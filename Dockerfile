@@ -2,7 +2,7 @@
 # One image with all backend binaries in /app; the chart picks the command per workload.
 # Multi-arch: the Go toolchain runs on the build platform and cross-compiles (no emulation).
 
-ARG GO_VERSION=1.25.5
+ARG GO_VERSION=1.26.11
 
 FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-bookworm AS build
 WORKDIR /src/backend
