@@ -209,7 +209,8 @@ Workloads always read `<fullname>-admin` (`login`, `password_hash`) and `<fullna
   in the cluster when it is absent and never overwrites it (an incomplete existing Secret fails the Job).
   - admin: login `secrets.admin.login` (default `admin`, stored under the key `login`), a random password whose
     argon2id hash goes to `<fullname>-admin`; the plaintext goes ONCE to `<fullname>-admin-initial`
-    (`login`, `password`). Read it, log in, delete `<fullname>-admin-initial`. It is never recreated.
+    (`login`, `password`). Read it, log in, change the password under Profile, delete `<fullname>-admin-initial`
+    (always safe, nothing reads it). It is never recreated.
   - crypto: one random 32-byte key with id `secrets.crypto.keyId` (default `k1`). It lives only in the cluster;
     deleting the namespace loses it (it only encrypts the Slack webhook URLs, which can be re-entered).
 - `externalSecret`: an ExternalSecret (`externalSecrets.secretStoreRef`, wave -2) materialises it. Needs
@@ -233,7 +234,9 @@ The secrets Job (`<fullname>-secrets-bootstrap`, rendered when any source is `ge
 with an API token and a Role limited to `create` on secrets and `get,update,patch` on exactly `<fullname>-admin`,
 `<fullname>-admin-initial`, `<fullname>-crypto` (and `<fullname>-statuspage`). It has no database credentials, so
 unlike the database bootstrap it stays enabled. Admin password reset: delete `<fullname>-admin` (and
-`<fullname>-admin-initial` if still there), run the upgrade again and restart the api.
+`<fullname>-admin-initial` if still there), run the upgrade again and restart the api. The api applies the hash of
+`<fullname>-admin` only when the admin never changed its password in the app, or when the hash is a new one; a restart
+with the same hash keeps a password chosen in the app.
 
 ### The database Secret
 

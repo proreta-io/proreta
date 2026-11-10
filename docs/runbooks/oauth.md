@@ -93,7 +93,7 @@ Why there is an allow-list: every employee of a Workspace has the same `hd`, so 
 ## Going OAuth-only without losing the admin
 1. Configure at least one provider and check that people can sign in with it. Have every user link a provider on `/profile` while they still have their password.
 2. Set `config.passwordLoginEnabled: false`. The chart and the api refuse this setting if no provider is configured.
-3. The password form disappears for everyone. The platform admin (`PRORETA_ADMIN_LOGIN`) keeps it at **`/login?admin`**: this is the break-glass account, so keep its password (Secret `proreta-admin`) somewhere safe.
+3. The password form disappears for everyone. The platform admin (`PRORETA_ADMIN_LOGIN`) keeps it at **`/login?admin`**: this is the break-glass account, so keep its password somewhere safe (the admin changes it under Profile; the Secret `proreta-admin` only matters for a reset, see the [admin panel runbook](admin-panel.md)).
 4. Password registration is refused as well. Invitations then work only through the provider buttons.
 
 ## Recovery

@@ -113,11 +113,11 @@ kubectl -n gateway-system get gateway gateway     # ADDRESS: point the DNS name 
 kubectl -n proreta get secret proreta-admin-initial -o jsonpath='{.data.login}' | base64 -d; echo
 kubectl -n proreta get secret proreta-admin-initial -o jsonpath='{.data.password}' | base64 -d; echo
 ```
-Open `config.publicUrl`, sign in with that login (default `admin`) and password, store the password in a password manager, then delete the plaintext copy. It is never recreated:
+Open `config.publicUrl` and sign in with that login (default `admin`) and password. Then choose your own password under **Profile → Change password** and store it in a password manager. The one-time password stays readable in the cluster until you delete it, and deleting it is always safe (it is never recreated, and the api does not read it):
 ```sh
 kubectl -n proreta delete secret proreta-admin-initial
 ```
-There is no way to change this password in the app yet. To reset it, delete the Secrets `proreta-admin` and `proreta-admin-initial`, run the same `helm upgrade` again (a new one-time password is generated) and restart the api, which reads the hash only at start: `kubectl -n proreta rollout restart deploy/proreta-api` ([admin panel runbook](runbooks/admin-panel.md)).
+A password you chose in the app is kept: the api compares the hash in the Secret `proreta-admin` with the one it saw at its previous start and only applies it when it is a new one. If you lose the password, reset it: delete the Secrets `proreta-admin` and `proreta-admin-initial`, run the same `helm upgrade` again (a new one-time password is generated), restart the api (`kubectl -n proreta rollout restart deploy/proreta-api`) and sign in with the new one-time password, which replaces the one you chose and ends the admin's sessions ([admin panel runbook](runbooks/admin-panel.md)).
 
 **7. Start using it.** The admin is the owner of the organization **Default** (slug `default`; plan `internal`: up to 1000 monitors, 100 heartbeats, 10 notification channels, 50 members). For a single company that is all you need: add monitors there and invite colleagues under **Members → Invite someone** (an invitation link works while registration is off; see [invitations](runbooks/invitations.md)). Self-service registration (`config.registrationEnabled: true`) is only for letting other people create separate organizations (plan `free`); there is no email verification, so leave it off unless you want that.
 
