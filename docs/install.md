@@ -36,7 +36,7 @@ Contents: [Prerequisites](#prerequisites) · [Install](#install) · [After insta
 
 ## Install
 
-The chart is not in a chart repository yet, so install it from a git checkout, as below. Once a release is published, the chart is also available as an OCI artifact; see [Installing from the OCI registry](#installing-from-the-oci-registry) for the three steps that differ.
+The commands below install the chart from a git checkout. Every release is also published as an OCI artifact; see [Installing from the OCI registry](#installing-from-the-oci-registry) for the three steps that differ.
 
 Worked example: host `proreta.example.com`, Gateway `gateway` with the HTTPS listener `https` in namespace `gateway-system`, PostgreSQL at `postgres.example.internal`. The resource and Secret names below are those of the release `proreta`; another release name gives `<release>-proreta-...` names (for example the database Secret `<release>-proreta-db`, or `database.secretName` when set), so several releases can share a namespace, each with its own PostgreSQL server.
 
@@ -122,9 +122,9 @@ There is no way to change this password in the app yet. To reset it, delete the 
 **7. Start using it.** The admin is the owner of the organization **Default** (plan `internal`: up to 1000 monitors, 100 heartbeats, 10 notification channels, 50 members). For a single company that is all you need: add monitors there and invite colleagues under **Members → Invite someone** (an invitation link works while registration is off; see [invitations](runbooks/invitations.md)). Self-service registration (`config.registrationEnabled: true`) is only for letting other people create separate organizations (plan `free`); there is no email verification, so leave it off unless you want that.
 
 ### Installing from the OCI registry
-Once a release exists, steps 1, 3 and 4 change; everything else is the same. Do not copy `values.example.yaml` from a checkout and do not set `image.tag`: the packaged chart uses its own release as the image tag.
+Steps 1, 3 and 4 change; everything else is the same. Do not copy `values.example.yaml` from a checkout and do not set `image.tag`: the packaged chart uses its own release as the image tag.
 ```sh
-VERSION=1.2.3
+VERSION=0.1.0
 helm show values oci://ghcr.io/proreta-io/charts/proreta --version "$VERSION" > my-values.yaml   # step 1 and 3: edit the keys from the table above
 helm upgrade --install proreta oci://ghcr.io/proreta-io/charts/proreta --version "$VERSION" -n proreta -f my-values.yaml --wait --timeout 10m
 ```
