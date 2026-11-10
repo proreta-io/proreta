@@ -13,7 +13,7 @@ Proreta is a multi-tenant uptime-monitoring service you can run yourself.
 
 ## Status
 
-Early development. The API and the database schema may still change between releases. There is no stable release yet.
+Early development. The latest release is [0.1.0](https://github.com/proreta-io/proreta/releases/tag/v0.1.0). While the major version is 0, the API and the database schema may still change between minor releases (see Versioning).
 
 ### Versioning
 
@@ -40,7 +40,7 @@ Prerequisites in short:
 - An external PostgreSQL 15 or newer and a login with `CREATEROLE` and `CREATEDB` for the one-time bootstrap (no superuser needed; only the `citext` extension is used). A bundled database is not supported yet.
 - Nothing else: no External Secrets Operator, cert-manager or metrics-server is required.
 
-The images are `ghcr.io/proreta-io/proreta-backend` and `ghcr.io/proreta-io/proreta-web` (multi-arch, `amd64` and `arm64`). There is no published release yet: until there is, install from a git checkout with an image tag that exists, as described in the guide. Releases will also publish the chart as `oci://ghcr.io/proreta-io/charts/proreta`.
+The images are `ghcr.io/proreta-io/proreta-backend` and `ghcr.io/proreta-io/proreta-web` (multi-arch, `amd64` and `arm64`). Every release tag (`X.Y.Z`) is published for both, and the chart is published as `oci://ghcr.io/proreta-io/charts/proreta` with the same version.
 
 After the install, the platform admin signs in with a generated one-time password and owns the organization "Default"; colleagues join by invitation link. Optional: [OAuth sign-in](docs/runbooks/oauth.md), [status pages](docs/runbooks/status-page.md), [Alertmanager watchdog](docs/runbooks/heartbeat-alertmanager.md), [metrics and alerts](docs/runbooks/observability.md).
 
