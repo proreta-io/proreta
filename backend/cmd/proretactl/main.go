@@ -154,14 +154,19 @@ func dbBootstrap() error {
 	defer stop()
 
 	ns := cfg.Namespace
-	if ns == "" {
-		if ns, err = dbbootstrap.InClusterNamespace(); err != nil {
+	var secrets dbbootstrap.SecretStore
+	if cfg.SecretFile != "" {
+		// Local development: no Kubernetes, the credentials go to a file.
+		ns, secrets = "local", dbbootstrap.FileSecrets{Path: cfg.SecretFile}
+	} else {
+		if ns == "" {
+			if ns, err = dbbootstrap.InClusterNamespace(); err != nil {
+				return err
+			}
+		}
+		if secrets, err = dbbootstrap.NewInClusterSecrets(); err != nil {
 			return err
 		}
-	}
-	secrets, err := dbbootstrap.NewInClusterSecrets()
-	if err != nil {
-		return err
 	}
 	admin, err := adminConnConfig(cfg)
 	if err != nil {

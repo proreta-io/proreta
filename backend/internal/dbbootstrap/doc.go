@@ -33,6 +33,9 @@
 //   - Secret exists but lacks a password key: the run fails; it never overwrites a Secret it
 //     did not write completely.
 //
+// For local development without Kubernetes, PRORETA_BOOTSTRAP_SECRET_FILE replaces the Secret by a
+// file of key=value lines (FileSecrets) with the same keys; scripts/dev-db.sh uses it.
+//
 // The Job's ServiceAccount needs get, create and patch on secrets in its namespace (the token, CA
 // bundle and namespace are read from /var/run/secrets/kubernetes.io/serviceaccount).
 //

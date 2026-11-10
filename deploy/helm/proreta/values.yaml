@@ -38,7 +38,8 @@ config:
   # `oauth` below.
   passwordLoginEnabled: true
   # PRORETA_PUBLIC_URL (api, jobs and statuspage), REQUIRED: the https URL users open, without a
-  # trailing slash, for example https://proreta.example.com. Linked from Slack messages and
+  # trailing slash, for example https://proreta.example.com. Plain http is accepted only for
+  # localhost, 127.0.0.1 and [::1] (a local trial) and then needs cookieSecure: false. Linked from Slack messages and
   # invitations, the base of the OAuth redirect URIs, and its host is the default of
   # httpRoute.hostnames.
   publicUrl: ""

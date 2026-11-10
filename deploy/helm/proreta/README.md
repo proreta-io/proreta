@@ -55,10 +55,10 @@ not contain `proreta` (`fullnameOverride` replaces it).
 | `image.tag` | `""` | `X.Y.Z` (no `v`) or `sha-<7 hex>`. Empty: the chart's `appVersion` (packaged chart only; required from a git checkout). |
 | `image.pullPolicy` | `IfNotPresent` | Pull policy of every container. |
 | `imagePullSecrets` | `[]` | Pull secrets for a private registry, `[{name: ...}]`. |
-| `config.publicUrl` | `""` | **Required.** The https URL users open, no trailing slash. Its host is the default of `httpRoute.hostnames`. |
+| `config.publicUrl` | `""` | **Required.** The https URL users open, no trailing slash. `http://` is accepted only for `localhost`, `127.0.0.1` and `[::1]` (local trial) and then needs `config.cookieSecure: false`. Its host is the default of `httpRoute.hostnames`. |
 | `config.logLevel` | `info` | `PRORETA_LOG_LEVEL`. |
 | `config.adminPort` | `9090` | Health and metrics port of the backend pods. |
-| `config.sessionTTL`, `config.cookieSecure` | `24h`, `true` | Session lifetime; `Secure` cookies (keep `true`). |
+| `config.sessionTTL`, `config.cookieSecure` | `24h`, `true` | Session lifetime; `Secure` cookies (keep `true`; `false` only with an `http://localhost` `config.publicUrl`, the api and statuspage refuse to start otherwise). |
 | `config.trustedProxyHops` | `0` | Trusted proxies in front of the api; `1` behind one Gateway. |
 | `config.registrationEnabled` | `false` | Self-service creation of organizations (no email verification). |
 | `config.passwordLoginEnabled` | `true` | `false`: password form for the platform admin only; needs an OAuth provider. |
@@ -132,7 +132,7 @@ helm lint --strict deploy/helm/proreta -f deploy/helm/proreta/values.example.yam
 helm template proreta deploy/helm/proreta -n proreta -f deploy/helm/proreta/values.example.yaml --set image.tag=sha-0000000
 ```
 
-`values.schema.json` rejects, among others, unknown keys, a `config.publicUrl` that is not https or ends with a slash,
+`values.schema.json` rejects, among others, unknown keys, a `config.publicUrl` that is not https (except `http://` on localhost, which needs `config.cookieSecure: false`) or ends with a slash,
 a `config.registrationEnabled` that is not a boolean, an admin login outside 3-254 of `[a-z0-9._@+-]`,
 `externalSecrets.enabled` without a store and a workload without `resources.requests` and `resources.limits`. The
 templates additionally fail with a message for a missing image tag, a missing `config.publicUrl`, a missing

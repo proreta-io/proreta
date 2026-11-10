@@ -201,7 +201,7 @@
         "cookieSecure": {
           "type": "boolean",
           "title": "secure cookies",
-          "description": "PRORETA_COOKIE_SECURE (api and statuspage); keep true, sign-in needs https"
+          "description": "PRORETA_COOKIE_SECURE (api and statuspage); keep true, sign-in needs https; false only with a localhost http publicUrl"
         },
         "trustedProxyHops": {
           "type": "integer",
@@ -223,8 +223,8 @@
         "publicUrl": {
           "type": "string",
           "title": "public URL",
-          "description": "PRORETA_PUBLIC_URL, required: the https URL users open, for example https://proreta.example.com; https only, no trailing slash, no user info, query or link-breaking characters; its host is the default of httpRoute.hostnames",
-          "pattern": "^$|^https://[^\\s/|<>&\"'?#@]+(/[^\\s|<>&\"'?#]*[^\\s/|<>&\"'?#])?$"
+          "description": "PRORETA_PUBLIC_URL, required: the https URL users open, for example https://proreta.example.com; https only (plain http only for localhost, 127.0.0.1 and [::1], a local trial that also sets cookieSecure to false), no trailing slash, no user info, query or link-breaking characters; its host is the default of httpRoute.hostnames",
+          "pattern": "^$|^https://[^\\s/|<>&\"'?#@]+(/[^\\s|<>&\"'?#]*[^\\s/|<>&\"'?#])?$|^http://(localhost|127\\.0\\.0\\.1|\\[::1\\])(:[0-9]{1,5})?(/[^\\s|<>&\"'?#]*[^\\s/|<>&\"'?#])?$"
         },
         "blockedCIDRs": {
           "type": "array",
@@ -240,7 +240,24 @@
         "logLevel",
         "adminPort",
         "publicUrl"
-      ]
+      ],
+      "if": {
+        "properties": {
+          "publicUrl": {
+            "pattern": "^http://"
+          }
+        },
+        "required": [
+          "publicUrl"
+        ]
+      },
+      "then": {
+        "properties": {
+          "cookieSecure": {
+            "const": false
+          }
+        }
+      }
     },
     "database": {
       "type": "object",
