@@ -119,16 +119,54 @@ kubectl -n proreta delete secret proreta-admin-initial
 ```
 There is no way to change this password in the app yet. To reset it, delete the Secrets `proreta-admin` and `proreta-admin-initial`, run the same `helm upgrade` again (a new one-time password is generated) and restart the api, which reads the hash only at start: `kubectl -n proreta rollout restart deploy/proreta-api` ([admin panel runbook](runbooks/admin-panel.md)).
 
-**7. Start using it.** The admin is the owner of the organization **Default** (plan `internal`: up to 1000 monitors, 100 heartbeats, 10 notification channels, 50 members). For a single company that is all you need: add monitors there and invite colleagues under **Members → Invite someone** (an invitation link works while registration is off; see [invitations](runbooks/invitations.md)). Self-service registration (`config.registrationEnabled: true`) is only for letting other people create separate organizations (plan `free`); there is no email verification, so leave it off unless you want that.
+**7. Start using it.** The admin is the owner of the organization **Default** (slug `default`; plan `internal`: up to 1000 monitors, 100 heartbeats, 10 notification channels, 50 members). For a single company that is all you need: add monitors there and invite colleagues under **Members → Invite someone** (an invitation link works while registration is off; see [invitations](runbooks/invitations.md)). Self-service registration (`config.registrationEnabled: true`) is only for letting other people create separate organizations (plan `free`); there is no email verification, so leave it off unless you want that.
 
 ### Installing from the OCI registry
 Steps 1, 3 and 4 change; everything else is the same. Do not copy `values.example.yaml` from a checkout and do not set `image.tag`: the packaged chart uses its own release as the image tag.
+
+Write a minimal `my-values.yaml` with the keys from the table in step 3 (everything else keeps the chart defaults):
+```yaml
+config:
+  publicUrl: https://proreta.example.com
+  trustedProxyHops: 1
+database:
+  host: postgres.example.internal
+  sslmode: require
+  bootstrap:
+    enabled: true
+    adminSecret:
+      existingSecret: proreta-db-admin-login
+httpRoute:
+  parentRef:
+    name: gateway
+    namespace: gateway-system   # empty: the Proreta namespace
+    sectionName: https          # optional: a single listener
+```
+Then install:
 ```sh
 VERSION=0.1.0
-helm show values oci://ghcr.io/proreta-io/charts/proreta --version "$VERSION" > my-values.yaml   # step 1 and 3: edit the keys from the table above
 helm upgrade --install proreta oci://ghcr.io/proreta-io/charts/proreta --version "$VERSION" -n proreta -f my-values.yaml --wait --timeout 10m
 ```
-`helm show values` prints the full defaults (`values.yaml`); set at least `config.publicUrl`, `httpRoute.parentRef`, `config.trustedProxyHops: 1` and the `database` block as in the table and in [values.example.yaml](../deploy/helm/proreta/values.example.yaml) (`host`, `bootstrap.enabled: true`, `bootstrap.adminSecret.existingSecret: proreta-db-admin-login`). For later upgrades pass the new `--version`.
+`helm show values oci://ghcr.io/proreta-io/charts/proreta --version "$VERSION"` prints every default with its comment, as a reference. For later upgrades pass the new `--version`.
+
+### Trying it without a Gateway controller
+For a local trial (kind, minikube) you can skip the Gateway controller, but the Gateway API CRDs are still required: the chart creates an `HTTPRoute`. Without a controller the route has no `status` and nothing serves the host name, yet the pods and the API work. Set `httpRoute.parentRef.name` to any name. The Services listen on port 8080 (not 80); reach them with port-forwards:
+```sh
+kubectl -n proreta port-forward svc/proreta-api 8080:8080     # the API
+kubectl -n proreta port-forward svc/proreta-web 8081:8080     # the web app, http://localhost:8081
+```
+Over plain http the `Secure` session cookie is not kept, so for such a trial only, set `config.cookieSecure: false` (the cookie is then named `proreta_session` instead of `__Host-proreta_session`). Never do this in production. The web app expects `/api` on the same origin, so without a Gateway use the API directly with `curl`:
+```sh
+ADMIN_PASSWORD=$(kubectl -n proreta get secret proreta-admin-initial -o jsonpath='{.data.password}' | base64 -d)
+curl -s -c jar -H 'Content-Type: application/json' \
+  -d "{\"login\":\"admin\",\"password\":\"$ADMIN_PASSWORD\"}" \
+  http://localhost:8080/api/v1/auth/login > session.json    # the answer contains "csrfToken"
+CSRF=$(sed -n 's/.*"csrfToken":"\([^"]*\)".*/\1/p' session.json)
+curl -s -b jar -H "X-CSRF-Token: $CSRF" -H 'Content-Type: application/json' \
+  -d '{"type":"http","name":"Example","http":{"url":"https://example.com/"}}' \
+  http://localhost:8080/api/v1/monitors
+```
+Writes (POST, PUT, PATCH, DELETE) need the `X-CSRF-Token` header; the login itself does not. `projectId` is optional (the Default project). The first check runs within about 30 seconds; `curl -s -b jar http://localhost:8080/api/v1/monitors` shows the status. The API reference is [api/openapi.yaml](../api/openapi.yaml).
 
 ## After installing
 
@@ -136,6 +174,8 @@ helm upgrade --install proreta oci://ghcr.io/proreta-io/charts/proreta --version
 ```sh
 # in my-values.yaml: database.bootstrap.enabled: false
 helm upgrade --install proreta deploy/helm/proreta -n proreta -f my-values.yaml --set image.tag="$TAG" --wait --timeout 10m
+# or, for the OCI chart (no image.tag):
+helm upgrade --install proreta oci://ghcr.io/proreta-io/charts/proreta --version "$VERSION" -n proreta -f my-values.yaml --wait --timeout 10m
 kubectl -n proreta delete secret proreta-db-admin-login
 ```
 The Secret `proreta-db` (the role passwords) stays; it is not managed by Helm. Turn the bootstrap on again only for a new database, a password rotation or a new role ([database bootstrap](runbooks/database-bootstrap.md)).
@@ -144,7 +184,10 @@ The Secret `proreta-db` (the role passwords) stays; it is not managed by Helm. T
 
 ## Upgrade
 1. Read the release notes. **Back up the database** (snapshot or `pg_dump`) right before the upgrade: migrations are forward-only and the backup is the only way back ([migrations runbook](runbooks/migrations.md)).
-2. Check out the new version of the chart and use the new image tag in `--set image.tag=...` (OCI chart: pass the new `--version` only).
+2. Check out the new version of the chart and use the new image tag in `--set image.tag=...`. With the OCI chart pass the new `--version` only:
+   ```sh
+   helm upgrade --install proreta oci://ghcr.io/proreta-io/charts/proreta --version "$NEW_VERSION" -n proreta -f my-values.yaml --wait --timeout 10m
+   ```
 3. Run the same `helm upgrade --install ... --wait --timeout 10m`. The secrets bootstrap (a no-op when the Secrets exist) and the migration Job run first; then the Deployments roll with `maxUnavailable: 0`, so the old pods keep serving until the new ones are ready.
 
 **Never roll the image back below the database schema.** api, worker and jobs refuse to start when the database has a migration their image does not know ("database schema is newer than this binary"). A `helm rollback` or an older `image.tag` across a migration therefore leaves the new pods crash-looping while the old ones keep running; roll forward instead, or restore the backup together with the old image.
