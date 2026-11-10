@@ -35,6 +35,7 @@ combos=(
   "defaults-url-port|$min --set config.publicUrl=https://Status.Example.org:8443/proreta"
   "defaults-hostnames|$min --set httpRoute.hostnames[0]=proreta.example.com --set httpRoute.hostnames[1]=status.example.com"
   "example|-f $example $tag"
+  "example-bootstrap-force|-f $example $tag --set database.bootstrap.force=true"
   "example-no-bootstrap|-f $example $tag --set database.bootstrap.enabled=false"
   "example-db-secret-name|-f $example $tag --set database.secretName=my-db"
   "example-existing-db-secret|-f $example $tag --set database.bootstrap.enabled=false --set database.secretName=existing-db"
@@ -128,6 +129,7 @@ expect_fail "removed key worker.command" --msg "additional properties 'command' 
 expect_fail "removed key migration.databaseUrlKey" --set migration.databaseUrlKey=api_url
 expect_fail "db bootstrap without External Secrets and without existingSecret" --msg "database.bootstrap needs the database server admin login" -f "$example" --set database.bootstrap.adminSecret.existingSecret=
 expect_fail "bootstrap without host" --msg "database.host is required" --set database.bootstrap.enabled=true --set database.bootstrap.adminSecret.existingSecret=db-admin
+expect_fail "non-boolean bootstrap force" --set database.bootstrap.force=sometimes -f "$example"
 expect_fail "invalid database Secret name" --set database.secretName=Proreta_DB
 expect_fail "OAuth without existingSecret and without External Secrets" -f "$example" --set oauth.github.enabled=true
 expect_fail "admin source externalSecret without External Secrets" -f "$example" --set secrets.admin.source=externalSecret
@@ -231,6 +233,16 @@ EOF
 echo "== sectionName omitted when empty"
 if grep -q 'sectionName:' "$out/example-no-section-name.yaml"; then echo "FAIL: empty sectionName rendered" >&2; exit 1; fi
 grep -q 'sectionName: https' "$out/example.yaml" || { echo "FAIL: sectionName missing in the example render" >&2; exit 1; }
+echo ok
+
+echo "== db bootstrap: admin Secret references are optional, force is off unless set"
+admin_refs() { awk '/name: PRORETA_BOOTSTRAP_ADMIN_(USER|PASSWORD)/{f=1} f&&/optional: true/{n++; f=0} END{print n+0}' "$out/$1.yaml"; }
+force_val() { grep -A1 'name: PRORETA_BOOTSTRAP_FORCE' "$out/$1.yaml" | sed -n 's/.*value: //p'; }
+for r in example example-eso-db-admin example-bootstrap-force; do
+  [ "$(admin_refs $r)" = 2 ] || { echo "FAIL: $r: the admin Secret references are not both optional" >&2; exit 1; }
+done
+[ "$(force_val example)" = '"false"' ] || { echo "FAIL: bootstrap force not off by default" >&2; exit 1; }
+[ "$(force_val example-bootstrap-force)" = '"true"' ] || { echo "FAIL: database.bootstrap.force=true not rendered" >&2; exit 1; }
 echo ok
 
 echo "== no ExternalSecret without External Secrets (the default path)"

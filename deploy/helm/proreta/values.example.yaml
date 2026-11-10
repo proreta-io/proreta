@@ -46,7 +46,8 @@ database:
   port: 5432
   sslmode: require                    # disable only for a server without TLS (e.g. a local test)
   # Creates the database, the roles and the Secret `proreta-db` on the first install
-  # (docs/runbooks/database-bootstrap.md). Switch it off after the first successful install.
+  # (docs/runbooks/database-bootstrap.md). Safe to leave on: later runs skip themselves, and the
+  # admin Secret below can be deleted after the first install.
   bootstrap:
     enabled: true
     adminSecret:

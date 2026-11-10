@@ -66,7 +66,8 @@ not contain `proreta` (`fullnameOverride` replaces it).
 | `database.secretName` | `""` | Secret with the connection URLs. Empty: `<fullname>-db`. |
 | `database.host` | `""` | PostgreSQL host; required when `database.bootstrap.enabled`. |
 | `database.port`, `database.name`, `database.sslmode` | `5432`, `proreta`, `require` | Server port, database name, libpq `sslmode`. |
-| `database.bootstrap.enabled` | `false` | Run the database bootstrap hook Job (first install; turn it off afterwards). |
+| `database.bootstrap.enabled` | `false` | Run the database bootstrap hook Job. It skips itself once the database is set up, so it may stay on. |
+| `database.bootstrap.force` | `false` | Run the full bootstrap even if the database looks ready (password rotation, a new role). Needs the admin Secret. |
 | `database.bootstrap.adminSecret.existingSecret` | `""` | Secret in the namespace with the server admin login. |
 | `database.bootstrap.adminSecret.remoteKey` | `proreta/db-admin` | With External Secrets and no `existingSecret`: the remote secret. |
 | `database.bootstrap.adminSecret.usernameKey`, `.passwordKey` | `username`, `password` | Keys of the login in that Secret (properties of the remote secret). |
@@ -261,10 +262,11 @@ When `database.bootstrap.enabled=true` (on in `values.example.yaml` for the firs
 `proreta_worker`, `proreta_statuspage`) and the database Secret. It reads the database server admin login (keys
 `database.bootstrap.adminSecret.usernameKey` and `.passwordKey`, default `username` and `password`) from either
 - a plain Secret you create in the namespace, named in `database.bootstrap.adminSecret.existingSecret` (the default
-  way, no External Secrets Operator needed; delete it after the bootstrap), or
+  way, no External Secrets Operator needed; you may delete it after the first install), or
 - with `externalSecrets.enabled`, a short-lived ExternalSecret `<database Secret>-admin`
   (`database.bootstrap.adminSecret.remoteKey`, default `proreta/db-admin`, deleted after success).
-Rendering fails when neither is configured.
+Rendering fails when neither is configured. The Job references the admin Secret as optional, so a pod starts
+without it; it fails with a clear message only when it needs the login (see below).
 
 It uses a dedicated ServiceAccount `<fullname>-db-bootstrap` (one of the two in the chart with an API token
 mounted), limited by a Role (`create` on secrets; `get,update,patch` only on the database Secret).
@@ -272,9 +274,17 @@ mounted), limited by a Role (`create` on secrets; `get,update,patch` only on the
 The role names are fixed, so one PostgreSQL server hosts one Proreta installation: a second installation on the
 same server would reset the role passwords of the first.
 
-Security trade-off: while enabled, the Job holds the database server admin login and runs on every upgrade
-(idempotent). After the first successful install set `database.bootstrap.enabled: false`, upgrade, then delete the
-admin Secret (the database Secret persists).
+The Job skips itself, exits 0 and does not read the admin login when all of these hold: the database Secret exists
+with every password and current URLs, `proreta_owner` connects to the database with the password from it, and the
+table `goose_db_version` exists (bootstrap is only needed before the first migration). A Secret left over from an
+earlier database therefore does not skip: the owner login or the migration table is missing there. In every other
+case it runs the full, idempotent bootstrap, which needs the admin login; without one the Job fails with
+`the database is not ready and no database admin login is available`. `database.bootstrap.force: true`
+(`PRORETA_BOOTSTRAP_FORCE`) always runs the full bootstrap, for a password rotation or a new role; turn it off
+afterwards.
+
+The recommended practice is still to delete the admin Secret after the first install, because it is the database
+server admin login. Doing so no longer requires turning `database.bootstrap.enabled` off first.
 
 ## Install order (Helm hooks and ArgoCD sync waves)
 

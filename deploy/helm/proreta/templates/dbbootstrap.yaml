@@ -151,16 +151,22 @@ spec:
               value: {{ $db.sslmode | quote }}
             - name: PRORETA_BOOTSTRAP_SECRET_NAME
               value: {{ $dbSecret | quote }}
+            - name: PRORETA_BOOTSTRAP_FORCE
+              value: {{ $b.force | quote }}
+            # Optional: once the database is set up the Job skips itself and needs no admin login,
+            # so the admin Secret may be deleted. A run that needs it fails with a clear message.
             - name: PRORETA_BOOTSTRAP_ADMIN_USER
               valueFrom:
                 secretKeyRef:
                   name: {{ $adminSecret }}
                   key: {{ $b.adminSecret.usernameKey }}
+                  optional: true
             - name: PRORETA_BOOTSTRAP_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ $adminSecret }}
                   key: {{ $b.adminSecret.passwordKey }}
+                  optional: true
           resources:
             {{- toYaml $b.resources | nindent 12 }}
           securityContext:
