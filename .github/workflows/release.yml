@@ -19,6 +19,7 @@ on:
       - api/**
       - Dockerfile
       - web/**
+      - .github/workflows/release.yml
   workflow_dispatch:
 
 # Serialise releases per ref; never cancel a run that is pushing an image.
