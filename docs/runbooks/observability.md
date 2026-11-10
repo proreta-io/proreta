@@ -47,7 +47,11 @@ No metric is labelled per organization, monitor, incident, user, channel, URL, h
 | `proreta_jobs_delivery_duration_seconds` | histogram | `channel_type` | One send to a notification channel |
 | `proreta_jobs_outbox_pending` | gauge | | Outbox rows waiting (including retries), all organizations; refreshed every 15 s |
 | `proreta_jobs_claim_errors_total` | counter | | Failed `claim_deliveries` calls |
-| `proreta_jobs_housekeeping_runs_total` | counter | `task`, `result` (`ok`, `skipped`, `error`) | Housekeeping runs; `task` is `ensure_partitions`, `compute_rollups`, `drop_expired_partitions` (the retention task, implemented by `list_droppable_partitions` / `detach_expired_partition` / `drop_detached_partition`), `purge_expired_sessions`, `evaluate_heartbeats` (every 30 s), `enqueue_incident_reminders` (every minute) or `rebuild_status_pages` (every 30 s) |
+| `proreta_jobs_mail_total` | counter | `kind` (message kind), `result` (`sent`, `retry`, `failed`) | Outgoing email attempts recorded by `finish_mail`; only with SMTP configured |
+| `proreta_jobs_mail_duration_seconds` | histogram | | One SMTP delivery |
+| `proreta_jobs_mail_pending` | gauge | | Mail outbox rows waiting (including retries); refreshed every 15 s |
+| `proreta_jobs_mail_claim_errors_total` | counter | | Failed `claim_mail` calls |
+| `proreta_jobs_housekeeping_runs_total` | counter | `task`, `result` (`ok`, `skipped`, `error`) | Housekeeping runs; `task` is `ensure_partitions`, `compute_rollups`, `drop_expired_partitions` (the retention task, implemented by `list_droppable_partitions` / `detach_expired_partition` / `drop_detached_partition`), `purge_expired_sessions`, `purge_mail_outbox` (hourly), `evaluate_heartbeats` (every 30 s), `enqueue_incident_reminders` (every minute) or `rebuild_status_pages` (every 30 s) |
 | `proreta_jobs_housekeeping_last_success_timestamp_seconds` | gauge | `task` | Unix time of the last successful run of each task |
 | `proreta_jobs_partitions_kept_total` | counter | `reason` (`rollups_incomplete`, `error`) | Expired `check_results` partitions the retention task kept back; each one is also logged at warn level with the partition name |
 | `proreta_jobs_heartbeats_missed_total` | counter | | Missed heartbeat deadlines applied as failures by `evaluate_heartbeats` (one per deadline; a heartbeat that stays silent is not counted again) |
@@ -95,6 +99,8 @@ Written in PromQL for any Prometheus-compatible stack with Alertmanager; thresho
 | RetentionErrors | `increase(proreta_jobs_housekeeping_runs_total{task="drop_expired_partitions",result="error"}[1d]) > 2` | 0m | The detach keeps hitting its lock timeout |
 | PartitionsKept | `increase(proreta_jobs_partitions_kept_total{reason="rollups_incomplete"}[2d]) > 0` | 0m | An expired month still has hours without rollups: older than the 7-day catch-up, needs a manual `compute_rollups(from, to)` |
 | OutboxBacklog | `proreta_jobs_outbox_pending > 50` | 10m | Alerts are not leaving: Slack down, rate limits or jobs stuck |
+| MailBacklog | `proreta_jobs_mail_pending > 20` | 10m | Email is not leaving (only with SMTP configured): server down, rate limits or jobs stuck |
+| MailFailing | `increase(proreta_jobs_mail_total{result="failed"}[1h]) > 0` | 0m | A message was given up: rejected recipient, or five failed attempts. See [outgoing email](email.md) |
 | DeliveriesFailing | `sum(rate(proreta_jobs_deliveries_total{result="failed"}[1h])) > 0` | 0m | A delivery gave up after five attempts or its channel is unusable |
 | APIErrors | `sum(rate(proreta_http_requests_total{code=~"5.."}[5m])) / sum(rate(proreta_http_requests_total[5m])) > 0.05` | 10m | api failing |
 | APILatency | `histogram_quantile(0.95, sum(rate(proreta_http_request_duration_seconds_bucket{route!="unmatched"}[10m])) by (le, route)) > 1` | 15m | Slow dashboard reads |

@@ -180,7 +180,7 @@ kubectl -n proreta delete secret proreta-db-admin-login
 ```
 The Secret `proreta-db` (the role passwords) stays; it is not managed by Helm. Turn the bootstrap on again only for a new database, a password rotation or a new role ([database bootstrap](runbooks/database-bootstrap.md)).
 
-**Optional next steps:** Slack channels in the app, [sign-in with Google or GitHub](runbooks/oauth.md), [status pages](runbooks/status-page.md), [Alertmanager watchdog](runbooks/heartbeat-alertmanager.md), [metrics and alerts](runbooks/observability.md). Add the CIDRs of your cluster and VPC to `config.blockedCIDRs` so monitors cannot probe internal addresses ([chart README](../deploy/helm/proreta/README.md)).
+**Optional next steps:** Slack channels in the app, [outgoing email](runbooks/email.md) (an SMTP server; off by default, and nothing is emailed without it), [sign-in with Google or GitHub](runbooks/oauth.md), [status pages](runbooks/status-page.md), [Alertmanager watchdog](runbooks/heartbeat-alertmanager.md), [metrics and alerts](runbooks/observability.md). Add the CIDRs of your cluster and VPC to `config.blockedCIDRs` so monitors cannot probe internal addresses ([chart README](../deploy/helm/proreta/README.md)).
 
 ## Upgrade
 1. Read the release notes. **Back up the database** (snapshot or `pg_dump`) right before the upgrade: migrations are forward-only and the backup is the only way back ([migrations runbook](runbooks/migrations.md)).
@@ -197,7 +197,7 @@ The Secret `proreta-db` (the role passwords) stays; it is not managed by Helm. T
 helm uninstall proreta -n proreta
 ```
 This removes the Deployments, Services, HTTPRoute and ServiceAccounts. It leaves:
-- the Secrets created by the bootstrap Jobs: `proreta-db`, `proreta-admin`, `proreta-crypto`, `proreta-statuspage` (and `proreta-admin-initial` if you did not delete it). Keep them to reinstall later with the same data: `proreta-crypto` holds the key that encrypts the Slack webhook URLs stored in the database;
+- the Secrets created by the bootstrap Jobs: `proreta-db`, `proreta-admin`, `proreta-crypto`, `proreta-statuspage` (and `proreta-admin-initial` if you did not delete it). Keep them to reinstall later with the same data: `proreta-crypto` holds the key that encrypts the Slack webhook URLs stored in the database (and the emails waiting in the queue);
 - the finished Jobs, until `ttlSecondsAfterFinished` removes them (10 minutes for the bootstrap Jobs, 1 hour for the migration);
 - the database and the four roles on your PostgreSQL server. There are no PersistentVolumeClaims.
 
