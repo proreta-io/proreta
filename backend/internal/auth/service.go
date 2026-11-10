@@ -18,6 +18,7 @@ import (
 
 	"github.com/proreta-io/proreta/backend/internal/audit"
 	"github.com/proreta-io/proreta/backend/internal/auth/authdb"
+	"github.com/proreta-io/proreta/backend/internal/mail"
 	"github.com/proreta-io/proreta/backend/internal/platform/clock"
 	"github.com/proreta-io/proreta/backend/internal/platform/crypto"
 	"github.com/proreta-io/proreta/backend/internal/platform/db"
@@ -74,6 +75,12 @@ type Options struct {
 	// with a token); every attempt that does not end in success counts. Defaults to 20 per 15
 	// minutes.
 	InviteLimiter *Limiter
+	// VerifyLimiter limits email verification attempts per client IP; every attempt that does
+	// not end in success counts. Defaults to 20 per 15 minutes.
+	VerifyLimiter *Limiter
+	// Mail queues the messages the service sends (email verification). Nil, or a queue without
+	// keys, means email is off: nothing is queued and every flow behaves as without email.
+	Mail *mail.Queue
 	// HashQueueWait defaults to 5 s.
 	HashQueueWait time.Duration
 	// PasswordLoginDisabled turns password login and password registration off for everyone
@@ -93,6 +100,8 @@ type Service struct {
 	ipLimit     *Limiter
 	loginLimit  *Limiter
 	inviteLimit *Limiter
+	verifyLimit *Limiter
+	mail        *mail.Queue
 	hashSem     chan struct{}
 	hashWait    time.Duration
 	// dummy is verified for unknown or password-less users. BootstrapAdmin builds it with the
@@ -138,6 +147,9 @@ func NewService(pool *db.Pool, opts Options) (*Service, error) {
 	if opts.InviteLimiter == nil {
 		opts.InviteLimiter = NewLimiter(20, 15*time.Minute, 100_000, opts.Clock)
 	}
+	if opts.VerifyLimiter == nil {
+		opts.VerifyLimiter = NewLimiter(20, 15*time.Minute, 100_000, opts.Clock)
+	}
 	if opts.HashQueueWait <= 0 {
 		opts.HashQueueWait = defaultHashQueueWait
 	}
@@ -149,6 +161,8 @@ func NewService(pool *db.Pool, opts Options) (*Service, error) {
 		ipLimit:               opts.IPLimiter,
 		loginLimit:            opts.LoginLimiter,
 		inviteLimit:           opts.InviteLimiter,
+		verifyLimit:           opts.VerifyLimiter,
+		mail:                  opts.Mail,
 		hashSem:               make(chan struct{}, maxConcurrentHashes),
 		hashWait:              opts.HashQueueWait,
 		afterVerify:           func() {},
@@ -377,6 +391,9 @@ type User struct {
 	// MustChangePassword is set while the password was issued by somebody else (the admin's
 	// Secret, a temporary password from the panel): the api refuses everything but changing it.
 	MustChangePassword bool
+	// EmailVerified is true once the address was confirmed by a link or by an identity provider.
+	// It is always false for a login that is not an email address (the system admin).
+	EmailVerified bool
 }
 
 // SessionInfo describes the current session.
@@ -593,7 +610,7 @@ func (s *Service) checkPassword(ctx context.Context, login, password string) (*U
 	if row == nil {
 		return nil, uuid.Nil, credential{}, false, nil
 	}
-	u := &User{ID: row.ID, Login: row.Email, DisplayName: row.DisplayName, IsPlatformAdmin: row.IsPlatformAdmin, MustChangePassword: row.PasswordMustChange}
+	u := &User{ID: row.ID, Login: row.Email, DisplayName: row.DisplayName, IsPlatformAdmin: row.IsPlatformAdmin, MustChangePassword: row.PasswordMustChange, EmailVerified: row.EmailVerifiedAt != nil}
 	ok := match && hash != s.dummy && row.Status == userStatusActive
 	var cred credential
 	if ok {
@@ -801,7 +818,7 @@ func (s *Service) Me(ctx context.Context, p Principal) (SessionInfo, error) {
 			return err
 		}
 		info = SessionInfo{
-			User:   User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, IsPlatformAdmin: u.IsPlatformAdmin, MustChangePassword: u.PasswordMustChange},
+			User:   User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, IsPlatformAdmin: u.IsPlatformAdmin, MustChangePassword: u.PasswordMustChange, EmailVerified: u.EmailVerifiedAt != nil},
 			Tenant: t, Role: role, CSRFToken: p.CSRFToken, ExpiresAt: p.ExpiresAt,
 		}
 		return nil

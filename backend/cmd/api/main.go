@@ -13,6 +13,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/auth"
 	"github.com/proreta-io/proreta/backend/internal/entitlements"
 	"github.com/proreta-io/proreta/backend/internal/incidents"
+	"github.com/proreta-io/proreta/backend/internal/mail"
 	"github.com/proreta-io/proreta/backend/internal/monitors"
 	"github.com/proreta-io/proreta/backend/internal/notify"
 	"github.com/proreta-io/proreta/backend/internal/oauth"
@@ -67,6 +68,16 @@ func run() error {
 	}
 
 	reg := metrics.NewRegistry("api", version, commit)
+	keys, err := crypto.NewKeyring(cfg.EncryptionKeys, cfg.EncryptionKeyID)
+	if err != nil {
+		return err
+	}
+	// Without an SMTP host the queue is disabled: nothing is queued and every flow behaves as it
+	// did before email existed.
+	mailKeys := keys
+	if !cfg.SMTP.Enabled() {
+		mailKeys = nil
+	}
 	authSvc, err := auth.NewService(pool, auth.Options{
 		SessionTTL: cfg.SessionTTL,
 		Clock:      clock.System{},
@@ -76,6 +87,7 @@ func run() error {
 		PasswordLoginDisabled: !cfg.PasswordLoginEnabled,
 		// Only operator-approved Workspace domains can be claimed and joined by.
 		AllowedDomains: cfg.OAuth.AllowedDomains,
+		Mail:           mail.NewQueue(mailKeys, reg),
 	})
 	if err != nil {
 		return err
@@ -90,10 +102,6 @@ func run() error {
 		return err
 	}
 
-	keys, err := crypto.NewKeyring(cfg.EncryptionKeys, cfg.EncryptionKeyID)
-	if err != nil {
-		return err
-	}
 	flow, err := oauthFlow(cfg)
 	if err != nil {
 		return err

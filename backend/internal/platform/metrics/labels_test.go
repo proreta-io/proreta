@@ -15,6 +15,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/api"
 	"github.com/proreta-io/proreta/backend/internal/auth"
 	"github.com/proreta-io/proreta/backend/internal/jobs"
+	"github.com/proreta-io/proreta/backend/internal/mail"
 	"github.com/proreta-io/proreta/backend/internal/platform/metrics"
 	"github.com/proreta-io/proreta/backend/internal/worker"
 )
@@ -50,6 +51,7 @@ func allMetrics(t *testing.T) map[string][]string {
 	if _, err := admin.NewService(nil, nil, admin.Options{Registerer: reg}); err != nil {
 		t.Fatal(err)
 	}
+	mail.NewQueue(nil, reg)
 	worker.NewMetrics(reg)
 	jobs.NewMetrics(reg)
 	api.NewPingMetrics(reg)

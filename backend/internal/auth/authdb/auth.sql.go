@@ -110,7 +110,7 @@ func (q *Queries) GetPasswordMustChange(ctx context.Context, id uuid.UUID) (bool
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, display_name, status, is_platform_admin, updated_at, password_changed_at, configured_password_hash, password_must_change
+SELECT id, email, password_hash, display_name, status, is_platform_admin, updated_at, password_changed_at, configured_password_hash, password_must_change, email_verified_at
 FROM users
 WHERE email = $1
 `
@@ -126,6 +126,7 @@ type GetUserByEmailRow struct {
 	PasswordChangedAt      *time.Time
 	ConfiguredPasswordHash *string
 	PasswordMustChange     bool
+	EmailVerifiedAt        *time.Time
 }
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error) {
@@ -142,12 +143,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEm
 		&i.PasswordChangedAt,
 		&i.ConfiguredPasswordHash,
 		&i.PasswordMustChange,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, display_name, status, is_platform_admin, password_must_change
+SELECT id, email, display_name, status, is_platform_admin, password_must_change, email_verified_at
 FROM users
 WHERE id = $1
 `
@@ -159,6 +161,7 @@ type GetUserByIDRow struct {
 	Status             string
 	IsPlatformAdmin    bool
 	PasswordMustChange bool
+	EmailVerifiedAt    *time.Time
 }
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (GetUserByIDRow, error) {
@@ -171,6 +174,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (GetUserByIDRow
 		&i.Status,
 		&i.IsPlatformAdmin,
 		&i.PasswordMustChange,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }

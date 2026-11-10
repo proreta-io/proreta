@@ -89,6 +89,8 @@ var roleCalls = map[string]struct {
 	"switchOrganization": {authz.Viewer, http.MethodPost, "/api/v1/auth/switch-organization", `{"organizationId":"0192b9c4-7c5e-7000-8000-0000000000ff"}`},
 	"changePassword":     {authz.Viewer, http.MethodPost, "/api/v1/auth/password", `{"currentPassword":"not the password","newPassword":"a role matrix passphrase"}`},
 	"getMe":              {authz.Viewer, http.MethodGet, "/api/v1/auth/me", ""},
+	// Any role; without email in this server it ends in 404.
+	"resendEmailVerification": {authz.Viewer, http.MethodPost, "/api/v1/auth/resend-verification", ""},
 	// Status page: settings readable by everyone, changes for admins and owners.
 	"listStatusPages":          {authz.Viewer, http.MethodGet, "/api/v1/status-pages", ""},
 	"createStatusPage":         {authz.Admin, http.MethodPost, "/api/v1/status-pages", `{"slug":"role-matrix","title":"Role matrix"}`},

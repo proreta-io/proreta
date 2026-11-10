@@ -449,7 +449,7 @@ func (s *server) toSessionInfo(ctx context.Context, i auth.SessionInfo) gen.Sess
 	return gen.SessionInfo{
 		Features:           features,
 		MustChangePassword: i.User.MustChangePassword,
-		User:               gen.User{Id: i.User.ID, Login: i.User.Login, DisplayName: i.User.DisplayName, IsPlatformAdmin: i.User.IsPlatformAdmin},
+		User:               gen.User{Id: i.User.ID, Login: i.User.Login, DisplayName: i.User.DisplayName, IsPlatformAdmin: i.User.IsPlatformAdmin, EmailVerified: i.User.EmailVerified},
 		Organization:       gen.OrganizationRef{Id: i.Tenant.ID, Slug: i.Tenant.Slug, Name: i.Tenant.Name},
 		Role:               gen.MembershipRole(i.Role),
 		CsrfToken:          i.CSRFToken,

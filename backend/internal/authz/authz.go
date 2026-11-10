@@ -153,21 +153,24 @@ var operations = map[string]Role{
 	"pingheartbeat":     Public,
 	"pingheartbeatpost": Public,
 	"lookupinvitation":  Public,
+	// The emailed token is the credential.
+	"verifyemail": Public,
 	// OAuth sign-in: the start of a link checks the session and CSRF token itself.
 	"getauthproviders": Public,
 	"startoauth":       Public,
 	"oauthcallback":    Public,
 
 	// The session itself and the user's own organizations: any role.
-	"logout":             Viewer,
-	"getme":              Viewer,
-	"listorganizations":  Viewer,
-	"switchorganization": Viewer,
-	"changepassword":     Viewer,
-	"acceptinvitation":   Viewer,
-	"leaveorganization":  Viewer,
-	"listidentities":     Viewer,
-	"unlinkidentity":     Viewer,
+	"logout":                  Viewer,
+	"getme":                   Viewer,
+	"resendemailverification": Viewer,
+	"listorganizations":       Viewer,
+	"switchorganization":      Viewer,
+	"changepassword":          Viewer,
+	"acceptinvitation":        Viewer,
+	"leaveorganization":       Viewer,
+	"listidentities":          Viewer,
+	"unlinkidentity":          Viewer,
 
 	// Reading the organization's data.
 	"listmonitors":         Viewer,

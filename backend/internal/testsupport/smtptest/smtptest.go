@@ -12,9 +12,15 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"io"
 	"math/big"
+	"mime"
+	"mime/multipart"
+	"mime/quotedprintable"
 	"net"
+	netmail "net/mail"
 	"net/textproto"
 	"strconv"
 	"strings"
@@ -275,4 +281,36 @@ func angle(arg string) string {
 	_, rest, _ := strings.Cut(arg, "<")
 	addr, _, _ := strings.Cut(rest, ">")
 	return addr
+}
+
+// Bodies returns the decoded text/plain and text/html parts of a received multipart/alternative
+// message.
+func (m Message) Bodies() (text, html string, err error) {
+	parsed, err := netmail.ReadMessage(strings.NewReader(m.Data))
+	if err != nil {
+		return "", "", err
+	}
+	_, params, err := mime.ParseMediaType(parsed.Header.Get("Content-Type"))
+	if err != nil {
+		return "", "", err
+	}
+	mr := multipart.NewReader(parsed.Body, params["boundary"])
+	for {
+		p, err := mr.NextPart()
+		if errors.Is(err, io.EOF) {
+			return text, html, nil
+		}
+		if err != nil {
+			return "", "", err
+		}
+		body, err := io.ReadAll(quotedprintable.NewReader(p))
+		if err != nil {
+			return "", "", err
+		}
+		if strings.HasPrefix(p.Header.Get("Content-Type"), "text/plain") {
+			text = string(body)
+		} else {
+			html = string(body)
+		}
+	}
 }
