@@ -18,7 +18,7 @@ Proreta {{ include "proreta.imageTag" . }} is installed as release "{{ .Release.
    ({{ $fullname }}-api for /api{{ if .Values.statuspage.enabled }}, {{ $fullname }}-statuspage for /status{{ end }}{{ if .Values.web.enabled }}, {{ $fullname }}-web for /{{ end }}).
 {{- end }}
 
-3. Open {{ $url }}{{ if not .Values.web.enabled }} (web.enabled is false: only the API under /api is served){{ end }}
+3. Once your Gateway and DNS route {{ regexReplaceAll "^https?://" $url "" }} to the cluster, open {{ $url }}{{ if not .Values.web.enabled }} (web.enabled is false: only the API under /api is served){{ end }}
 
 {{- if and .Release.IsInstall (eq .Values.secrets.admin.source "generate") }}
 
@@ -35,7 +35,7 @@ Proreta {{ include "proreta.imageTag" . }} is installed as release "{{ .Release.
 4. Sign in as the platform admin with the credentials kept in your secret store (secrets.admin.remoteKey).
 {{- end }}
 
-   The admin owns the "default" organization: add monitors there and invite colleagues by link.
+   The admin owns the organization "Default" (slug "default"): add monitors there and invite colleagues by link.
 {{- $b := .Values.database.bootstrap }}
 {{- if $b.enabled }}
 
