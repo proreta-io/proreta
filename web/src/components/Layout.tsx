@@ -5,6 +5,7 @@ import ErrorBoundary from "./ErrorBoundary";
 import OrganizationSwitcher from "./OrganizationSwitcher";
 import ProjectSwitcher from "./ProjectSwitcher";
 import ThemeToggle from "./ThemeToggle";
+import VerifyEmailBanner from "./VerifyEmailBanner";
 import { Badge, Button, cx } from "./ui";
 
 /** The page width shared by the top bar and the content, so their edges line up. */
@@ -144,6 +145,9 @@ export default function Layout() {
           </div>
         </div>
       )}
+      <div className={PAGE}>
+        <VerifyEmailBanner />
+      </div>
       <main className={cx(PAGE, "flex flex-1 flex-col pb-16")}>
         {/* Keyed by path so an error on one page does not stick after navigating away. */}
         <ErrorBoundary key={location.pathname}>

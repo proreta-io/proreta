@@ -305,6 +305,14 @@ export const revokeInvitation = (invitationId: string) =>
     }),
   );
 
+/** Confirms an address with the token of the emailed link; works without a session. */
+export const verifyEmail = (token: string) =>
+  unwrap(client.POST("/api/v1/auth/verify-email", { body: { token } }));
+
+/** Asks for a new verification email for the signed-in user. */
+export const resendEmailVerification = () =>
+  unwrap(client.POST("/api/v1/auth/resend-verification"));
+
 /** What an invitation link offers; works without a session. */
 export const lookupInvitation = (token: string) =>
   unwrap(client.POST("/api/v1/invitations/lookup", { body: { token } }));

@@ -134,6 +134,59 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/auth/verify-email": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Confirm an email address with the emailed token
+     * @description Public (no session): the token from the link in the verification email proves control of the
+     *     mailbox, so it works from any browser. The token travels in the body, never in a URL (the
+     *     link carries it in the fragment, which browsers do not send). It works once, only for the
+     *     newest link of the account, only until it expires (24 hours) and only while the account
+     *     still has the address it was issued for. Unknown, malformed, expired, used and replaced
+     *     tokens all get the same 404 `urn:proreta:problem:not-found`. Each failed attempt counts
+     *     against a per-client-IP limit (429 with Retry-After). A success is audited as
+     *     `auth.email_verified`. Only meaningful when `emailEnabled` is true in
+     *     `GET /api/v1/auth/providers`; otherwise no token exists and the answer is 404.
+     */
+    post: operations["verifyEmail"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/resend-verification": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Send the signed-in user a new verification link
+     * @description Queues a new verification email to the user's address and invalidates the older links.
+     *     Any role. 204 also when the address is already verified (nothing is sent). 404
+     *     `urn:proreta:problem:not-found` when the installation sends no email
+     *     (`emailEnabled` false) or the login is not an email address (the system admin). Limited
+     *     per user to one email a minute and five a day (429 with Retry-After). Audited as
+     *     `auth.email_verification_requested`.
+     */
+    post: operations["resendEmailVerification"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/auth/me": {
     parameters: {
       query?: never;
@@ -1564,6 +1617,14 @@ export interface components {
        *     `PRORETA_ADMIN_LOGIN`; no API grants it).
        */
       isPlatformAdmin: boolean;
+      /**
+       * @description Whether the login's email address was confirmed, by the link in a verification email or
+       *     by an identity provider that reported it verified. Always false for a login that is not
+       *     an email address (the system admin). Verification emails are sent only when
+       *     `emailEnabled` is true in `GET /api/v1/auth/providers`; a user of an installation
+       *     without email stays unverified, and nothing depends on it.
+       */
+      emailVerified: boolean;
     };
     /** @description The organization a session is bound to */
     OrganizationRef: {
@@ -2188,6 +2249,10 @@ export interface components {
       inviteUrl: string;
     };
     InvitationToken: {
+      /** Format: password */
+      token: string;
+    };
+    EmailVerificationToken: {
       /** Format: password */
       token: string;
     };
@@ -2852,6 +2917,58 @@ export interface operations {
       };
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
+      default: components["responses"]["Error"];
+    };
+  };
+  verifyEmail: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["EmailVerificationToken"];
+      };
+    };
+    responses: {
+      /** @description The address is verified */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["BadRequest"];
+      404: components["responses"]["NotFound"];
+      429: components["responses"]["TooManyRequests"];
+      default: components["responses"]["Error"];
+    };
+  };
+  resendEmailVerification: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The email is queued, or there was nothing to send */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      429: components["responses"]["TooManyRequests"];
       default: components["responses"]["Error"];
     };
   };
