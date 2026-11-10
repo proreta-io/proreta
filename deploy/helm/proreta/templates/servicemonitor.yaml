@@ -1,0 +1,47 @@
+{{- if .Values.serviceMonitor.enabled }}
+{{- /* Requires Prometheus Operator CRDs. Services expose only the admin port. */}}
+{{- $components := list "api" "worker" "jobs" }}
+{{- if .Values.statuspage.enabled }}{{ $components = append $components "statuspage" }}{{ end }}
+{{- range $c := $components }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "proreta.componentName" (dict "ctx" $ "component" $c) }}-metrics
+  labels:
+    {{- include "proreta.labels" (dict "ctx" $ "component" $c) | nindent 4 }}
+    proreta/metrics: "true"
+spec:
+  type: ClusterIP
+  ports:
+    - name: admin
+      port: {{ $.Values.config.adminPort }}
+      targetPort: admin
+      protocol: TCP
+  selector:
+    {{- include "proreta.selectorLabels" (dict "ctx" $ "component" $c) | nindent 4 }}
+{{- end }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "proreta.fullname" . }}
+  labels:
+    {{- include "proreta.labels" (dict "ctx" . "component" "api") | nindent 4 }}
+    {{- with .Values.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "proreta.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      proreta/metrics: "true"
+  endpoints:
+    - port: admin
+      path: {{ .Values.serviceMonitor.path }}
+      interval: {{ .Values.serviceMonitor.interval }}
+{{- end }}

@@ -1,0 +1,38 @@
+{{- if .Values.networkPolicy.enabled }}
+# WARNING: effective only when the cluster CNI enforces NetworkPolicy.
+# Ingress-only: egress is left open because monitor checks must reach arbitrary targets.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "proreta.fullname" . }}
+  labels:
+    {{- include "proreta.labels" (dict "ctx" . "component" "api") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "proreta.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    # Gateway data plane -> api / web / statuspage
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ include "proreta.networkPolicy.gatewayNamespace" . }}
+      ports:
+        - {protocol: TCP, port: {{ .Values.api.httpPort }}}
+        {{- if .Values.web.enabled }}
+        - {protocol: TCP, port: {{ .Values.web.httpPort }}}
+        {{- end }}
+        {{- if and .Values.statuspage.enabled (ne (int .Values.statuspage.httpPort) (int .Values.api.httpPort)) }}
+        - {protocol: TCP, port: {{ .Values.statuspage.httpPort }}}
+        {{- end }}
+    # Metrics scraping of the admin port
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicy.monitoringNamespace }}
+      ports:
+        - {protocol: TCP, port: {{ .Values.config.adminPort }}}
+{{- end }}

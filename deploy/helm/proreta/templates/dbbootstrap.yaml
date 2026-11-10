@@ -1,0 +1,176 @@
+{{- if .Values.database.bootstrap.enabled }}
+{{- /* Database bootstrap. Waves: -4 admin ExternalSecret (unless adminSecret.existingSecret) + RBAC, -3 Job. */}}
+{{- $db := .Values.database }}
+{{- $b := $db.bootstrap }}
+{{- $es := .Values.externalSecrets }}
+{{- $name := include "proreta.componentName" (dict "ctx" . "component" "db-bootstrap") }}
+{{- $sel := dict "ctx" . "component" "db-bootstrap" }}
+{{- $existing := $b.adminSecret.existingSecret | default "" }}
+{{- $adminSecret := $existing | default (include "proreta.secret.dbAdmin" .) }}
+{{- $dbSecret := include "proreta.secret.db" . }}
+{{- if not $existing }}
+{{- if not $es.enabled }}
+{{- fail "database.bootstrap needs the database server admin login: create a Secret and set database.bootstrap.adminSecret.existingSecret, or enable externalSecrets and set database.bootstrap.adminSecret.remoteKey" }}
+{{- end }}
+---
+# database server admin login (for example the RDS master login). Deleted with the
+# ExternalSecret (creationPolicy Owner) as soon as the hook phase succeeded.
+apiVersion: {{ $es.apiVersion }}
+kind: ExternalSecret
+metadata:
+  name: {{ $adminSecret }}
+  labels:
+    {{- include "proreta.labels" $sel | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
+    argocd.argoproj.io/sync-wave: "-4"
+    {{- include "proreta.helmHook" (dict "weight" "-4" "job" false) | nindent 4 }}
+spec:
+  refreshInterval: {{ $es.refreshInterval | quote }}
+  secretStoreRef:
+    kind: {{ $es.secretStoreRef.kind }}
+    name: {{ $es.secretStoreRef.name }}
+  target:
+    name: {{ $adminSecret }}
+    creationPolicy: Owner
+  data:
+    {{- range $k := list $b.adminSecret.usernameKey $b.adminSecret.passwordKey }}
+    - secretKey: {{ $k }}
+      remoteRef:
+        key: {{ required "database.bootstrap.adminSecret.remoteKey is required unless existingSecret is set" $b.adminSecret.remoteKey }}
+        property: {{ $k }}
+    {{- end }}
+{{- end }}
+---
+# The only ServiceAccount in the chart that mounts an API token: the Job must create the
+# `{{ $dbSecret }}` Secret through the Kubernetes API.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "proreta.labels" $sel | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-4"
+    {{- include "proreta.helmHook" (dict "weight" "-4" "job" false) | nindent 4 }}
+    {{- with .Values.serviceAccount.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "proreta.labels" $sel | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-4"
+    {{- include "proreta.helmHook" (dict "weight" "-4" "job" false) | nindent 4 }}
+rules:
+  # `create` cannot be restricted by resourceNames (the name is unknown to the authorizer on create).
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ $dbSecret | quote }}]
+    verbs: ["get", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "proreta.labels" $sel | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-4"
+    {{- include "proreta.helmHook" (dict "weight" "-4" "job" false) | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "proreta.labels" $sel | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-3"
+    {{- include "proreta.helmHook" (dict "weight" "-3" "job" true) | nindent 4 }}
+spec:
+  backoffLimit: {{ $b.backoffLimit }}
+  activeDeadlineSeconds: {{ $b.activeDeadlineSeconds }}
+  ttlSecondsAfterFinished: {{ $b.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "proreta.labels" $sel | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: true
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: db-bootstrap
+          image: {{ include "proreta.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/app/proretactl", "db", "bootstrap"]
+          env:
+            - name: PRORETA_LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: PRORETA_BOOTSTRAP_HOST
+              value: {{ required "database.host is required when database.bootstrap.enabled is true: the PostgreSQL server host, reachable from the cluster" $db.host | quote }}
+            - name: PRORETA_BOOTSTRAP_PORT
+              value: {{ $db.port | quote }}
+            - name: PRORETA_BOOTSTRAP_DB_NAME
+              value: {{ $db.name | quote }}
+            - name: PRORETA_BOOTSTRAP_SSLMODE
+              value: {{ $db.sslmode | quote }}
+            - name: PRORETA_BOOTSTRAP_SECRET_NAME
+              value: {{ $dbSecret | quote }}
+            - name: PRORETA_BOOTSTRAP_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $adminSecret }}
+                  key: {{ $b.adminSecret.usernameKey }}
+            - name: PRORETA_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $adminSecret }}
+                  key: {{ $b.adminSecret.passwordKey }}
+          resources:
+            {{- toYaml $b.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+      {{- include "proreta.scheduling" $sel | nindent 6 }}
+{{- end }}

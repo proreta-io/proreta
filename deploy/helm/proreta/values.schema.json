@@ -1,0 +1,1366 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Proreta chart values",
+  "type": "object",
+  "additionalProperties": false,
+  "definitions": {
+    "quantity": {
+      "type": [
+        "string",
+        "number"
+      ],
+      "description": "Kubernetes quantity, for example 50m, 96Mi or 1"
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requests",
+        "limits"
+      ],
+      "properties": {
+        "requests": {
+          "type": "object",
+          "title": "requests",
+          "description": "resource requests; cpu and memory are required",
+          "required": [
+            "cpu",
+            "memory"
+          ],
+          "additionalProperties": {
+            "$ref": "#/definitions/quantity"
+          }
+        },
+        "limits": {
+          "type": "object",
+          "title": "limits",
+          "description": "resource limits; memory is required (a cpu limit is optional)",
+          "required": [
+            "memory"
+          ],
+          "additionalProperties": {
+            "$ref": "#/definitions/quantity"
+          }
+        }
+      }
+    },
+    "grace": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 600
+    },
+    "envList": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "service": {
+      "type": "object",
+      "title": "Service",
+      "description": "the ClusterIP Service in front of the pods",
+      "additionalProperties": false,
+      "required": [
+        "port"
+      ],
+      "properties": {
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "title": "Service port",
+          "description": "port of the ClusterIP Service (targets the container's http port)"
+        }
+      }
+    }
+  },
+  "required": [
+    "image",
+    "config",
+    "database",
+    "secrets",
+    "oauth",
+    "externalSecrets",
+    "api",
+    "worker",
+    "jobs",
+    "statuspage",
+    "web",
+    "migration",
+    "httpRoute"
+  ],
+  "properties": {
+    "nameOverride": {
+      "type": "string",
+      "title": "name override",
+      "description": "replaces the chart name in resource names and the app.kubernetes.io/name label",
+      "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "maxLength": 63
+    },
+    "fullnameOverride": {
+      "type": "string",
+      "title": "full name override",
+      "description": "replaces <release>-<chart> as the base of every resource name",
+      "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+      "maxLength": 63
+    },
+    "image": {
+      "type": "object",
+      "title": "backend image",
+      "description": "the proreta-backend image (api, worker, jobs, statuspage, migrate, bootstrap Jobs)",
+      "additionalProperties": false,
+      "properties": {
+        "repository": {
+          "type": "string",
+          "title": "backend image repository",
+          "description": "registry and repository of the backend image",
+          "minLength": 1
+        },
+        "tag": {
+          "type": "string",
+          "title": "backend image tag",
+          "description": "a release version (X.Y.Z; a leading v such as v1.2.3 is rejected, image tags have none) or a main-branch build (sha-<7 hex>); empty uses the chart appVersion, which only a chart from oci://ghcr.io/proreta-io/charts/proreta has (rendering fails in a git checkout)",
+          "pattern": "^$|^(v|v[A-Za-z_.-][A-Za-z0-9_.-]{0,126}|[A-Za-uw-z0-9_][A-Za-z0-9_.-]{0,127})$"
+        },
+        "pullPolicy": {
+          "type": "string",
+          "title": "image pull policy",
+          "description": "imagePullPolicy of every container",
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        }
+      },
+      "required": [
+        "repository",
+        "tag"
+      ]
+    },
+    "imagePullSecrets": {
+      "type": "array",
+      "title": "image pull secrets",
+      "description": "Secrets for a private registry or mirror, e.g. [{name: registry-pull}]",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "pull secret name",
+            "description": "name of a docker-registry Secret in the release namespace",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "config": {
+      "type": "object",
+      "title": "application configuration",
+      "description": "environment contract read by the backend",
+      "additionalProperties": false,
+      "properties": {
+        "logLevel": {
+          "type": "string",
+          "title": "log level",
+          "description": "PRORETA_LOG_LEVEL",
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ]
+        },
+        "adminPort": {
+          "type": "integer",
+          "title": "admin port",
+          "description": "PRORETA_ADMIN_ADDR port (health and metrics) of every backend pod; never routed externally",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "sessionTTL": {
+          "type": "string",
+          "title": "session TTL",
+          "description": "PRORETA_SESSION_TTL, a Go duration such as 24h (api only)",
+          "minLength": 1,
+          "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$"
+        },
+        "cookieSecure": {
+          "type": "boolean",
+          "title": "secure cookies",
+          "description": "PRORETA_COOKIE_SECURE (api and statuspage); keep true, sign-in needs https"
+        },
+        "trustedProxyHops": {
+          "type": "integer",
+          "title": "trusted proxy hops",
+          "description": "PRORETA_TRUSTED_PROXY_HOPS: number of trusted proxies in front of the api; 0 if none, 1 behind one Gateway",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "registrationEnabled": {
+          "type": "boolean",
+          "title": "self-service registration",
+          "description": "PRORETA_REGISTRATION_ENABLED: anyone can create an organization, without email verification (chart default false)"
+        },
+        "passwordLoginEnabled": {
+          "type": "boolean",
+          "title": "password login",
+          "description": "PRORETA_PASSWORD_LOGIN_ENABLED: false keeps the password form for the platform admin only and needs an OAuth provider (default true)"
+        },
+        "publicUrl": {
+          "type": "string",
+          "title": "public URL",
+          "description": "PRORETA_PUBLIC_URL, required: the https URL users open, for example https://proreta.example.com; https only, no trailing slash, no user info, query or link-breaking characters; its host is the default of httpRoute.hostnames",
+          "pattern": "^$|^https://[^\\s/|<>&\"'?#@]+(/[^\\s|<>&\"'?#]*[^\\s/|<>&\"'?#])?$"
+        },
+        "blockedCIDRs": {
+          "type": "array",
+          "title": "blocked CIDRs",
+          "description": "PRORETA_BLOCKED_CIDRS: extra ranges the SSRF guard refuses (api, worker, jobs), for example the cluster and VPC CIDRs",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-fA-F:.]+/[0-9]{1,3}$"
+          }
+        }
+      },
+      "required": [
+        "logLevel",
+        "adminPort",
+        "publicUrl"
+      ]
+    },
+    "database": {
+      "type": "object",
+      "title": "database",
+      "description": "the PostgreSQL server and the Secret with the connection URLs; one PostgreSQL server hosts one installation (fixed role names)",
+      "additionalProperties": false,
+      "properties": {
+        "secretName": {
+          "type": "string",
+          "title": "database Secret name",
+          "description": "Secret with the connection URLs (keys api_url, worker_url, owner_url, statuspage_url); empty: <fullname>-db. Created by the bootstrap Job, or by you when bootstrap is disabled",
+          "maxLength": 63,
+          "pattern": "^$|^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
+        },
+        "host": {
+          "type": "string",
+          "title": "database host",
+          "description": "PostgreSQL server host reachable from the cluster; required when database.bootstrap.enabled"
+        },
+        "port": {
+          "type": "integer",
+          "title": "database port",
+          "description": "PostgreSQL server port",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "name": {
+          "type": "string",
+          "title": "database name",
+          "description": "name of the database the bootstrap creates",
+          "pattern": "^[a-z_][a-z0-9_]*$",
+          "maxLength": 63
+        },
+        "sslmode": {
+          "type": "string",
+          "title": "sslmode",
+          "description": "libpq sslmode of the connections; require encrypts without verifying the certificate",
+          "enum": [
+            "disable",
+            "allow",
+            "prefer",
+            "require",
+            "verify-ca",
+            "verify-full"
+          ]
+        },
+        "bootstrap": {
+          "type": "object",
+          "title": "database bootstrap",
+          "description": "hook Job that creates the database, the roles and the database Secret; turn it off after the first successful install",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "title": "run the database bootstrap",
+              "description": "render the bootstrap hook Job; it holds the database server admin login while enabled"
+            },
+            "adminSecret": {
+              "type": "object",
+              "title": "database admin login",
+              "description": "where the bootstrap reads the database server admin login (LOGIN, CREATEROLE, CREATEDB)",
+              "additionalProperties": false,
+              "properties": {
+                "existingSecret": {
+                  "type": "string",
+                  "title": "existing admin Secret",
+                  "description": "a Secret you created in the release namespace with the login; when set no ExternalSecret is rendered"
+                },
+                "remoteKey": {
+                  "type": "string",
+                  "title": "admin remote key",
+                  "description": "with externalSecrets.enabled and existingSecret empty: the JSON secret in your store"
+                },
+                "usernameKey": {
+                  "type": "string",
+                  "title": "username key",
+                  "description": "key of the admin user name in the Secret (and property of the remote secret)",
+                  "minLength": 1,
+                  "pattern": "^[-._a-zA-Z0-9]+$"
+                },
+                "passwordKey": {
+                  "type": "string",
+                  "title": "password key",
+                  "description": "key of the admin password in the Secret (and property of the remote secret)",
+                  "minLength": 1,
+                  "pattern": "^[-._a-zA-Z0-9]+$"
+                }
+              },
+              "required": [
+                "usernameKey",
+                "passwordKey"
+              ]
+            },
+            "backoffLimit": {
+              "type": "integer",
+              "title": "database bootstrap backoffLimit",
+              "description": "retries of the database bootstrap Job before it fails",
+              "minimum": 0,
+              "maximum": 6
+            },
+            "activeDeadlineSeconds": {
+              "type": "integer",
+              "title": "database bootstrap activeDeadlineSeconds",
+              "description": "maximum run time of the database bootstrap Job in seconds",
+              "minimum": 1
+            },
+            "ttlSecondsAfterFinished": {
+              "type": "integer",
+              "title": "database bootstrap ttlSecondsAfterFinished",
+              "description": "seconds a finished database bootstrap Job is kept (its logs stay readable until then)",
+              "minimum": 0
+            },
+            "resources": {
+              "$ref": "#/definitions/resources",
+              "title": "database bootstrap Job resources",
+              "description": "Kubernetes requests and limits of the database bootstrap Job container; requests.cpu, requests.memory and limits.memory are required"
+            }
+          },
+          "required": [
+            "enabled",
+            "adminSecret",
+            "resources"
+          ]
+        }
+      },
+      "required": [
+        "secretName",
+        "port",
+        "name",
+        "sslmode",
+        "bootstrap"
+      ]
+    },
+    "secrets": {
+      "type": "object",
+      "title": "generated or external Secrets",
+      "description": "admin login, encryption keys, status page cookie key and OAuth client credentials",
+      "additionalProperties": false,
+      "properties": {
+        "admin": {
+          "type": "object",
+          "title": "admin Secret",
+          "description": "Secret <fullname>-admin (login, password_hash) of the platform admin",
+          "additionalProperties": false,
+          "properties": {
+            "source": {
+              "type": "string",
+              "title": "source",
+              "description": "who creates the Secret: generate (the secrets bootstrap Job, default) or externalSecret (read from remoteKey through External Secrets; needs externalSecrets.enabled)",
+              "enum": [
+                "generate",
+                "externalSecret"
+              ]
+            },
+            "login": {
+              "type": "string",
+              "title": "admin login",
+              "description": "platform admin login (generate mode): 3-254 of [a-z0-9._@+-]",
+              "pattern": "^[a-z0-9._@+-]{3,254}$"
+            },
+            "remoteKey": {
+              "type": "string",
+              "title": "admin remote key",
+              "description": "externalSecret mode: JSON secret with properties login, password_hash"
+            }
+          },
+          "required": [
+            "source"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "source": {
+                    "const": "generate"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "login"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "source": {
+                    "const": "externalSecret"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "remoteKey"
+                ],
+                "properties": {
+                  "remoteKey": {
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "crypto": {
+          "type": "object",
+          "title": "encryption key Secret",
+          "description": "Secret <fullname>-crypto (keys, active_key_id) that encrypts the Slack webhook URLs",
+          "additionalProperties": false,
+          "properties": {
+            "source": {
+              "type": "string",
+              "title": "source",
+              "description": "who creates the Secret: generate (the secrets bootstrap Job, default) or externalSecret (read from remoteKey through External Secrets; needs externalSecrets.enabled)",
+              "enum": [
+                "generate",
+                "externalSecret"
+              ]
+            },
+            "keyId": {
+              "type": "string",
+              "title": "key id",
+              "description": "id of the generated key (generate mode), PRORETA_ENCRYPTION_ACTIVE_KEY_ID",
+              "pattern": "^[A-Za-z0-9_-]{1,32}$"
+            },
+            "remoteKey": {
+              "type": "string",
+              "title": "crypto remote key",
+              "description": "externalSecret mode: JSON secret with properties keys (JSON string), active_key_id"
+            }
+          },
+          "required": [
+            "source"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "source": {
+                    "const": "generate"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "keyId"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "source": {
+                    "const": "externalSecret"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "remoteKey"
+                ],
+                "properties": {
+                  "remoteKey": {
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "statuspage": {
+          "type": "object",
+          "title": "status page cookie key Secret",
+          "description": "Secret <fullname>-statuspage (cookie_key) of the status page renderer; only with statuspage.enabled",
+          "additionalProperties": false,
+          "properties": {
+            "source": {
+              "type": "string",
+              "title": "source",
+              "description": "who creates the Secret: generate (the secrets bootstrap Job, default) or externalSecret (read from remoteKey through External Secrets; needs externalSecrets.enabled)",
+              "enum": [
+                "generate",
+                "externalSecret"
+              ]
+            },
+            "remoteKey": {
+              "type": "string",
+              "title": "status page remote key",
+              "description": "externalSecret mode: JSON secret with property cookie_key (standard base64 of 32 random bytes)"
+            }
+          },
+          "required": [
+            "source"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "source": {
+                    "const": "externalSecret"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "remoteKey"
+                ],
+                "properties": {
+                  "remoteKey": {
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "oauth": {
+          "type": "object",
+          "title": "OAuth client credentials",
+          "description": "a Secret you created (existingSecret) or, with externalSecrets.enabled, the ExternalSecret <fullname>-oauth read from remoteKey",
+          "additionalProperties": false,
+          "properties": {
+            "existingSecret": {
+              "type": "string",
+              "title": "existing OAuth Secret",
+              "description": "Secret in the release namespace with google_client_id, google_client_secret, github_client_id, github_client_secret (only those of enabled providers); when set no ExternalSecret is rendered"
+            },
+            "remoteKey": {
+              "type": "string",
+              "title": "OAuth remote key",
+              "description": "JSON secret in your store, used when existingSecret is empty"
+            }
+          }
+        },
+        "bootstrap": {
+          "type": "object",
+          "title": "secrets bootstrap Job",
+          "description": "hook Job that generates the Secrets whose source is generate; it has no database credentials",
+          "additionalProperties": false,
+          "properties": {
+            "backoffLimit": {
+              "type": "integer",
+              "title": "secrets bootstrap backoffLimit",
+              "description": "retries of the secrets bootstrap Job before it fails",
+              "minimum": 0,
+              "maximum": 6
+            },
+            "activeDeadlineSeconds": {
+              "type": "integer",
+              "title": "secrets bootstrap activeDeadlineSeconds",
+              "description": "maximum run time of the secrets bootstrap Job in seconds",
+              "minimum": 1
+            },
+            "ttlSecondsAfterFinished": {
+              "type": "integer",
+              "title": "secrets bootstrap ttlSecondsAfterFinished",
+              "description": "seconds a finished secrets bootstrap Job is kept (its logs stay readable until then)",
+              "minimum": 0
+            },
+            "resources": {
+              "$ref": "#/definitions/resources",
+              "title": "secrets bootstrap Job resources",
+              "description": "Kubernetes requests and limits of the secrets bootstrap Job container; requests.cpu, requests.memory and limits.memory are required"
+            }
+          },
+          "required": [
+            "resources"
+          ]
+        }
+      },
+      "required": [
+        "admin",
+        "crypto",
+        "statuspage",
+        "oauth",
+        "bootstrap"
+      ]
+    },
+    "oauth": {
+      "type": "object",
+      "title": "OAuth sign-in",
+      "description": "OAuth sign-in providers; credentials come from secrets.oauth",
+      "additionalProperties": false,
+      "properties": {
+        "google": {
+          "type": "object",
+          "title": "Google sign-in",
+          "description": "sign-in with Google",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "title": "Google enabled",
+              "description": "offer sign-in with Google"
+            }
+          },
+          "required": [
+            "enabled"
+          ]
+        },
+        "github": {
+          "type": "object",
+          "title": "GitHub sign-in",
+          "description": "sign-in with GitHub",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "title": "GitHub enabled",
+              "description": "offer sign-in with GitHub"
+            }
+          },
+          "required": [
+            "enabled"
+          ]
+        },
+        "allowedDomains": {
+          "type": "array",
+          "title": "allowed Workspace domains",
+          "description": "PRORETA_OAUTH_ALLOWED_DOMAINS: lowercase Google Workspace domains organizations may claim for auto-join; empty turns claiming off",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "maxLength": 253,
+            "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
+          }
+        }
+      },
+      "required": [
+        "google",
+        "github"
+      ]
+    },
+    "externalSecrets": {
+      "type": "object",
+      "title": "External Secrets",
+      "description": "External Secrets Operator integration (optional, off by default)",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "External Secrets enabled",
+          "description": "render ExternalSecrets (needs the operator and its CRDs in the cluster)"
+        },
+        "apiVersion": {
+          "type": "string",
+          "title": "ExternalSecret apiVersion",
+          "description": "API version of the rendered ExternalSecrets",
+          "minLength": 1
+        },
+        "secretStoreRef": {
+          "type": "object",
+          "title": "secret store",
+          "description": "the SecretStore or ClusterSecretStore the ExternalSecrets read from",
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "type": "string",
+              "title": "store kind",
+              "description": "ClusterSecretStore or SecretStore",
+              "enum": [
+                "ClusterSecretStore",
+                "SecretStore"
+              ]
+            },
+            "name": {
+              "type": "string",
+              "title": "store name",
+              "description": "name of the store; required when enabled"
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ]
+        },
+        "refreshInterval": {
+          "type": "string",
+          "title": "refresh interval",
+          "description": "refreshInterval of the ExternalSecrets; \"0\" reads once"
+        },
+        "creationPolicy": {
+          "type": "string",
+          "title": "creation policy",
+          "description": "target creationPolicy of the ExternalSecrets",
+          "enum": [
+            "Owner",
+            "Orphan",
+            "Merge",
+            "None"
+          ]
+        }
+      },
+      "required": [
+        "enabled",
+        "secretStoreRef"
+      ]
+    },
+    "podAnnotations": {
+      "type": "object",
+      "title": "pod annotations",
+      "description": "annotations added to every pod of the Deployments",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "podLabels": {
+      "type": "object",
+      "title": "pod labels",
+      "description": "labels added to every pod of the Deployments (never to selectors)",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "nodeSelector": {
+      "type": "object",
+      "title": "node selector",
+      "description": "nodeSelector of every pod",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "tolerations": {
+      "type": "array",
+      "title": "tolerations",
+      "description": "tolerations of every pod (Kubernetes Toleration objects)",
+      "items": {
+        "type": "object"
+      }
+    },
+    "affinity": {
+      "type": "object",
+      "title": "affinity",
+      "description": "affinity of every pod (a Kubernetes Affinity object)",
+      "additionalProperties": true
+    },
+    "podSecurityContext": {
+      "type": "object",
+      "title": "pod security context",
+      "description": "pod securityContext of every pod (a Kubernetes PodSecurityContext); the default meets the restricted Pod Security Standard; overriding it can break the restricted profile",
+      "additionalProperties": true
+    },
+    "securityContext": {
+      "type": "object",
+      "title": "container security context",
+      "description": "securityContext of every container (a Kubernetes SecurityContext); the default meets the restricted Pod Security Standard; overriding it can break the restricted profile",
+      "additionalProperties": true
+    },
+    "strategy": {
+      "type": "object",
+      "title": "rollout strategy",
+      "description": "RollingUpdate settings of every Deployment",
+      "additionalProperties": false,
+      "properties": {
+        "rollingUpdate": {
+          "type": "object",
+          "title": "rolling update",
+          "description": "maxSurge and maxUnavailable",
+          "additionalProperties": false,
+          "properties": {
+            "maxSurge": {
+              "type": [
+                "integer",
+                "string"
+              ],
+              "title": "max surge",
+              "description": "pods above the desired count during a rollout (number or percentage)"
+            },
+            "maxUnavailable": {
+              "type": [
+                "integer",
+                "string"
+              ],
+              "title": "max unavailable",
+              "description": "pods below the desired count during a rollout (number or percentage)"
+            }
+          }
+        }
+      },
+      "required": [
+        "rollingUpdate"
+      ]
+    },
+    "revisionHistoryLimit": {
+      "type": "integer",
+      "title": "revision history limit",
+      "description": "old ReplicaSets kept per Deployment",
+      "minimum": 0
+    },
+    "terminationGracePeriodSeconds": {
+      "$ref": "#/definitions/grace",
+      "title": "termination grace period",
+      "description": "default terminationGracePeriodSeconds of the pods"
+    },
+    "serviceAccount": {
+      "type": "object",
+      "title": "ServiceAccounts",
+      "description": "settings of the per-workload ServiceAccounts",
+      "additionalProperties": false,
+      "properties": {
+        "annotations": {
+          "type": "object",
+          "title": "ServiceAccount annotations",
+          "description": "annotations of every ServiceAccount, for example for workload identity",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "api": {
+      "type": "object",
+      "title": "api",
+      "description": "the HTTP API (Deployment <fullname>-api)",
+      "additionalProperties": false,
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "title": "api replicas",
+          "description": "number of api pods; stateless, login rate limits are per replica",
+          "minimum": 0
+        },
+        "httpPort": {
+          "type": "integer",
+          "title": "api HTTP port",
+          "description": "container port of the api (PRORETA_HTTP_ADDR)",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "terminationGracePeriodSeconds": {
+          "$ref": "#/definitions/grace",
+          "title": "api termination grace period",
+          "description": "terminationGracePeriodSeconds of the api pods; default: the top-level terminationGracePeriodSeconds"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources",
+          "title": "api resources",
+          "description": "Kubernetes requests and limits of the api container; requests.cpu, requests.memory and limits.memory are required"
+        },
+        "env": {
+          "$ref": "#/definitions/envList",
+          "title": "extra api env",
+          "description": "extra environment variables of the api container (a list of Kubernetes EnvVar objects, for example {name: FOO, value: bar}); appended after the chart's own"
+        },
+        "service": {
+          "$ref": "#/definitions/service"
+        },
+        "pdb": {
+          "type": "object",
+          "title": "api PodDisruptionBudget",
+          "description": "optional PodDisruptionBudget of the api",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "title": "PDB enabled",
+              "description": "render a PodDisruptionBudget for the api"
+            },
+            "minAvailable": {
+              "type": [
+                "integer",
+                "string"
+              ],
+              "title": "min available",
+              "description": "minAvailable of the PodDisruptionBudget (number or percentage)"
+            }
+          }
+        }
+      },
+      "required": [
+        "replicas",
+        "httpPort",
+        "resources",
+        "service"
+      ]
+    },
+    "worker": {
+      "type": "object",
+      "title": "worker",
+      "description": "the check runner (Deployment <fullname>-worker)",
+      "additionalProperties": false,
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "title": "worker replicas",
+          "description": "number of worker pods; they share the due checks through database leases",
+          "minimum": 0
+        },
+        "terminationGracePeriodSeconds": {
+          "$ref": "#/definitions/grace",
+          "title": "worker termination grace period",
+          "description": "terminationGracePeriodSeconds of the worker pods; default: the top-level terminationGracePeriodSeconds"
+        },
+        "claimBatch": {
+          "type": "integer",
+          "title": "claim batch",
+          "description": "PRORETA_WORKER_CLAIM_BATCH: checks claimed per round",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "concurrency": {
+          "type": "integer",
+          "title": "concurrency",
+          "description": "PRORETA_WORKER_CONCURRENCY: checks in flight per pod",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "tenantConcurrency": {
+          "type": "integer",
+          "title": "tenant concurrency",
+          "description": "PRORETA_WORKER_TENANT_CONCURRENCY: checks in flight per organization",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "hostConcurrency": {
+          "type": "integer",
+          "title": "host concurrency",
+          "description": "PRORETA_WORKER_HOST_CONCURRENCY: checks in flight per target host",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "location": {
+          "type": "string",
+          "title": "probe location",
+          "description": "PRORETA_WORKER_LOCATION: code of the probe location whose checks this worker runs (a DNS label; the database is seeded with default)",
+          "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+          "maxLength": 63
+        },
+        "resources": {
+          "$ref": "#/definitions/resources",
+          "title": "worker resources",
+          "description": "Kubernetes requests and limits of the worker container; requests.cpu, requests.memory and limits.memory are required"
+        },
+        "env": {
+          "$ref": "#/definitions/envList",
+          "title": "extra worker env",
+          "description": "extra environment variables of the worker container (a list of Kubernetes EnvVar objects, for example {name: FOO, value: bar}); appended after the chart's own"
+        }
+      },
+      "required": [
+        "replicas",
+        "location",
+        "resources"
+      ]
+    },
+    "jobs": {
+      "type": "object",
+      "title": "jobs",
+      "description": "Slack delivery and housekeeping (Deployment <fullname>-jobs)",
+      "additionalProperties": false,
+      "properties": {
+        "replicas": {
+          "type": "integer",
+          "title": "jobs replicas",
+          "description": "0 or 1 only: jobs must stay a singleton; 0 stops Slack delivery and housekeeping",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "terminationGracePeriodSeconds": {
+          "$ref": "#/definitions/grace",
+          "title": "jobs termination grace period",
+          "description": "terminationGracePeriodSeconds of the jobs pods; default: the top-level terminationGracePeriodSeconds"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources",
+          "title": "jobs resources",
+          "description": "Kubernetes requests and limits of the jobs container; requests.cpu, requests.memory and limits.memory are required"
+        },
+        "env": {
+          "$ref": "#/definitions/envList",
+          "title": "extra jobs env",
+          "description": "extra environment variables of the jobs container (a list of Kubernetes EnvVar objects, for example {name: FOO, value: bar}); appended after the chart's own"
+        }
+      },
+      "required": [
+        "replicas",
+        "resources"
+      ]
+    },
+    "statuspage": {
+      "type": "object",
+      "title": "statuspage",
+      "description": "the public status page renderer (Deployment <fullname>-statuspage), routed at /status",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "status pages enabled",
+          "description": "deploy the renderer and route /status to it"
+        },
+        "replicas": {
+          "type": "integer",
+          "title": "statuspage replicas",
+          "description": "number of renderer pods; rate limits and cache are per replica",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "httpPort": {
+          "type": "integer",
+          "title": "statuspage HTTP port",
+          "description": "container port of the renderer (PRORETA_HTTP_ADDR)",
+          "minimum": 1024,
+          "maximum": 65535
+        },
+        "terminationGracePeriodSeconds": {
+          "$ref": "#/definitions/grace",
+          "title": "statuspage termination grace period",
+          "description": "terminationGracePeriodSeconds of the statuspage pods; default: the top-level terminationGracePeriodSeconds"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources",
+          "title": "statuspage resources",
+          "description": "Kubernetes requests and limits of the statuspage container; requests.cpu, requests.memory and limits.memory are required"
+        },
+        "env": {
+          "$ref": "#/definitions/envList",
+          "title": "extra statuspage env",
+          "description": "extra environment variables of the statuspage container (a list of Kubernetes EnvVar objects, for example {name: FOO, value: bar}); appended after the chart's own"
+        },
+        "service": {
+          "$ref": "#/definitions/service"
+        }
+      },
+      "required": [
+        "enabled",
+        "replicas",
+        "httpPort",
+        "resources",
+        "service"
+      ]
+    },
+    "web": {
+      "type": "object",
+      "title": "web",
+      "description": "the web app (nginx serving the React build, Deployment <fullname>-web), routed at /",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "web enabled",
+          "description": "deploy the web app and route / to it (default true)"
+        },
+        "replicas": {
+          "type": "integer",
+          "title": "web replicas",
+          "description": "number of web pods",
+          "minimum": 0
+        },
+        "image": {
+          "type": "object",
+          "title": "web image",
+          "description": "the proreta-web image",
+          "additionalProperties": false,
+          "properties": {
+            "repository": {
+              "type": "string",
+              "title": "web image repository",
+              "description": "registry and repository of the web image",
+              "minLength": 1
+            },
+            "tag": {
+              "type": "string",
+              "title": "web image tag",
+              "description": "empty: the backend image tag (both images are released together)",
+              "pattern": "^$|^[A-Za-uw-z0-9_][A-Za-z0-9_.-]{0,127}$"
+            }
+          },
+          "required": [
+            "repository"
+          ]
+        },
+        "httpPort": {
+          "type": "integer",
+          "title": "web HTTP port",
+          "description": "container port; must be the port nginx listens on (8080 in the published image)",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "terminationGracePeriodSeconds": {
+          "$ref": "#/definitions/grace",
+          "title": "web termination grace period",
+          "description": "terminationGracePeriodSeconds of the web pods; default: the top-level terminationGracePeriodSeconds"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources",
+          "title": "web resources",
+          "description": "Kubernetes requests and limits of the web container; requests.cpu, requests.memory and limits.memory are required"
+        },
+        "env": {
+          "$ref": "#/definitions/envList",
+          "title": "extra web env",
+          "description": "extra environment variables of the web container (a list of Kubernetes EnvVar objects, for example {name: FOO, value: bar}); appended after the chart's own"
+        },
+        "service": {
+          "$ref": "#/definitions/service"
+        }
+      },
+      "required": [
+        "enabled",
+        "replicas",
+        "image",
+        "httpPort",
+        "resources",
+        "service"
+      ]
+    },
+    "migration": {
+      "type": "object",
+      "title": "database migration",
+      "description": "hook Job <fullname>-migrate that applies the migrations as proreta_owner before the workloads start",
+      "additionalProperties": false,
+      "properties": {
+        "hookPhase": {
+          "type": "string",
+          "title": "ArgoCD hook phase",
+          "description": "Sync (default, ordered by waves) or PreSync (ArgoCD only; not with database.bootstrap.enabled)",
+          "enum": [
+            "PreSync",
+            "Sync"
+          ]
+        },
+        "backoffLimit": {
+          "type": "integer",
+          "title": "migration backoffLimit",
+          "description": "retries of the migration Job before it fails",
+          "minimum": 0,
+          "maximum": 6
+        },
+        "activeDeadlineSeconds": {
+          "type": "integer",
+          "title": "migration activeDeadlineSeconds",
+          "description": "maximum run time of the migration Job in seconds",
+          "minimum": 1
+        },
+        "ttlSecondsAfterFinished": {
+          "type": "integer",
+          "title": "migration ttlSecondsAfterFinished",
+          "description": "seconds a finished migration Job is kept (its logs stay readable until then)",
+          "minimum": 0
+        },
+        "resources": {
+          "$ref": "#/definitions/resources",
+          "title": "migration Job resources",
+          "description": "Kubernetes requests and limits of the migration Job container; requests.cpu, requests.memory and limits.memory are required"
+        }
+      },
+      "required": [
+        "hookPhase",
+        "resources"
+      ]
+    },
+    "httpRoute": {
+      "type": "object",
+      "title": "HTTPRoute",
+      "description": "Gateway API routing: /api to the api, /status to the statuspage, / to the web",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "HTTPRoute enabled",
+          "description": "render the HTTPRoute; false: route to the Services yourself"
+        },
+        "hostnames": {
+          "type": "array",
+          "title": "host names",
+          "description": "host names of the route; empty: the host of config.publicUrl",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "description": "lowercase DNS name, optionally with one leading *. wildcard label",
+            "pattern": "^(\\*\\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$"
+          }
+        },
+        "parentRef": {
+          "type": "object",
+          "title": "Gateway",
+          "description": "the Gateway (and its HTTPS listener) the HTTPRoute attaches to",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string",
+              "title": "Gateway name",
+              "description": "name of your Gateway; required when httpRoute.enabled"
+            },
+            "namespace": {
+              "type": "string",
+              "title": "Gateway namespace",
+              "description": "namespace of the Gateway; empty: the release namespace",
+              "pattern": "^$|^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+              "maxLength": 63
+            },
+            "sectionName": {
+              "type": "string",
+              "title": "listener name",
+              "description": "listener (sectionName) on the Gateway; empty attaches to every listener that admits the route"
+            }
+          },
+          "required": [
+            "name"
+          ]
+        },
+        "apiPathPrefix": {
+          "type": "string",
+          "title": "api path prefix",
+          "description": "path prefix routed to the api",
+          "pattern": "^/"
+        },
+        "apiRequestTimeout": {
+          "type": "string",
+          "title": "api request timeout",
+          "description": "Gateway API request timeout of the api rule, for example 60s",
+          "pattern": "^([0-9]{1,5}(h|m|s|ms)){1,4}$"
+        },
+        "statusPathPrefix": {
+          "type": "string",
+          "title": "status path prefix",
+          "description": "path prefix routed to the statuspage; fixed to /status (the renderer serves only that)",
+          "const": "/status"
+        }
+      },
+      "required": [
+        "enabled",
+        "hostnames",
+        "parentRef"
+      ]
+    },
+    "networkPolicy": {
+      "type": "object",
+      "title": "NetworkPolicy",
+      "description": "optional ingress NetworkPolicy; effective only when the CNI enforces NetworkPolicy",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "NetworkPolicy enabled",
+          "description": "render the NetworkPolicy"
+        },
+        "gatewayNamespace": {
+          "type": "string",
+          "title": "Gateway proxy namespace",
+          "description": "namespace of the Gateway's proxy pods allowed to reach api, web and statuspage; empty: httpRoute.parentRef.namespace, else the release namespace",
+          "pattern": "^$|^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+          "maxLength": 63
+        },
+        "monitoringNamespace": {
+          "type": "string",
+          "title": "monitoring namespace",
+          "description": "namespace allowed to scrape the admin port",
+          "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+          "maxLength": 63
+        }
+      }
+    },
+    "serviceMonitor": {
+      "type": "object",
+      "title": "ServiceMonitor",
+      "description": "optional Prometheus Operator ServiceMonitor for the backend admin ports",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "ServiceMonitor enabled",
+          "description": "render the ServiceMonitor and the metrics Services (needs the Prometheus Operator CRDs)"
+        },
+        "interval": {
+          "type": "string",
+          "title": "scrape interval",
+          "description": "scrape interval, for example 30s",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "title": "metrics path",
+          "description": "HTTP path of the metrics",
+          "pattern": "^/"
+        },
+        "labels": {
+          "type": "object",
+          "title": "ServiceMonitor labels",
+          "description": "extra labels of the ServiceMonitor, for example the selector of your Prometheus",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "topologySpread": {
+      "type": "object",
+      "title": "topology spread",
+      "description": "optional topologySpreadConstraints of every pod",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "topology spread enabled",
+          "description": "render topologySpreadConstraints"
+        },
+        "topologyKey": {
+          "type": "string",
+          "title": "topology key",
+          "description": "node label to spread over, for example kubernetes.io/hostname",
+          "minLength": 1
+        },
+        "maxSkew": {
+          "type": "integer",
+          "title": "max skew",
+          "description": "maxSkew of the constraint",
+          "minimum": 1
+        },
+        "whenUnsatisfiable": {
+          "type": "string",
+          "title": "when unsatisfiable",
+          "description": "ScheduleAnyway or DoNotSchedule",
+          "enum": [
+            "ScheduleAnyway",
+            "DoNotSchedule"
+          ]
+        }
+      }
+    }
+  }
+}

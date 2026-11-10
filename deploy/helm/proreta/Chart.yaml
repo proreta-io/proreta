@@ -1,0 +1,24 @@
+apiVersion: v2
+name: proreta
+description: Proreta, self-hosted multi-tenant uptime monitoring (api, worker, jobs, status pages, web)
+type: application
+# The release workflow packages the chart with --version and --app-version from the Git tag
+# (vX.Y.Z -> X.Y.Z). In a git checkout both are placeholders and image.tag must be set.
+version: 0.1.0
+appVersion: "0.0.0"
+kubeVersion: ">=1.29.0-0"
+home: https://github.com/proreta-io/proreta
+sources:
+  - https://github.com/proreta-io/proreta
+keywords:
+  - uptime
+  - monitoring
+  - status-page
+  - incidents
+  - alerting
+maintainers:
+  - name: Proreta maintainers
+    url: https://github.com/proreta-io/proreta
+annotations:
+  artifacthub.io/category: monitoring-logging
+  artifacthub.io/license: Apache-2.0

@@ -1,0 +1,9 @@
+* text=auto eol=lf
+
+# Generated code and lockfiles. The last pattern keeps the hand-written connection package
+# (which the sqlc glob would also match) out of the generated set.
+backend/internal/api/gen/api.gen.go linguist-generated=true
+web/src/api/generated/** linguist-generated=true
+**/*db/*.go linguist-generated=true
+backend/internal/platform/db/*.go -linguist-generated
+web/package-lock.json linguist-generated=true

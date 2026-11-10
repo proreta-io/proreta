@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "proreta.componentName" (dict "ctx" . "component" "api") }}
+  labels:
+    {{- include "proreta.labels" (dict "ctx" . "component" "api") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.api.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "proreta.selectorLabels" (dict "ctx" . "component" "api") | nindent 4 }}
+{{- if .Values.web.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "proreta.componentName" (dict "ctx" . "component" "web") }}
+  labels:
+    {{- include "proreta.labels" (dict "ctx" . "component" "web") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.web.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "proreta.selectorLabels" (dict "ctx" . "component" "web") | nindent 4 }}
+{{- end }}
+{{- if .Values.statuspage.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "proreta.componentName" (dict "ctx" . "component" "statuspage") }}
+  labels:
+    {{- include "proreta.labels" (dict "ctx" . "component" "statuspage") | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.statuspage.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "proreta.selectorLabels" (dict "ctx" . "component" "statuspage") | nindent 4 }}
+{{- end }}

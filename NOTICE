@@ -1,0 +1,18 @@
+Proreta
+Copyright 2026 The Proreta Authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The web application bundles the following fonts through the npm packages
+@fontsource-variable/instrument-sans and @fontsource-variable/azeret-mono.
+Both are licensed under the SIL Open Font License, Version 1.1
+(https://openfontlicense.org):
+
+  Instrument Sans: Copyright 2022 The Instrument Sans Project Authors
+  (https://github.com/Instrument/instrument-sans)
+
+  Azeret Mono: Copyright 2021 The Azeret Project Authors
+  (https://github.com/displaay/azeret)
+
+Other third-party Go modules and npm packages keep their own licenses; see
+backend/go.mod and web/package-lock.json for the complete lists.

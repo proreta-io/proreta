@@ -1,0 +1,26 @@
+package api
+
+import (
+	"context"
+
+	"github.com/proreta-io/proreta/backend/internal/api/gen"
+	"github.com/proreta-io/proreta/backend/internal/plans"
+)
+
+func (s *server) GetUsage(ctx context.Context, _ gen.GetUsageRequestObject) (gen.GetUsageResponseObject, error) {
+	p, err := s.principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	u, err := s.plans.Usage(ctx, p.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	return gen.GetUsage200JSONResponse{
+		Plan: gen.PlanRef{Key: u.Plan.Key, Name: u.Plan.Name},
+		Limits: gen.ResourceCounts{Monitors: u.Limits.Of(plans.ResourceMonitor), Heartbeats: u.Limits.Of(plans.ResourceHeartbeat), Channels: u.Limits.Of(plans.ResourceChannel),
+			Members: u.Limits.Of(plans.ResourceMember), Projects: u.Limits.Of(plans.ResourceProject), StatusPages: u.Limits.Of(plans.ResourceStatusPage)},
+		Usage: gen.ResourceCounts{Monitors: u.Counts.Monitors, Heartbeats: u.Counts.Heartbeats, Channels: u.Counts.Channels, Members: u.Counts.Members,
+			Projects: u.Counts.Projects, StatusPages: u.Counts.StatusPages},
+	}, nil
+}

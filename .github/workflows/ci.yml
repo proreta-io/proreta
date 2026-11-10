@@ -1,0 +1,353 @@
+name: ci
+
+# Full CI runs on pull requests to main (and by hand). It does not run again on push to main: the
+# merge only starts `release`, which builds images. The single required status check is `ci-ok`.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions: {}
+
+env:
+  # Path of the OpenAPI contract.
+  OPENAPI_SPEC: api/openapi.yaml
+  # Helm used by every job here; must match the pin in release.yml (job chart).
+  HELM_VERSION: v3.18.6
+
+jobs:
+  repo-hygiene:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: TODOs reference an issue
+        run: bash scripts/check-todos.sh
+      - name: No internal record references
+        run: bash scripts/check-internal-refs.sh
+      - name: Migration file naming
+        run: |
+          set -euo pipefail
+          dir=backend/migrations
+          if [ ! -d "$dir" ]; then
+            echo "No ${dir}; skipping."
+            exit 0
+          fi
+          fail=0
+          shopt -s nullglob
+          for f in "$dir"/*.sql; do
+            [ -f "$f" ] || continue
+            base=$(basename "$f")
+            if ! [[ "$base" =~ ^[0-9]{14}_[a-z0-9_]+\.sql$ ]]; then
+              echo "::error file=${f}::migration name must be <14-digit timestamp>_<snake_case>.sql"
+              fail=1
+              continue
+            fi
+            if grep -q '+goose Down' "$f"; then
+              echo "::error file=${f}::migrations are forward-only: remove '+goose Down'"
+              fail=1
+            fi
+          done
+          dups=$(find "$dir" -maxdepth 1 -type f -name '*.sql' -exec basename {} \; | cut -c1-14 | sort | uniq -d)
+          if [ -n "$dups" ]; then
+            echo "::error::duplicate migration timestamps: ${dups}"
+            fail=1
+          fi
+          exit "$fail"
+
+  secrets-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # The gitleaks binary (MIT) instead of gitleaks-action, which needs a licence key for organizations.
+      - name: Install gitleaks (pinned, checksum verified)
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          # linux_x64 line of the checksums file of the release above.
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          set -euo pipefail
+          dir="${RUNNER_TEMP}/gitleaks"
+          mkdir -p "$dir"
+          curl -fsSL -o "$dir/gitleaks.tar.gz" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  $dir/gitleaks.tar.gz" | sha256sum --check --strict
+          tar -xzf "$dir/gitleaks.tar.gz" -C "$dir" gitleaks
+          echo "$dir" >> "$GITHUB_PATH"
+      - name: Scan the history for secrets
+        run: gitleaks git --redact --no-banner --exit-code 1 .
+
+  actionlint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Install actionlint (pinned, checksum verified)
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          # linux_amd64 line of the checksums file of the release above.
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          set -euo pipefail
+          dir="${RUNNER_TEMP}/actionlint"
+          mkdir -p "$dir"
+          curl -fsSL -o "$dir/actionlint.tar.gz" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  $dir/actionlint.tar.gz" | sha256sum --check --strict
+          tar -xzf "$dir/actionlint.tar.gz" -C "$dir" actionlint
+          echo "$dir" >> "$GITHUB_PATH"
+      - name: Lint workflows
+        run: actionlint -color
+
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      backend: ${{ github.event_name != 'pull_request' || steps.filter.outputs.backend == 'true' }}
+      api: ${{ github.event_name != 'pull_request' || steps.filter.outputs.api == 'true' }}
+      helm: ${{ github.event_name != 'pull_request' || steps.filter.outputs.helm == 'true' }}
+      web: ${{ github.event_name != 'pull_request' || steps.filter.outputs.web == 'true' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      # A manual run (workflow_dispatch) runs every job; the filter only applies to pull requests.
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
+        if: github.event_name == 'pull_request'
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'api/**'
+              - 'sqlc.yaml'
+              - 'Dockerfile'
+              - 'Makefile'
+              - '.github/workflows/ci.yml'
+            api:
+              - 'api/**'
+              - '.github/spectral.yaml'
+              - '.github/workflows/ci.yml'
+            helm:
+              - 'deploy/helm/**'
+              - 'scripts/validate-chart.sh'
+              - 'scripts/check-rendered-chart.py'
+              - '.github/workflows/ci.yml'
+            web:
+              - 'web/**'
+              - 'api/**'
+              - '.github/workflows/ci.yml'
+
+  backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Throwaway CI database; credentials are not secrets.
+      # SUPERUSER on a scratch Postgres: integration tests create and drop their own databases/roles.
+      TEST_DATABASE_ADMIN_URL: postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - name: Generated code is up to date
+        run: make check-generated
+      - name: Test
+        run: make test
+      # TEST_DATABASE_ADMIN_URL comes from the job env above, like the normal tests.
+      - name: End-to-end test (proretatest build tag)
+        run: make test-e2e
+
+  # Separate from `backend` so a lint finding never hides the test and e2e results.
+  backend-lint:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      # Deviation from `make lint`: the action installs golangci-lint (with its cache) and runs it
+      # in backend/. Keep flags in sync with the Makefile `lint` target.
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.15.0
+          working-directory: backend
+
+  api-contract:
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Lint OpenAPI (spectral)
+        run: npx --yes @stoplight/spectral-cli@6.11.1 lint "$OPENAPI_SPEC" --ruleset .github/spectral.yaml --fail-severity warn
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        if: github.event_name == 'pull_request'
+        with:
+          go-version: stable
+          cache: false
+      - name: Breaking-change check (oasdiff vs base branch)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          if ! git cat-file -e "origin/${BASE_REF}:${OPENAPI_SPEC}" 2>/dev/null; then
+            echo "No ${OPENAPI_SPEC} on base branch; skipping breaking-change check."
+            exit 0
+          fi
+          git show "origin/${BASE_REF}:${OPENAPI_SPEC}" > "${RUNNER_TEMP}/base-openapi.yaml"
+          go install github.com/oasdiff/oasdiff@v1.37.0
+          # Accepted breaking changes, each backed by an ADR (api/oasdiff-err-ignore.txt).
+          "$(go env GOPATH)/bin/oasdiff" breaking "${RUNNER_TEMP}/base-openapi.yaml" "$OPENAPI_SPEC" --fail-on ERR \
+            --err-ignore api/oasdiff-err-ignore.txt
+
+  web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - name: Generated client is up to date
+        run: |
+          npm run gen:api
+          if [ -n "$(git status --porcelain -- src/api/generated)" ]; then
+            git status --porcelain -- src/api/generated
+            echo "::error::web/src/api/generated is stale: run 'npm run gen:api' in web/ and commit the result"
+            exit 1
+          fi
+      - name: Format
+        run: npm run format:check
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build
+
+  helm:
+    needs: changes
+    if: needs.changes.outputs.helm == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: Install PyYAML (chart invariant checks)
+        run: |
+          python3 -m venv "${RUNNER_TEMP}/venv"
+          "${RUNNER_TEMP}/venv/bin/pip" install --quiet pyyaml==6.0.2
+          echo "${RUNNER_TEMP}/venv/bin" >> "$GITHUB_PATH"
+      - name: Install kubeconform (pinned, checksum verified)
+        env:
+          KUBECONFORM_VERSION: v0.8.0
+          # linux-amd64 line of the CHECKSUMS file of the release above.
+          KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+        run: |
+          set -euo pipefail
+          dir="${RUNNER_TEMP}/kubeconform"
+          mkdir -p "$dir"
+          curl -fsSL -o "$dir/kubeconform.tar.gz" \
+            "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  $dir/kubeconform.tar.gz" | sha256sum --check --strict
+          tar -xzf "$dir/kubeconform.tar.gz" -C "$dir" kubeconform
+          echo "$dir" >> "$GITHUB_PATH"
+      - name: Validate chart (helm lint, helm template, invariants, kubeconform)
+        run: bash scripts/validate-chart.sh
+
+  # The one required status check. Jobs skipped by the path filter (or because `changes` failed)
+  # report "skipped", which a branch rule does not reliably treat as a pass, so this job decides:
+  # it always runs and fails when any job it needs failed or was cancelled.
+  ci-ok:
+    if: always()
+    needs: [repo-hygiene, secrets-scan, actionlint, changes, backend, backend-lint, api-contract, web, helm]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: All required jobs passed or were skipped by the path filter
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          if echo "$NEEDS" | jq -e 'any(.[]; .result == "failure" or .result == "cancelled")' >/dev/null; then
+            echo "::error::at least one CI job failed or was cancelled"
+            exit 1
+          fi

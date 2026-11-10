@@ -1,0 +1,8 @@
+{{- /* jobs needs the encryption keys (decrypts the Slack webhook) and the public URL (message links).
+       It connects as the worker role: it claims through the SECURITY DEFINER functions. */ -}}
+{{- $env := join "\n" (list
+  (include "proreta.env.common" (dict "ctx" . "dbKey" "worker_url"))
+  (include "proreta.env.encryption" .)
+  (include "proreta.env.guard" .)
+  (include "proreta.env.publicUrl" .)) -}}
+{{ include "proreta.backendDeployment" (dict "ctx" . "component" "jobs" "cfg" .Values.jobs "env" $env "httpPort" 0) }}

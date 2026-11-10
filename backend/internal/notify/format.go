@@ -1,0 +1,178 @@
+package notify
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// Kinds of outbox deliveries (notification_deliveries.kind).
+const (
+	DeliveryOpened      = "opened"
+	DeliveryResolved    = "resolved"
+	DeliveryTLSExpiring = "tls_expiring"
+	// DeliveryReminder is queued by enqueue_incident_reminders while an incident stays open.
+	DeliveryReminder = "reminder"
+)
+
+// Payload is the outbox payload written by internal/incidents and enqueue_incident_reminders.
+// It holds what a message needs and no secret.
+type Payload struct {
+	MonitorID       uuid.UUID  `json:"monitorId"`
+	MonitorName     string     `json:"monitorName"`
+	URL             string     `json:"url"`
+	IncidentID      *uuid.UUID `json:"incidentId,omitempty"`
+	Reason          string     `json:"reason,omitempty"`
+	StartedAt       *time.Time `json:"startedAt,omitempty"`
+	ResolvedAt      *time.Time `json:"resolvedAt,omitempty"`
+	DurationSeconds int64      `json:"durationSeconds,omitempty"`
+	TLSNotAfter     *time.Time `json:"tlsNotAfter,omitempty"`
+	DaysLeft        *int       `json:"daysLeft,omitempty"`
+}
+
+// ErrBadPayload means an outbox row cannot be turned into a message; retrying will not help.
+var ErrBadPayload = errors.New("notify: unusable delivery payload")
+
+// Format renders the Slack mrkdwn text of an outbox delivery.
+// publicURL is PRORETA_PUBLIC_URL without a trailing slash.
+func Format(kind string, raw []byte, publicURL string) (string, error) {
+	var p Payload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return "", ErrBadPayload
+	}
+	switch kind {
+	case DeliveryOpened:
+		return FormatOpened(p, publicURL), nil
+	case DeliveryResolved:
+		return FormatResolved(p), nil
+	case DeliveryTLSExpiring:
+		if p.TLSNotAfter == nil || p.DaysLeft == nil {
+			return "", ErrBadPayload
+		}
+		return FormatTLSExpiring(p), nil
+	case DeliveryReminder:
+		return FormatReminder(p), nil
+	}
+	return "", ErrBadPayload
+}
+
+// Message is Format with the channel's mention in front of the kinds that call for attention
+// (opened and reminder); other kinds never mention anybody.
+func Message(kind string, raw []byte, publicURL string, mention []string) (string, error) {
+	text, err := Format(kind, raw, publicURL)
+	if err != nil || (kind != DeliveryOpened && kind != DeliveryReminder) {
+		return text, err
+	}
+	var parts []string
+	for _, m := range mention {
+		if s := slackMention(m); s != "" {
+			parts = append(parts, s)
+		}
+	}
+	if len(parts) == 0 {
+		return text, nil
+	}
+	return strings.Join(parts, " ") + " " + text, nil
+}
+
+// FormatOpened: the headline, then the URL, the reason, the start time in UTC and a link.
+func FormatOpened(p Payload, publicURL string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, ":red_circle: *%s* is down", Escape(p.MonitorName))
+	if u := DisplayURL(p.URL); u != "" {
+		b.WriteString("\n" + Escape(u))
+	}
+	b.WriteString("\nReason: " + Escape(reasonText(p.Reason)))
+	if p.StartedAt != nil {
+		b.WriteString("\nSince: " + p.StartedAt.UTC().Format("2006-01-02 15:04:05") + " UTC")
+	}
+	fmt.Fprintf(&b, "\n<%s/monitors/%s|Open in Proreta>", Escape(publicURL), p.MonitorID)
+	return b.String()
+}
+
+// reasonText is the Reason line of an opened message: the error kind, with an explanation for
+// kinds whose name alone says too little in a Slack channel.
+func reasonText(kind string) string {
+	switch kind {
+	case "":
+		return "unknown"
+	case "heartbeat_missed": // monitors.ErrorKindHeartbeatMissed
+		return "heartbeat_missed (no ping within the expected interval and grace)"
+	}
+	return kind
+}
+
+// DisplayURL is the monitor URL as shown in Slack: scheme, host and path only. The query string
+// and fragment often carry tokens or API keys, and a Slack channel is a wider audience than the
+// dashboard. An unparsable URL is not shown at all.
+func DisplayURL(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: u.Path, RawPath: u.RawPath}).String()
+}
+
+// FormatResolved: `:large_green_circle: *{name}* is back up after {duration}`.
+func FormatResolved(p Payload) string {
+	return fmt.Sprintf(":large_green_circle: *%s* is back up after %s", Escape(p.MonitorName), HumanDuration(time.Duration(p.DurationSeconds)*time.Second))
+}
+
+// FormatTLSExpiring: `:warning: TLS certificate for *{name}* expires in {n} days ({date})`.
+// One day reads "1 day".
+func FormatTLSExpiring(p Payload) string {
+	n := *p.DaysLeft
+	unit := "days"
+	if n == 1 {
+		unit = "day"
+	}
+	return fmt.Sprintf(":warning: TLS certificate for *%s* expires in %d %s (%s)",
+		Escape(p.MonitorName), n, unit, p.TLSNotAfter.UTC().Format("2006-01-02"))
+}
+
+// FormatReminder: `:bell: *{name}* is still down ({duration})`.
+func FormatReminder(p Payload) string {
+	return fmt.Sprintf(":bell: *%s* is still down (%s)", Escape(p.MonitorName), HumanDuration(time.Duration(p.DurationSeconds)*time.Second))
+}
+
+// TestMessage is the text of POST /channels/{id}/test.
+func TestMessage(publicURL string) string {
+	return fmt.Sprintf(":white_check_mark: Test message from Proreta: alerts will be posted here. <%s|Open Proreta>", Escape(publicURL))
+}
+
+// Escape replaces the characters Slack mrkdwn treats as control characters (&, <, >), so a
+// monitor name or URL cannot inject links or mentions.
+func Escape(s string) string {
+	return mrkdwnEscaper.Replace(s)
+}
+
+var mrkdwnEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+
+// HumanDuration renders d as days, hours and minutes ("2h 5m"); seconds only below a minute.
+func HumanDuration(d time.Duration) string {
+	if d < time.Minute {
+		return strconv.Itoa(int(max(d, 0)/time.Second)) + "s"
+	}
+	total := int(d / time.Minute)
+	days, hours, mins := total/(24*60), total/60%24, total%60
+	var parts []string
+	if days > 0 {
+		parts = append(parts, strconv.Itoa(days)+"d")
+	}
+	if hours > 0 {
+		parts = append(parts, strconv.Itoa(hours)+"h")
+	}
+	if mins > 0 {
+		parts = append(parts, strconv.Itoa(mins)+"m")
+	}
+	return strings.Join(parts, " ")
+}

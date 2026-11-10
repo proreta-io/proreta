@@ -1,0 +1,7 @@
+{{- $env := join "\n" (list
+  (include "proreta.env.common" (dict "ctx" . "dbKey" "api_url"))
+  (include "proreta.env.encryption" .)
+  (include "proreta.env.guard" .)
+  (include "proreta.env.publicUrl" .)
+  (include "proreta.env.api" .)) -}}
+{{ include "proreta.backendDeployment" (dict "ctx" . "component" "api" "cfg" .Values.api "env" $env "httpPort" .Values.api.httpPort) }}

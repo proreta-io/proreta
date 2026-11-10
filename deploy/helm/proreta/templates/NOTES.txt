@@ -1,0 +1,62 @@
+{{- $ns := .Release.Namespace }}
+{{- $fullname := include "proreta.fullname" . }}
+{{- $url := include "proreta.publicUrl" . }}
+Proreta {{ include "proreta.imageTag" . }} is installed as release "{{ .Release.Name }}" in namespace "{{ $ns }}".
+
+1. Watch the pods until they are Running and Ready:
+
+     kubectl -n {{ $ns }} get pods -l app.kubernetes.io/instance={{ .Release.Name }} -w
+
+{{- if .Values.httpRoute.enabled }}
+
+2. Check that the Gateway accepted the route (Accepted and ResolvedRefs must be True):
+
+     kubectl -n {{ $ns }} get httproute {{ $fullname }} -o jsonpath='{range .status.parents[*].conditions[*]}{.type}={.status} {.reason}{"\n"}{end}'
+{{- else }}
+
+2. httpRoute.enabled is false: route {{ $url }} to the Services yourself
+   ({{ $fullname }}-api for /api{{ if .Values.statuspage.enabled }}, {{ $fullname }}-statuspage for /status{{ end }}{{ if .Values.web.enabled }}, {{ $fullname }}-web for /{{ end }}).
+{{- end }}
+
+3. Open {{ $url }}{{ if not .Values.web.enabled }} (web.enabled is false: only the API under /api is served){{ end }}
+
+{{- if and .Release.IsInstall (eq .Values.secrets.admin.source "generate") }}
+
+4. Sign in as the platform admin. The one-time password exists only after the first install:
+
+     kubectl -n {{ $ns }} get secret {{ include "proreta.secret.adminInitial" . }} -o jsonpath='{.data.login}' | base64 -d; echo
+     kubectl -n {{ $ns }} get secret {{ include "proreta.secret.adminInitial" . }} -o jsonpath='{.data.password}' | base64 -d; echo
+
+   Store the password in a password manager, then delete the plaintext copy:
+
+     kubectl -n {{ $ns }} delete secret {{ include "proreta.secret.adminInitial" . }}
+{{- else if ne .Values.secrets.admin.source "generate" }}
+
+4. Sign in as the platform admin with the credentials kept in your secret store (secrets.admin.remoteKey).
+{{- end }}
+
+   The admin owns the "default" organization: add monitors there and invite colleagues by link.
+{{- $b := .Values.database.bootstrap }}
+{{- if $b.enabled }}
+
+WARNING: database.bootstrap.enabled is true, so every upgrade runs the bootstrap Job with the
+database admin login. After this install succeeded, set database.bootstrap.enabled: false in your
+values, run the same helm upgrade again{{ if $b.adminSecret.existingSecret }}, and then delete the admin login Secret:
+
+     kubectl -n {{ $ns }} delete secret {{ $b.adminSecret.existingSecret }}
+{{- else }}.{{ end }}
+{{- end }}
+{{- if .Values.config.registrationEnabled }}
+
+WARNING: config.registrationEnabled is true: anyone who can reach {{ $url }} can
+create an account and an organization, without email verification. Turn it off unless you run
+Proreta for several independent organizations.
+{{- end }}
+{{- if and .Values.httpRoute.enabled (eq (int .Values.config.trustedProxyHops) 0) }}
+
+NOTE: config.trustedProxyHops is 0. Behind a Gateway set it to 1, or every client shares one
+rate-limit bucket (the peer address is the Gateway's).
+{{- end }}
+
+Upgrades: back up the database first; migrations run automatically before the new pods start, and
+an image older than the database schema refuses to start. See https://github.com/proreta-io/proreta/blob/main/docs/install.md

@@ -1,0 +1,9 @@
+{{- if .Values.statuspage.enabled }}
+{{- /* Public status page renderer: database role proreta_statuspage, no encryption keys, no
+       admin credentials, no SSRF guard (it makes no outbound calls). */ -}}
+{{- $env := join "\n" (list
+  (include "proreta.env.common" (dict "ctx" . "dbKey" "statuspage_url"))
+  (include "proreta.env.publicUrl" .)
+  (include "proreta.env.statuspage" .)) -}}
+{{ include "proreta.backendDeployment" (dict "ctx" . "component" "statuspage" "cfg" .Values.statuspage "env" $env "httpPort" .Values.statuspage.httpPort) }}
+{{- end }}

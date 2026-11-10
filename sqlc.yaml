@@ -1,0 +1,134 @@
+# sqlc: queries live next to their owning module; the schema is the goose migrations.
+# Run with `make generate`; generated code is committed and checked by `make check-generated`.
+version: "2"
+sql:
+  - &module
+    engine: postgresql
+    schema: backend/migrations
+    queries: backend/internal/auth/queries
+    strict_function_checks: true
+    gen:
+      go:
+        package: authdb
+        out: backend/internal/auth/authdb
+        sql_package: pgx/v5
+        emit_pointers_for_null_types: true
+        omit_unused_structs: true
+        overrides: &overrides
+          - db_type: uuid
+            go_type: github.com/google/uuid.UUID
+          - db_type: uuid
+            nullable: true
+            go_type:
+              import: github.com/google/uuid
+              type: UUID
+              pointer: true
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
+          - db_type: citext
+            go_type: string
+  - <<: *module
+    queries: backend/internal/tenants/queries
+    gen:
+      go:
+        package: tenantsdb
+        out: backend/internal/tenants/tenantsdb
+        sql_package: pgx/v5
+        emit_pointers_for_null_types: true
+        omit_unused_structs: true
+        overrides: *overrides
+  - <<: *module
+    queries: backend/internal/audit/queries
+    gen:
+      go:
+        package: auditdb
+        out: backend/internal/audit/auditdb
+        sql_package: pgx/v5
+        emit_pointers_for_null_types: true
+        omit_unused_structs: true
+        overrides: *overrides
+  - <<: *module
+    queries: backend/internal/scheduler/queries
+    gen:
+      go:
+        package: schedulerdb
+        out: backend/internal/scheduler/schedulerdb
+        sql_package: pgx/v5
+        emit_pointers_for_null_types: true
+        omit_unused_structs: true
+        overrides: *overrides
+  - <<: *module
+    queries: backend/internal/monitors/queries
+    gen:
+      go:
+        package: monitorsdb
+        out: backend/internal/monitors/monitorsdb
+        sql_package: pgx/v5
+        emit_pointers_for_null_types: true
+        omit_unused_structs: true
+        overrides: *overrides
+  - <<: *module
+    queries: backend/internal/incidents/queries
+    gen:
+      go:
+        package: incidentsdb
+        out: backend/internal/incidents/incidentsdb
+        sql_package: pgx/v5
+        emit_pointers_for_null_types: true
+        omit_unused_structs: true
+        overrides: *overrides
+  - <<: *module
+    queries: backend/internal/results/queries
+    gen:
+      go:
+        package: resultsdb
+        out: backend/internal/results/resultsdb
+        sql_package: pgx/v5
+        emit_pointers_for_null_types: true
+        omit_unused_structs: true
+        overrides: *overrides
+  - <<: *module
+    queries: backend/internal/notify/queries
+    gen:
+      go:
+        package: notifydb
+        out: backend/internal/notify/notifydb
+        sql_package: pgx/v5
+        emit_pointers_for_null_types: true
+        omit_unused_structs: true
+        overrides: *overrides
+  - <<: *module
+    queries: backend/internal/plans/queries
+    gen:
+      go:
+        package: plansdb
+        out: backend/internal/plans/plansdb
+        sql_package: pgx/v5
+        emit_pointers_for_null_types: true
+        omit_unused_structs: true
+        overrides: *overrides
+  - <<: *module
+    queries: backend/internal/projects/queries
+    gen:
+      go:
+        package: projectsdb
+        out: backend/internal/projects/projectsdb
+        sql_package: pgx/v5
+        emit_pointers_for_null_types: true
+        omit_unused_structs: true
+        overrides: *overrides
+  - <<: *module
+    queries: backend/internal/statuspages/queries
+    gen:
+      go:
+        package: statuspagesdb
+        out: backend/internal/statuspages/statuspagesdb
+        sql_package: pgx/v5
+        emit_pointers_for_null_types: true
+        omit_unused_structs: true
+        overrides: *overrides

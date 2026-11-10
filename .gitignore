@@ -1,0 +1,26 @@
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Go
+*.test
+*.out
+coverage.*
+/backend/bin/
+/bin/
+
+# Node / web
+node_modules/
+web/dist/
+web/.vite/
+
+# Secrets and local env
+.env*
+!.env.example
+*.pem
+*.key
+
+# Test reports
+web/.vitest/

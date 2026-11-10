@@ -1,0 +1,9 @@
+{{- /* SECURITY: never add hostNetwork to this pod. The worker probes tenant-supplied targets, so the
+       node metadata endpoint (169.254.169.254) must be unreachable from pods; block it yourself on
+       clouds where the platform does not.
+       The worker has NO encryption keys and NO admin credentials. */ -}}
+{{- $env := join "\n" (list
+  (include "proreta.env.common" (dict "ctx" . "dbKey" "worker_url"))
+  (include "proreta.env.guard" .)
+  (include "proreta.env.worker" .)) -}}
+{{ include "proreta.backendDeployment" (dict "ctx" . "component" "worker" "cfg" .Values.worker "env" $env "httpPort" 0) }}

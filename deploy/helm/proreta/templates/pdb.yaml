@@ -1,0 +1,13 @@
+{{- if .Values.api.pdb.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "proreta.componentName" (dict "ctx" . "component" "api") }}
+  labels:
+    {{- include "proreta.labels" (dict "ctx" . "component" "api") | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.api.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "proreta.selectorLabels" (dict "ctx" . "component" "api") | nindent 6 }}
+{{- end }}

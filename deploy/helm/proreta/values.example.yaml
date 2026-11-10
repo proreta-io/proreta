@@ -1,0 +1,82 @@
+# Example values for one installation. Copy this file, replace every value marked CHANGE and
+# install it as described in docs/install.md:
+#   helm upgrade --install proreta deploy/helm/proreta -n proreta -f my-values.yaml \
+#     --set image.tag=<tag> --wait --timeout 10m
+# Only the keys that usually differ per installation are listed; everything else comes from
+# values.yaml. CI renders the chart with this file (scripts/validate-chart.sh).
+# Nothing here needs the External Secrets Operator; it is shown as an opt-in at the end.
+
+image:
+  repository: ghcr.io/proreta-io/proreta-backend
+  # Image tag: a release version (1.2.3, no leading v) or a build of main (sha-<first 7 hex of the
+  # commit>, for example sha-1a2b3c4).
+  #   git checkout: REQUIRED. Set it here or pass --set image.tag=<tag> (rendering fails without it).
+  #   chart from oci://ghcr.io/proreta-io/charts/proreta: omit it; the chart uses its own release.
+  # tag: "1.2.3"
+
+config:
+  # CHANGE. The https URL users open (no trailing slash); linked from Slack messages and
+  # invitations, and the base of the OAuth redirect URIs. Its host is also the host name of the
+  # HTTPRoute (set httpRoute.hostnames only to serve more names).
+  publicUrl: https://proreta.example.com
+  # Self-service registration of new organizations. Not needed when one organization is enough:
+  # the platform admin owns the "default" organization and invites colleagues by link.
+  registrationEnabled: false
+  # Number of trusted proxies in front of the api (the Gateway below is one); 0 without a proxy.
+  trustedProxyHops: 1
+
+httpRoute:
+  parentRef:
+    name: gateway                     # CHANGE: your Gateway API Gateway
+    namespace: gateway-system         # CHANGE: its namespace (empty: the release namespace)
+    sectionName: https                # CHANGE: the name of its HTTPS listener
+
+# Admin login and encryption key: generated in the cluster on the first install. Log in as `admin`
+# with the one-time password from the Secret proreta-admin-initial, then delete that Secret
+# (docs/install.md).
+secrets:
+  admin:
+    source: generate
+    login: admin
+  crypto:
+    source: generate
+
+database:
+  host: postgres.example.internal     # CHANGE: your PostgreSQL server, reachable from the cluster
+  port: 5432
+  sslmode: require                    # disable only for a server without TLS (e.g. a local test)
+  # Creates the database, the roles and the Secret `proreta-db` on the first install
+  # (docs/runbooks/database-bootstrap.md). Switch it off after the first successful install.
+  bootstrap:
+    enabled: true
+    adminSecret:
+      # A Secret you create in the namespace with the keys `username` and `password` of a login
+      # that may create roles and databases (docs/install.md, step 2).
+      existingSecret: proreta-db-admin-login
+
+# Public status pages (docs/runbooks/status-page.md).
+statuspage:
+  enabled: true
+
+# Optional: sign-in with Google and/or GitHub (docs/runbooks/oauth.md). Create the Secret first.
+# oauth:
+#   google:
+#     enabled: true
+# secrets:
+#   oauth:
+#     existingSecret: proreta-oauth-clients
+
+# Optional alternative: read secrets from your secret store through the External Secrets Operator
+# (must be installed in the cluster). Then database.bootstrap.adminSecret.existingSecret may stay
+# empty (the login is read from database.bootstrap.adminSecret.remoteKey), and secrets.*.source may
+# be externalSecret (docs/runbooks/database-bootstrap.md, deploy/helm/proreta/README.md).
+# externalSecrets:
+#   enabled: true
+#   secretStoreRef:
+#     kind: ClusterSecretStore
+#     name: my-secret-store
+# database:
+#   bootstrap:
+#     adminSecret:
+#       existingSecret: ""
+#       remoteKey: proreta/db-admin

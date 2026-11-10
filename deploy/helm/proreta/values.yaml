@@ -1,0 +1,344 @@
+# Defaults of the Proreta chart. Every key here is part of the chart's values contract and is
+# validated by values.schema.json: unknown keys are rejected. Copy values.example.yaml and override
+# what your installation needs. Required, with no default: config.publicUrl and (with
+# httpRoute.enabled) httpRoute.parentRef.name; for the first install also database.host and
+# database.bootstrap.
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: ghcr.io/proreta-io/proreta-backend
+  # A release version such as 1.2.3 (image tags have no leading v) or a build of main,
+  # sha-<first 7 hex of the commit>. Empty: the chart's appVersion, which is the release version for
+  # a chart installed from oci://ghcr.io/proreta-io/charts/proreta. A chart from a git checkout has
+  # no usable appVersion, so the tag is REQUIRED there (rendering fails without it).
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# Pull secrets for a private registry or mirror, e.g. [{name: registry-pull}].
+imagePullSecrets: []
+
+# Application configuration (env contract read by the backend).
+config:
+  logLevel: info
+  adminPort: 9090          # PRORETA_ADMIN_ADDR (health + metrics), shared by every backend pod
+  sessionTTL: 24h          # PRORETA_SESSION_TTL (api only)
+  cookieSecure: true       # PRORETA_COOKIE_SECURE (api and statuspage)
+  # PRORETA_TRUSTED_PROXY_HOPS (api and statuspage): number of trusted proxies in front of the api;
+  # 0 if none (X-Forwarded-For is then ignored). Behind one Gateway set 1.
+  trustedProxyHops: 0
+  # PRORETA_REGISTRATION_ENABLED (api only): self-service registration of new organizations. Off by
+  # default: the platform admin owns the "default" organization and invites colleagues (invitations
+  # work either way). Turn it on only to let others create their own organizations; there is no
+  # email verification.
+  registrationEnabled: false
+  # PRORETA_PASSWORD_LOGIN_ENABLED (api only): false turns the password form off for everyone but the
+  # platform admin (`/login?admin`), for an OAuth-only installation. Needs at least one provider in
+  # `oauth` below.
+  passwordLoginEnabled: true
+  # PRORETA_PUBLIC_URL (api, jobs and statuspage), REQUIRED: the https URL users open, without a
+  # trailing slash, for example https://proreta.example.com. Linked from Slack messages and
+  # invitations, the base of the OAuth redirect URIs, and its host is the default of
+  # httpRoute.hostnames.
+  publicUrl: ""
+  # PRORETA_BLOCKED_CIDRS (api, worker, jobs): extra ranges for the SSRF guard on top of its built-in
+  # private/link-local/metadata ranges. Add the VPC and service CIDRs of the cluster, especially when
+  # the CNI does not enforce NetworkPolicy.
+  blockedCIDRs: []
+
+# PostgreSQL. Every backend pod reads its connection URL from one Secret, `secretName` (empty:
+# `<fullname>-db`). That Secret is created at runtime by the database bootstrap Job below and is not
+# managed by Helm (`helm uninstall` leaves it). Its keys are fixed: api_url, worker_url, owner_url,
+# statuspage_url and the matching *_password keys.
+# The role names (proreta_owner, proreta_api, proreta_worker, proreta_statuspage) are fixed too, so
+# one PostgreSQL server hosts one Proreta installation.
+database:
+  # Name of the Secret with the connection URLs. Empty: `<fullname>-db`. Set it to use a Secret you
+  # created yourself (with bootstrap.enabled false) or to keep an existing name.
+  secretName: ""
+  # Server the bootstrap Job connects to and writes into the URLs. Required when bootstrap is enabled.
+  host: ""
+  port: 5432
+  name: proreta            # database name
+  sslmode: require         # disable only for a server without TLS (e.g. a throwaway test database)
+  # Hook Job (Helm pre-install/pre-upgrade or ArgoCD Sync, weight/wave -3) running
+  # `proretactl db bootstrap` BEFORE the migration Job: creates the database and the roles
+  # (idempotent) and the Secret `secretName`.
+  # SECURITY TRADE-OFF: while enabled, the Job holds the database server admin login (for example the
+  # RDS master login) and runs on every upgrade. Set `enabled: false` after the first successful
+  # install (the Secret persists), then delete the admin login Secret.
+  bootstrap:
+    enabled: false
+    # Database server admin login (LOGIN, CREATEROLE, CREATEDB). Either a plain Secret you create in
+    # the namespace (`existingSecret`, the default way), or, with externalSecrets.enabled and
+    # `existingSecret` empty, a short-lived ExternalSecret `<secretName>-admin` read from `remoteKey`
+    # (hook, deleted after success). Rendering fails when neither is configured.
+    adminSecret:
+      existingSecret: ""
+      remoteKey: proreta/db-admin
+      # Keys of the login in that Secret (with External Secrets: the properties of the remote secret).
+      usernameKey: username
+      passwordKey: password
+    backoffLimit: 2
+    activeDeadlineSeconds: 300
+    ttlSecondsAfterFinished: 600
+    resources:
+      requests: {cpu: 50m, memory: 64Mi}
+      limits: {cpu: 200m, memory: 128Mi}
+
+# Admin login and encryption keys. Workloads always read the Secrets `<fullname>-admin`
+# (login, password_hash) and `<fullname>-crypto` (keys, active_key_id). Per Secret, `source` picks
+# who creates it:
+#   generate        (default) the secrets bootstrap hook Job creates it in the cluster if absent and
+#                   never overwrites it. The admin password is generated and readable ONCE from the
+#                   Secret `<fullname>-admin-initial` (delete it after the first login). A generated
+#                   key exists only in the cluster: losing the namespace loses it (it only encrypts the
+#                   Slack webhook URLs, which can be re-entered).
+#   externalSecret  an ExternalSecret reads it from the secret store (`remoteKey`, wave -2).
+secrets:
+  admin:
+    source: generate
+    # System admin login (generate mode), 3-254 of [a-z0-9._@+-]; the app treats logins case-insensitively.
+    login: admin
+    # externalSecret mode: JSON secret with properties login, password_hash
+    remoteKey: proreta/admin
+  crypto:
+    source: generate
+    # Key id of the generated key (generate mode); PRORETA_ENCRYPTION_ACTIVE_KEY_ID.
+    keyId: k1
+    # externalSecret mode: JSON secret with properties keys (JSON string), active_key_id
+    remoteKey: proreta/crypto
+  # Key that signs the unlock cookies of password-protected status pages, Secret
+  # `<fullname>-statuspage` (cookie_key). Only rendered and read with statuspage.enabled. Losing it
+  # only signs visitors of protected pages out.
+  statuspage:
+    source: generate
+    # externalSecret mode: JSON secret with property cookie_key (standard base64 of 32 random bytes)
+    remoteKey: proreta/statuspage
+  # OAuth client credentials, only read when a provider in `oauth` is enabled. Keys
+  # google_client_id, google_client_secret, github_client_id, github_client_secret (only those of the
+  # enabled providers). Never put them in a values file. Either
+  #   existingSecret  the name of a Secret you create in the namespace (no External Secrets needed), or
+  #   remoteKey       a JSON secret in your store, read through the ExternalSecret `<fullname>-oauth`
+  #                   (needs externalSecrets.enabled; used when existingSecret is empty).
+  oauth:
+    existingSecret: ""
+    remoteKey: proreta/oauth
+  # The hook Job (Helm pre-install/pre-upgrade or ArgoCD Sync, weight/wave -3) rendered when any
+  # source is generate. It has no database credentials; its Role can only create Secrets and
+  # read/update the Secrets above.
+  bootstrap:
+    backoffLimit: 2
+    activeDeadlineSeconds: 300
+    ttlSecondsAfterFinished: 600
+    # argon2id hashing uses 64 MiB (the `proretactl hashpw` default).
+    resources:
+      requests: {cpu: 50m, memory: 96Mi}
+      limits: {cpu: 500m, memory: 256Mi}
+
+# OAuth sign-in. An enabled provider is offered on the login page; its credentials come from
+# secrets.oauth (existingSecret or remoteKey). Register this redirect URI at the provider (exactly,
+# no trailing slash):
+#   <config.publicUrl>/api/v1/auth/oauth/<google|github>/callback
+oauth:
+  google:
+    enabled: false
+  github:
+    enabled: false
+  # PRORETA_OAUTH_ALLOWED_DOMAINS (api only): the Google Workspace domains an organization owner may
+  # claim for auto-join, lowercase, e.g. [example.com]. Empty: claiming and domain auto-join are off.
+  # Removing a domain here stops auto-join for an organization that already claimed it.
+  allowedDomains: []
+
+# External Secrets Operator (optional, off by default; any provider behind the referenced store).
+# The default install needs no External Secrets: the admin and crypto Secrets are generated in the
+# cluster and the database admin login comes from database.bootstrap.adminSecret.existingSecret.
+# When enabled, it is used by the database admin ExternalSecret (when existingSecret is empty), by
+# every `secrets.*.source: externalSecret` and by OAuth without secrets.oauth.existingSecret
+# (wave -2). Needs the operator and its CRDs (external-secrets.io/v1) installed in the cluster.
+# The database Secret (database.secretName) is never an ExternalSecret.
+externalSecrets:
+  enabled: false
+  apiVersion: external-secrets.io/v1
+  # Your SecretStore or ClusterSecretStore; the name is required when enabled.
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: ""
+  refreshInterval: "0"
+  creationPolicy: Owner
+
+podAnnotations: {}
+podLabels: {}
+
+# Applied to all pods.
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+  seccompProfile:
+    type: RuntimeDefault
+
+strategy:
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+revisionHistoryLimit: 3
+terminationGracePeriodSeconds: 30
+
+serviceAccount:
+  annotations: {}
+
+api:
+  replicas: 2              # stateless; login rate limits are per replica
+  httpPort: 8080
+  resources:
+    requests: {cpu: 50m, memory: 96Mi}
+    limits: {cpu: 500m, memory: 384Mi}
+  env: []                  # extra env vars (list of EnvVar)
+  service:
+    port: 8080
+  pdb:
+    enabled: false
+    minAvailable: 1
+
+worker:
+  # SECURITY: the worker must NEVER run with hostNetwork. The node metadata endpoint
+  # (169.254.169.254) must be unreachable from pods; block it yourself on clouds where the platform
+  # does not. The worker executes tenant-supplied monitor targets (SSRF surface). hostNetwork is
+  # deliberately not templated for any workload.
+  replicas: 2              # replicas share the due checks through database leases
+  # Up to 25 s for in-flight checks plus a 15 s bounded final flush.
+  terminationGracePeriodSeconds: 45
+  # PRORETA_WORKER_* (defaults mirrored from the code).
+  claimBatch: 100
+  concurrency: 50
+  tenantConcurrency: 5
+  hostConcurrency: 2
+  # PRORETA_WORKER_LOCATION: code of the probe location whose checks this worker runs (a DNS label).
+  # The database is seeded with the location `default`.
+  location: default
+  resources:
+    requests: {cpu: 50m, memory: 96Mi}
+    limits: {cpu: 500m, memory: 384Mi}
+  env: []
+
+jobs:
+  replicas: 1              # 0 or 1 only (schema); 0 stops Slack delivery and housekeeping
+  # Up to 25 s for sends in flight on SIGTERM, then the lease expires.
+  terminationGracePeriodSeconds: 45
+  resources:
+    requests: {cpu: 25m, memory: 64Mi}
+    limits: {cpu: 500m, memory: 256Mi}
+  env: []
+
+# Public status page renderer: serves /status/<slug> from prepared snapshots, as the database role
+# proreta_statuspage (key statuspage_url of the database Secret). An installation whose database
+# Secret has no statuspage_url key yet must run the database bootstrap once before enabling it
+# (docs/runbooks/status-page.md), or the pod cannot start (missing Secret key).
+statuspage:
+  enabled: true
+  replicas: 1              # rate limits and cache are per replica
+  httpPort: 8080
+  # argon2id password checks take 64 MiB, one at a time per replica.
+  resources:
+    requests: {cpu: 10m, memory: 48Mi}
+    limits: {cpu: 300m, memory: 192Mi}
+  env: []
+  service:
+    port: 8080
+
+# Frontend (React, nginx static). The web image tag defaults to image.tag (both images are
+# released together).
+web:
+  enabled: true
+  replicas: 2
+  image:
+    repository: ghcr.io/proreta-io/proreta-web
+    tag: ""                # empty -> falls back to image.tag
+  # Container port; must be the port nginx listens on (8080 in the published image).
+  httpPort: 8080
+  service:
+    port: 8080
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {cpu: 200m, memory: 128Mi}
+  env: []
+
+# Memory limits are 3-4x the requests everywhere; requests stay small so a small cluster can run
+# the defaults. Total requests with these replicas: 2x96 + 2x96 + 64 + 48 + 2x32 = 560Mi.
+
+# Database migration (hook Job running /app/migrate as proreta_owner; Helm pre-install/pre-upgrade
+# weight -1).
+migration:
+  # ArgoCD only: Sync (default) | PreSync. Plain Helm ignores it (the Helm hook weights give the
+  # same order as the waves below).
+  # Sync: ordering by waves: -4 admin ExternalSecret + bootstrap RBAC, -3 bootstrap Jobs (database,
+  # secrets), -2 other ExternalSecrets + migrate ServiceAccount, -1 migrate Job, 0 workloads; so the
+  # very first sync works. PreSync would run the Job before the ExternalSecrets exist on a first sync
+  # and before the bootstrap Job (rejected at render time when database.bootstrap.enabled=true).
+  hookPhase: Sync
+  backoffLimit: 2
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 3600
+  resources:
+    requests: {cpu: 25m, memory: 64Mi}
+    limits: {cpu: 500m, memory: 256Mi}
+
+# Gateway API routing (NO Ingress objects).
+httpRoute:
+  enabled: true
+  # Host names of the route. Empty: the host of config.publicUrl.
+  hostnames: []
+  # The Gateway the route attaches to. `name` is REQUIRED when enabled (there is no built-in
+  # Gateway). An empty namespace means the release namespace; an empty sectionName attaches to every
+  # listener that admits the route.
+  parentRef:
+    name: ""
+    namespace: ""
+    sectionName: ""
+  apiPathPrefix: /api
+  apiRequestTimeout: 60s
+  # Routed to the statuspage Service when statuspage.enabled.
+  statusPathPrefix: /status
+
+# --- Optional resources, all disabled by default ---
+
+# NetworkPolicy (ingress only). WARNING: it protects only when the cluster CNI enforces
+# NetworkPolicy; check yours before relying on it.
+networkPolicy:
+  enabled: false
+  # Namespace of the Gateway's proxy pods, allowed to reach api, web and statuspage. Empty:
+  # httpRoute.parentRef.namespace (or the release namespace when that is empty too). Some
+  # controllers run the proxies elsewhere (Envoy Gateway: in its own namespace by default); set it
+  # then.
+  gatewayNamespace: ""
+  monitoringNamespace: monitoring      # namespace allowed to scrape the admin port
+
+# ServiceMonitor for the backend admin port /metrics (needs the Prometheus Operator CRDs). Also
+# creates one metrics Service per component.
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  path: /metrics
+  labels: {}
+
+# Spread api/worker replicas across a topology key.
+topologySpread:
+  enabled: false
+  topologyKey: kubernetes.io/hostname
+  maxSkew: 1
+  whenUnsatisfiable: ScheduleAnyway

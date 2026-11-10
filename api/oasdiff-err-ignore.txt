@@ -1,0 +1,3 @@
+# Breaking changes accepted on purpose; read by `oasdiff breaking --err-ignore` in CI.
+# Each entry needs a design decision recorded with the change. Remove an entry when the next
+# release no longer differs there.
