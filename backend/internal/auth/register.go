@@ -387,15 +387,24 @@ func validateRegistration(rawEmail, password, rawName string) (string, string, e
 	if nameMsg != "" {
 		verr.Add("displayName", nameMsg)
 	}
-	switch n := utf8.RuneCountInString(password); {
-	case n < minPasswordRunes:
-		verr.Add("password", fmt.Sprintf("must be at least %d characters", minPasswordRunes))
-	case n > maxPasswordRunes:
-		verr.Add("password", fmt.Sprintf("must be at most %d characters", maxPasswordRunes))
-	case msg == "" && strings.EqualFold(password, email):
-		verr.Add("password", "must not be the same as the email")
+	if pmsg := passwordPolicy(password, email, msg == ""); pmsg != "" {
+		verr.Add("password", pmsg)
 	}
 	return email, name, verr.Err()
+}
+
+// passwordPolicy is the one password rule of registration and password change: 12-128 code
+// points, and not the login (checked only when the login is known to be well formed).
+func passwordPolicy(password, login string, checkLogin bool) string {
+	switch n := utf8.RuneCountInString(password); {
+	case n < minPasswordRunes:
+		return fmt.Sprintf("must be at least %d characters", minPasswordRunes)
+	case n > maxPasswordRunes:
+		return fmt.Sprintf("must be at most %d characters", maxPasswordRunes)
+	case checkLogin && strings.EqualFold(password, login):
+		return "must not be the same as the email"
+	}
+	return ""
 }
 
 // maxDisplayNameRunes caps a display name (the column allows 200).

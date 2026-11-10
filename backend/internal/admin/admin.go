@@ -65,8 +65,8 @@ var (
 	ErrProtectedTenant = errors.New("admin: the default tenant cannot be suspended or deleted")
 	// ErrOwnTenant means an admin cannot suspend or delete a tenant it belongs to.
 	ErrOwnTenant = errors.New("admin: cannot suspend or delete a tenant you belong to")
-	// ErrSystemAdmin means the password of a platform admin is managed by its Secret.
-	ErrSystemAdmin = errors.New("admin: the system admin's password is managed by its Secret")
+	// ErrSystemAdmin means the password of a platform admin cannot be reset by another admin.
+	ErrSystemAdmin = errors.New("admin: the system admin changes its own password")
 	// ErrTenantDeleted means the tenant is deleted and cannot be changed any more.
 	ErrTenantDeleted = errors.New("admin: tenant is deleted")
 )
