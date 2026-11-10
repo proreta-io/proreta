@@ -212,8 +212,8 @@ export interface paths {
      * @description Public, needs no session. The OAuth providers that have credentials configured
      *     (a provider without them is not listed and its start answers 404), whether the password
      *     form is offered to everyone (`PRORETA_PASSWORD_LOGIN_ENABLED`; when false only the platform
-     *     admin signs in with a password, on `/login?admin`) and whether self-service registration
-     *     is open.
+     *     admin signs in with a password, on `/login?admin`), whether self-service registration
+     *     is open and whether the installation sends email.
      */
     get: operations["getAuthProviders"];
     put?: never;
@@ -2344,6 +2344,12 @@ export interface components {
       passwordLoginEnabled: boolean;
       /** @description Whether an OAuth sign-in or `POST /api/v1/auth/register` may create a new organization */
       registrationEnabled: boolean;
+      /**
+       * @description Whether the installation sends email (an SMTP server is configured,
+       *     `PRORETA_SMTP_HOST`). When false nothing is ever emailed and every flow that could send
+       *     a message shows its link in the page instead.
+       */
+      emailEnabled: boolean;
     };
     AuthProvider: {
       id: components["schemas"]["OAuthProvider"];

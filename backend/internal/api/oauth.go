@@ -54,6 +54,7 @@ func (s *server) GetAuthProviders(_ context.Context, _ gen.GetAuthProvidersReque
 		Providers:            []gen.AuthProvider{},
 		PasswordLoginEnabled: s.cfg.PasswordLoginEnabled,
 		RegistrationEnabled:  s.cfg.RegistrationEnabled,
+		EmailEnabled:         s.cfg.EmailEnabled,
 	}
 	if s.oauth != nil {
 		for _, p := range s.oauth.Providers() {

@@ -36,6 +36,14 @@ export function useAuthProviders(): AuthProviders | undefined {
 }
 
 /**
+ * Whether the installation sends email. False while loading or when the answer cannot be loaded,
+ * so a page keeps showing the link it would show without email until the server says otherwise.
+ */
+export function useEmailEnabled(): boolean {
+  return useAuthProviders()?.emailEnabled === true;
+}
+
+/**
  * Calls reset when the browser shows this page again from its back-forward cache (the user came
  * back from the provider with the back button): a button left busy before the navigation would
  * otherwise stay busy.

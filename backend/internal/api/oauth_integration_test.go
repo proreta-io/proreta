@@ -204,6 +204,9 @@ func TestIntegrationOAuthHTTPFlow(t *testing.T) {
 	if r.code != http.StatusOK || !strings.Contains(r.raw, `{"id":"google","name":"Google"}`) || r.body["passwordLoginEnabled"] != true {
 		t.Fatalf("providers: %d %s", r.code, r.raw)
 	}
+	if r.body["emailEnabled"] != false {
+		t.Fatalf("emailEnabled must be false without SMTP: %s", r.raw)
+	}
 	if r := s.do(http.MethodPost, "/api/v1/auth/oauth/gitlab/start", `{}`, nil); r.code != http.StatusBadRequest {
 		t.Fatalf("unknown provider: %d %s", r.code, r.raw)
 	}
@@ -389,6 +392,10 @@ func TestIntegrationOAuthHTTPRateLimitAndPasswordOff(t *testing.T) {
 
 	if r := s.do(http.MethodGet, "/api/v1/auth/providers", "", nil); r.body["passwordLoginEnabled"] != false {
 		t.Fatalf("providers: %s", r.raw)
+	}
+	mailOn := newOAuthServer(t, env, membersOpts(), api.Config{RegistrationEnabled: true, PasswordLoginEnabled: true, EmailEnabled: true})
+	if r := mailOn.do(http.MethodGet, "/api/v1/auth/providers", "", nil); r.body["emailEnabled"] != true {
+		t.Fatalf("emailEnabled with SMTP: %s", r.raw)
 	}
 	r := s.do(http.MethodPost, "/api/v1/auth/login", `{"login":"someone@example.com","password":"x"}`, map[string]string{"X-Forwarded-For": "198.51.100.40"})
 	if r.code != http.StatusForbidden || r.body["type"] != "urn:proreta:problem:password-login-disabled" {
