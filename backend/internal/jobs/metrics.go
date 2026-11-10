@@ -3,6 +3,7 @@ package jobs
 import (
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/proreta-io/proreta/backend/internal/mail"
 	"github.com/proreta-io/proreta/backend/internal/notify"
 )
 
@@ -24,6 +25,11 @@ type Metrics struct {
 	heartbeatsMissed prometheus.Counter
 	// statusSnapshots counts status page snapshots stored by the rebuild task.
 	statusSnapshots prometheus.Counter
+	// mail* are the outgoing email metrics (the mail outbox).
+	mail            *prometheus.CounterVec
+	mailDuration    prometheus.Histogram
+	mailPending     prometheus.Gauge
+	mailClaimErrors prometheus.Counter
 }
 
 // NewMetrics registers the jobs metrics.
@@ -57,6 +63,24 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		statusSnapshots: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "proreta_jobs_status_page_snapshots_total", Help: "Status page snapshots rebuilt and stored.",
 		}),
+		mail: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "proreta_jobs_mail_total", Help: "Mail attempts recorded, by message kind and result (sent, retry, failed).",
+		}, []string{"kind", "result"}),
+		mailDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name: "proreta_jobs_mail_duration_seconds", Help: "Duration of one SMTP delivery.",
+			Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30},
+		}),
+		mailPending: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "proreta_jobs_mail_pending", Help: "Mail outbox rows waiting to be delivered (including retries).",
+		}),
+		mailClaimErrors: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "proreta_jobs_mail_claim_errors_total", Help: "Failed claim_mail calls.",
+		}),
+	}
+	for _, k := range mail.Kinds() {
+		for _, s := range []string{statusSent, "retry", statusFailed} {
+			m.mail.WithLabelValues(string(k), s)
+		}
 	}
 	for _, t := range notify.ChannelTypes {
 		for _, s := range []string{statusSent, "retry", statusFailed} {
@@ -66,6 +90,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	for _, r := range []string{keptRollupsIncomplete, keptError} {
 		m.partitionsKept.WithLabelValues(r)
 	}
-	reg.MustRegister(m.deliveries, m.duration, m.pending, m.claimErrors, m.housekeeping, m.lastSuccess, m.partitionsKept, m.heartbeatsMissed, m.statusSnapshots)
+	reg.MustRegister(m.deliveries, m.duration, m.pending, m.claimErrors, m.housekeeping, m.lastSuccess, m.partitionsKept, m.heartbeatsMissed, m.statusSnapshots,
+		m.mail, m.mailDuration, m.mailPending, m.mailClaimErrors)
 	return m
 }

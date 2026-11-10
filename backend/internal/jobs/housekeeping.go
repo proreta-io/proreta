@@ -41,6 +41,7 @@ const (
 	lockHeartbeats       int64 = 0x7072_6f72_6574_0005
 	lockReminders        int64 = 0x7072_6f72_6574_0006
 	lockStatusPages      int64 = 0x7072_6f72_6574_0007
+	lockPurgeMail        int64 = 0x7072_6f72_6574_0008
 )
 
 // StatusPageEvery is how often the snapshots of published status pages are rebuilt;
@@ -78,6 +79,7 @@ func DefaultTasks(m *Metrics, log *slog.Logger, mon *monitors.Service) []Task {
 		{Name: "compute_rollups", Every: 5 * time.Minute, LockKey: lockComputeRollups, Run: computeRollups},
 		{Name: "drop_expired_partitions", Every: 24 * time.Hour, LockKey: lockDropPartitions, RunOutsideTx: r.dropExpiredPartitions},
 		{Name: "purge_expired_sessions", Every: time.Hour, LockKey: lockPurgeSessions, Run: scalar(`SELECT purge_expired_sessions()`)},
+		{Name: "purge_mail_outbox", Every: time.Hour, LockKey: lockPurgeMail, Run: purgeMail},
 		{Name: "enqueue_incident_reminders", Every: ReminderEvery, LockKey: lockReminders, Run: enqueueReminders},
 	}
 }
@@ -110,6 +112,13 @@ func scalar(sql string) func(context.Context, pgx.Tx, time.Time) (int, error) {
 		err := tx.QueryRow(ctx, sql).Scan(&n)
 		return int(n), err
 	}
+}
+
+// purgeMail deletes finished mail rows older than MailRetention.
+func purgeMail(ctx context.Context, tx pgx.Tx, _ time.Time) (int, error) {
+	var n int32
+	err := tx.QueryRow(ctx, `SELECT purge_mail_outbox(make_interval(secs => $1))`, MailRetention.Seconds()).Scan(&n)
+	return int(n), err
 }
 
 // enqueueReminders queues the reminder deliveries that are due (enqueue_incident_reminders).
