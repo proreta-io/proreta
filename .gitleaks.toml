@@ -1,0 +1,9 @@
+title = "Proreta gitleaks config"
+
+[extend]
+useDefault = true
+
+# oapi-codegen embeds the gzipped OpenAPI document as base64 text; the entropy rule reports it.
+[[allowlists]]
+description = "Generated embedded OpenAPI document"
+paths = ['''backend/internal/api/gen/api\.gen\.go''']
