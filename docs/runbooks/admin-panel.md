@@ -21,7 +21,7 @@ Guard rails (enforced in the database, not only in the UI): the `default` organi
 
 ## Recover a customer's password
 Until outgoing email exists this is the only recovery path.
-1. Verify the request through a channel you trust (the customer's known contact, not only an email that claims to be them). Without email verification, registration proves nothing about who owns an address.
+1. Verify the request through a channel you trust (the customer's known contact, not only an email that claims to be them). Registration proves nothing about who owns an address unless the user confirmed it with the email link (the users table does not show that yet).
 2. Open `/admin/organizations`, search for the customer's email, open the organization.
 3. In the users table choose **Reset password** for that user and confirm.
 4. Copy the temporary password from the panel. It is shown once: the server keeps only its hash, and hiding the panel or leaving the page clears it from the page (the web app keeps no other copy). If it is lost, reset again.
