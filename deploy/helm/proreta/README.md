@@ -211,7 +211,7 @@ Workloads always read `<fullname>-admin` (`login`, `password_hash`) and `<fullna
     argon2id hash goes to `<fullname>-admin`; the plaintext goes ONCE to `<fullname>-admin-initial`
     (`login`, `password`). Read it, log in, delete `<fullname>-admin-initial`. It is never recreated.
   - crypto: one random 32-byte key with id `secrets.crypto.keyId` (default `k1`). It lives only in the cluster;
-    deleting the namespace loses it (it only encrypts the Slack webhook URLs, which can be re-entered).
+    deleting the namespace loses it (it only encrypts the Slack webhook URLs, which can then only be re-entered). Export it first: [docs/install.md](../../../docs/install.md#back-up-the-secrets).
 - `externalSecret`: an ExternalSecret (`externalSecrets.secretStoreRef`, wave -2) materialises it. Needs
   `externalSecrets.enabled: true`; rendering fails otherwise.
 

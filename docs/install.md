@@ -180,7 +180,43 @@ kubectl -n proreta delete secret proreta-db-admin-login
 ```
 The Secret `proreta-db` (the role passwords) stays; it is not managed by Helm. Turn the bootstrap on again only for a new database, a password rotation or a new role ([database bootstrap](runbooks/database-bootstrap.md)).
 
+**Back up the encryption key.** Do this now, once. The Secret `proreta-crypto` holds the keys that encrypt the Slack webhook URLs stored in the database. Without it the webhook URLs in the database (and in any backup of it) cannot be decrypted: they are lost and each Slack channel must be entered again. The Secret `proreta-statuspage` (the cookie signing key of the status page) is less critical: losing it only signs visitors of password-protected pages out, but it is cheap to keep with the other one. [Back up the secrets](#back-up-the-secrets) shows how.
+
 **Optional next steps:** Slack channels in the app, [sign-in with Google or GitHub](runbooks/oauth.md), [status pages](runbooks/status-page.md), [Alertmanager watchdog](runbooks/heartbeat-alertmanager.md), [metrics and alerts](runbooks/observability.md). Add the CIDRs of your cluster and VPC to `config.blockedCIDRs` so monitors cannot probe internal addresses ([chart README](../deploy/helm/proreta/README.md)).
+
+## Back up the secrets
+The database backup alone is not enough to restore an installation. Two Secrets are generated in the cluster and exist nowhere else (with `secrets.*.source: externalSecret` your secret store is the copy, and you can skip this):
+
+| Secret (release `proreta`) | Keys | What it protects | If it is lost |
+|---|---|---|---|
+| `proreta-crypto` | `keys` (JSON `{"<keyId>":"<base64 of 32 bytes>"}`, for example `{"k1":"..."}`), `active_key_id` | AES-256-GCM encryption of the Slack webhook URLs in the database (each stored value names the key id that sealed it) | The stored webhook URLs cannot be decrypted and are lost. Monitors, incidents and users are unaffected; Slack channels must be created again. |
+| `proreta-statuspage` | `cookie_key` | Signature of the cookie that records a visitor's password unlock on a protected status page | Visitors of protected pages enter the password again. Nothing is lost. |
+
+**Export.** Print the data of each Secret without the cluster-specific metadata (name, namespace, uid, resource version) and store the output in a password manager or an external secret store, never in Git or in the same place as the database backup:
+```sh
+kubectl -n proreta get secret proreta-crypto -o yaml \
+  | yq 'del(.metadata) | .metadata.name = "proreta-crypto"'
+kubectl -n proreta get secret proreta-statuspage -o yaml \
+  | yq 'del(.metadata) | .metadata.name = "proreta-statuspage"'
+```
+Without `yq`, copy the two `data` entries: `kubectl -n proreta get secret proreta-crypto -o jsonpath='{.data}'`. The values are base64 encoded once by Kubernetes; the `keys` value decodes to the JSON above. Repeat the export after every key rotation (see below).
+
+**Restore.** On a new cluster or after `kubectl delete namespace`, create the Secrets before the first `helm upgrade --install` (the secrets bootstrap Job creates a Secret only when it is absent and never overwrites it):
+```sh
+kubectl create namespace proreta
+kubectl -n proreta apply -f proreta-crypto.yaml -f proreta-statuspage.yaml   # the saved files, with metadata.name and no namespace or uid
+```
+Then install with the same `secrets.crypto.keyId`, restore the database, and check that a Slack channel can send a test message. If the Secrets already exist with other content, apply the saved files over them and restart `api` and `jobs` (`kubectl -n proreta rollout restart deploy/proreta-api deploy/proreta-jobs`) and the `statuspage` Deployment, which read the Secrets only at start.
+
+**Rotation.** Add a second entry to `keys` and point `active_key_id` at it; never remove an old entry while stored webhook URLs may still be sealed with it, because there is no re-encryption tool and a webhook URL is re-sealed only when its channel is saved again:
+```sh
+NEW=$(openssl rand -base64 32)
+KEYS=$(kubectl -n proreta get secret proreta-crypto -o jsonpath='{.data.keys}' | base64 -d)
+PATCH=$(jq -cn --arg old "$KEYS" --arg new "$NEW" '{stringData: {keys: ($old | fromjson | . + {k2: $new} | tojson), active_key_id: "k2"}}')
+kubectl -n proreta patch secret proreta-crypto --type merge -p "$PATCH"
+kubectl -n proreta rollout restart deploy/proreta-api deploy/proreta-jobs
+```
+Rotating also ends OAuth sign-ins that are in progress ([OAuth runbook](runbooks/oauth.md)). Export the Secret again afterwards. The cookie key of the status page is rotated by deleting `proreta-statuspage` ([status page runbook](runbooks/status-page.md)); that only signs visitors out.
 
 ## Upgrade
 1. Read the release notes. **Back up the database** (snapshot or `pg_dump`) right before the upgrade: migrations are forward-only and the backup is the only way back ([migrations runbook](runbooks/migrations.md)).
@@ -197,12 +233,13 @@ The Secret `proreta-db` (the role passwords) stays; it is not managed by Helm. T
 helm uninstall proreta -n proreta
 ```
 This removes the Deployments, Services, HTTPRoute and ServiceAccounts. It leaves:
-- the Secrets created by the bootstrap Jobs: `proreta-db`, `proreta-admin`, `proreta-crypto`, `proreta-statuspage` (and `proreta-admin-initial` if you did not delete it). Keep them to reinstall later with the same data: `proreta-crypto` holds the key that encrypts the Slack webhook URLs stored in the database;
+- the Secrets created by the bootstrap Jobs: `proreta-db`, `proreta-admin`, `proreta-crypto`, `proreta-statuspage` (and `proreta-admin-initial` if you did not delete it). Keep them to reinstall later with the same data: `proreta-crypto` holds the key that encrypts the Slack webhook URLs stored in the database, so [export it](#back-up-the-secrets) before deleting anything;
 - the finished Jobs, until `ttlSecondsAfterFinished` removes them (10 minutes for the bootstrap Jobs, 1 hour for the migration);
 - the database and the four roles on your PostgreSQL server. There are no PersistentVolumeClaims.
 
 To remove everything for good:
 ```sh
+# export proreta-crypto and proreta-statuspage first: see "Back up the secrets"
 kubectl -n proreta delete secret proreta-db proreta-admin proreta-admin-initial proreta-crypto proreta-statuspage --ignore-not-found
 kubectl delete namespace proreta
 ```

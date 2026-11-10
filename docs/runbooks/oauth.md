@@ -103,7 +103,7 @@ Why there is an allow-list: every employee of a Workspace has the same `hd`, so 
   - Otherwise, the code exchange fails: sign-ins return to `/login?error=failed`, the api logs `oauth code exchange failed`, and `proreta_auth_oauth_logins_total{result="failed"}` rises.
 
   In both cases, sign in as the admin at `/login?admin`. If the problem is configuration (redirect URI, rotated secret), fix it at the provider or in the secret and restart the api. Temporarily setting `config.passwordLoginEnabled: true` again gives password users their form back.
-- **"The sign-in took too long or was started in another browser"** (`state_invalid`): the flow must finish in the same browser within 10 minutes. Rotating the encryption key also ends flows that are in progress. Start again.
+- **"The sign-in took too long or was started in another browser"** (`state_invalid`): the flow must finish in the same browser within 10 minutes. Rotating the encryption key also ends flows that are in progress ([rotation and backup of the key](../install.md#back-up-the-secrets)). Start again.
 - **Someone cannot unlink a provider** ("This is your only way to sign in"): link another provider first. When password sign-in is off, a password does not count, except for the admin.
 - **Too many attempts** (`rate_limited`): failed callbacks share the login limit per client address (30 failures per 15 minutes per api replica). Wait, or check for a misconfigured client causing repeated failures.
 
