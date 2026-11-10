@@ -471,7 +471,7 @@ paths:
         `state_invalid`, `email_unverified`, `email_unusable`, `not_invited`, `account_exists`,
         `invitation_invalid`, `already_member`, `plan_limit`, `suspended`, `rate_limited`; link
         errors add `identity_in_use`, `already_linked` and `session_expired`. Provider error text
-        is never reflected. Every outcome is audited (`auth.oauth_login`, `auth.oauth_failed`,
+        is never reflected. Every outcome is audited (`auth.oauth_login_succeeded`, `auth.oauth_login_failed`,
         `auth.identity_linked`). Failed callbacks count against the login's per-client-IP limit.
       tags: [auth]
       security: []
@@ -1875,7 +1875,7 @@ paths:
         installation only (409 `urn:proreta:problem:domain-taken`). At most 10 domains per
         organization (422). A new domain always starts with `defaultRole` `viewer` (another value
         is 422); raise it with `updateAuthDomain`. Auto-join stops for a domain that the operator
-        removes from the list. Audited as `org.auth_domain_changed`. Owner only.
+        removes from the list. Audited as `organization.auth_domain_changed`. Owner only.
       tags: [members]
       security:
         - cookieAuth: []
@@ -1916,7 +1916,7 @@ paths:
       description: |
         Changes the default role or turns auto-join off and on. The domain itself cannot change
         (delete and claim again). Members who already joined keep their role. Audited as
-        `org.auth_domain_changed`. Owner only.
+        `organization.auth_domain_changed`. Owner only.
       tags: [members]
       security:
         - cookieAuth: []
@@ -1951,7 +1951,7 @@ paths:
       summary: Release a sign-in domain
       description: |
         Stops auto-join for the domain and frees it for other organizations. Members who already
-        joined stay. Audited as `org.auth_domain_changed`. Owner only.
+        joined stay. Audited as `organization.auth_domain_changed`. Owner only.
       tags: [members]
       security:
         - cookieAuth: []

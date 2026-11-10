@@ -35,11 +35,11 @@ const (
 
 // Audit actions written by this module.
 const (
-	ActionLoginSucceeded = "auth.login.succeeded"
-	ActionLoginFailed    = "auth.login.failed"
-	ActionLogout         = "auth.logout"
+	ActionLoginSucceeded = "auth.login_succeeded"
+	ActionLoginFailed    = "auth.login_failed"
+	ActionLogout         = "auth.logged_out"
 	ActionAdminRotated   = "admin.rotated"
-	ActionRegister       = "auth.register"
+	ActionRegister       = "auth.registered"
 )
 
 const (
@@ -335,7 +335,7 @@ func (s *Service) retirePreviousOwners(ctx context.Context, tx pgx.Tx, q *authdb
 		}
 		if err := audit.Record(ctx, tx, audit.Entry{
 			TenantID: tenantID, Action: ActionAdminRotated, EntityType: "user", EntityID: old.String(),
-			Metadata: map[string]any{"new_admin_user_id": adminID.String(), "sessions_revoked": n},
+			Metadata: map[string]any{"newAdminUserId": adminID.String(), "sessionsRevoked": n},
 		}); err != nil {
 			return err
 		}
@@ -498,7 +498,7 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (LoginResult, error)
 		// Only reached with the right password, so the state of the tenant is never revealed to
 		// a guess. The attempt stays counted by the limiters like a failure.
 		s.logins.WithLabelValues("suspended").Inc()
-		if aerr := s.auditFailure(ctx, auditTenant, &user.ID, in.IP, "tenant_suspended"); aerr != nil {
+		if aerr := s.auditFailure(ctx, auditTenant, &user.ID, in.IP, "organization_suspended"); aerr != nil {
 			return LoginResult{}, aerr
 		}
 		return LoginResult{}, ErrAccountSuspended

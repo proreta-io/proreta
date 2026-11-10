@@ -21,11 +21,11 @@ import (
 
 // Audit actions of OAuth sign-in. Metadata never carries a token, a code or an email.
 const (
-	ActionOAuthLogin        = "auth.oauth_login"
-	ActionOAuthFailed       = "auth.oauth_failed"
+	ActionOAuthLogin        = "auth.oauth_login_succeeded"
+	ActionOAuthFailed       = "auth.oauth_login_failed"
 	ActionIdentityLinked    = "auth.identity_linked"
 	ActionIdentityUnlinked  = "auth.identity_unlinked"
-	ActionAuthDomainChanged = "org.auth_domain_changed"
+	ActionAuthDomainChanged = "organization.auth_domain_changed"
 )
 
 // ProviderGoogle is the provider whose hd claim can join an organization by domain.
@@ -81,7 +81,7 @@ func (s *Service) ReserveOAuthAttempt(ctx context.Context, ip netip.Addr) (func(
 	return func() { s.ipLimit.Refund(key) }, nil
 }
 
-// RecordOAuthFailure audits a failed OAuth sign-in or link (auth.oauth_failed) and counts it.
+// RecordOAuthFailure audits a failed OAuth sign-in or link (auth.oauth_login_failed) and counts it.
 // tenantID is the tenant of the user or the session when known; uuid.Nil means the default
 // tenant. reason is a short stable code, never provider text.
 func (s *Service) RecordOAuthFailure(ctx context.Context, provider, reason string, tenantID uuid.UUID, actor *uuid.UUID, ip netip.Addr) {
@@ -237,7 +237,7 @@ func (s *Service) oauthSignIn(ctx context.Context, in OAuthLoginInput, userID uu
 		}
 		t, err := tenants.Get(ctx, tx, *tenantID)
 		if errors.Is(err, tenants.ErrNotFound) || (err == nil && t.Status != tenants.StatusActive) {
-			return refuse(ErrAccountSuspended, "tenant_suspended", *tenantID, &userID)
+			return refuse(ErrAccountSuspended, "organization_suspended", *tenantID, &userID)
 		}
 		if err != nil {
 			return err
@@ -385,7 +385,7 @@ func (s *Service) oauthRegister(ctx context.Context, in OAuthLoginInput) (LoginR
 			if err := audit.Record(ctx, tx, audit.Entry{
 				TenantID: tenantID, ActorUserID: &userID, Action: ActionRegister,
 				EntityType: "user", EntityID: userID.String(), IP: in.IP,
-				Metadata: map[string]any{"tenant_id": tenantID.String(), "provider": in.Identity.Provider},
+				Metadata: map[string]any{"organizationId": tenantID.String(), "provider": in.Identity.Provider},
 			}); err != nil {
 				return err
 			}

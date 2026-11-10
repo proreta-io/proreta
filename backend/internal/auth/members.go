@@ -322,7 +322,7 @@ func (s *Service) SwitchOrganization(ctx context.Context, p Principal, tenantID 
 		if err := audit.Record(ctx, tx, audit.Entry{
 			TenantID: tenantID, ActorUserID: &p.UserID, Action: ActionOrganizationSwitched,
 			EntityType: "session", EntityID: sess.id.String(), IP: ip,
-			Metadata: map[string]any{"from_tenant_id": p.TenantID.String()},
+			Metadata: map[string]any{"fromOrganizationId": p.TenantID.String()},
 		}); err != nil {
 			return err
 		}

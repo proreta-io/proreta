@@ -53,7 +53,7 @@ COMMIT;
 Write down who asked and why; this bypasses the audit log.
 
 ## Audit
-Actions: `member.invited`, `invitation.revoked`, `member.joined`, `member.role_changed` (`from`, `to`), `member.removed` (`role`, `self`), `organization.switched` (`from_tenant_id`), `organization.deleted`. No token or link is ever written to the audit log or the logs. Runtime roles cannot read `audit_log`; query it as `proreta_owner`:
+Actions: `member.invited`, `invitation.revoked`, `member.joined`, `member.role_changed` (`from`, `to`), `member.removed` (`role`, `self`), `organization.switched` (`fromOrganizationId`), `organization.deleted`. No token or link is ever written to the audit log or the logs. Runtime roles cannot read `audit_log`; query it as `proreta_owner`:
 ```sql
 SELECT created_at, action, actor_user_id, entity_id, metadata FROM audit_log
 WHERE tenant_id = '<organization id>' AND (action LIKE 'member.%' OR action LIKE 'invitation.%' OR action LIKE 'organization.%')

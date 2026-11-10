@@ -211,7 +211,7 @@ func TestIntegrationLoginMeLogout(t *testing.T) {
 		}
 		got = append(got, action+map[bool]string{true: "+actor", false: ""}[hasActor])
 	}
-	want := "auth.login.failed+actor,auth.login.failed,auth.login.succeeded+actor,auth.logout+actor"
+	want := "auth.login_failed+actor,auth.login_failed,auth.login_succeeded+actor,auth.logged_out+actor"
 	if strings.Join(got, ",") != want {
 		t.Fatalf("audit = %s\nwant    %s", strings.Join(got, ","), want)
 	}

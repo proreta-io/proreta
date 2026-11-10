@@ -103,7 +103,7 @@ func TestIntegrationOAuthLoginRules(t *testing.T) {
 	if n := e.count(`SELECT count(*) FROM users WHERE email = 'new@example.com'`); n != 0 {
 		t.Fatal("user created without permission")
 	}
-	if n := e.count(`SELECT count(*) FROM audit_log WHERE action = 'auth.oauth_failed' AND metadata->>'reason' = 'not_invited'`); n != 1 {
+	if n := e.count(`SELECT count(*) FROM audit_log WHERE action = 'auth.oauth_login_failed' AND metadata->>'reason' = 'not_invited'`); n != 1 {
 		t.Fatalf("not_invited audit rows = %d", n)
 	}
 
@@ -158,7 +158,7 @@ func TestIntegrationOAuthLoginRules(t *testing.T) {
 	if email != "renamed@example.org" || last == nil {
 		t.Fatalf("identity not refreshed: %s %v", email, last)
 	}
-	if n := e.count(`SELECT count(*) FROM audit_log WHERE action = 'auth.oauth_login' AND actor_user_id = $1`, res.User.ID); n != 2 {
+	if n := e.count(`SELECT count(*) FROM audit_log WHERE action = 'auth.oauth_login_succeeded' AND actor_user_id = $1`, res.User.ID); n != 2 {
 		t.Fatalf("oauth_login audit rows = %d", n)
 	}
 
@@ -357,7 +357,7 @@ func TestIntegrationOAuthDomains(t *testing.T) {
 	if err := e.svc.DeleteAuthDomain(e.ctx, owner, d.ID); err != nil {
 		t.Fatal(err)
 	}
-	if n := e.count(`SELECT count(*) FROM audit_log WHERE action = 'org.auth_domain_changed' AND tenant_id = $1`, admin.Tenant.ID); n != 4 {
+	if n := e.count(`SELECT count(*) FROM audit_log WHERE action = 'organization.auth_domain_changed' AND tenant_id = $1`, admin.Tenant.ID); n != 4 {
 		t.Fatalf("domain audit rows = %d, want 4", n)
 	}
 }

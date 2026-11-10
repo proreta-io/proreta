@@ -124,7 +124,7 @@ func (s *Service) CreateInvitation(ctx context.Context, a Actor, role, label str
 		return audit.Record(ctx, tx, audit.Entry{
 			TenantID: a.TenantID, ActorUserID: &a.UserID, Action: ActionMemberInvited,
 			EntityType: "invitation", EntityID: inv.ID.String(), IP: a.IP,
-			Metadata: map[string]any{"role": inv.Role, "expires_at": inv.ExpiresAt.UTC().Format(time.RFC3339)},
+			Metadata: map[string]any{"role": inv.Role, "expiresAt": inv.ExpiresAt.UTC().Format(time.RFC3339)},
 		})
 	})
 	if err != nil {
@@ -304,7 +304,7 @@ func (s *Service) joinInvited(ctx context.Context, tx pgx.Tx, tenantID, userID u
 	if err := audit.Record(ctx, tx, audit.Entry{
 		TenantID: tenantID, ActorUserID: &userID, Action: ActionMemberJoined,
 		EntityType: "user", EntityID: userID.String(), IP: ip,
-		Metadata: map[string]any{"invitation_id": inv.ID.String(), "role": inv.Role},
+		Metadata: map[string]any{"invitationId": inv.ID.String(), "role": inv.Role},
 	}); err != nil {
 		return "", err
 	}

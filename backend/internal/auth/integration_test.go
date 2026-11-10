@@ -290,7 +290,7 @@ func TestIntegrationLoginLimitHoldsUnderConcurrency(t *testing.T) {
 		t.Fatalf("verified=%d rate_limited=%d other=%d; want at most %d verifications", verified.Load(), limited.Load(), other.Load(), limit)
 	}
 	var failures int32
-	if err := admin.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action = 'auth.login.failed'`).Scan(&failures); err != nil {
+	if err := admin.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action = 'auth.login_failed'`).Scan(&failures); err != nil {
 		t.Fatal(err)
 	}
 	if failures != verified.Load() {

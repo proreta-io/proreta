@@ -691,7 +691,7 @@ BEGIN
         RAISE EXCEPTION 'admin: cannot delete a tenant the admin belongs to' USING ERRCODE = 'PRA06';
     END IF;
     UPDATE tenants SET deleted_at = now(), status = 'suspended', updated_at = now() WHERE id = p_tenant_id;
-    PERFORM admin_audit(p_tenant_id, p_actor, p_audit_id, 'admin.organization.deleted', 'tenant', p_tenant_id::text,
+    PERFORM admin_audit(p_tenant_id, p_actor, p_audit_id, 'admin.organization.deleted', 'organization', p_tenant_id::text,
                         jsonb_build_object('status', v_status, 'plan', v_plan), p_ip);
     RETURN true;
 END
@@ -829,7 +829,7 @@ BEGIN
     UPDATE users SET password_hash = p_password_hash, updated_at = now() WHERE id = p_user_id;
     v_n := auth_revoke_user_sessions(p_user_id);
     PERFORM admin_audit(v_tenant, p_actor, p_audit_id, 'admin.user.password_reset', 'user', p_user_id::text,
-                        jsonb_build_object('sessions_revoked', v_n), p_ip);
+                        jsonb_build_object('sessionsRevoked', v_n), p_ip);
     RETURN QUERY SELECT v_tenant, v_n;
 END
 $function$
@@ -858,7 +858,7 @@ BEGIN
         RETURN false;
     END IF;
     UPDATE tenants SET plan_key = p_plan_key, updated_at = now() WHERE id = p_tenant_id;
-    PERFORM admin_audit(p_tenant_id, p_actor, p_audit_id, 'admin.organization.plan_changed', 'tenant', p_tenant_id::text,
+    PERFORM admin_audit(p_tenant_id, p_actor, p_audit_id, 'admin.organization.plan_changed', 'organization', p_tenant_id::text,
                         jsonb_build_object('from', v_old, 'to', p_plan_key), p_ip);
     RETURN true;
 END
@@ -907,11 +907,11 @@ BEGIN
         SET status = 'failed', last_error = 'tenant_suspended'
         WHERE d.tenant_id = p_tenant_id AND d.status = 'pending' AND d.created_at < now() - interval '15 minutes';
         GET DIAGNOSTICS v_expired = ROW_COUNT;
-        v_meta := v_meta || jsonb_build_object('deliveries_expired', v_expired);
+        v_meta := v_meta || jsonb_build_object('deliveriesExpired', v_expired);
     END IF;
     PERFORM admin_audit(p_tenant_id, p_actor, p_audit_id,
                         CASE WHEN p_status = 'suspended' THEN 'admin.organization.suspended' ELSE 'admin.organization.unsuspended' END,
-                        'tenant', p_tenant_id::text, v_meta, p_ip);
+                        'organization', p_tenant_id::text, v_meta, p_ip);
     RETURN true;
 END
 $function$
@@ -1593,7 +1593,7 @@ BEGIN
     END IF;
     UPDATE tenants SET deleted_at = now(), status = 'suspended', updated_at = now() WHERE id = v_tenant;
     INSERT INTO audit_log (id, tenant_id, actor_user_id, action, entity_type, entity_id, metadata, ip)
-    VALUES (p_audit_id, v_tenant, p_actor, 'organization.deleted', 'tenant', v_tenant::text, '{}'::jsonb, p_ip);
+    VALUES (p_audit_id, v_tenant, p_actor, 'organization.deleted', 'organization', v_tenant::text, '{}'::jsonb, p_ip);
     RETURN true;
 END
 $function$

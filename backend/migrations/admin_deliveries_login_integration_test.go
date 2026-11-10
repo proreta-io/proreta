@@ -91,7 +91,7 @@ func TestIntegrationAdminDeliveriesAndLoginTenant(t *testing.T) {
 		if err := admin.QueryRow(ctx, `SELECT metadata::text FROM audit_log WHERE tenant_id = $1 AND action = 'admin.organization.unsuspended'`, tenantA).Scan(&meta); err != nil {
 			t.Fatal(err)
 		}
-		if want := `{"to": "active", "from": "suspended", "deliveries_expired": 2}`; meta != want {
+		if want := `{"to": "active", "from": "suspended", "deliveriesExpired": 2}`; meta != want {
 			t.Fatalf("audit metadata = %s, want %s", meta, want)
 		}
 		// The fresh delivery of the unsuspended tenant is claimed; the suspended tenant's waits.

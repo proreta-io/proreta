@@ -88,7 +88,7 @@ Then an **owner** of the organization:
 
 From then on, a person whose verified Google account has `hd = example.com` joins that organization on their **first** Google sign-in. Existing accounts do not join. A domain belongs to one organization only.
 
-Why there is an allow-list: every employee of a Workspace has the same `hd`, so without it anyone could claim the company domain for an organization of their own. If a domain was claimed by the wrong organization, remove it from `oauth.allowedDomains` and deploy (auto-join stops at once). Then the owner of that organization releases it, or the platform admin deletes that organization. All changes are audited as `org.auth_domain_changed`.
+Why there is an allow-list: every employee of a Workspace has the same `hd`, so without it anyone could claim the company domain for an organization of their own. If a domain was claimed by the wrong organization, remove it from `oauth.allowedDomains` and deploy (auto-join stops at once). Then the owner of that organization releases it, or the platform admin deletes that organization. All changes are audited as `organization.auth_domain_changed`.
 
 ## Going OAuth-only without losing the admin
 1. Configure at least one provider and check that people can sign in with it. Have every user link a provider on `/profile` while they still have their password.
@@ -108,4 +108,4 @@ Why there is an allow-list: every employee of a Workspace has the same `hd`, so 
 - **Too many attempts** (`rate_limited`): failed callbacks share the login limit per client address (30 failures per 15 minutes per api replica). Wait, or check for a misconfigured client causing repeated failures.
 
 ## Audit
-`auth.oauth_login`, `auth.oauth_failed` (with a short reason code, never the provider's text), `auth.identity_linked`, `auth.identity_unlinked`, `member.joined` (with `via: auth_domain` for domain joins) and `org.auth_domain_changed`.
+`auth.oauth_login_succeeded`, `auth.oauth_login_failed` (with a short reason code, never the provider's text), `auth.identity_linked`, `auth.identity_unlinked`, `member.joined` (with `via: auth_domain` for domain joins) and `organization.auth_domain_changed`.

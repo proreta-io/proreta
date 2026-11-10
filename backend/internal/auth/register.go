@@ -146,7 +146,7 @@ func (s *Service) createAccount(ctx context.Context, email, passwordHash string,
 		if err := audit.Record(ctx, tx, audit.Entry{
 			TenantID: tenantID, ActorUserID: &userID, Action: ActionRegister,
 			EntityType: "user", EntityID: userID.String(), IP: in.IP,
-			Metadata: map[string]any{"tenant_id": tenantID.String()},
+			Metadata: map[string]any{"organizationId": tenantID.String()},
 		}); err != nil {
 			return err
 		}
@@ -350,7 +350,7 @@ func (s *Service) createInvitedAccount(ctx context.Context, email, passwordHash 
 		if err := audit.Record(ctx, tx, audit.Entry{
 			TenantID: tenantID, ActorUserID: &userID, Action: ActionRegister,
 			EntityType: "user", EntityID: userID.String(), IP: in.IP,
-			Metadata: map[string]any{"tenant_id": tenantID.String(), "invited": true},
+			Metadata: map[string]any{"organizationId": tenantID.String(), "invited": true},
 		}); err != nil {
 			return err
 		}

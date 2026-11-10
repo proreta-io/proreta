@@ -36,7 +36,7 @@ Use it for abuse, non-payment or a customer's request to freeze an account.
 - **Sessions:** existing sessions stop working on the next request (they are kept; unsuspending revives those that have not expired).
 - **Checks and alerts:** the worker claims none of its monitors, its heartbeats are not evaluated and pings are answered 204 but not recorded, and its Slack deliveries are not sent. Deliveries that were already queued wait; see the unsuspend note below. Open incidents stay open.
 - **Data:** nothing is deleted; monitors, results, incidents, Slack settings and users stay. Retention keeps working as for everybody.
-- Unsuspend with the same button. Checks resume within about a minute. Slack deliveries that waited more than 15 minutes are not sent: the unsuspend marks them `failed` with `last_error = 'tenant_suspended'` and the audit row `admin.organization.unsuspended` records how many (`deliveries_expired`); newer ones are sent at once. Pings sent during the suspension were not recorded, so a heartbeat whose deadline passed meanwhile goes down at the next evaluation (within 30 s) and alerts, unless a ping arrives first; warn the customer. The incident resolves with the next ping.
+- Unsuspend with the same button. Checks resume within about a minute. Slack deliveries that waited more than 15 minutes are not sent: the unsuspend marks them `failed` with `last_error = 'tenant_suspended'` and the audit row `admin.organization.unsuspended` records how many (`deliveriesExpired`); newer ones are sent at once. Pings sent during the suspension were not recorded, so a heartbeat whose deadline passed meanwhile goes down at the next evaluation (within 30 s) and alerts, unless a ping arrives first; warn the customer. The incident resolves with the next ping.
 
 ## Delete an organization
 - Soft delete: `deleted_at` is set and the status becomes `suspended`, with every effect of a suspension. Its pending Slack deliveries are marked `failed` (`last_error = 'tenant_deleted'`) by the next delivery claim and are never sent, even after a restore. The organization disappears from the default list (tick "Show deleted" to see it) and can no longer be changed in the panel.
@@ -57,3 +57,10 @@ FROM audit_log WHERE action LIKE 'admin.%' ORDER BY created_at DESC LIMIT 50;
 ```
 
 `audit_log` forces RLS for its owner too: run the query in a transaction after `SELECT set_config('app.tenant_id', '<organization id>', true);` for one organization, or as the database server admin login for all of them.
+
+### Naming rules
+Audit rows are permanent, so the vocabulary is fixed:
+- **`action`** is `<area>.<event>`: lowercase, one dot, the event in past tense with words joined by `_` (`member.role_changed`, `auth.login_failed`, `organization.auth_domain_changed`). Actions of the platform admin have three parts, `admin.<entity>.<event>` (`admin.organization.suspended`, `admin.user.password_reset`), and are also the label values of `proreta_admin_actions_total`. The areas are `auth`, `organization`, `member`, `invitation`, `project`, `monitor`, `channel`, `status_page` and `admin`.
+- **`entity_type`** is the singular snake_case noun of the row `entity_id` points at: `organization` (never `tenant`), `user`, `session`, `invitation`, `auth_domain`, `project`, `monitor`, `notification_channel`, `status_page`.
+- **`metadata`** keys are camelCase and use the organization vocabulary (`organizationId`, `fromOrganizationId`, `invitationId`, `expiresAt`, `defaultRole`, `newAdminUserId`, `sessionsRevoked`, `deliveriesExpired`, `monitorsDetached`). Values that are codes are lowercase snake_case (`via: auth_domain`, `reason: organization_suspended`). Metadata never holds a secret, a hash, a URL or an email.
+- `audit_log.tenant_id` is the column name of the owning organization; it is a column, not a vocabulary item, and keeps the SQL name.

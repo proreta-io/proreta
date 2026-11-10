@@ -394,7 +394,7 @@ func TestIntegrationAdminFunctions(t *testing.T) {
 			t.Fatalf("after reset: hash stored=%v sessions=%d err=%v", stored == fakeHash, sessions, err)
 		}
 		rows := auditRows(tenantA, "admin.user.password_reset")
-		if len(rows) != 1 || rows[0] != userPlatform+" "+userOwnerA+` {"sessions_revoked": 1}` {
+		if len(rows) != 1 || rows[0] != userPlatform+" "+userOwnerA+` {"sessionsRevoked": 1}` {
 			t.Fatalf("reset audit rows: %q", rows)
 		}
 	})

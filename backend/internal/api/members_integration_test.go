@@ -770,7 +770,7 @@ func TestIntegrationInviteExistingAccount(t *testing.T) {
 	if r := c.do(http.MethodPost, "/api/v1/auth/login", loginBody, nil); r.code != http.StatusOK {
 		t.Fatalf("login after rejoining: %d %s", r.code, r.raw)
 	}
-	if n := countRows(t, env, `SELECT count(*) FROM audit_log WHERE action = 'auth.login.failed' AND metadata->>'reason' = 'invitation_invalid_credentials'`); n != 1 {
+	if n := countRows(t, env, `SELECT count(*) FROM audit_log WHERE action = 'auth.login_failed' AND metadata->>'reason' = 'invitation_invalid_credentials'`); n != 1 {
 		t.Fatalf("failed attempt audit rows: %d", n)
 	}
 	// Used now.

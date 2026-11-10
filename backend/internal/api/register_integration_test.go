@@ -164,7 +164,7 @@ func TestIntegrationRegister(t *testing.T) {
 		Scan(&action, &actor, &entity, &meta, &ip); err != nil {
 		t.Fatal(err)
 	}
-	if action != "auth.register" || actor != userID || entity != userID || meta != fmt.Sprintf(`{"tenant_id": "%s"}`, tenantID) || ip != "198.51.100.20" {
+	if action != "auth.registered" || actor != userID || entity != userID || meta != fmt.Sprintf(`{"organizationId": "%s"}`, tenantID) || ip != "198.51.100.20" {
 		t.Fatalf("audit: %s %s %s %s %s", action, actor, entity, meta, ip)
 	}
 
@@ -205,7 +205,7 @@ func TestIntegrationRegister(t *testing.T) {
 		}
 	}
 	// The failed login of a registered user is audited in that user's tenant.
-	if n := countRows(t, env, `SELECT count(*) FROM audit_log WHERE tenant_id = $1 AND action = 'auth.login.failed' AND actor_user_id = $2`, tenantID, userID); n != 1 {
+	if n := countRows(t, env, `SELECT count(*) FROM audit_log WHERE tenant_id = $1 AND action = 'auth.login_failed' AND actor_user_id = $2`, tenantID, userID); n != 1 {
 		t.Fatalf("failed login audit rows in the user's tenant = %d", n)
 	}
 

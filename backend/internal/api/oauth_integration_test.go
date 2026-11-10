@@ -277,7 +277,7 @@ func TestIntegrationOAuthHTTPFlow(t *testing.T) {
 	}
 
 	// Every outcome is audited.
-	if err := admin.QueryRow(context.Background(), `SELECT count(*) FROM audit_log WHERE action = 'auth.oauth_failed'`).Scan(&n); err != nil || n < 8 {
+	if err := admin.QueryRow(context.Background(), `SELECT count(*) FROM audit_log WHERE action = 'auth.oauth_login_failed'`).Scan(&n); err != nil || n < 8 {
 		t.Fatalf("oauth_failed audit rows: %d %v", n, err)
 	}
 }

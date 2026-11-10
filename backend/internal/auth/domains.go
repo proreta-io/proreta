@@ -214,7 +214,7 @@ func (s *Service) auditDomain(ctx context.Context, tx pgx.Tx, a Actor, d Domain,
 	return audit.Record(ctx, tx, audit.Entry{
 		TenantID: a.TenantID, ActorUserID: &a.UserID, Action: ActionAuthDomainChanged,
 		EntityType: "auth_domain", EntityID: d.ID.String(), IP: a.IP,
-		Metadata: map[string]any{"change": change, "domain": d.Domain, "default_role": d.DefaultRole, "enabled": d.Enabled},
+		Metadata: map[string]any{"change": change, "domain": d.Domain, "defaultRole": d.DefaultRole, "enabled": d.Enabled},
 	})
 }
 
