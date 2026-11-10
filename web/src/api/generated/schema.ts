@@ -2454,6 +2454,7 @@ export interface components {
      *     | `urn:proreta:problem:validation` | 422 | A well-formed request breaks a business rule; see `fieldErrors` |
      *     | `urn:proreta:problem:rate-limited` | 429 | Too many attempts; see `Retry-After` |
      *     | `urn:proreta:problem:internal` | 500 | Unexpected server error; quote `requestId` when reporting it |
+     *     | `urn:proreta:problem:internal` | 499 | The client cancelled the request; recorded by the server only, never delivered (see the introduction) |
      *     | `urn:proreta:problem:channel-delivery-failed` | 502 | The notification channel's service did not accept the test message |
      *     | `urn:proreta:problem:unavailable` | 503 | A dependency (a sign-in provider, the probe location) is temporarily unavailable |
      * @example urn:proreta:problem:unauthenticated
