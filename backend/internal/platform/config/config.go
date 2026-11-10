@@ -104,6 +104,9 @@ type API struct {
 	// false (PRORETA_PASSWORD_LOGIN_ENABLED, default true).
 	PasswordLoginEnabled bool
 	OAuth                OAuth
+	// SMTP is the outgoing email configuration (PRORETA_SMTP_*); the api only queues mail, so it
+	// carries no login. Empty host: email is off.
+	SMTP SMTP
 }
 
 // OAuth holds the OAuth client credentials. A provider without both values is off.
@@ -146,8 +149,11 @@ type Jobs struct {
 	Server
 	Encryption
 	Guard
-	// PublicURL is PRORETA_PUBLIC_URL, linked from Slack messages.
+	// PublicURL is PRORETA_PUBLIC_URL, linked from Slack messages and emails.
 	PublicURL string
+	// SMTP is the outgoing email configuration (PRORETA_SMTP_*) including the login; jobs is the
+	// only process that connects to the server.
+	SMTP SMTP
 }
 
 // Statuspage is the configuration of cmd/statuspage, the public status page renderer.
@@ -206,6 +212,7 @@ func LoadAPI(lookup LookupFunc) (API, error) {
 		RegistrationEnabled:  l.boolean("PRORETA_REGISTRATION_ENABLED", true),
 		PasswordLoginEnabled: l.boolean("PRORETA_PASSWORD_LOGIN_ENABLED", true),
 		OAuth:                l.oauth(),
+		SMTP:                 l.smtp(false),
 	}
 	if cfg.HTTPAddr != "" && cfg.HTTPAddr == cfg.AdminAddr {
 		l.fail("PRORETA_HTTP_ADDR", "must differ from PRORETA_ADMIN_ADDR")
@@ -281,7 +288,7 @@ func LoadWorker(lookup LookupFunc) (Worker, error) {
 // LoadJobs loads the jobs configuration.
 func LoadJobs(lookup LookupFunc) (Jobs, error) {
 	l := &loader{lookup: lookup}
-	cfg := Jobs{Server: l.server(5), Encryption: l.encryption(), Guard: l.guard(), PublicURL: l.publicURL("PRORETA_PUBLIC_URL")}
+	cfg := Jobs{Server: l.server(5), Encryption: l.encryption(), Guard: l.guard(), PublicURL: l.publicURL("PRORETA_PUBLIC_URL"), SMTP: l.smtp(true)}
 	return cfg, l.err()
 }
 
