@@ -11,6 +11,7 @@ heartbeat_tokens kind=r owner=proreta_owner rls=true force=true acl=proreta_api=
 incident_monitors kind=r owner=proreta_owner rls=true force=true acl=proreta_api=r/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=ar/proreta_owner
 incidents kind=r owner=proreta_owner rls=true force=true acl=proreta_api=rw/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=arw/proreta_owner
 invitations kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arw/proreta_owner,proreta_owner=arwdDxt/proreta_owner
+mail_outbox kind=r owner=proreta_owner rls=false force=false acl=proreta_api=a/proreta_owner,proreta_owner=arwdDxt/proreta_owner
 memberships kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arwd/proreta_owner,proreta_owner=arwdDxt/proreta_owner
 monitor_channels kind=r owner=proreta_owner rls=true force=true acl=proreta_api=ard/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=r/proreta_owner
 monitor_location_state kind=r owner=proreta_owner rls=true force=true options=fillfactor=70 acl=proreta_api=ar/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=rw/proreta_owner
@@ -94,6 +95,18 @@ invitations.8 expires_at timestamp with time zone not null
 invitations.9 accepted_at timestamp with time zone
 invitations.10 accepted_by uuid
 invitations.11 revoked_at timestamp with time zone
+mail_outbox.1 id uuid not null
+mail_outbox.2 kind text not null
+mail_outbox.3 payload bytea not null
+mail_outbox.4 status text not null default 'pending'::text
+mail_outbox.5 attempts integer not null default 0
+mail_outbox.6 next_attempt_at timestamp with time zone not null default now()
+mail_outbox.7 lease_until timestamp with time zone
+mail_outbox.8 claim_token uuid
+mail_outbox.9 last_error text
+mail_outbox.10 created_at timestamp with time zone not null default now()
+mail_outbox.11 expires_at timestamp with time zone not null
+mail_outbox.12 finished_at timestamp with time zone
 memberships.1 tenant_id uuid not null
 memberships.2 user_id uuid not null
 memberships.3 role text not null
@@ -321,6 +334,17 @@ invitations invitations_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenant
 invitations invitations_tenant_id_id_key UNIQUE (tenant_id, id)
 invitations invitations_token_hash_check CHECK ((length(token_hash) = 32))
 invitations invitations_token_hash_key UNIQUE (token_hash)
+mail_outbox mail_outbox_attempts_check CHECK ((attempts >= 0))
+mail_outbox mail_outbox_check CHECK ((expires_at > created_at))
+mail_outbox mail_outbox_check1 CHECK (((status = 'in_progress'::text) = (lease_until IS NOT NULL)))
+mail_outbox mail_outbox_check2 CHECK (((status = 'in_progress'::text) = (claim_token IS NOT NULL)))
+mail_outbox mail_outbox_check3 CHECK (((status = ANY (ARRAY['sent'::text, 'failed'::text])) = (finished_at IS NOT NULL)))
+mail_outbox mail_outbox_check4 CHECK (((status = ANY (ARRAY['pending'::text, 'in_progress'::text])) = (octet_length(payload) > 0)))
+mail_outbox mail_outbox_kind_check CHECK ((kind ~ '^[a-z][a-z_]{0,39}$'::text))
+mail_outbox mail_outbox_last_error_check CHECK ((length(last_error) <= 500))
+mail_outbox mail_outbox_payload_check CHECK ((octet_length(payload) <= 8192))
+mail_outbox mail_outbox_pkey PRIMARY KEY (id)
+mail_outbox mail_outbox_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'in_progress'::text, 'sent'::text, 'failed'::text])))
 memberships memberships_pkey PRIMARY KEY (tenant_id, user_id)
 memberships memberships_role_check CHECK ((role = ANY (ARRAY['owner'::text, 'admin'::text, 'member'::text, 'viewer'::text])))
 memberships memberships_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id)
@@ -490,6 +514,10 @@ CREATE UNIQUE INDEX invitations_pkey ON public.invitations USING btree (id)
 CREATE INDEX invitations_tenant_created_idx ON public.invitations USING btree (tenant_id, created_at DESC)
 CREATE UNIQUE INDEX invitations_tenant_id_id_key ON public.invitations USING btree (tenant_id, id)
 CREATE UNIQUE INDEX invitations_token_hash_key ON public.invitations USING btree (token_hash)
+CREATE INDEX mail_outbox_finished_idx ON public.mail_outbox USING btree (finished_at) WHERE (finished_at IS NOT NULL)
+CREATE INDEX mail_outbox_lease_idx ON public.mail_outbox USING btree (lease_until) WHERE (status = 'in_progress'::text)
+CREATE UNIQUE INDEX mail_outbox_pkey ON public.mail_outbox USING btree (id)
+CREATE INDEX mail_outbox_ready_idx ON public.mail_outbox USING btree (next_attempt_at) WHERE (status = 'pending'::text)
 CREATE UNIQUE INDEX memberships_pkey ON public.memberships USING btree (tenant_id, user_id)
 CREATE INDEX memberships_user_id_idx ON public.memberships USING btree (user_id)
 CREATE INDEX monitor_channels_channel_idx ON public.monitor_channels USING btree (tenant_id, channel_id)
@@ -622,6 +650,7 @@ auth_sync_platform_admin(uuid) owner=proreta_owner definer=true acl=proreta_api=
 auth_user_organizations(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 claim_deliveries(integer) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 claim_due_monitors(integer,text) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+claim_mail(integer) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 compute_rollups(timestamp with time zone,timestamp with time zone) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 compute_rollups_catch_up(integer,integer) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 detach_expired_partition(text) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
@@ -630,12 +659,15 @@ enqueue_incident_reminders(integer) owner=proreta_owner definer=true acl=proreta
 ensure_partitions() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 fail_deleted_channel_deliveries(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 finish_delivery(uuid,uuid,text,text,timestamp with time zone) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+finish_mail(uuid,uuid,text,text,timestamp with time zone) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 heartbeat_ping(bytea) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 list_droppable_partitions() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 list_due_heartbeats(integer) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+mail_pending() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 org_delete_tenant(uuid,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 outbox_pending() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 purge_expired_sessions() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+purge_mail_outbox(interval) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 reset_monitor_runtime(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 status_page_published_pages() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 status_page_slug_held(text) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
@@ -1182,6 +1214,48 @@ AS $function$
               m.config ->> 'url', COALESCE(m.config ->> 'expectedStatus', '2xx'),
               m.failure_threshold, m.interval_seconds, m.timeout_seconds, s.next_run_at
 $function$
+CREATE OR REPLACE FUNCTION public.claim_mail(n integer)
+ RETURNS TABLE(id uuid, kind text, payload bytea, attempts integer, claim_token uuid)
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    UPDATE mail_outbox AS m
+    SET status = CASE WHEN m.attempts + 1 >= 5 THEN 'failed' ELSE 'pending' END,
+        attempts = m.attempts + 1,
+        last_error = 'lease_expired',
+        lease_until = NULL,
+        claim_token = NULL,
+        finished_at = CASE WHEN m.attempts + 1 >= 5 THEN now() END,
+        payload = CASE WHEN m.attempts + 1 >= 5 THEN ''::bytea ELSE m.payload END
+    WHERE m.id IN (
+        SELECT e.id FROM mail_outbox AS e
+        WHERE e.status = 'in_progress' AND e.lease_until <= now()
+        FOR UPDATE SKIP LOCKED
+    );
+
+    UPDATE mail_outbox AS m
+    SET status = 'failed', last_error = 'expired', finished_at = now(), payload = ''::bytea
+    WHERE m.id IN (
+        SELECT e.id FROM mail_outbox AS e
+        WHERE e.status = 'pending' AND e.expires_at <= now()
+        FOR UPDATE SKIP LOCKED
+    );
+
+    WITH ready AS (
+        SELECT e.id
+        FROM mail_outbox AS e
+        WHERE e.status = 'pending' AND e.next_attempt_at <= now()
+        ORDER BY e.created_at, e.id
+        LIMIT least(greatest(n, 0), 100)
+        FOR UPDATE SKIP LOCKED
+    )
+    UPDATE mail_outbox AS m
+    SET status = 'in_progress', lease_until = now() + interval '2 minutes', claim_token = gen_random_uuid()
+    FROM ready
+    WHERE m.id = ready.id
+    RETURNING m.id, m.kind, m.payload, m.attempts, m.claim_token
+$function$
 CREATE OR REPLACE FUNCTION public.compute_rollups(from_hour timestamp with time zone, to_hour timestamp with time zone)
  RETURNS integer
  LANGUAGE plpgsql
@@ -1485,6 +1559,32 @@ BEGIN
     RETURN FOUND;
 END
 $function$
+CREATE OR REPLACE FUNCTION public.finish_mail(p_id uuid, p_token uuid, p_status text, p_error text, p_retry_at timestamp with time zone)
+ RETURNS boolean
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+    IF p_status IS NULL OR p_status NOT IN ('sent', 'failed', 'pending') THEN
+        RAISE EXCEPTION 'finish_mail: invalid status' USING ERRCODE = '22023';
+    END IF;
+    IF p_status = 'pending' AND p_retry_at IS NULL THEN
+        RAISE EXCEPTION 'finish_mail: retry_at is required for pending' USING ERRCODE = '22023';
+    END IF;
+    UPDATE mail_outbox AS m
+    SET status = p_status,
+        attempts = m.attempts + 1,
+        lease_until = NULL,
+        claim_token = NULL,
+        last_error = CASE WHEN p_status = 'sent' THEN NULL ELSE left(p_error, 500) END,
+        finished_at = CASE WHEN p_status = 'pending' THEN NULL ELSE now() END,
+        payload = CASE WHEN p_status = 'pending' THEN m.payload ELSE ''::bytea END,
+        next_attempt_at = CASE WHEN p_status = 'pending' THEN p_retry_at ELSE m.next_attempt_at END
+    WHERE m.id = p_id AND m.status = 'in_progress' AND m.claim_token = p_token;
+    RETURN FOUND;
+END
+$function$
 CREATE OR REPLACE FUNCTION public.heartbeat_ping(p_token_hash bytea)
  RETURNS TABLE(tenant_id uuid, monitor_id uuid, recorded boolean)
  LANGUAGE plpgsql
@@ -1564,6 +1664,14 @@ AS $function$
     ORDER BY d.deadline, h.monitor_id
     LIMIT least(greatest(n, 0), 1000)
 $function$
+CREATE OR REPLACE FUNCTION public.mail_pending()
+ RETURNS bigint
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    SELECT count(*) FROM mail_outbox WHERE status = 'pending'
+$function$
 CREATE OR REPLACE FUNCTION public.org_delete_tenant(p_actor uuid, p_audit_id uuid, p_ip inet)
  RETURNS boolean
  LANGUAGE plpgsql
@@ -1613,6 +1721,25 @@ CREATE OR REPLACE FUNCTION public.purge_expired_sessions()
 AS $function$
     WITH d AS (DELETE FROM sessions WHERE expires_at < now() RETURNING 1)
     SELECT count(*)::integer FROM d
+$function$
+CREATE OR REPLACE FUNCTION public.purge_mail_outbox(p_keep interval)
+ RETURNS integer
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    WITH gone AS (
+        DELETE FROM mail_outbox AS m
+        WHERE m.id IN (
+            SELECT e.id FROM mail_outbox AS e
+            WHERE e.finished_at IS NOT NULL AND e.finished_at < now() - p_keep
+            ORDER BY e.finished_at
+            LIMIT 1000
+            FOR UPDATE SKIP LOCKED
+        )
+        RETURNING 1
+    )
+    SELECT count(*)::integer FROM gone
 $function$
 CREATE OR REPLACE FUNCTION public.reset_monitor_runtime(p_monitor_id uuid)
  RETURNS integer
