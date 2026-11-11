@@ -1758,6 +1758,142 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/organizations/{organizationId}/members": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+      };
+      cookie?: never;
+    };
+    /**
+     * Members of an organization
+     * @description Every member of the organization (a deleted organization included), oldest first, with
+     *     login, display name, role, when they joined and whether the account is active or disabled.
+     *     Unlike `GET /api/v1/members` the logins are always shown. Platform admins only.
+     */
+    get: operations["adminListOrganizationMembers"];
+    put?: never;
+    /**
+     * Add an existing account to an organization by email
+     * @description Finds the account with this email address and makes it a member with the role, or changes
+     *     its role when it already is one (same rules as `PUT .../members/{userId}`). When no account
+     *     has that address the answer is 404 and nothing is written: invite the person instead
+     *     (`POST .../invitations`). Platform admins only.
+     */
+    post: operations["adminAddOrganizationMember"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/organizations/{organizationId}/members/{userId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+        /** @description User id of the member; a value that is not a UUID is answered with 400 */
+        userId: components["parameters"]["MemberUserId"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Add a user to an organization or change their role
+     * @description Makes an existing account a member with the role (any of `owner`, `admin`, `member`,
+     *     `viewer`), or changes the role of a member; setting the role a member already has changes
+     *     nothing and writes no audit row. An unknown user is 404. Adding respects the plan's member
+     *     limit (409 `urn:proreta:problem:plan-limit-reached`; raise the plan first). The organization
+     *     always keeps an active owner (409 `urn:proreta:problem:last-owner`). The platform admin's
+     *     membership of the default organization cannot be changed and the platform admin cannot be
+     *     added to another organization (409 `urn:proreta:problem:system-admin`). A deleted
+     *     organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). A disabled
+     *     account can be added but cannot sign in. A new role applies on the member's next request.
+     *     Audited in the organization as `admin.member.added` or `admin.member.role_changed`.
+     *     Platform admins only.
+     */
+    put: operations["adminSetOrganizationMember"];
+    post?: never;
+    /**
+     * Remove a member from an organization
+     * @description Ends the membership and the user's sessions in this organization at once; the user and
+     *     their other memberships stay. The last active owner and the platform admin cannot be
+     *     removed (409 `urn:proreta:problem:last-owner`, `urn:proreta:problem:system-admin`); a deleted
+     *     organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited as
+     *     `admin.member.removed`. Platform admins only.
+     */
+    delete: operations["adminRemoveOrganizationMember"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/organizations/{organizationId}/invitations": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+      };
+      cookie?: never;
+    };
+    /**
+     * Invitations of an organization
+     * @description The newest 200 invitations of the organization (a deleted organization included) with their state. The link of an invitation is never shown again. Platform admins only.
+     */
+    get: operations["adminListOrganizationInvitations"];
+    put?: never;
+    /**
+     * Invite someone to an organization
+     * @description For a person without an account. Same rules and the same email option as
+     *     `POST /api/v1/invitations` (roles `admin`, `member`, `viewer`; the link is in the answer
+     *     only and is never logged or audited; `email` is sent only when the installation has a tested
+     *     mail server and the invitations switch is on). Open invitations count toward the plan's
+     *     member limit (409 `urn:proreta:problem:plan-limit-reached`). A deleted organization
+     *     cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in the
+     *     organization as `admin.invitation.created` (role and whether an email was queued, never
+     *     the address or the link). Platform admins only.
+     */
+    post: operations["adminCreateOrganizationInvitation"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/organizations/{organizationId}/invitations/{invitationId}/revoke": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+        /** @description Invitation id; a value that is not a UUID is answered with 400 */
+        invitationId: components["parameters"]["InvitationId"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Revoke an invitation of an organization
+     * @description The link stops working at once. Revoking a revoked or expired invitation changes nothing
+     *     (204); an accepted one is 409 `urn:proreta:problem:invitation-accepted`. Audited as
+     *     `admin.invitation.revoked`. Platform admins only.
+     */
+    post: operations["adminRevokeOrganizationInvitation"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/email": {
     parameters: {
       query?: never;
@@ -2637,6 +2773,31 @@ export interface components {
     AdminRegistrationUpdate: {
       /** @description `true` or `false` is the choice; `null` follows the environment again */
       enabled: boolean | null;
+    };
+    AdminMember: {
+      /** Format: uuid */
+      userId: string;
+      /** @description The member's login (email address) */
+      login: string;
+      displayName: string;
+      role: components["schemas"]["MembershipRole"];
+      /**
+       * @description A disabled account cannot sign in
+       * @enum {string}
+       */
+      status: "active" | "disabled";
+      /** Format: date-time */
+      joinedAt: string;
+      /** @description The system admin; its membership cannot be changed or removed */
+      isPlatformAdmin: boolean;
+    };
+    AdminMemberList: {
+      items: components["schemas"]["AdminMember"][];
+    };
+    AdminMemberAdd: {
+      /** @description Email address of an existing account */
+      email: string;
+      role: components["schemas"]["MembershipRole"];
     };
     AdminEmailTestRequest: {
       /** @description Recipient of the test message; omitted, the admin's own login if it is an email address (422 otherwise) */
@@ -5796,6 +5957,239 @@ export interface operations {
       400: components["responses"]["BadRequest"];
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminListOrganizationMembers: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The members */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminMemberList"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminAddOrganizationMember: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminMemberAdd"];
+      };
+    };
+    responses: {
+      /** @description The member after the change */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminMember"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      422: components["responses"]["UnprocessableEntity"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminSetOrganizationMember: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+        /** @description User id of the member; a value that is not a UUID is answered with 400 */
+        userId: components["parameters"]["MemberUserId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MemberUpdate"];
+      };
+    };
+    responses: {
+      /** @description The member after the change */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminMember"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminRemoveOrganizationMember: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+        /** @description User id of the member; a value that is not a UUID is answered with 400 */
+        userId: components["parameters"]["MemberUserId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Removed */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminListOrganizationInvitations: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The invitations */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["InvitationList"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminCreateOrganizationInvitation: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["InvitationCreate"];
+      };
+    };
+    responses: {
+      /** @description The invitation and its link, shown once */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["InvitationCreated"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["PlanLimitReached"];
+      422: components["responses"]["UnprocessableEntity"];
+      429: components["responses"]["TooManyRequests"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminRevokeOrganizationInvitation: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+        /** @description Invitation id; a value that is not a UUID is answered with 400 */
+        invitationId: components["parameters"]["InvitationId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Revoked */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
       default: components["responses"]["Error"];
     };
   };

@@ -35,6 +35,7 @@ export type AdminUserSummary = Schemas["AdminUserSummary"];
 export type AdminUserSummaryList = Schemas["AdminUserSummaryList"];
 export type AdminUserDetail = Schemas["AdminUserDetail"];
 export type AdminUserMembership = Schemas["AdminUserMembership"];
+export type AdminMember = Schemas["AdminMember"];
 export type MembershipRole = Schemas["MembershipRole"];
 export type Organization = Schemas["Organization"];
 export type Member = Schemas["Member"];
@@ -95,6 +96,8 @@ export const queryKeys = {
   adminAllUsers: (query: string, status: string, offset: number) =>
     ["admin", "all-users", { query, status, offset }] as const,
   adminUser: (id: string) => ["admin", "user", id] as const,
+  adminMembers: (id: string) => ["admin", "organization", id, "members"] as const,
+  adminInvitations: (id: string) => ["admin", "organization", id, "invitations"] as const,
   organizations: ["organizations"] as const,
   members: ["members"] as const,
   invitations: ["invitations"] as const,
@@ -272,6 +275,74 @@ export const listAdminOrganizationUsers = (organizationId: string) =>
   unwrap(
     client.GET("/api/v1/admin/organizations/{organizationId}/users", {
       params: { path: { organizationId }, query: { limit: 100 } },
+    }),
+  );
+
+export const listAdminMembers = (organizationId: string) =>
+  unwrap(
+    client.GET("/api/v1/admin/organizations/{organizationId}/members", {
+      params: { path: { organizationId } },
+    }),
+  );
+
+/** Adds an existing user to the organization or changes their role (any of the four roles). */
+export const setAdminMember = (organizationId: string, userId: string, role: MembershipRole) =>
+  unwrap(
+    client.PUT("/api/v1/admin/organizations/{organizationId}/members/{userId}", {
+      params: { path: { organizationId, userId } },
+      body: { role },
+    }),
+  );
+
+/** Like setAdminMember for the account with this email; 404 when there is none. */
+export const addAdminMemberByEmail = (
+  organizationId: string,
+  email: string,
+  role: MembershipRole,
+) =>
+  unwrap(
+    client.POST("/api/v1/admin/organizations/{organizationId}/members", {
+      params: { path: { organizationId } },
+      body: { email, role },
+    }),
+  );
+
+export const removeAdminMember = (organizationId: string, userId: string) =>
+  unwrap(
+    client.DELETE("/api/v1/admin/organizations/{organizationId}/members/{userId}", {
+      params: { path: { organizationId, userId } },
+    }),
+  );
+
+export const listAdminInvitations = (organizationId: string) =>
+  unwrap(
+    client.GET("/api/v1/admin/organizations/{organizationId}/invitations", {
+      params: { path: { organizationId } },
+    }),
+  );
+
+/** A new invitation; its link is in this answer only. */
+export const createAdminInvitation = (
+  organizationId: string,
+  role: InvitationRole,
+  label: string,
+  email = "",
+) =>
+  unwrap(
+    client.POST("/api/v1/admin/organizations/{organizationId}/invitations", {
+      params: { path: { organizationId } },
+      body: {
+        role,
+        ...(label ? { label } : {}),
+        ...(email ? { email, sendEmail: true } : {}),
+      },
+    }),
+  );
+
+export const revokeAdminInvitation = (organizationId: string, invitationId: string) =>
+  unwrap(
+    client.POST("/api/v1/admin/organizations/{organizationId}/invitations/{invitationId}/revoke", {
+      params: { path: { organizationId, invitationId } },
     }),
   );
 

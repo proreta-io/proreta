@@ -237,6 +237,9 @@ func writeError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 		// disabled.
 		log.ErrorContext(r.Context(), "request failed", "error", err)
 		p.Type, p.Title, p.Status = problemUnavailable, "Monitoring location unavailable, try again later", http.StatusServiceUnavailable
+	case errors.Is(err, auth.ErrUserNotFound):
+		p.Type, p.Title, p.Status = problemNotFound, "No account found", http.StatusNotFound
+		p.Detail = "No account matches. Invite the person instead if they do not have one yet."
 	case errors.Is(err, errNotFound), errors.Is(err, routers.ErrPathNotFound), errors.Is(err, monitors.ErrNotFound), errors.Is(err, queries.ErrNotFound), errors.Is(err, admin.ErrNotFound),
 		errors.Is(err, notify.ErrChannelNotFound), errors.Is(err, auth.ErrMemberNotFound), errors.Is(err, auth.ErrInvitationNotFound),
 		errors.Is(err, auth.ErrOrganizationNotFound), errors.Is(err, projects.ErrNotFound), errors.Is(err, projects.ErrMemberNotFound),

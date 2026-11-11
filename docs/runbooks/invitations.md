@@ -31,6 +31,9 @@ With an address the same link is also sent by email, from the sender configured 
 
 A link works once and for 7 days. Open invitations count toward the plan's member limit (`max_members`: `free` 3, `internal` 50) until they are used, revoked or expire, so revoke the ones nobody will use.
 
+### When nobody in the organization can invite
+The platform admin can invite people, add an existing account, change roles and remove members from **Admin → Organizations → (the organization)**, without being a member; see "Add a person to an organization" in [the admin panel runbook](admin-panel.md). Those changes are audited as `admin.invitation.created`, `admin.invitation.revoked`, `admin.member.added`, `admin.member.role_changed` and `admin.member.removed`, in place of the `member.*` names above.
+
 ## A link was sent to the wrong person or leaked
 Revoke it at once: **Members → Invitations → Revoke**. If it was already used, the list shows who joined (`acceptedBy`); remove that member (**Remove**), which ends their sessions in the organization immediately. Both are audited (`invitation.revoked`, `member.removed`).
 
