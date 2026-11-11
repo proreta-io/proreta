@@ -27,6 +27,28 @@ func (q *Queries) ActivateUser(ctx context.Context, id uuid.UUID) (int64, error)
 	return result.RowsAffected(), nil
 }
 
+const applyConfiguredPasswordHash = `-- name: ApplyConfiguredPasswordHash :execrows
+UPDATE users
+SET password_hash = $1, password_changed_at = NULL, configured_password_hash = $1,
+    updated_at = CASE WHEN password_hash IS DISTINCT FROM $1 THEN now() ELSE updated_at END
+WHERE id = $2
+`
+
+type ApplyConfiguredPasswordHashParams struct {
+	PasswordHash *string
+	ID           uuid.UUID
+}
+
+// The configured admin hash replaces the password and clears the in-app marker; it is also
+// remembered, so that the next start can tell an unchanged Secret from a new one.
+func (q *Queries) ApplyConfiguredPasswordHash(ctx context.Context, arg ApplyConfiguredPasswordHashParams) (int64, error) {
+	result, err := q.db.Exec(ctx, applyConfiguredPasswordHash, arg.PasswordHash, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteSession = `-- name: DeleteSession :execrows
 DELETE FROM sessions
 WHERE id = $1
@@ -70,19 +92,21 @@ func (q *Queries) GetMembershipRole(ctx context.Context, arg GetMembershipRolePa
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, display_name, status, is_platform_admin, updated_at
+SELECT id, email, password_hash, display_name, status, is_platform_admin, updated_at, password_changed_at, configured_password_hash
 FROM users
 WHERE email = $1
 `
 
 type GetUserByEmailRow struct {
-	ID              uuid.UUID
-	Email           string
-	PasswordHash    *string
-	DisplayName     string
-	Status          string
-	IsPlatformAdmin bool
-	UpdatedAt       time.Time
+	ID                     uuid.UUID
+	Email                  string
+	PasswordHash           *string
+	DisplayName            string
+	Status                 string
+	IsPlatformAdmin        bool
+	UpdatedAt              time.Time
+	PasswordChangedAt      *time.Time
+	ConfiguredPasswordHash *string
 }
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error) {
@@ -96,6 +120,8 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEm
 		&i.Status,
 		&i.IsPlatformAdmin,
 		&i.UpdatedAt,
+		&i.PasswordChangedAt,
+		&i.ConfiguredPasswordHash,
 	)
 	return i, err
 }
@@ -120,6 +146,33 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (GetUserByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
+		&i.DisplayName,
+		&i.Status,
+		&i.IsPlatformAdmin,
+	)
+	return i, err
+}
+
+const getUserCredential = `-- name: GetUserCredential :one
+SELECT email, password_hash, display_name, status, is_platform_admin
+FROM users
+WHERE id = $1
+`
+
+type GetUserCredentialRow struct {
+	Email           string
+	PasswordHash    *string
+	DisplayName     string
+	Status          string
+	IsPlatformAdmin bool
+}
+
+func (q *Queries) GetUserCredential(ctx context.Context, id uuid.UUID) (GetUserCredentialRow, error) {
+	row := q.db.QueryRow(ctx, getUserCredential, id)
+	var i GetUserCredentialRow
+	err := row.Scan(
+		&i.Email,
+		&i.PasswordHash,
 		&i.DisplayName,
 		&i.Status,
 		&i.IsPlatformAdmin,
@@ -257,6 +310,26 @@ func (q *Queries) ListOtherActiveOwners(ctx context.Context, arg ListOtherActive
 	return items, nil
 }
 
+const lockLiveSession = `-- name: LockLiveSession :one
+SELECT id
+FROM sessions
+WHERE id = $1 AND expires_at > $2
+FOR UPDATE
+`
+
+type LockLiveSessionParams struct {
+	ID  uuid.UUID
+	Now time.Time
+}
+
+// A password change acts only for a session that still exists.
+func (q *Queries) LockLiveSession(ctx context.Context, arg LockLiveSessionParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, lockLiveSession, arg.ID, arg.Now)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const lockUserCredential = `-- name: LockUserCredential :one
 SELECT password_hash, status, updated_at
 FROM users
@@ -278,6 +351,51 @@ func (q *Queries) LockUserCredential(ctx context.Context, id uuid.UUID) (LockUse
 	var i LockUserCredentialRow
 	err := row.Scan(&i.PasswordHash, &i.Status, &i.UpdatedAt)
 	return i, err
+}
+
+const lockUserForPasswordChange = `-- name: LockUserForPasswordChange :one
+SELECT email, password_hash, status, updated_at
+FROM users
+WHERE id = $1
+FOR UPDATE
+`
+
+type LockUserForPasswordChangeRow struct {
+	Email        string
+	PasswordHash *string
+	Status       string
+	UpdatedAt    time.Time
+}
+
+// The password change re-reads the credential it verified; FOR UPDATE makes concurrent changes
+// and resets wait for each other.
+func (q *Queries) LockUserForPasswordChange(ctx context.Context, id uuid.UUID) (LockUserForPasswordChangeRow, error) {
+	row := q.db.QueryRow(ctx, lockUserForPasswordChange, id)
+	var i LockUserForPasswordChangeRow
+	err := row.Scan(
+		&i.Email,
+		&i.PasswordHash,
+		&i.Status,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const setUserPassword = `-- name: SetUserPassword :exec
+UPDATE users
+SET password_hash = $1, password_changed_at = $2, updated_at = $2
+WHERE id = $3
+`
+
+type SetUserPasswordParams struct {
+	PasswordHash *string
+	ChangedAt    *time.Time
+	ID           uuid.UUID
+}
+
+func (q *Queries) SetUserPassword(ctx context.Context, arg SetUserPasswordParams) error {
+	_, err := q.db.Exec(ctx, setUserPassword, arg.PasswordHash, arg.ChangedAt, arg.ID)
+	return err
 }
 
 const touchMembership = `-- name: TouchMembership :exec
@@ -313,25 +431,6 @@ type TouchSessionParams struct {
 func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) error {
 	_, err := q.db.Exec(ctx, touchSession, arg.Now, arg.ID, arg.StaleBefore)
 	return err
-}
-
-const updateUserPasswordHash = `-- name: UpdateUserPasswordHash :execrows
-UPDATE users
-SET password_hash = $1, updated_at = now()
-WHERE id = $2 AND password_hash IS DISTINCT FROM $1
-`
-
-type UpdateUserPasswordHashParams struct {
-	PasswordHash *string
-	ID           uuid.UUID
-}
-
-func (q *Queries) UpdateUserPasswordHash(ctx context.Context, arg UpdateUserPasswordHashParams) (int64, error) {
-	result, err := q.db.Exec(ctx, updateUserPasswordHash, arg.PasswordHash, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }
 
 const upsertMembership = `-- name: UpsertMembership :exec

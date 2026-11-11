@@ -39,9 +39,8 @@ Proreta {{ include "proreta.imageTag" . }} is installed as release "{{ .Release.
 {{- $b := .Values.database.bootstrap }}
 {{- if $b.enabled }}
 
-WARNING: database.bootstrap.enabled is true, so every upgrade runs the bootstrap Job with the
-database admin login. After this install succeeded, set database.bootstrap.enabled: false in your
-values, run the same helm upgrade again{{ if $b.adminSecret.existingSecret }}, and then delete the admin login Secret:
+NOTE: database.bootstrap.enabled is true. Later upgrades skip the bootstrap on their own once the
+database is set up, without reading the database admin login{{ if $b.adminSecret.existingSecret }}, so you can delete the admin login Secret now:
 
      kubectl -n {{ $ns }} delete secret {{ $b.adminSecret.existingSecret }}
 {{- else }}.{{ end }}

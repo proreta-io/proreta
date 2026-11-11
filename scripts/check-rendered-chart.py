@@ -31,6 +31,21 @@ STATUSPAGE_ENV = {"PRORETA_LOG_LEVEL", "PRORETA_ADMIN_ADDR", "PRORETA_DATABASE_U
                   "PRORETA_HTTP_ADDR", "PRORETA_COOKIE_SECURE", "PRORETA_TRUSTED_PROXY_HOPS", "PRORETA_STATUSPAGE_COOKIE_KEY"}
 
 
+LOOPBACK_HTTP = re.compile(r"^http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]+)?(/.*)?$")
+
+
+def public_url_ok(url, env):
+    """https, or plain http on a loopback host when the same workload has non-Secure cookies."""
+    if url.endswith("/"):
+        return False
+    if url.startswith("https://"):
+        return True
+    if LOOPBACK_HTTP.match(url):
+        cookie = env.get("PRORETA_COOKIE_SECURE")
+        return cookie is None or cookie.get("value") == "false"
+    return False
+
+
 def mem_mi(value):
     m = re.fullmatch(r"(\d+)(Mi|Gi)", str(value))
     if not m:
@@ -238,8 +253,8 @@ def check(path):
         fail("worker has PRORETA_PUBLIC_URL")
     for comp, env in (("api", api), ("jobs", jobs)):
         url = env.get("PRORETA_PUBLIC_URL", {}).get("value", "")
-        if not url.startswith("https://") or url.endswith("/"):
-            fail(f"{comp}: PRORETA_PUBLIC_URL {url!r} must be https without trailing slash")
+        if not public_url_ok(url, env):
+            fail(f"{comp}: PRORETA_PUBLIC_URL {url!r} must be https (http only on localhost with PRORETA_COOKIE_SECURE=false) without trailing slash")
     for comp, d in deployments.items():
         grace = d["spec"]["template"]["spec"].get("terminationGracePeriodSeconds")
         if comp in ("worker", "jobs") and grace != 45:
@@ -257,8 +272,8 @@ def check(path):
         if key_ref != {"name": STATUSPAGE_SECRET, "key": "cookie_key"}:
             fail(f"statuspage cookie key must come from {STATUSPAGE_SECRET}/cookie_key, got {key_ref}")
         url = sp.get("PRORETA_PUBLIC_URL", {}).get("value", "")
-        if not url.startswith("https://") or url.endswith("/"):
-            fail(f"statuspage: PRORETA_PUBLIC_URL {url!r} must be https without trailing slash")
+        if not public_url_ok(url, sp):
+            fail(f"statuspage: PRORETA_PUBLIC_URL {url!r} must be https (http only on localhost with PRORETA_COOKIE_SECURE=false) without trailing slash")
     for comp, env in (("api", api), ("worker", worker), ("jobs", jobs)):
         if "PRORETA_STATUSPAGE_COOKIE_KEY" in env or env.get("PRORETA_DATABASE_URL", {}).get("valueFrom", {}).get("secretKeyRef", {}).get("key") == "statuspage_url":
             fail(f"{comp} has the status page's credentials")

@@ -33,8 +33,21 @@
 //   - Secret exists but lacks a password key: the run fails; it never overwrites a Secret it
 //     did not write completely.
 //
+// For local development without Kubernetes, PRORETA_BOOTSTRAP_SECRET_FILE replaces the Secret by a
+// file of key=value lines (FileSecrets) with the same keys; scripts/dev-db.sh uses it.
+//
 // The Job's ServiceAccount needs get, create and patch on secrets in its namespace (the token, CA
 // bundle and namespace are read from /var/run/secrets/kubernetes.io/serviceaccount).
+//
+// # Skipping
+//
+// Ensure, which `proretactl db bootstrap` calls, does nothing and needs no admin login when the
+// database is already set up: the Secret exists with every password and current URLs,
+// proreta_owner connects with the password from it, and the goose_db_version table exists
+// (bootstrap is only needed before the first migration). Otherwise, or when Options.Force is
+// set, it runs the full bootstrap below, and fails with ErrAdminRequired when there is no admin
+// login. A Secret left over from an earlier database does not skip: the owner login or the
+// migration table is missing there.
 //
 // # Database changes
 //

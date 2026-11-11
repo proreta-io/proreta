@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/netip"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/auth"
 	"github.com/proreta-io/proreta/backend/internal/platform/clock"
 	"github.com/proreta-io/proreta/backend/internal/platform/crypto"
+	"github.com/proreta-io/proreta/backend/internal/platform/validation"
 	"github.com/proreta-io/proreta/backend/internal/testsupport/pgtest"
 )
 
@@ -692,5 +694,223 @@ func TestIntegrationAcceptRefusesTenantSuspendedMeanwhile(t *testing.T) {
 	// The same for a registration through the link.
 	if _, err := svc.Register(ctx, auth.RegisterInput{Email: "new@example.com", Password: "new passphrase!", IP: testIP, InviteToken: token}); !errors.Is(err, auth.ErrInvitationInvalid) {
 		t.Fatalf("register into a suspended tenant: %v", err)
+	}
+}
+
+const strongPassword = "a brand new passphrase"
+
+func principalOf(t *testing.T, svc *auth.Service, token string) auth.Principal {
+	t.Helper()
+	p, err := svc.Authenticate(context.Background(), token)
+	if err != nil {
+		t.Fatalf("authenticate: %v", err)
+	}
+	return p
+}
+
+func fieldErrorOn(err error, field string) bool {
+	var verr *validation.Error
+	if !errors.As(err, &verr) {
+		return false
+	}
+	for _, f := range verr.Fields {
+		if f.Field == field {
+			return true
+		}
+	}
+	return false
+}
+
+// A password chosen in the app survives a restart with the same Secret hash; a new Secret hash
+// (the documented reset) replaces it.
+func TestIntegrationChangePasswordKeepsAdminPasswordAcrossRestarts(t *testing.T) {
+	env := pgtest.New(t, pgtest.DBName("auth_pwchange_admin"))
+	ctx := context.Background()
+	admin := env.AdminConn(t)
+	secret1, _ := crypto.HashPassword("first", cheap)
+	secret2, _ := crypto.HashPassword("second", cheap)
+
+	svc := newBootstrapped(t, env, "admin", secret1)
+	current := mustLogin(t, svc, "admin", "first")
+	other := mustLogin(t, svc, "admin", "first")
+
+	res, err := svc.ChangePassword(ctx, principalOf(t, svc, current), auth.ChangePasswordInput{Current: "first", New: strongPassword, IP: testIP})
+	if err != nil {
+		t.Fatalf("change: %v", err)
+	}
+	if res.Token == "" || res.Token == current || res.CSRFToken == "" || res.User.Login != "admin" || !res.User.IsPlatformAdmin || res.Tenant.Slug != "default" || res.Role != auth.RoleOwner {
+		t.Fatalf("answer = %+v", res)
+	}
+	for name, token := range map[string]string{"the old current session": current, "the other session": other} {
+		if _, err := svc.Authenticate(ctx, token); !errors.Is(err, auth.ErrUnauthenticated) {
+			t.Fatalf("%s: err = %v, want ErrUnauthenticated", name, err)
+		}
+	}
+	if _, err := svc.Authenticate(ctx, res.Token); err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	if _, err := login(t, svc, "admin", "first"); !errors.Is(err, auth.ErrInvalidCredentials) {
+		t.Fatalf("old password: err = %v", err)
+	}
+	mustLogin(t, svc, "admin", strongPassword)
+
+	var action, entity, meta string
+	if err := admin.QueryRow(ctx, `SELECT action, entity_type, metadata::text FROM audit_log WHERE action = 'auth.password_changed'`).Scan(&action, &entity, &meta); err != nil {
+		t.Fatalf("audit row: %v", err)
+	}
+	if entity != "user" || meta != `{"sessionsRevoked": 2}` {
+		t.Fatalf("audit entity=%s metadata=%s", entity, meta)
+	}
+
+	// Restarts with the same Secret hash: the chosen password stays and its sessions survive.
+	for i := 0; i < 2; i++ {
+		svc = newBootstrapped(t, env, "admin", secret1)
+		if _, err := svc.Authenticate(ctx, res.Token); err != nil {
+			t.Fatalf("session after restart: %v", err)
+		}
+		mustLogin(t, svc, "admin", strongPassword)
+	}
+	if _, err := login(t, svc, "admin", "first"); !errors.Is(err, auth.ErrInvalidCredentials) {
+		t.Fatalf("Secret password after a change: err = %v", err)
+	}
+	var marker *time.Time
+	if err := admin.QueryRow(ctx, `SELECT password_changed_at FROM users WHERE email = 'admin'`).Scan(&marker); err != nil || marker == nil {
+		t.Fatalf("password_changed_at = %v (%v), want set", marker, err)
+	}
+
+	// The reset: a new Secret hash (regenerated Secrets) replaces the chosen password and ends
+	// its sessions.
+	svc = newBootstrapped(t, env, "admin", secret2)
+	if _, err := svc.Authenticate(ctx, res.Token); !errors.Is(err, auth.ErrUnauthenticated) {
+		t.Fatalf("session after reset: err = %v", err)
+	}
+	if _, err := login(t, svc, "admin", strongPassword); !errors.Is(err, auth.ErrInvalidCredentials) {
+		t.Fatalf("chosen password after reset: err = %v", err)
+	}
+	mustLogin(t, svc, "admin", "second")
+	if err := admin.QueryRow(ctx, `SELECT password_changed_at FROM users WHERE email = 'admin'`).Scan(&marker); err != nil || marker != nil {
+		t.Fatalf("password_changed_at after reset = %v (%v), want NULL", marker, err)
+	}
+	// A password can be chosen again, and survives the same Secret again.
+	if _, err := svc.ChangePassword(ctx, principalOf(t, svc, mustLogin(t, svc, "admin", "second")), auth.ChangePasswordInput{Current: "second", New: strongPassword + "!", IP: testIP}); err != nil {
+		t.Fatalf("second change: %v", err)
+	}
+	svc = newBootstrapped(t, env, "admin", secret2)
+	mustLogin(t, svc, "admin", strongPassword+"!")
+}
+
+func TestIntegrationChangePasswordRules(t *testing.T) {
+	env := pgtest.New(t, pgtest.DBName("auth_pwchange_rules"))
+	ctx := context.Background()
+	admin := env.AdminConn(t)
+	secret, _ := crypto.HashPassword("first", cheap)
+	userHash, _ := crypto.HashPassword("user password 1", cheap)
+	svc := newBootstrapped(t, env, "admin", secret)
+	pgtest.MustExec(t, admin,
+		`INSERT INTO users (id, email, password_hash) VALUES ('01920000-0000-7000-8000-0000000000a1', 'user@example.com', '`+userHash+`')`,
+		`INSERT INTO users (id, email) VALUES ('01920000-0000-7000-8000-0000000000a2', 'oauth@example.com')`,
+		`INSERT INTO memberships (tenant_id, user_id, role) SELECT t.id, u.id, 'member' FROM tenants t, users u WHERE t.slug = 'default' AND u.email IN ('user@example.com', 'oauth@example.com')`)
+	token := mustLogin(t, svc, "user@example.com", "user password 1")
+	p := principalOf(t, svc, token)
+
+	for name, tc := range map[string]struct {
+		in    auth.ChangePasswordInput
+		field string
+	}{
+		"wrong current": {auth.ChangePasswordInput{Current: "nope", New: strongPassword, IP: testIP}, "currentPassword"},
+		"too short":     {auth.ChangePasswordInput{Current: "user password 1", New: "short", IP: testIP}, "newPassword"},
+		"too long":      {auth.ChangePasswordInput{Current: "user password 1", New: strings.Repeat("x", 129), IP: testIP}, "newPassword"},
+		"the login":     {auth.ChangePasswordInput{Current: "user password 1", New: "USER@example.com", IP: testIP}, "newPassword"},
+		"unchanged":     {auth.ChangePasswordInput{Current: "user password 1", New: "user password 1", IP: testIP}, "newPassword"},
+	} {
+		if _, err := svc.ChangePassword(ctx, p, tc.in); !fieldErrorOn(err, tc.field) {
+			t.Errorf("%s: err = %v, want a validation error on %s", name, err, tc.field)
+		}
+	}
+	// Nothing changed and the session is still there.
+	if _, err := svc.Authenticate(ctx, token); err != nil {
+		t.Fatalf("session after refused changes: %v", err)
+	}
+	mustLogin(t, svc, "user@example.com", "user password 1")
+
+	oauthP := auth.Principal{SessionID: p.SessionID, UserID: uuid.MustParse("01920000-0000-7000-8000-0000000000a2"), TenantID: p.TenantID}
+	if _, err := svc.ChangePassword(ctx, oauthP, auth.ChangePasswordInput{Current: "x", New: strongPassword, IP: testIP}); !errors.Is(err, auth.ErrNoPassword) {
+		t.Fatalf("user without a password: err = %v", err)
+	}
+	// A session that was deleted meanwhile cannot change anything.
+	pgtest.MustExec(t, admin, `DELETE FROM sessions WHERE id = '`+p.SessionID.String()+`'`)
+	if _, err := svc.ChangePassword(ctx, p, auth.ChangePasswordInput{Current: "user password 1", New: strongPassword, IP: testIP}); !errors.Is(err, auth.ErrUnauthenticated) {
+		t.Fatalf("revoked session: err = %v", err)
+	}
+	mustLogin(t, svc, "user@example.com", "user password 1")
+}
+
+// Wrong current passwords are limited per account and per client address, like logins.
+func TestIntegrationChangePasswordRateLimited(t *testing.T) {
+	env := pgtest.New(t, pgtest.DBName("auth_pwchange_limit"))
+	ctx := context.Background()
+	secret, _ := crypto.HashPassword("first", cheap)
+	pool := env.Pool(t, env.APIURL, 8)
+	svc, err := auth.NewService(pool, auth.Options{SessionTTL: time.Hour, LoginLimiter: auth.NewLimiter(3, time.Hour, 100, clock.System{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.BootstrapAdmin(ctx, "admin", secret); err != nil {
+		t.Fatal(err)
+	}
+	p := principalOf(t, svc, mustLogin(t, svc, "admin", "first"))
+	for i := 0; i < 3; i++ {
+		if _, err := svc.ChangePassword(ctx, p, auth.ChangePasswordInput{Current: "nope", New: strongPassword, IP: testIP}); !fieldErrorOn(err, "currentPassword") {
+			t.Fatalf("attempt %d: err = %v", i, err)
+		}
+	}
+	// Even the right password is refused until the window passes.
+	if _, err := svc.ChangePassword(ctx, p, auth.ChangePasswordInput{Current: "first", New: strongPassword, IP: testIP}); !errors.Is(err, auth.ErrRateLimited) {
+		t.Fatalf("after the limit: err = %v, want ErrRateLimited", err)
+	}
+}
+
+// Password login turned off: only the admin keeps a usable password.
+func TestIntegrationChangePasswordWhenPasswordLoginIsOff(t *testing.T) {
+	env := pgtest.New(t, pgtest.DBName("auth_pwchange_off"))
+	ctx := context.Background()
+	admin := env.AdminConn(t)
+	secret, _ := crypto.HashPassword("first", cheap)
+	userHash, _ := crypto.HashPassword("user password 1", cheap)
+	svc, err := auth.NewService(env.Pool(t, env.APIURL, 8), auth.Options{SessionTTL: time.Hour, PasswordLoginDisabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.BootstrapAdmin(ctx, "admin", secret); err != nil {
+		t.Fatal(err)
+	}
+	pgtest.MustExec(t, admin,
+		`INSERT INTO users (id, email, password_hash) VALUES ('01920000-0000-7000-8000-0000000000a1', 'user@example.com', '`+userHash+`')`)
+	p := principalOf(t, svc, mustLogin(t, svc, "admin", "first"))
+	userP := auth.Principal{SessionID: p.SessionID, UserID: uuid.MustParse("01920000-0000-7000-8000-0000000000a1"), TenantID: p.TenantID}
+	if _, err := svc.ChangePassword(ctx, userP, auth.ChangePasswordInput{Current: "user password 1", New: strongPassword, IP: testIP}); !errors.Is(err, auth.ErrPasswordLoginDisabled) {
+		t.Fatalf("user: err = %v", err)
+	}
+	if _, err := svc.ChangePassword(ctx, p, auth.ChangePasswordInput{Current: "first", New: strongPassword, IP: testIP}); err != nil {
+		t.Fatalf("admin: %v", err)
+	}
+}
+
+// An adopted user takes the Secret's hash even after it changed its password in the app.
+func TestIntegrationBootstrapAdoptionOverridesChosenPassword(t *testing.T) {
+	env := pgtest.New(t, pgtest.DBName("auth_pwchange_adopt"))
+	admin := env.AdminConn(t)
+	secret, _ := crypto.HashPassword("first", cheap)
+	opsHash, _ := crypto.HashPassword("ops chosen", cheap)
+	newBootstrapped(t, env, "admin", secret)
+	pgtest.MustExec(t, admin,
+		`INSERT INTO users (id, email, password_hash, password_changed_at) VALUES ('01920000-0000-7000-8000-0000000000e1', 'ops@company.example', '`+opsHash+`', now())`,
+		`INSERT INTO memberships (tenant_id, user_id, role) SELECT id, '01920000-0000-7000-8000-0000000000e1', 'viewer' FROM tenants WHERE slug = 'default'`)
+	ops, _ := crypto.HashPassword("ops from secret", cheap)
+	svc := newBootstrapped(t, env, "ops@company.example", ops)
+	mustLogin(t, svc, "ops@company.example", "ops from secret")
+	var marker *time.Time
+	if err := admin.QueryRow(context.Background(), `SELECT password_changed_at FROM users WHERE email = 'ops@company.example'`).Scan(&marker); err != nil || marker != nil {
+		t.Fatalf("marker = %v (%v), want NULL", marker, err)
 	}
 }

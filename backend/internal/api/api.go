@@ -349,6 +349,28 @@ func (s *server) Register(ctx context.Context, req gen.RegisterRequestObject) (g
 	}, nil
 }
 
+func (s *server) ChangePassword(ctx context.Context, req gen.ChangePasswordRequestObject) (gen.ChangePasswordResponseObject, error) {
+	p, err := s.principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	r := httpRequest(ctx)
+	res, err := s.auth.ChangePassword(ctx, p, auth.ChangePasswordInput{
+		Current:   req.Body.CurrentPassword,
+		New:       req.Body.NewPassword,
+		IP:        s.limiterIP(ctx, r),
+		UserAgent: r.UserAgent(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	cookie := s.sessionCookie(res.Token, res.ExpiresAt).String()
+	return gen.ChangePassword200JSONResponse{
+		Body:    s.toSessionInfo(ctx, res.SessionInfo),
+		Headers: gen.ChangePassword200ResponseHeaders{SetCookie: &cookie},
+	}, nil
+}
+
 func (s *server) warnMissingXFF(ctx context.Context) {
 	now := time.Now().UnixNano()
 	last := s.lastXFFWarn.Load()

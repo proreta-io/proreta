@@ -25,10 +25,16 @@ Until outgoing email exists this is the only recovery path.
 2. Open `/admin/organizations`, search for the customer's email, open the organization.
 3. In the users table choose **Reset password** for that user and confirm.
 4. Copy the temporary password from the panel. It is shown once: the server keeps only its hash, and hiding the panel or leaving the page clears it from the page (the web app keeps no other copy). If it is lost, reset again.
-5. Hand it over through a trusted channel, never in a ticket or a shared chat. Ask the user to keep it in a password manager: there is no way to change it in the app yet.
+5. Hand it over through a trusted channel, never in a ticket or a shared chat. Ask the user to choose their own password right away under **Profile → Change password** (it asks for the temporary one and signs the other devices out).
 6. The user's open sessions were deleted, and a login that was checking the old password at that moment is refused too; they log in with their email and the temporary password.
 
-The system admin's own password is not reset here: change the hash in the `proreta-admin` Secret (`proretactl hashpw`, or delete the generated Secrets and re-sync); the api replaces it at the next start and deletes the admin's sessions.
+## The system admin's password
+The system admin changes its own password under **Profile → Change password** like any user (current password, new password; 12-128 characters). The change signs the admin out everywhere else, keeps the current browser signed in with a new session, and is audited as `auth.password_changed`.
+
+The panel does not reset it. The hash in the Secret `proreta-admin` (`PRORETA_ADMIN_PASSWORD_HASH`) is applied at every api start with one rule: it replaces the stored password only while the admin never changed it in the app, or when it is a different hash from the one the api saw at its previous start. So:
+- A restart or an upgrade with the same Secret never overwrites a password chosen in the app.
+- **Initial password:** after the admin changed its password, the Secret `proreta-admin-initial` is obsolete and can be deleted at any time (`kubectl -n proreta delete secret proreta-admin-initial`). Nothing reads it; it only holds the first password in plain text.
+- **Reset when the password is lost:** put a new hash into the Secret, then restart the api, which applies it, forgets the chosen password and deletes the admin's sessions. With the generated Secrets: delete `proreta-admin` and `proreta-admin-initial`, run the same `helm upgrade` (a new one-time password is generated), `kubectl -n proreta rollout restart deploy/proreta-api`, sign in with the new one-time password and change it again. With your own secret store or Secret: write a new hash (`proretactl hashpw`) to it and restart the api.
 
 ## Suspend an organization
 Use it for abuse, non-payment or a customer's request to freeze an account.

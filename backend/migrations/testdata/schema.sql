@@ -286,6 +286,8 @@ users.6 created_at timestamp with time zone not null default now()
 users.7 updated_at timestamp with time zone not null default now() acl=proreta_api=w/proreta_owner
 users.8 is_platform_admin boolean not null default false
 users.9 email_verified_at timestamp with time zone acl=proreta_api=aw/proreta_owner
+users.10 password_changed_at timestamp with time zone acl=proreta_api=w/proreta_owner
+users.11 configured_password_hash text acl=proreta_api=w/proreta_owner
 
 -- constraints
 audit_log audit_log_action_check CHECK (((length(action) >= 1) AND (length(action) <= 100)))

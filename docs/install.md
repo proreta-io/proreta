@@ -24,7 +24,7 @@ Contents: [Prerequisites](#prerequisites) · [Install](#install) · [After insta
 - **What the bootstrap does with it** (`proretactl db bootstrap`, idempotent, under an advisory lock):
   - creates the roles `proreta_owner` (migrations), `proreta_api`, `proreta_worker` and `proreta_statuspage`, all `LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`, with connection limits 3, 20, 20 and 10 and per-role statement timeouts. Passwords are random, sent as SCRAM verifiers, and stored only in the Secret `proreta-db` in your namespace;
   - creates the database `proreta` (`database.name`) owned by `proreta_owner`, revokes `PUBLIC` access, grants `CONNECT` to the four roles;
-  - temporarily grants itself `proreta_owner` (needed on RDS to create a database owned by another role) and revokes it at the end. On PostgreSQL 16 and newer the admin keeps an implicit membership as the role's creator; the bootstrap log reports it (`admin member of proreta_owner: true`);
+  - temporarily grants itself `proreta_owner` (needed on RDS to create a database owned by another role) and revokes it at the end. On PostgreSQL 16 and newer the admin keeps an implicit membership as the role's creator; the bootstrap log reports whether the admin is still a member (`admin member of proreta_owner: true` or `false`, depending on the server and its version); both are fine, because the migrations and the application do not depend on it;
   - in the new database: makes `proreta_owner` the owner of schema `public` and creates the extension **`citext`** as `proreta_owner`.
 - **Extensions:** only `citext` is needed. It is a trusted extension, so the database owner may create it without superuser rights. It is part of the standard contrib modules (present in the official images, RDS, Aurora and Cloud SQL). On Azure Database for PostgreSQL allow-list it first (server parameter `azure.extensions` must include `CITEXT`). The migrations themselves create no extensions.
 - **One installation per PostgreSQL server:** the role names (`proreta_owner`, `proreta_api`, `proreta_worker`, `proreta_statuspage`) are fixed and not configurable, so one PostgreSQL server hosts exactly one Proreta installation. A second installation on the same server, even with another `database.name`, would reset the role passwords of the first one. Use a separate server (or managed instance) per installation.
@@ -38,7 +38,7 @@ Contents: [Prerequisites](#prerequisites) · [Install](#install) · [After insta
 
 The commands below install the chart from a git checkout. Every release is also published as an OCI artifact; see [Installing from the OCI registry](#installing-from-the-oci-registry) for the three steps that differ.
 
-Worked example: host `proreta.example.com`, Gateway `gateway` with the HTTPS listener `https` in namespace `gateway-system`, PostgreSQL at `postgres.example.internal`. The resource and Secret names below are those of the release `proreta`; another release name gives `<release>-proreta-...` names (for example the database Secret `<release>-proreta-db`, or `database.secretName` when set), so several releases can share a namespace, each with its own PostgreSQL server.
+Worked example: host `proreta.example.com`, Gateway `gateway` with the HTTPS listener `https` in namespace `gateway-system`, PostgreSQL at `postgres.example.internal`. The resource and Secret names below are those of the release `proreta`; a release name that does not contain `proreta` gives `<release>-proreta-...` names (for example the database Secret `<release>-proreta-db`, or `database.secretName` when set), and a name that contains it is used as it is (a release called `platform-proreta` gives `platform-proreta-api`, `platform-proreta-admin-initial` and so on; Argo CD uses the name of the Application as the release name unless you set `helm.releaseName`), so several releases can share a namespace, each with its own PostgreSQL server.
 
 **1. Get the chart**
 ```sh
@@ -113,11 +113,11 @@ kubectl -n gateway-system get gateway gateway     # ADDRESS: point the DNS name 
 kubectl -n proreta get secret proreta-admin-initial -o jsonpath='{.data.login}' | base64 -d; echo
 kubectl -n proreta get secret proreta-admin-initial -o jsonpath='{.data.password}' | base64 -d; echo
 ```
-Open `config.publicUrl`, sign in with that login (default `admin`) and password, store the password in a password manager, then delete the plaintext copy. It is never recreated:
+Open `config.publicUrl` and sign in with that login (default `admin`) and password. Then choose your own password under **Profile → Change password** and store it in a password manager. The application reads only the hash (Secret `proreta-admin`), so nothing breaks if you keep `proreta-admin-initial`, but it is the live first password in plain text and readable by everyone who can read Secrets in the namespace, so deleting it is recommended once you have changed the password. It is never recreated:
 ```sh
 kubectl -n proreta delete secret proreta-admin-initial
 ```
-There is no way to change this password in the app yet. To reset it, delete the Secrets `proreta-admin` and `proreta-admin-initial`, run the same `helm upgrade` again (a new one-time password is generated) and restart the api, which reads the hash only at start: `kubectl -n proreta rollout restart deploy/proreta-api` ([admin panel runbook](runbooks/admin-panel.md)).
+A password you chose in the app is kept: the api compares the hash in the Secret `proreta-admin` with the one it saw at its previous start and only applies it when it is a new one. If you lose the password, reset it: delete the Secrets `proreta-admin` and `proreta-admin-initial`, run the same `helm upgrade` again (a new one-time password is generated), restart the api (`kubectl -n proreta rollout restart deploy/proreta-api`) and sign in with the new one-time password, which replaces the one you chose and ends the admin's sessions ([admin panel runbook](runbooks/admin-panel.md)).
 
 **7. Start using it.** The admin is the owner of the organization **Default** (slug `default`; plan `internal`: up to 1000 monitors, 100 heartbeats, 10 notification channels, 50 members). For a single company that is all you need: add monitors there and invite colleagues under **Members → Invite someone** (an invitation link works while registration is off; see [invitations](runbooks/invitations.md)). Self-service registration (`config.registrationEnabled: true`) is only for letting other people create separate organizations (plan `free`); there is no email verification, so leave it off unless you want that.
 
@@ -149,13 +149,57 @@ helm upgrade --install proreta oci://ghcr.io/proreta-io/charts/proreta --version
 ```
 `helm show values oci://ghcr.io/proreta-io/charts/proreta --version "$VERSION"` prints every default with its comment, as a reference. For later upgrades pass the new `--version`.
 
+### Installing with Argo CD
+The chart works under Argo CD with the same order as Helm: the ServiceAccounts, Roles, bootstrap Jobs and the migration Job are hooks ordered by sync waves, the workloads come last. Tested with Argo CD 3.x, Envoy Gateway and Amazon RDS (PostgreSQL 16), from the git source below; installing from the OCI registry as an Argo CD source was not tested (it needs the registry registered in Argo CD as a Helm repository with OCI enabled).
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: proreta
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/proreta-io/proreta.git
+    targetRevision: v0.1.0            # the release tag; chart and image tag come from the same version
+    path: deploy/helm/proreta
+    helm:
+      releaseName: proreta            # Argo CD otherwise uses the Application name, which changes every resource name
+      parameters:
+        - name: image.tag
+          value: "0.1.0"              # required from a git checkout; image tags have no leading v
+      valuesObject:                   # the minimal values from "Installing from the OCI registry"
+        config:
+          publicUrl: https://proreta.example.com
+          trustedProxyHops: 1
+        database:
+          host: postgres.example.internal
+          bootstrap:
+            enabled: true
+            adminSecret:
+              existingSecret: proreta-db-admin-login
+        httpRoute:
+          parentRef: {name: gateway, namespace: gateway-system, sectionName: https}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: proreta
+  syncPolicy:
+    syncOptions: [CreateNamespace=true]
+```
+
+- Create the namespace yourself if you want Pod Security enforcement (`pod-security.kubernetes.io/enforce=restricted`; the pods satisfy it) instead of `CreateNamespace=true`.
+- The database admin Secret (`proreta-db-admin-login`, keys `username` and `password`) can come from an ExternalSecret or any other source; it only has to exist before the first sync.
+- If you do not set `helm.releaseName`, replace `proreta-` in the Secret and workload names used elsewhere in this guide with the Application name (for example `platform-proreta-admin-initial`).
+- Turning the bootstrap off later is a second change to the Application (`bootstrap.enabled: false`) and a sync; only then remove the admin Secret ([After installing](#after-installing)).
+
 ### Trying it without a Gateway controller
 For a local trial (kind, minikube) you can skip the Gateway controller, but the Gateway API CRDs are still required: the chart creates an `HTTPRoute`. Without a controller the route has no `status` and nothing serves the host name, yet the pods and the API work. Set `httpRoute.parentRef.name` to any name. The Services listen on port 8080 (not 80); reach them with port-forwards:
 ```sh
 kubectl -n proreta port-forward svc/proreta-api 8080:8080     # the API
 kubectl -n proreta port-forward svc/proreta-web 8081:8080     # the web app, http://localhost:8081
 ```
-Over plain http the `Secure` session cookie is not kept, so for such a trial only, set `config.cookieSecure: false` (the cookie is then named `proreta_session` instead of `__Host-proreta_session`). Never do this in production. The web app expects `/api` on the same origin, so without a Gateway use the API directly with `curl`:
+Over plain http the `Secure` session cookie is not kept, so for such a trial only, set `config.cookieSecure: false` (with a `config.publicUrl` such as `http://localhost:8081`, which is accepted only for `localhost`, `127.0.0.1` and `[::1]` and then requires `cookieSecure: false`; the cookie is then named `proreta_session` instead of `__Host-proreta_session`). Never do this in production. The web app expects `/api` on the same origin, so without a Gateway use the API directly with `curl`:
 ```sh
 ADMIN_PASSWORD=$(kubectl -n proreta get secret proreta-admin-initial -o jsonpath='{.data.password}' | base64 -d)
 curl -s -c jar -H 'Content-Type: application/json' \
@@ -170,17 +214,49 @@ Writes (POST, PUT, PATCH, DELETE) need the `X-CSRF-Token` header; the login itse
 
 ## After installing
 
-**Turn the database bootstrap off.** While `database.bootstrap.enabled` is `true`, every `helm upgrade` runs the bootstrap Job again with the admin login. That is harmless (it is idempotent: a second run creates nothing and keeps all passwords), but it keeps the admin login in the namespace, and if you delete the admin Secret while the flag is still on, the bootstrap pod cannot start without it and the next upgrade fails once the Job's `activeDeadlineSeconds` (300 s by default) runs out. So, in this order:
+**Delete the admin login Secret (recommended).** `database.bootstrap.enabled` may stay `true`: on every later `helm upgrade` the bootstrap Job checks whether the database is already set up (the Secret `proreta-db` exists, `proreta_owner` connects with its password, and the migrations have started) and, if so, skips itself without reading the admin login. The Job treats the admin Secret as optional, so deleting it does not stop the pod. The admin login is the database server's admin account, so remove it from the namespace once it is no longer needed:
 ```sh
-# in my-values.yaml: database.bootstrap.enabled: false
-helm upgrade --install proreta deploy/helm/proreta -n proreta -f my-values.yaml --set image.tag="$TAG" --wait --timeout 10m
-# or, for the OCI chart (no image.tag):
-helm upgrade --install proreta oci://ghcr.io/proreta-io/charts/proreta --version "$VERSION" -n proreta -f my-values.yaml --wait --timeout 10m
 kubectl -n proreta delete secret proreta-db-admin-login
 ```
-The Secret `proreta-db` (the role passwords) stays; it is not managed by Helm. Turn the bootstrap on again only for a new database, a password rotation or a new role ([database bootstrap](runbooks/database-bootstrap.md)).
+The Secret `proreta-db` (the role passwords) stays; it is not managed by Helm. If a later run needs the login again (a new or empty database, a missing or outdated `proreta-db`), the Job fails with `the database is not ready and no database admin login is available`: create the admin Secret again (step 2) and rerun the upgrade. To rotate the role passwords or add a role on a working installation, set `database.bootstrap.force: true` together with the admin Secret, upgrade, then set it back to `false` ([database bootstrap](runbooks/database-bootstrap.md)). You can still set `database.bootstrap.enabled: false` after the first install if you prefer not to run the Job at all.
+
+**Back up the encryption key.** Do this now, once. The Secret `proreta-crypto` holds the keys that encrypt the Slack webhook URLs stored in the database. Without it the webhook URLs in the database (and in any backup of it) cannot be decrypted: they are lost and each Slack channel must be entered again. The Secret `proreta-statuspage` (the cookie signing key of the status page) is less critical: losing it only signs visitors of password-protected pages out, but it is cheap to keep with the other one. [Back up the secrets](#back-up-the-secrets) shows how.
 
 **Optional next steps:** Slack channels in the app, [outgoing email](runbooks/email.md) (an SMTP server; off by default, and nothing is emailed without it), [sign-in with Google or GitHub](runbooks/oauth.md), [status pages](runbooks/status-page.md), [Alertmanager watchdog](runbooks/heartbeat-alertmanager.md), [metrics and alerts](runbooks/observability.md). Add the CIDRs of your cluster and VPC to `config.blockedCIDRs` so monitors cannot probe internal addresses ([chart README](../deploy/helm/proreta/README.md)).
+
+## Back up the secrets
+The database backup alone is not enough to restore an installation. Two Secrets are generated in the cluster and exist nowhere else (with `secrets.*.source: externalSecret` your secret store is the copy, and you can skip this):
+
+| Secret (release `proreta`) | Keys | What it protects | If it is lost |
+|---|---|---|---|
+| `proreta-crypto` | `keys` (JSON `{"<keyId>":"<base64 of 32 bytes>"}`, for example `{"k1":"..."}`), `active_key_id` | AES-256-GCM encryption of the Slack webhook URLs in the database (each stored value names the key id that sealed it) | The stored webhook URLs cannot be decrypted and are lost. Monitors, incidents and users are unaffected; Slack channels must be created again. |
+| `proreta-statuspage` | `cookie_key` | Signature of the cookie that records a visitor's password unlock on a protected status page | Visitors of protected pages enter the password again. Nothing is lost. |
+
+**Export.** Print the data of each Secret without the cluster-specific metadata (name, namespace, uid, resource version) and store the output in a password manager or an external secret store, never in Git or in the same place as the database backup:
+```sh
+kubectl -n proreta get secret proreta-crypto -o yaml \
+  | yq 'del(.metadata) | .metadata.name = "proreta-crypto"'
+kubectl -n proreta get secret proreta-statuspage -o yaml \
+  | yq 'del(.metadata) | .metadata.name = "proreta-statuspage"'
+```
+Without `yq`, copy the two `data` entries: `kubectl -n proreta get secret proreta-crypto -o jsonpath='{.data}'`. The values are base64 encoded once by Kubernetes; the `keys` value decodes to the JSON above. Repeat the export after every key rotation (see below).
+
+**Restore.** On a new cluster or after `kubectl delete namespace`, create the Secrets before the first `helm upgrade --install` (the secrets bootstrap Job creates a Secret only when it is absent and never overwrites it):
+```sh
+kubectl create namespace proreta
+kubectl -n proreta apply -f proreta-crypto.yaml -f proreta-statuspage.yaml   # the saved files, with metadata.name and no namespace or uid
+```
+Then install with the same `secrets.crypto.keyId`, restore the database, and check that a Slack channel can send a test message. If the Secrets already exist with other content, apply the saved files over them and restart `api` and `jobs` (`kubectl -n proreta rollout restart deploy/proreta-api deploy/proreta-jobs`) and the `statuspage` Deployment, which read the Secrets only at start.
+
+**Rotation.** Add a second entry to `keys` and point `active_key_id` at it; never remove an old entry while stored webhook URLs may still be sealed with it, because there is no re-encryption tool and a webhook URL is re-sealed only when its channel is saved again:
+```sh
+NEW=$(openssl rand -base64 32)
+KEYS=$(kubectl -n proreta get secret proreta-crypto -o jsonpath='{.data.keys}' | base64 -d)
+PATCH=$(jq -cn --arg old "$KEYS" --arg new "$NEW" '{stringData: {keys: ($old | fromjson | . + {k2: $new} | tojson), active_key_id: "k2"}}')
+kubectl -n proreta patch secret proreta-crypto --type merge -p "$PATCH"
+kubectl -n proreta rollout restart deploy/proreta-api deploy/proreta-jobs
+```
+Rotating also ends OAuth sign-ins that are in progress ([OAuth runbook](runbooks/oauth.md)). Export the Secret again afterwards. The cookie key of the status page is rotated by deleting `proreta-statuspage` ([status page runbook](runbooks/status-page.md)); that only signs visitors out.
 
 ## Upgrade
 1. Read the release notes. **Back up the database** (snapshot or `pg_dump`) right before the upgrade: migrations are forward-only and the backup is the only way back ([migrations runbook](runbooks/migrations.md)).
@@ -197,12 +273,13 @@ The Secret `proreta-db` (the role passwords) stays; it is not managed by Helm. T
 helm uninstall proreta -n proreta
 ```
 This removes the Deployments, Services, HTTPRoute and ServiceAccounts. It leaves:
-- the Secrets created by the bootstrap Jobs: `proreta-db`, `proreta-admin`, `proreta-crypto`, `proreta-statuspage` (and `proreta-admin-initial` if you did not delete it). Keep them to reinstall later with the same data: `proreta-crypto` holds the key that encrypts the Slack webhook URLs stored in the database (and the emails waiting in the queue);
+- the Secrets created by the bootstrap Jobs: `proreta-db`, `proreta-admin`, `proreta-crypto`, `proreta-statuspage` (and `proreta-admin-initial` if you did not delete it). Keep them to reinstall later with the same data: `proreta-crypto` holds the key that encrypts the Slack webhook URLs stored in the database (and the emails waiting in the queue), so [export it](#back-up-the-secrets) before deleting anything;
 - the finished Jobs, until `ttlSecondsAfterFinished` removes them (10 minutes for the bootstrap Jobs, 1 hour for the migration);
 - the database and the four roles on your PostgreSQL server. There are no PersistentVolumeClaims.
 
 To remove everything for good:
 ```sh
+# export proreta-crypto and proreta-statuspage first: see "Back up the secrets"
 kubectl -n proreta delete secret proreta-db proreta-admin proreta-admin-initial proreta-crypto proreta-statuspage --ignore-not-found
 kubectl delete namespace proreta
 ```
@@ -230,7 +307,7 @@ Two replicas of `api` and `worker` keep the service up during node drains; the `
 ### Helm fails with `pre-install hooks failed` (or `pre-upgrade hooks failed`)
  One of the Jobs did not finish. The last line of the message tells how:
 - `job proreta-db-bootstrap failed: BackoffLimitExceeded` (or `proreta-secrets-bootstrap`, `proreta-migrate`): the container ran and exited with an error three times (`backoffLimit: 2`). The Job's logs say why.
-- `job ... failed: DeadlineExceeded`: the Job did not finish within `activeDeadlineSeconds` (300 s for the bootstrap Jobs, 600 s for the migration). Usually the pod never started: a missing Secret (for example the admin login Secret, shown as `CreateContainerConfigError`) or an image that cannot be pulled.
+- `job ... failed: DeadlineExceeded`: the Job did not finish within `activeDeadlineSeconds` (300 s for the bootstrap Jobs, 600 s for the migration). Usually the pod never started: a missing Secret the Job needs (the admin login Secret is optional, so it is not the usual cause) or an image that cannot be pulled.
 - `timed out waiting for the condition`: Helm's `--timeout` ran out first, for the same reasons. Use `--timeout 10m` so the Job's own limit decides.
 
 Find which Job and why:
@@ -261,7 +338,7 @@ The first pod to fail is usually `proreta-db-bootstrap`. `kubectl -n proreta des
 - `tls error: server refused TLS connection`: the server has no TLS; set `database.sslmode: disable` (only on a trusted network) or enable TLS on the server.
 - `no pg_hba.conf entry`, `i/o timeout`, `connection refused`, `no such host`: the pod cannot reach the server. Check `database.host` and `database.port`, DNS, security groups or firewall rules, `pg_hba.conf`, and any NetworkPolicy in the namespace.
 - `permission denied to create role` or `permission denied to create database`: the admin login lacks `CREATEROLE` or `CREATEDB`.
-- `CreateContainerConfigError` on the pod (`kubectl describe pod`): the Secret named in `database.bootstrap.adminSecret.existingSecret` does not exist in the namespace or lacks the keys `username` and `password` (or the names set in `usernameKey` / `passwordKey`).
+- `the database is not ready and no database admin login is available`: the database has to be set up (the log names why: `proreta-db` missing or outdated, `proreta_owner` cannot connect, or no migration table yet) and the admin Secret named in `database.bootstrap.adminSecret.existingSecret` does not exist in the namespace or lacks the keys `username` and `password` (or the names set in `usernameKey` / `passwordKey`). Create it (step 2) and rerun the upgrade.
 
 ### The migration or the bootstrap fails because of an extension
 - `extension "citext" is not available` or `not allow-listed` in the bootstrap log: install the contrib modules on a self-hosted server, or allow-list `CITEXT` (Azure: server parameter `azure.extensions`), then rerun.

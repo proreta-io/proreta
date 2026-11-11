@@ -6,6 +6,7 @@ Operator and contributor documentation for Proreta.
 - [Project overview](../README.md)
 - [Installation guide](install.md): prerequisites, install, upgrade, uninstall, troubleshooting
 - [Helm chart](../deploy/helm/proreta/README.md) and its [example values](../deploy/helm/proreta/values.example.yaml)
+- [Running locally](development.md): throwaway database in Docker, all processes with `go run`, no Kubernetes
 - [Contributing](../CONTRIBUTING.md): development setup, conventions, tests, migrations
 
 ## Runbooks

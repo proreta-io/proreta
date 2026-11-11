@@ -7,3 +7,14 @@ useDefault = true
 [[allowlists]]
 description = "Generated embedded OpenAPI document"
 paths = ['''backend/internal/api/gen/api\.gen\.go''']
+
+# Test files carry made-up tokens and passwords as fixtures; the generic entropy rule reports them.
+# Rules for real provider credentials (AWS, GitHub, Slack and so on) still apply to test files.
+[[allowlists]]
+description = "Fixtures in test files"
+targetRules = ["generic-api-key"]
+paths = [
+  '''_test\.go$''',
+  '''\.test\.tsx?$''',
+  '''/testdata/''',
+]

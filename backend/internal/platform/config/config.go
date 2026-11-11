@@ -94,7 +94,7 @@ type API struct {
 	// TrustedProxyHops is the number of trusted proxies in front of the api (PRORETA_TRUSTED_PROXY_HOPS,
 	// default 0: X-Forwarded-For is ignored and the peer address is the client).
 	TrustedProxyHops int
-	// PublicURL is where users open Proreta (PRORETA_PUBLIC_URL, https, no trailing slash); used in
+	// PublicURL is where users open Proreta (PRORETA_PUBLIC_URL, https or http on localhost, no trailing slash); used in
 	// Slack messages.
 	PublicURL string
 	// RegistrationEnabled is the kill switch of self-service registration
@@ -180,16 +180,23 @@ type Migrate struct {
 // Bootstrap is the configuration of `proretactl db bootstrap`.
 type Bootstrap struct {
 	Base
-	Host          string
-	Port          int
+	Host string
+	Port int
+	// AdminUser and AdminPassword are empty when the admin Secret is absent; the bootstrap then
+	// only works if the database is already set up.
 	AdminUser     string
 	AdminPassword Secret
-	DBName        string
-	SSLMode       string
-	SecretName    string
+	// Force runs the full bootstrap even if the database looks ready.
+	Force      bool
+	DBName     string
+	SSLMode    string
+	SecretName string
 	// Namespace is empty when PRORETA_BOOTSTRAP_NAMESPACE is unset; the caller then reads the
 	// pod's service account namespace.
 	Namespace string
+	// SecretFile is PRORETA_BOOTSTRAP_SECRET_FILE: when set, the credentials are kept in this file
+	// instead of a Kubernetes Secret (local development).
+	SecretFile string
 }
 
 // shutdownTimeout leaves 5 s of the chart's 30 s termination grace period for the process to exit.
@@ -217,6 +224,7 @@ func LoadAPI(lookup LookupFunc) (API, error) {
 	if cfg.HTTPAddr != "" && cfg.HTTPAddr == cfg.AdminAddr {
 		l.fail("PRORETA_HTTP_ADDR", "must differ from PRORETA_ADMIN_ADDR")
 	}
+	l.cookieMatchesURL(cfg.CookieSecure, cfg.PublicURL)
 	if !cfg.PasswordLoginEnabled && !cfg.OAuth.GoogleEnabled() && !cfg.OAuth.GitHubEnabled() {
 		l.fail("PRORETA_PASSWORD_LOGIN_ENABLED", "false needs at least one OAuth provider (PRORETA_OAUTH_GOOGLE_* or PRORETA_OAUTH_GITHUB_*)")
 	}
@@ -306,6 +314,7 @@ func LoadStatuspage(lookup LookupFunc) (Statuspage, error) {
 	if cfg.HTTPAddr != "" && cfg.HTTPAddr == cfg.AdminAddr {
 		l.fail("PRORETA_HTTP_ADDR", "must differ from PRORETA_ADMIN_ADDR")
 	}
+	l.cookieMatchesURL(cfg.CookieSecure, cfg.PublicURL)
 	return cfg, l.err()
 }
 
@@ -338,12 +347,17 @@ func LoadBootstrap(lookup LookupFunc) (Bootstrap, error) {
 		Base:          l.base(),
 		Host:          l.required("PRORETA_BOOTSTRAP_HOST"),
 		Port:          l.integer("PRORETA_BOOTSTRAP_PORT", 5432, 1, 65535),
-		AdminUser:     l.required("PRORETA_BOOTSTRAP_ADMIN_USER"),
-		AdminPassword: Secret(l.required("PRORETA_BOOTSTRAP_ADMIN_PASSWORD")),
+		AdminUser:     l.optional("PRORETA_BOOTSTRAP_ADMIN_USER"),
+		AdminPassword: Secret(l.optional("PRORETA_BOOTSTRAP_ADMIN_PASSWORD")),
+		Force:         l.boolean("PRORETA_BOOTSTRAP_FORCE", false),
 		DBName:        l.identifier("PRORETA_BOOTSTRAP_DB_NAME", "proreta"),
 		SSLMode:       l.oneOf("PRORETA_BOOTSTRAP_SSLMODE", "require", "disable", "allow", "prefer", "require", "verify-ca", "verify-full"),
 		SecretName:    l.dnsLabel("PRORETA_BOOTSTRAP_SECRET_NAME", "proreta-db"),
 		Namespace:     l.optional("PRORETA_BOOTSTRAP_NAMESPACE"),
+		SecretFile:    l.optional("PRORETA_BOOTSTRAP_SECRET_FILE"),
+	}
+	if (cfg.AdminUser == "") != (cfg.AdminPassword == "") {
+		l.fail("PRORETA_BOOTSTRAP_ADMIN_USER", "and PRORETA_BOOTSTRAP_ADMIN_PASSWORD must be set together")
 	}
 	if cfg.Namespace != "" && !isDNSLabel(cfg.Namespace) {
 		l.fail("PRORETA_BOOTSTRAP_NAMESPACE", "must be a DNS label")
@@ -441,18 +455,34 @@ func (l *loader) databaseURL(name string) Secret {
 }
 
 // publicURL accepts an absolute https URL without user info, query, fragment or trailing slash,
-// made only of characters that need no escaping in a Slack link (<url|text>).
+// made only of characters that need no escaping in a Slack link (<url|text>). Plain http is
+// accepted only for a loopback host (local development).
 func (l *loader) publicURL(name string) string {
 	v := l.required(name)
 	if v == "" {
 		return ""
 	}
 	u, err := url.Parse(v)
-	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery ||
+	schemeOK := err == nil && (u.Scheme == "https" || (u.Scheme == "http" && IsLoopbackHost(u.Hostname())))
+	if !schemeOK || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery ||
 		u.Fragment != "" || strings.HasSuffix(v, "/") || strings.ContainsAny(v, "|<>& \t\n\"'") || u.String() != v {
-		l.fail(name, "must be an https URL without a trailing slash, such as https://proreta.example.com")
+		l.fail(name, "must be an https URL without a trailing slash, such as https://proreta.example.com (http is allowed only for localhost, 127.0.0.1 and [::1])")
 	}
 	return v
+}
+
+// IsLoopbackHost reports whether host (without port or brackets) is localhost, 127.0.0.1 or ::1.
+func IsLoopbackHost(host string) bool {
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
+// cookieMatchesURL fails when the public URL is plain http but cookies are marked Secure: browsers
+// do not send a Secure cookie back over http (Safari and curl never do), so sign-in would appear to
+// work and the next request would be anonymous. The development setup must say so explicitly.
+func (l *loader) cookieMatchesURL(cookieSecure bool, publicURL string) {
+	if cookieSecure && strings.HasPrefix(publicURL, "http://") {
+		l.fail("PRORETA_COOKIE_SECURE", "must be false when PRORETA_PUBLIC_URL is an http:// localhost URL (Secure cookies are not sent over plain http)")
+	}
 }
 
 // CookieInsecureOverHTTPS reports a configuration that serves an https public URL with cookies

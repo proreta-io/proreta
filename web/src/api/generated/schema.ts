@@ -200,6 +200,41 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/auth/password": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Change the password of the current user
+     * @description Verifies `currentPassword`, stores `newPassword` and ends every session of the user, in
+     *     every organization, including the current one; the answer carries a new session in the
+     *     same organization (a new cookie and a new CSRF token), so the caller stays signed in
+     *     and its other devices are signed out. Any role, and also the platform admin, whose
+     *     password then stays as chosen: the hash in the deployment's Secret is applied only while
+     *     the password was never changed here.
+     *
+     *     The new password follows the registration policy (12-128 characters, not the login) and
+     *     must differ from the current one; policy failures and a wrong current password are 422
+     *     with `fieldErrors` (`newPassword`, `currentPassword`). A wrong current password is not a
+     *     401, which would mean the session is gone. Attempts are rate limited like logins: per
+     *     client IP (shared with logins and registrations) and per account, a wrong current
+     *     password counts, and verification shares the login's bounded hashing queue (429 with
+     *     `Retry-After`). A user without a password (signed in only with a provider) gets 409
+     *     `urn:proreta:problem:no-password`; when password sign-in is turned off for the user,
+     *     403 `urn:proreta:problem:password-login-disabled`. Audited as `auth.password_changed`.
+     */
+    post: operations["changePassword"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/auth/providers": {
     parameters: {
       query?: never;
@@ -1418,8 +1453,8 @@ export interface paths {
      * @description Replaces the user's password with a random temporary password, deletes all of the user's
      *     sessions and writes an audit row (never with the password). The password is in this
      *     answer only (`Cache-Control: no-store`); hand it to the user over a trusted channel. The
-     *     password of the system admin is managed by its Secret and cannot be reset here (409
-     *     `urn:proreta:problem:system-admin`). Platform admins only.
+     *     password of the system admin cannot be reset here: it changes its own password with
+     *     `POST /api/v1/auth/password` (409 `urn:proreta:problem:system-admin`). Platform admins only.
      */
     post: operations["adminResetUserPassword"];
     delete?: never;
@@ -1448,6 +1483,15 @@ export interface components {
       login: string;
       /** Format: password */
       password: string;
+    };
+    ChangePasswordRequest: {
+      /** Format: password */
+      currentPassword: string;
+      /**
+       * Format: password
+       * @description 12-128 characters (Unicode code points); the policy is checked by the server (422)
+       */
+      newPassword: string;
     };
     RegisterRequest: {
       /**
@@ -2448,13 +2492,14 @@ export interface components {
      *     | `urn:proreta:problem:plan-limit-reached` | 409 | The plan allows no more of a resource; carries `limit` and `max` |
      *     | `urn:proreta:problem:protected-organization` | 409 | The default organization, or the admin's own, cannot be suspended or deleted |
      *     | `urn:proreta:problem:organization-deleted` | 409 | A deleted organization cannot be changed |
-     *     | `urn:proreta:problem:system-admin` | 409 | The platform admin's membership or password cannot be changed through the API |
+     *     | `urn:proreta:problem:system-admin` | 409 | The platform admin's membership cannot be changed through the API, nor its password reset by another admin |
      *     | `urn:proreta:problem:invitation-accepted` | 409 | The invitation was already used |
      *     | `urn:proreta:problem:already-member` | 409 | The user is already a member of the organization |
      *     | `urn:proreta:problem:last-owner` | 409 | The organization would be left without an owner |
      *     | `urn:proreta:problem:slug-taken` | 409 | The slug of a project or status page is in use |
      *     | `urn:proreta:problem:project-not-empty` | 409 | The project still has monitors or channels |
      *     | `urn:proreta:problem:default-project` | 409 | The Default project cannot be deleted |
+     *     | `urn:proreta:problem:no-password` | 409 | The user has no password to change (signed in only with a provider) |
      *     | `urn:proreta:problem:last-login-method` | 409 | Unlinking would leave the user without a way to sign in |
      *     | `urn:proreta:problem:domain-taken` | 409 | Another organization claimed the sign-in domain |
      *     | `urn:proreta:problem:validation` | 422 | A well-formed request breaks a business rule; see `fieldErrors` |
@@ -2872,6 +2917,50 @@ export interface operations {
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
+      default: components["responses"]["Error"];
+    };
+  };
+  changePassword: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ChangePasswordRequest"];
+      };
+    };
+    responses: {
+      /** @description Changed; the answer describes the new session */
+      200: {
+        headers: {
+          /** @description The new session cookie (`__Host-proreta_session`, HttpOnly, Secure, SameSite=Lax; `proreta_session` without secure cookies) */
+          "Set-Cookie"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SessionInfo"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      /** @description The user has no password (`urn:proreta:problem:no-password`) */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      422: components["responses"]["UnprocessableEntity"];
+      429: components["responses"]["TooManyRequests"];
       default: components["responses"]["Error"];
     };
   };

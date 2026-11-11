@@ -89,10 +89,16 @@ type Options struct {
 	// Out receives the verification summary (no secrets).
 	Out    io.Writer
 	Logger *slog.Logger
+	// Force makes Ensure run the full bootstrap even when the database looks ready (password
+	// rotation, a new role). Run ignores it.
+	Force bool
 }
 
 // Result describes what a run did.
 type Result struct {
+	// Skipped is set by Ensure when nothing was done because the database was ready.
+	Skipped         bool
+	SkipReason      string
 	SecretCreated   bool
 	DatabaseCreated bool
 	Roles           []RoleInfo

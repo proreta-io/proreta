@@ -1,7 +1,7 @@
 // Command proretactl is the Proreta admin CLI.
 //
 //	proretactl hashpw [-m KiB] [-t iterations] [-p parallelism]   print an argon2id hash of a password read from stdin
-//	proretactl db bootstrap                                       create/repair the database and roles (see internal/dbbootstrap)
+//	proretactl db bootstrap                                       create/repair the database and roles, or skip when they are ready (see internal/dbbootstrap)
 //	proretactl secrets bootstrap                                  create the admin and encryption Secrets if absent (see internal/secretsbootstrap)
 //	proretactl mail test -to ADDRESS                              send a test message with the PRORETA_SMTP_* settings, bypassing the queue
 package main
@@ -159,20 +159,28 @@ func dbBootstrap() error {
 	defer stop()
 
 	ns := cfg.Namespace
-	if ns == "" {
-		if ns, err = dbbootstrap.InClusterNamespace(); err != nil {
+	var secrets dbbootstrap.SecretStore
+	if cfg.SecretFile != "" {
+		// Local development: no Kubernetes, the credentials go to a file.
+		ns, secrets = "local", dbbootstrap.FileSecrets{Path: cfg.SecretFile}
+	} else {
+		if ns == "" {
+			if ns, err = dbbootstrap.InClusterNamespace(); err != nil {
+				return err
+			}
+		}
+		if secrets, err = dbbootstrap.NewInClusterSecrets(); err != nil {
 			return err
 		}
 	}
-	secrets, err := dbbootstrap.NewInClusterSecrets()
-	if err != nil {
-		return err
+	var admin *pgx.ConnConfig
+	if cfg.AdminUser != "" {
+		if admin, err = adminConnConfig(cfg); err != nil {
+			return err
+		}
 	}
-	admin, err := adminConnConfig(cfg)
-	if err != nil {
-		return err
-	}
-	_, err = dbbootstrap.Run(ctx, dbbootstrap.Options{
+	res, err := dbbootstrap.Ensure(ctx, dbbootstrap.Options{
+		Force:      cfg.Force,
 		Admin:      admin,
 		Host:       cfg.Host,
 		Port:       cfg.Port,
@@ -186,6 +194,10 @@ func dbBootstrap() error {
 	})
 	if err != nil {
 		return err
+	}
+	if res.Skipped {
+		log.Info("bootstrap skipped", "reason", res.SkipReason)
+		return nil
 	}
 	log.Info("bootstrap complete")
 	return nil

@@ -33,6 +33,10 @@ export TEST_DATABASE_ADMIN_URL='postgres://postgres:postgres@127.0.0.1:55432/pos
 make test test-e2e
 ```
 
+### Running the whole app locally
+
+`make dev-db dev-migrate`, then `make -j5 -O dev-api dev-worker dev-jobs dev-statuspage dev-web` runs the app on http://localhost:5173 without Kubernetes; see [docs/development.md](docs/development.md).
+
 ### Web
 
 ```sh

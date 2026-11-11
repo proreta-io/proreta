@@ -93,7 +93,7 @@ Why there is an allow-list: every employee of a Workspace has the same `hd`, so 
 ## Going OAuth-only without losing the admin
 1. Configure at least one provider and check that people can sign in with it. Have every user link a provider on `/profile` while they still have their password.
 2. Set `config.passwordLoginEnabled: false`. The chart and the api refuse this setting if no provider is configured.
-3. The password form disappears for everyone. The platform admin (`PRORETA_ADMIN_LOGIN`) keeps it at **`/login?admin`**: this is the break-glass account, so keep its password (Secret `proreta-admin`) somewhere safe.
+3. The password form disappears for everyone. The platform admin (`PRORETA_ADMIN_LOGIN`) keeps it at **`/login?admin`**: this is the break-glass account, so keep its password somewhere safe (the admin changes it under Profile; the Secret `proreta-admin` only matters for a reset, see the [admin panel runbook](admin-panel.md)).
 4. Password registration is refused as well. Invitations then work only through the provider buttons.
 
 ## Recovery
@@ -103,7 +103,7 @@ Why there is an allow-list: every employee of a Workspace has the same `hd`, so 
   - Otherwise, the code exchange fails: sign-ins return to `/login?error=failed`, the api logs `oauth code exchange failed`, and `proreta_auth_oauth_logins_total{result="failed"}` rises.
 
   In both cases, sign in as the admin at `/login?admin`. If the problem is configuration (redirect URI, rotated secret), fix it at the provider or in the secret and restart the api. Temporarily setting `config.passwordLoginEnabled: true` again gives password users their form back.
-- **"The sign-in took too long or was started in another browser"** (`state_invalid`): the flow must finish in the same browser within 10 minutes. Rotating the encryption key also ends flows that are in progress. Start again.
+- **"The sign-in took too long or was started in another browser"** (`state_invalid`): the flow must finish in the same browser within 10 minutes. Rotating the encryption key also ends flows that are in progress ([rotation and backup of the key](../install.md#back-up-the-secrets)). Start again.
 - **Someone cannot unlink a provider** ("This is your only way to sign in"): link another provider first. When password sign-in is off, a password does not count, except for the admin.
 - **Too many attempts** (`rate_limited`): failed callbacks share the login limit per client address (30 failures per 15 minutes per api replica). Wait, or check for a misconfigured client causing repeated failures.
 
