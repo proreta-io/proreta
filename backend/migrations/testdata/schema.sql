@@ -25,6 +25,7 @@ notification_deliveries kind=r owner=proreta_owner rls=true force=true acl=prore
 org_auth_domains kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arwd/proreta_owner,proreta_owner=arwdDxt/proreta_owner
 password_resets kind=r owner=proreta_owner rls=false force=false acl=proreta_api=ar/proreta_owner,proreta_owner=arwdDxt/proreta_owner
 plans kind=r owner=proreta_owner rls=false force=false acl=proreta_api=r/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=r/proreta_owner
+platform_settings kind=r owner=proreta_owner rls=false force=false acl=proreta_owner=arwdDxt/proreta_owner
 probe_locations kind=r owner=proreta_owner rls=false force=false acl=proreta_api=r/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=r/proreta_owner
 project_members kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arwd/proreta_owner,proreta_owner=arwdDxt/proreta_owner
 projects kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arw/proreta_owner,proreta_owner=arwdDxt/proreta_owner
@@ -229,6 +230,10 @@ plans.2 name text not null
 plans.3 limits jsonb not null
 plans.4 created_at timestamp with time zone not null default now()
 plans.5 features text[] not null default '{}'::text[]
+platform_settings.1 id boolean not null default true
+platform_settings.2 registration_enabled boolean
+platform_settings.3 updated_at timestamp with time zone
+platform_settings.4 updated_by uuid
 probe_locations.1 id uuid not null
 probe_locations.2 code text not null
 probe_locations.3 name text not null
@@ -485,6 +490,8 @@ plans plans_key_check CHECK ((key ~ '^[a-z0-9][a-z0-9-]{0,62}$'::text))
 plans plans_limits_check CHECK ((jsonb_typeof(limits) = 'object'::text))
 plans plans_name_check CHECK (((length(name) >= 1) AND (length(name) <= 200)))
 plans plans_pkey PRIMARY KEY (key)
+platform_settings platform_settings_id_check CHECK (id)
+platform_settings platform_settings_pkey PRIMARY KEY (id)
 probe_locations probe_locations_code_check CHECK ((code ~ '^[a-z0-9][a-z0-9-]{0,62}$'::text))
 probe_locations probe_locations_code_key UNIQUE (code)
 probe_locations probe_locations_kind_check CHECK ((kind = ANY (ARRAY['platform'::text, 'agent'::text])))
@@ -619,6 +626,7 @@ CREATE INDEX password_resets_expires_idx ON public.password_resets USING btree (
 CREATE UNIQUE INDEX password_resets_pkey ON public.password_resets USING btree (token_hash)
 CREATE INDEX password_resets_user_idx ON public.password_resets USING btree (user_id, created_at DESC)
 CREATE UNIQUE INDEX plans_pkey ON public.plans USING btree (key)
+CREATE UNIQUE INDEX platform_settings_pkey ON public.platform_settings USING btree (id)
 CREATE UNIQUE INDEX probe_locations_code_key ON public.probe_locations USING btree (code)
 CREATE UNIQUE INDEX probe_locations_pkey ON public.probe_locations USING btree (id)
 CREATE UNIQUE INDEX project_members_pkey ON public.project_members USING btree (tenant_id, project_id, user_id)
@@ -711,6 +719,8 @@ admin_email_test_request(uuid,text,uuid,inet) owner=proreta_owner definer=true a
 admin_get_tenant(uuid,uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_list_tenants(uuid,text,boolean,integer,integer) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_list_users(uuid,uuid,text,integer,integer) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+admin_registration_get(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+admin_registration_set(uuid,boolean,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_require_platform_admin(uuid) owner=proreta_owner definer=false acl=proreta_owner=X/proreta_owner
 admin_reset_user_password(uuid,uuid,text,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_set_tenant_plan(uuid,uuid,text,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
@@ -747,6 +757,7 @@ list_due_heartbeats(integer) owner=proreta_owner definer=true acl=proreta_owner=
 mail_pending() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 org_delete_tenant(uuid,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 outbox_pending() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+platform_registration_override() owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 purge_email_verifications() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 purge_expired_sessions() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 purge_mail_outbox(interval) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
@@ -1082,6 +1093,46 @@ BEGIN
     ORDER BY m.created_at, u.id
     LIMIT least(greatest(COALESCE(p_limit, 25), 1), 100)
     OFFSET greatest(COALESCE(p_offset, 0), 0);
+END
+$function$
+CREATE OR REPLACE FUNCTION public.admin_registration_get(p_actor uuid)
+ RETURNS TABLE(registration_enabled boolean, updated_at timestamp with time zone)
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+#variable_conflict use_column
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    RETURN QUERY SELECT s.registration_enabled, s.updated_at FROM platform_settings AS s;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.admin_registration_set(p_actor uuid, p_enabled boolean, p_audit_id uuid, p_ip inet)
+ RETURNS TABLE(from_value text, to_value text)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_old    boolean;
+    v_from   text;
+    v_to     text;
+    v_tenant uuid;
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    SELECT s.registration_enabled INTO v_old FROM platform_settings AS s WHERE s.id FOR UPDATE;
+    IF v_old IS NOT DISTINCT FROM p_enabled THEN
+        RETURN;
+    END IF;
+    UPDATE platform_settings AS s SET registration_enabled = p_enabled, updated_at = now(), updated_by = p_actor WHERE s.id;
+    v_from := CASE v_old WHEN true THEN 'enabled' WHEN false THEN 'disabled' ELSE 'environment' END;
+    v_to := CASE p_enabled WHEN true THEN 'enabled' WHEN false THEN 'disabled' ELSE 'environment' END;
+    v_tenant := auth_login_tenant(p_actor);
+    IF v_tenant IS NOT NULL THEN
+        PERFORM admin_audit(v_tenant, p_actor, p_audit_id, 'admin.registration_settings.updated', 'registration_settings', 'registration',
+                            jsonb_build_object('from', v_from, 'to', v_to), p_ip);
+    END IF;
+    RETURN QUERY SELECT v_from, v_to;
 END
 $function$
 CREATE OR REPLACE FUNCTION public.admin_require_platform_admin(p_actor uuid)
@@ -2033,6 +2084,14 @@ CREATE OR REPLACE FUNCTION public.outbox_pending()
  SET search_path TO 'public', 'pg_temp'
 AS $function$
     SELECT count(*) FROM notification_deliveries WHERE status = 'pending'
+$function$
+CREATE OR REPLACE FUNCTION public.platform_registration_override()
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    SELECT s.registration_enabled FROM platform_settings AS s
 $function$
 CREATE OR REPLACE FUNCTION public.purge_email_verifications()
  RETURNS integer

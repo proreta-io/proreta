@@ -25,6 +25,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/platform/db"
 	"github.com/proreta-io/proreta/backend/internal/platform/uuidv7"
 	"github.com/proreta-io/proreta/backend/internal/platform/validation"
+	"github.com/proreta-io/proreta/backend/internal/platformsettings"
 )
 
 // Tenant statuses an admin may set.
@@ -80,6 +81,8 @@ type Options struct {
 	// features after a change. Both are needed for the email settings operations.
 	Mail     *mail.Queue
 	Settings *mail.Settings
+	// Registration holds the registration switch the panel changes; needed for its operations.
+	Registration *platformsettings.Registration
 }
 
 // Service implements the admin operations.
@@ -91,6 +94,7 @@ type Service struct {
 
 	mail         *mail.Queue
 	mailSettings *mail.Settings
+	registration *platformsettings.Registration
 }
 
 // NewService builds the service. The auth service hashes temporary passwords through its bounded
@@ -99,10 +103,10 @@ func NewService(pool *db.Pool, authSvc *auth.Service, opts Options) (*Service, e
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
-	s := &Service{pool: pool, auth: authSvc, log: opts.Logger, mail: opts.Mail, mailSettings: opts.Settings,
+	s := &Service{pool: pool, auth: authSvc, log: opts.Logger, mail: opts.Mail, mailSettings: opts.Settings, registration: opts.Registration,
 		actions: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "proreta_admin_actions_total",
-			Help: "Platform admin changes by audit action (admin.organization.plan_changed, admin.organization.suspended, admin.organization.unsuspended, admin.organization.deleted, admin.user.password_reset, admin.email_settings.updated, admin.email_test.sent).",
+			Help: "Platform admin changes by audit action (admin.organization.plan_changed, admin.organization.suspended, admin.organization.unsuspended, admin.organization.deleted, admin.user.password_reset, admin.email_settings.updated, admin.email_test.sent, admin.registration_settings.updated).",
 		}, []string{"action"}),
 	}
 	if opts.Registerer != nil {

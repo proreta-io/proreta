@@ -144,6 +144,9 @@ export default function Layout() {
               <NavLink to="/admin/email" className={navClass}>
                 Email
               </NavLink>
+              <NavLink to="/admin/registration" className={navClass}>
+                Registration
+              </NavLink>
             </nav>
           </div>
         </div>

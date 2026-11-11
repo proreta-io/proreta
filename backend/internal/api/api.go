@@ -32,6 +32,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/platform/httpx"
 	"github.com/proreta-io/proreta/backend/internal/platform/logging"
 	"github.com/proreta-io/proreta/backend/internal/platform/metrics"
+	"github.com/proreta-io/proreta/backend/internal/platformsettings"
 	"github.com/proreta-io/proreta/backend/internal/projects"
 	"github.com/proreta-io/proreta/backend/internal/queries"
 	"github.com/proreta-io/proreta/backend/internal/statuspages"
@@ -85,6 +86,9 @@ type Deps struct {
 	StatusPages *statuspages.Service
 	// Admin serves /api/v1/admin; nil answers those operations with 500.
 	Admin *admin.Service
+	// Registration is the registration switch the platform admin changes in the panel; nil
+	// means Config.RegistrationEnabled alone decides.
+	Registration *platformsettings.Registration
 	// OAuth runs the OAuth sign-in flows; nil means no provider is configured.
 	OAuth *oauth.Flow
 	// Entitlements reports the paid features of an organization; nil means none.
@@ -114,6 +118,8 @@ type server struct {
 	pages    *statuspages.Service
 	admin    *admin.Service
 	oauth    *oauth.Flow
+	// registration is nil when no switch is wired: Config.RegistrationEnabled decides.
+	registration *platformsettings.Registration
 	// entitlements is nil when no provider is wired: every organization has no features.
 	entitlements EntitlementsProvider
 	log          *slog.Logger
@@ -144,7 +150,7 @@ func NewHandler(cfg Config, deps Deps) (http.Handler, error) {
 	if pings == nil {
 		pings = NewPingMetrics(prometheus.NewRegistry())
 	}
-	s := &server{cfg: cfg, auth: deps.Auth, monitors: deps.Monitors, queries: deps.Queries, channels: deps.Channels, plans: deps.Plans, projects: deps.Projects, pages: deps.StatusPages, admin: deps.Admin, oauth: deps.OAuth, entitlements: deps.Entitlements, log: deps.Logger,
+	s := &server{cfg: cfg, auth: deps.Auth, monitors: deps.Monitors, queries: deps.Queries, channels: deps.Channels, plans: deps.Plans, projects: deps.Projects, pages: deps.StatusPages, admin: deps.Admin, registration: deps.Registration, oauth: deps.OAuth, entitlements: deps.Entitlements, log: deps.Logger,
 		channelTests:    auth.NewLimiter(1, channelTestInterval, 10_000, clk),
 		emailTestBurst:  auth.NewLimiter(1, emailTestInterval, 100, clk),
 		emailTestHourly: auth.NewLimiter(20, time.Hour, 100, clk),
@@ -290,8 +296,17 @@ func (s *server) GetHealth(_ context.Context, _ gen.GetHealthRequestObject) (gen
 	return gen.GetHealth200JSONResponse{Status: gen.Ok, Version: s.cfg.Version, Commit: s.cfg.Commit}, nil
 }
 
-func (s *server) GetPublicConfig(_ context.Context, _ gen.GetPublicConfigRequestObject) (gen.GetPublicConfigResponseObject, error) {
-	return gen.GetPublicConfig200JSONResponse{RegistrationEnabled: s.cfg.RegistrationEnabled}, nil
+func (s *server) GetPublicConfig(ctx context.Context, _ gen.GetPublicConfigRequestObject) (gen.GetPublicConfigResponseObject, error) {
+	return gen.GetPublicConfig200JSONResponse{RegistrationEnabled: s.registrationEnabled(ctx)}, nil
+}
+
+// registrationEnabled is whether self-service registration is open: the platform admin's choice
+// in the database when there is one, else the environment value.
+func (s *server) registrationEnabled(ctx context.Context) bool {
+	if s.registration == nil {
+		return s.cfg.RegistrationEnabled
+	}
+	return s.registration.Enabled(ctx)
 }
 
 // limiterIP is the client address the login and registration limits are keyed by.
@@ -331,7 +346,7 @@ func (s *server) Register(ctx context.Context, req gen.RegisterRequestObject) (g
 		invite = *req.Body.InviteToken
 	}
 	// An invitation is its own authorization: it works with registration turned off.
-	if !s.cfg.RegistrationEnabled && invite == "" {
+	if !s.registrationEnabled(ctx) && invite == "" {
 		return nil, errRegistrationDisabled
 	}
 	r := httpRequest(ctx)

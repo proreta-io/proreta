@@ -60,7 +60,7 @@ not contain `proreta` (`fullnameOverride` replaces it).
 | `config.adminPort` | `9090` | Health and metrics port of the backend pods. |
 | `config.sessionTTL`, `config.cookieSecure` | `24h`, `true` | Session lifetime; `Secure` cookies (keep `true`; `false` only with an `http://localhost` `config.publicUrl`, the api and statuspage refuse to start otherwise). |
 | `config.trustedProxyHops` | `0` | Trusted proxies in front of the api; `1` behind one Gateway. |
-| `config.registrationEnabled` | `false` | Self-service creation of organizations (addresses are verified by email only when the platform admin turns that on in Admin, Email, and nothing requires it). |
+| `config.registrationEnabled` | `false` | Self-service creation of organizations (addresses are verified by email only when the platform admin turns that on in Admin, Email, and nothing requires it). The platform admin can override it under Admin, Registration without a redeploy; this is then only the initial value and the fallback. |
 | `config.passwordLoginEnabled` | `true` | `false`: password form for the platform admin only; needs an OAuth provider. |
 | `config.blockedCIDRs` | `[]` | Extra ranges the SSRF guard refuses (cluster and VPC CIDRs). |
 | `database.secretName` | `""` | Secret with the connection URLs. Empty: `<fullname>-db`. |

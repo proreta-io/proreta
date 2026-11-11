@@ -1600,6 +1600,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/registration": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Self-service registration switch
+     * @description Whether people can create a new organization of their own (`POST /api/v1/auth/register`
+     *     and the sign-up of an OAuth sign-in). `effective` is what applies now. When the platform
+     *     admin has chosen a value (`source` `database`) it wins; otherwise the installation's
+     *     `PRORETA_REGISTRATION_ENABLED` setting applies (`source` `environment`, shown as
+     *     `environmentValue`). Invitation links, claimed Workspace domains and existing users are
+     *     not affected. Platform admins only.
+     */
+    get: operations["adminGetRegistration"];
+    /**
+     * Turn self-service registration on or off
+     * @description `enabled` `true` or `false` is the platform admin's choice and wins over the environment;
+     *     `null` removes the choice, so the environment setting applies again. The change applies
+     *     at once in the api replica that served it and within a few seconds in the others; no
+     *     restart is needed. A request that changes nothing does nothing. Audited as
+     *     `admin.registration_settings.updated` (`from`, `to`: `enabled`, `disabled` or
+     *     `environment`). Platform admins only.
+     */
+    put: operations["adminUpdateRegistration"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/email": {
     parameters: {
       query?: never;
@@ -2416,6 +2450,26 @@ export interface components {
       sendInvitations: boolean;
       sendEmailVerification: boolean;
       allowPasswordReset: boolean;
+    };
+    AdminRegistrationSettings: {
+      /** @description Whether registration is open now */
+      effective: boolean;
+      /**
+       * @description `database` when the platform admin chose a value, else `environment`
+       * @enum {string}
+       */
+      source: "database" | "environment";
+      /** @description The installation's `PRORETA_REGISTRATION_ENABLED`, used when no choice is stored */
+      environmentValue: boolean;
+      /**
+       * Format: date-time
+       * @description When the choice was last changed in the panel; null when it never was
+       */
+      updatedAt: string | null;
+    };
+    AdminRegistrationUpdate: {
+      /** @description `true` or `false` is the choice; `null` follows the environment again */
+      enabled: boolean | null;
     };
     AdminEmailTestRequest: {
       /** @description Recipient of the test message; omitted, the admin's own login if it is an email address (422 otherwise) */
@@ -5363,6 +5417,60 @@ export interface operations {
       404: components["responses"]["NotFound"];
       409: components["responses"]["Conflict"];
       429: components["responses"]["TooManyRequests"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminGetRegistration: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The setting */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminRegistrationSettings"];
+        };
+      };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminUpdateRegistration: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminRegistrationUpdate"];
+      };
+    };
+    responses: {
+      /** @description The setting after the change */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminRegistrationSettings"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
       default: components["responses"]["Error"];
     };
   };

@@ -28,6 +28,7 @@ export type AdminEmailSettings = Schemas["AdminEmailSettings"];
 export type AdminEmailConnectionUpdate = Schemas["AdminEmailConnectionUpdate"];
 export type AdminEmailFeaturesUpdate = Schemas["AdminEmailFeaturesUpdate"];
 export type AdminEmailTestResult = Schemas["AdminEmailTestResult"];
+export type AdminRegistrationSettings = Schemas["AdminRegistrationSettings"];
 export type AdminUser = Schemas["AdminUser"];
 export type AdminUserList = Schemas["AdminUserList"];
 export type MembershipRole = Schemas["MembershipRole"];
@@ -82,6 +83,7 @@ export const queryKeys = {
   authDomains: ["auth-domains"] as const,
   adminStats: ["admin", "stats"] as const,
   adminEmail: ["admin", "email"] as const,
+  adminRegistration: ["admin", "registration"] as const,
   adminOrganizations: (query: string, offset: number, includeDeleted: boolean) =>
     ["admin", "organizations", { query, offset, includeDeleted }] as const,
   adminOrganization: (id: string) => ["admin", "organization", id] as const,
@@ -284,6 +286,12 @@ export const deleteAdminEmailSettings = () => unwrap(client.DELETE("/api/v1/admi
 
 export const updateAdminEmailFeatures = (body: AdminEmailFeaturesUpdate) =>
   unwrap(client.PUT("/api/v1/admin/email/features", { body }));
+
+export const getAdminRegistration = () => unwrap(client.GET("/api/v1/admin/registration"));
+
+/** `true` or `false` is the platform admin's choice; `null` follows the installation setting again. */
+export const updateAdminRegistration = (enabled: boolean | null) =>
+  unwrap(client.PUT("/api/v1/admin/registration", { body: { enabled } }));
 
 /** Queues a real test message; poll getAdminEmailSettings for the result. */
 export const sendAdminTestEmail = (to: string) =>
