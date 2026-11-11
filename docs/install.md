@@ -199,7 +199,7 @@ For a local trial (kind, minikube) you can skip the Gateway controller, but the 
 kubectl -n proreta port-forward svc/proreta-api 8080:8080     # the API
 kubectl -n proreta port-forward svc/proreta-web 8081:8080     # the web app, http://localhost:8081
 ```
-Over plain http the `Secure` session cookie is not kept, so for such a trial only, set `config.cookieSecure: false` (the cookie is then named `proreta_session` instead of `__Host-proreta_session`). Never do this in production. The web app expects `/api` on the same origin, so without a Gateway use the API directly with `curl`:
+Over plain http the `Secure` session cookie is not kept, so for such a trial only, set `config.cookieSecure: false` (with a `config.publicUrl` such as `http://localhost:8081`, which is accepted only for `localhost`, `127.0.0.1` and `[::1]` and then requires `cookieSecure: false`; the cookie is then named `proreta_session` instead of `__Host-proreta_session`). Never do this in production. The web app expects `/api` on the same origin, so without a Gateway use the API directly with `curl`:
 ```sh
 ADMIN_PASSWORD=$(kubectl -n proreta get secret proreta-admin-initial -o jsonpath='{.data.password}' | base64 -d)
 curl -s -c jar -H 'Content-Type: application/json' \

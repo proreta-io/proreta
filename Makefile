@@ -14,7 +14,7 @@ GENERATED := backend/internal/api/gen backend/internal/auth/authdb backend/inter
 	backend/internal/notify/notifydb backend/internal/plans/plansdb backend/internal/projects/projectsdb \
 	backend/internal/statuspages/statuspagesdb
 
-.PHONY: generate check-generated lint test test-e2e build tidy
+.PHONY: generate check-generated lint test test-e2e build tidy dev-db dev-db-down dev-migrate dev-api dev-worker dev-jobs dev-statuspage dev-web
 
 generate:
 	$(TOOLS) sqlc generate -f $(ROOT)/sqlc.yaml
@@ -50,3 +50,31 @@ build:
 tidy:
 	cd $(BACKEND) && go mod tidy
 	cd $(BACKEND)/tools && go mod tidy
+
+# Local development without Kubernetes, see docs/development.md. dev-db starts a throwaway PostgreSQL
+# in Docker and writes .dev/env; every other dev-* target runs one process with it, in the foreground.
+DEV_ENV := set -a && . $(ROOT)/.dev/env && set +a
+
+dev-db:
+	scripts/dev-db.sh up
+
+dev-db-down:
+	scripts/dev-db.sh down
+
+dev-migrate:
+	$(DEV_ENV) && cd $(BACKEND) && PRORETA_MIGRATE_DATABASE_URL=$$DEV_OWNER_URL go run ./cmd/migrate
+
+dev-api:
+	$(DEV_ENV) && cd $(BACKEND) && PRORETA_DATABASE_URL=$$DEV_API_URL PRORETA_HTTP_ADDR=127.0.0.1:8080 PRORETA_ADMIN_ADDR=127.0.0.1:9090 go run ./cmd/api
+
+dev-worker:
+	$(DEV_ENV) && cd $(BACKEND) && PRORETA_DATABASE_URL=$$DEV_WORKER_URL PRORETA_ADMIN_ADDR=127.0.0.1:9091 go run ./cmd/worker
+
+dev-jobs:
+	$(DEV_ENV) && cd $(BACKEND) && PRORETA_DATABASE_URL=$$DEV_WORKER_URL PRORETA_ADMIN_ADDR=127.0.0.1:9092 go run ./cmd/jobs
+
+dev-statuspage:
+	$(DEV_ENV) && cd $(BACKEND) && PRORETA_DATABASE_URL=$$DEV_STATUSPAGE_URL PRORETA_HTTP_ADDR=127.0.0.1:8081 PRORETA_ADMIN_ADDR=127.0.0.1:9093 go run ./cmd/statuspage
+
+dev-web:
+	$(DEV_ENV) && cd $(ROOT)/web && { [ -d node_modules ] || npm ci; } && npm run dev
