@@ -210,8 +210,8 @@ Workloads always read `<fullname>-admin` (`login`, `password_hash`) and `<fullna
   in the cluster when it is absent and never overwrites it (an incomplete existing Secret fails the Job).
   - admin: login `secrets.admin.login` (default `admin`, stored under the key `login`), a random password whose
     argon2id hash goes to `<fullname>-admin`; the plaintext goes ONCE to `<fullname>-admin-initial`
-    (`login`, `password`). Read it, log in, change the password under Profile, delete `<fullname>-admin-initial`
-    (always safe, nothing reads it). It is never recreated.
+    (`login`, `password`). Read it and log in: the first sign-in asks for a new password. Then delete
+    `<fullname>-admin-initial` (always safe, nothing reads it; its password no longer works). It is never recreated.
   - crypto: one random 32-byte key with id `secrets.crypto.keyId` (default `k1`). It lives only in the cluster;
     deleting the namespace loses it (it only encrypts the Slack webhook URLs, which can then only be re-entered). Export it first: [docs/install.md](../../../docs/install.md#back-up-the-secrets).
 - `externalSecret`: an ExternalSecret (`externalSecrets.secretStoreRef`, wave -2) materialises it. Needs
