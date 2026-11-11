@@ -82,6 +82,11 @@ type Options struct {
 	// and per organization and recipient. They default to 30 per hour and 3 per day.
 	InviteMailLimiter          *Limiter
 	InviteMailRecipientLimiter *Limiter
+	// ResetLimiter limits password reset requests and attempts per client IP (every request
+	// counts; a success is refunded) and ResetAddressLimiter the requests per address. Defaults:
+	// 10 per 15 minutes and 3 per hour.
+	ResetLimiter        *Limiter
+	ResetAddressLimiter *Limiter
 	// Mail queues the messages the service sends (email verification). Nil, or a queue without
 	// keys, means email is off: nothing is queued and every flow behaves as without email.
 	Mail *mail.Queue
@@ -105,6 +110,9 @@ type Service struct {
 	loginLimit  *Limiter
 	inviteLimit *Limiter
 	verifyLimit *Limiter
+	// resetLimit and resetAddrLimit limit the password reset flow (see ResetLimiter).
+	resetLimit     *Limiter
+	resetAddrLimit *Limiter
 	// inviteMail* limit invitation emails (see InviteMailLimiter).
 	inviteMailLimit          *Limiter
 	inviteMailRecipientLimit *Limiter
@@ -163,6 +171,12 @@ func NewService(pool *db.Pool, opts Options) (*Service, error) {
 	if opts.InviteMailRecipientLimiter == nil {
 		opts.InviteMailRecipientLimiter = NewLimiter(invitationMailsPerRecipient, 24*time.Hour, 100_000, opts.Clock)
 	}
+	if opts.ResetLimiter == nil {
+		opts.ResetLimiter = NewLimiter(10, 15*time.Minute, 100_000, opts.Clock)
+	}
+	if opts.ResetAddressLimiter == nil {
+		opts.ResetAddressLimiter = NewLimiter(3, time.Hour, 100_000, opts.Clock)
+	}
 	if opts.HashQueueWait <= 0 {
 		opts.HashQueueWait = defaultHashQueueWait
 	}
@@ -175,6 +189,8 @@ func NewService(pool *db.Pool, opts Options) (*Service, error) {
 		loginLimit:      opts.LoginLimiter,
 		inviteLimit:     opts.InviteLimiter,
 		verifyLimit:     opts.VerifyLimiter,
+		resetLimit:      opts.ResetLimiter,
+		resetAddrLimit:  opts.ResetAddressLimiter,
 		inviteMailLimit: opts.InviteMailLimiter,
 
 		inviteMailRecipientLimit: opts.InviteMailRecipientLimiter,

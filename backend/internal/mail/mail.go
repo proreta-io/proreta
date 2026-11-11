@@ -24,6 +24,8 @@ const (
 	KindVerifyEmail Kind = "verify_email"
 	// KindInvitation carries an organization invitation link to the person invited.
 	KindInvitation Kind = "invitation"
+	// KindPasswordReset carries the one-time link to choose a new password.
+	KindPasswordReset Kind = "password_reset"
 )
 
 // Message is one email ready to send. Both bodies are always set.

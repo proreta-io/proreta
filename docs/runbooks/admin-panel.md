@@ -20,7 +20,7 @@ The panel is the `/admin` area of the web app and the `/api/v1/admin/*` operatio
 Guard rails (enforced in the database, not only in the UI): the `default` organization cannot be suspended or deleted, the admin cannot suspend or delete an organization it is a member of, a deleted organization cannot be changed, and the system admin's password cannot be reset in the panel. `proreta_admin_actions_total{action}` counts the changes ([observability](observability.md)).
 
 ## Recover a customer's password
-Until outgoing email exists this is the only recovery path.
+On an installation without [outgoing email](email.md) this is the only recovery path; with it, users can also use **Forgot your password?** on the sign-in page, and this panel remains for the cases that need a person (an account without a mailbox, a suspected takeover).
 1. Verify the request through a channel you trust (the customer's known contact, not only an email that claims to be them). Registration proves nothing about who owns an address unless the user confirmed it with the email link (the users table does not show that yet).
 2. Open `/admin/organizations`, search for the customer's email, open the organization.
 3. In the users table choose **Reset password** for that user and confirm.

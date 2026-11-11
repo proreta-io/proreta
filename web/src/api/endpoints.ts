@@ -313,6 +313,14 @@ export const revokeInvitation = (invitationId: string) =>
 export const verifyEmail = (token: string) =>
   unwrap(client.POST("/api/v1/auth/verify-email", { body: { token } }));
 
+/** Emails a reset link if the address has an account; the answer is the same either way. */
+export const requestPasswordReset = (email: string) =>
+  unwrap(client.POST("/api/v1/auth/forgot-password", { body: { email } }));
+
+/** Sets a new password with the token of the emailed link; ends every session of the account. */
+export const resetPassword = (token: string, password: string) =>
+  unwrap(client.POST("/api/v1/auth/reset-password", { body: { token, password } }));
+
 /** Asks for a new verification email for the signed-in user. */
 export const resendEmailVerification = () =>
   unwrap(client.POST("/api/v1/auth/resend-verification"));

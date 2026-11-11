@@ -30,7 +30,7 @@ func TestIntegrationMigrateFromScratchAndRerun(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "audit_log,auth_identities,check_results,email_verifications,heartbeat_tokens,incident_monitors,incidents,invitations,mail_outbox,memberships,monitor_channels,monitor_location_state," +
-		"monitor_locations,monitor_state,monitors,notification_channels,notification_deliveries,org_auth_domains,plans,probe_locations,project_members,projects,result_rollups_hourly,rollup_state,sessions," +
+		"monitor_locations,monitor_state,monitors,notification_channels,notification_deliveries,org_auth_domains,password_resets,plans,probe_locations,project_members,projects,result_rollups_hourly,rollup_state,sessions," +
 		"status_page_components,status_page_released_slugs,status_page_snapshots,status_pages,tenants,users"
 	if got := strings.Join(tables, ","); got != want {
 		t.Fatalf("tables = %s, want %s", got, want)
@@ -80,6 +80,8 @@ var definerAllowList = map[string][]string{
 	"purge_mail_outbox": {"proreta_worker"},
 	// Expired email verification tokens.
 	"purge_email_verifications": {"proreta_worker"},
+	// Expired password reset tokens.
+	"purge_password_resets": {"proreta_worker"},
 	// Pause, resume and URL change reset the schedule within the caller's tenant.
 	"reset_monitor_runtime": {"proreta_api"},
 	// The public heartbeat ping finds its heartbeat by token hash before the tenant is known, and

@@ -31,7 +31,7 @@ import (
 // The OAuth operations are public: the login page lists the providers, a sign-in starts and
 // finishes without a session (the start of a link checks the session itself).
 var publicOperations = []string{"getHealth", "getPublicConfig", "login", "register", "pingHeartbeat", "pingHeartbeatPost", "lookupInvitation",
-	"getAuthProviders", "startOAuth", "oauthCallback", "verifyEmail"}
+	"getAuthProviders", "startOAuth", "oauthCallback", "verifyEmail", "requestPasswordReset", "resetPassword"}
 
 // csrfExempt are the unsafe operations without a session, hence without a CSRF token. The POST
 // form of the heartbeat ping is one: it has no session to carry a CSRF token, and it changes only
@@ -39,7 +39,7 @@ var publicOperations = []string{"getHealth", "getPublicConfig", "login", "regist
 // startOAuth has no session for a sign-in; with intent link it checks the CSRF token itself.
 // verifyEmail is public: the token in the emailed link is the credential and the visitor may have no
 // session on this browser.
-var csrfExempt = []string{"login", "register", "pingHeartbeatPost", "lookupInvitation", "startOAuth", "verifyEmail"}
+var csrfExempt = []string{"login", "register", "pingHeartbeatPost", "lookupInvitation", "startOAuth", "verifyEmail", "requestPasswordReset", "resetPassword"}
 
 func isCSRFExempt(operationID string) bool {
 	return slices.ContainsFunc(csrfExempt, func(id string) bool { return strings.EqualFold(id, operationID) })

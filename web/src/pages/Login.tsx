@@ -5,7 +5,7 @@ import { useAuth } from "../auth/AuthProvider";
 import { redirectTarget } from "../auth/RequireAuth";
 import AuthScreen, { AuthHeading, authLink, ShowPassword } from "../components/AuthScreen";
 import ProviderButtons, { OrDivider } from "../components/ProviderButtons";
-import { Alert, Button, Field, Input, Loading, Skeleton } from "../components/ui";
+import { Alert, Button, cx, Field, Input, Loading, Skeleton } from "../components/ui";
 import { formatDuration } from "../lib/format";
 import {
   oauthErrorMessage,
@@ -144,6 +144,11 @@ export default function Login() {
                   />
                 )}
               </Field>
+              {providers?.emailEnabled === true && providers.passwordLoginEnabled && (
+                <Link to="/forgot-password" className={cx(authLink, "self-start")}>
+                  Forgot your password?
+                </Link>
+              )}
               <Button type="submit" busy={submitting} className="mt-1.5">
                 {submitting ? "Signing in…" : "Sign in"}
               </Button>

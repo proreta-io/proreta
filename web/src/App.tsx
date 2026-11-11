@@ -2,6 +2,7 @@ import { Route, Routes } from "react-router-dom";
 import RequireAuth from "./auth/RequireAuth";
 import RequirePlatformAdmin from "./auth/RequirePlatformAdmin";
 import Layout from "./components/Layout";
+import ForgotPassword from "./pages/ForgotPassword";
 import Invite from "./pages/Invite";
 import Login from "./pages/Login";
 import Members from "./pages/Members";
@@ -12,6 +13,7 @@ import NotFound from "./pages/NotFound";
 import Profile from "./pages/Profile";
 import Projects from "./pages/Projects";
 import Register from "./pages/Register";
+import ResetPassword from "./pages/ResetPassword";
 import Settings from "./pages/Settings";
 import StatusPageSettings from "./pages/StatusPage";
 import VerifyEmail from "./pages/VerifyEmail";
@@ -25,6 +27,8 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
       <Route path="/invite" element={<Invite />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/verify-email" element={<VerifyEmail />} />
       <Route element={<RequireAuth />}>
         <Route element={<Layout />}>

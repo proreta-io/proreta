@@ -163,6 +163,65 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/auth/forgot-password": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Email a link to reset a forgotten password
+     * @description Public (no session). Sends a one-time link to the address when it belongs to an account that
+     *     can be reset (active, with a password, not the platform admin) and answers 202 either way, so
+     *     the answer says nothing about which addresses are registered. The link is
+     *     `PRORETA_PUBLIC_URL/reset-password#<token>`; it works once and for one hour, and only the
+     *     newest link of an account works. A malformed address is 422 (that says nothing about
+     *     accounts). Every request counts against a per-client-IP limit (429 with Retry-After); beyond
+     *     three requests an hour for one address, or three links an hour for one account, requests are
+     *     answered 202 and send nothing. `404 urn:proreta:problem:not-found` when the installation
+     *     sends no email (`emailEnabled` false in `GET /api/v1/auth/providers`) or has the password
+     *     form turned off (`passwordLoginEnabled` false). Audited as `auth.password_reset_requested`
+     *     when a link was issued (no address in the metadata).
+     */
+    post: operations["requestPasswordReset"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/auth/reset-password": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Set a new password with the emailed token
+     * @description Public (no session): the token from the emailed link proves control of the mailbox. The token
+     *     and the password travel in the body, never in a URL. The password follows the registration
+     *     policy (12-128 characters, not the email address; 422 with `fieldErrors` otherwise). Unknown,
+     *     malformed, expired, used and replaced tokens all get the same 404
+     *     `urn:proreta:problem:not-found`. On success the password is replaced, **every session of the
+     *     account in every organization is ended**, the other open reset links die, and the address
+     *     counts as verified; the user is not signed in and must log in. Failed attempts count against
+     *     the per-client-IP limit and the password hash shares the login's bounded queue (429 with
+     *     Retry-After when it is full). Audited as `auth.password_reset_completed` (`sessionsRevoked`).
+     *     404 also when the installation sends no email or has the password form turned off.
+     */
+    post: operations["resetPassword"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/auth/resend-verification": {
     parameters: {
       query?: never;
@@ -2273,6 +2332,15 @@ export interface components {
       /** Format: password */
       token: string;
     };
+    PasswordResetRequest: {
+      email: string;
+    };
+    PasswordResetComplete: {
+      /** Format: password */
+      token: string;
+      /** Format: password */
+      password: string;
+    };
     EmailVerificationToken: {
       /** Format: password */
       token: string;
@@ -2963,6 +3031,60 @@ export interface operations {
       };
       400: components["responses"]["BadRequest"];
       404: components["responses"]["NotFound"];
+      429: components["responses"]["TooManyRequests"];
+      default: components["responses"]["Error"];
+    };
+  };
+  requestPasswordReset: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PasswordResetRequest"];
+      };
+    };
+    responses: {
+      /** @description Accepted; a link is sent if the address can be reset */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["BadRequest"];
+      404: components["responses"]["NotFound"];
+      422: components["responses"]["UnprocessableEntity"];
+      429: components["responses"]["TooManyRequests"];
+      default: components["responses"]["Error"];
+    };
+  };
+  resetPassword: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PasswordResetComplete"];
+      };
+    };
+    responses: {
+      /** @description The password was changed and all sessions ended */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["BadRequest"];
+      404: components["responses"]["NotFound"];
+      422: components["responses"]["UnprocessableEntity"];
       429: components["responses"]["TooManyRequests"];
       default: components["responses"]["Error"];
     };
