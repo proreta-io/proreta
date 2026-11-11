@@ -1,6 +1,6 @@
 import { QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
-import { setCsrfToken, setUnauthorizedHandler } from "../api/client";
+import { setCsrfToken, setPasswordChangeHandler, setUnauthorizedHandler } from "../api/client";
 import * as api from "../api/endpoints";
 import { queryKeys, type SessionInfo } from "../api/endpoints";
 
@@ -77,6 +77,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Any 401 ends the session in the UI; the route guard then redirects to /login with the target path.
   useEffect(() => setUnauthorizedHandler(() => dropSession(queryClient)), [queryClient]);
+
+  useEffect(
+    () =>
+      setPasswordChangeHandler(
+        () => void queryClient.invalidateQueries({ queryKey: queryKeys.me }),
+      ),
+    [queryClient],
+  );
 
   const channel = useRef<BroadcastChannel | null>(null);
   useEffect(() => {

@@ -144,6 +144,7 @@ export interface paths {
     /**
      * Current user and session
      * @description Returns the logged-in user, the organization of the session and the CSRF token.
+     *     `mustChangePassword` tells the client to ask for a new password before anything else.
      */
     get: operations["getMe"];
     put?: never;
@@ -216,7 +217,9 @@ export interface paths {
      *     same organization (a new cookie and a new CSRF token), so the caller stays signed in
      *     and its other devices are signed out. Any role, and also the platform admin, whose
      *     password then stays as chosen: the hash in the deployment's Secret is applied only while
-     *     the password was never changed here.
+     *     the password was never changed here. This is one of the three operations a session with
+     *     `mustChangePassword` may call; the current password is still required, and the answer's
+     *     session no longer has the flag.
      *
      *     The new password follows the registration policy (12-128 characters, not the login) and
      *     must differ from the current one; policy failures and a wrong current password are 422
@@ -1453,7 +1456,8 @@ export interface paths {
      * @description Replaces the user's password with a random temporary password, deletes all of the user's
      *     sessions and writes an audit row (never with the password). The password is in this
      *     answer only (`Cache-Control: no-store`); hand it to the user over a trusted channel. The
-     *     password of the system admin cannot be reset here: it changes its own password with
+     *     user must replace the temporary password at the next sign-in (`mustChangePassword` of the
+     *     session, see the `auth` tag). The password of the system admin cannot be reset here: it changes its own password with
      *     `POST /api/v1/auth/password` (409 `urn:proreta:problem:system-admin`). Platform admins only.
      */
     post: operations["adminResetUserPassword"];
@@ -1523,6 +1527,13 @@ export interface components {
     };
     SessionInfo: {
       user: components["schemas"]["User"];
+      /**
+       * @description True while the password has to be replaced before the app can be used (see the `auth`
+       *     tag). Only `GET /api/v1/auth/me`, `POST /api/v1/auth/logout` and
+       *     `POST /api/v1/auth/password` work then; everything else is 403
+       *     `urn:proreta:problem:password-change-required`.
+       */
+      mustChangePassword: boolean;
       organization: components["schemas"]["OrganizationRef"];
       role: components["schemas"]["MembershipRole"];
       /** @description Send as `X-CSRF-Token` on unsafe requests */
@@ -2479,6 +2490,7 @@ export interface components {
      *     | `urn:proreta:problem:csrf` | 403 | Missing or wrong `X-CSRF-Token` |
      *     | `urn:proreta:problem:forbidden` | 403 | The role (in the organization or the project) or the platform-admin flag does not allow the operation |
      *     | `urn:proreta:problem:account-suspended` | 403 | The organization was suspended or deleted by the platform admin |
+     *     | `urn:proreta:problem:password-change-required` | 403 | The password was issued by somebody else and must be changed first (`mustChangePassword` of the session); only `GET /auth/me`, `POST /auth/logout` and `POST /auth/password` work until then |
      *     | `urn:proreta:problem:registration-disabled` | 403 | Self-service registration is turned off |
      *     | `urn:proreta:problem:password-login-disabled` | 403 | Password sign-in is turned off for this user |
      *     | `urn:proreta:problem:domain-not-verified` | 403 | The sign-in domain was not proven by a recent Google Workspace sign-in |

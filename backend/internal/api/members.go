@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -18,6 +19,9 @@ import (
 type roleError struct{ required authz.Role }
 
 func (e *roleError) Error() string { return fmt.Sprintf("forbidden: needs role %s", e.required) }
+
+// errPasswordChangeRequired is a request refused because the user has to change the password first.
+var errPasswordChangeRequired = errors.New("password change required")
 
 // authorize is the strict-handler middleware that applies the operation table of internal/authz
 // to every operation by its operation id: unknown operations are refused, public ones pass, and
@@ -36,6 +40,9 @@ func (s *server) authorize(f gen.StrictHandlerFunc, operationID string) gen.Stri
 		p, err := s.resolve(r)
 		if err != nil {
 			return nil, err
+		}
+		if p.MustChangePassword && !authz.AllowedWhileMustChangePassword(operationID) {
+			return nil, errPasswordChangeRequired
 		}
 		if !authz.Can(authz.Actor{UserID: p.UserID, Role: authz.Role(p.Role)}, operationID) {
 			s.log.WarnContext(ctx, "operation refused by role", "operation", operationID, "role", p.Role, "required", string(min))

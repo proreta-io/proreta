@@ -1,5 +1,5 @@
 -- name: GetUserByEmail :one
-SELECT id, email, password_hash, display_name, status, is_platform_admin, updated_at, password_changed_at, configured_password_hash
+SELECT id, email, password_hash, display_name, status, is_platform_admin, updated_at, password_changed_at, configured_password_hash, password_must_change
 FROM users
 WHERE email = @email;
 
@@ -13,20 +13,30 @@ WHERE id = @id
 FOR SHARE;
 
 -- name: GetUserByID :one
-SELECT id, email, display_name, status, is_platform_admin
+SELECT id, email, display_name, status, is_platform_admin, password_must_change
+FROM users
+WHERE id = @id;
+
+-- name: GetPasswordMustChange :one
+-- Read for every authenticated request: while it is true the api answers only the session and
+-- password-change operations.
+SELECT password_must_change
 FROM users
 WHERE id = @id;
 
 -- name: InsertUserIfMissing :exec
-INSERT INTO users (id, email, password_hash, display_name)
-VALUES (@id, @email, @password_hash, @display_name)
+-- A user created from the Secret signs in with a password somebody else knows: it must change it.
+INSERT INTO users (id, email, password_hash, display_name, password_must_change)
+VALUES (@id, @email, @password_hash, @display_name, true)
 ON CONFLICT (email) DO NOTHING;
 
 -- name: ApplyConfiguredPasswordHash :execrows
 -- The configured admin hash replaces the password and clears the in-app marker; it is also
--- remembered, so that the next start can tell an unchanged Secret from a new one.
+-- remembered, so that the next start can tell an unchanged Secret from a new one. A new hash
+-- (must_change) asks for a change at the next sign-in; the flag is never cleared here.
 UPDATE users
 SET password_hash = @password_hash, password_changed_at = NULL, configured_password_hash = @password_hash,
+    password_must_change = password_must_change OR @must_change,
     updated_at = CASE WHEN password_hash IS DISTINCT FROM @password_hash THEN now() ELSE updated_at END
 WHERE id = @id;
 
@@ -40,7 +50,7 @@ FOR UPDATE;
 
 -- name: SetUserPassword :exec
 UPDATE users
-SET password_hash = @password_hash, password_changed_at = @changed_at, updated_at = @changed_at
+SET password_hash = @password_hash, password_changed_at = @changed_at, password_must_change = false, updated_at = @changed_at
 WHERE id = @id;
 
 -- name: LockLiveSession :one

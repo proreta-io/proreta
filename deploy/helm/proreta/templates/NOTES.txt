@@ -27,7 +27,7 @@ Proreta {{ include "proreta.imageTag" . }} is installed as release "{{ .Release.
      kubectl -n {{ $ns }} get secret {{ include "proreta.secret.adminInitial" . }} -o jsonpath='{.data.login}' | base64 -d; echo
      kubectl -n {{ $ns }} get secret {{ include "proreta.secret.adminInitial" . }} -o jsonpath='{.data.password}' | base64 -d; echo
 
-   Store the password in a password manager, then delete the plaintext copy:
+   Proreta asks you to set a new password at the first sign-in. Then delete the plaintext copy:
 
      kubectl -n {{ $ns }} delete secret {{ include "proreta.secret.adminInitial" . }}
 {{- else if ne .Values.secrets.admin.source "generate" }}

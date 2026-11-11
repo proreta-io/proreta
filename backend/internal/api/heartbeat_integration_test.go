@@ -50,6 +50,7 @@ func newHeartbeatServer(t *testing.T, env *pgtest.Env, logs *lockedBuffer, clk c
 	if err := svc.BootstrapAdmin(ctx, adminLogin, hash); err != nil {
 		t.Fatal(err)
 	}
+	pgtest.MustExec(t, env.AdminConn(t), `UPDATE users SET password_must_change = false WHERE email = '`+adminLogin+`'`)
 	sched := scheduler.New()
 	h, err := api.NewHandler(api.Config{Version: "test", Commit: "test", CookieSecure: true, TrustedProxyHops: 1, PublicURL: heartbeatPublicURL},
 		api.Deps{Auth: svc, Monitors: monitors.NewService(pool, sched, incidents.NewService(sched)), Queries: queries.New(pool, nil),

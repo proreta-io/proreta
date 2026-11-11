@@ -98,3 +98,66 @@ func pgtestExec(t *testing.T, env *pgtest.Env, sql string) {
 	t.Helper()
 	pgtest.MustExec(t, env.AdminConn(t), sql)
 }
+
+// A user whose password was issued by somebody else can do nothing but look at the session, sign
+// out and change the password; changing it opens everything.
+func TestIntegrationMustChangePasswordGate(t *testing.T) {
+	env := pgtest.New(t, pgtest.DBName("apimustchange"))
+	c := newRegistrationServer(t, env, auth.Options{}, true, &lockedBuffer{})
+	xff := map[string]string{"X-Forwarded-For": "198.51.100.31"}
+	cookie, csrf, reg := c.register("gate@example.com")
+	if reg.body["mustChangePassword"] != false {
+		t.Fatalf("registered user: %s", reg.raw)
+	}
+	h := map[string]string{"Cookie": cookie["Cookie"], "X-CSRF-Token": csrf, "X-Forwarded-For": xff["X-Forwarded-For"]}
+	pgtestExec(t, env, `UPDATE users SET password_must_change = true WHERE email = 'gate@example.com'`)
+
+	if r := c.do(http.MethodGet, "/api/v1/auth/me", "", h); r.code != http.StatusOK || r.body["mustChangePassword"] != true {
+		t.Fatalf("me: %d %s", r.code, r.raw)
+	}
+	for _, call := range []struct{ method, path, body string }{
+		{http.MethodGet, "/api/v1/monitors", ""},
+		{http.MethodPost, "/api/v1/monitors", `{"type":"http","name":"m","http":{"url":"https://example.com/"}}`},
+		{http.MethodGet, "/api/v1/auth/organizations", ""},
+		{http.MethodGet, "/api/v1/members", ""},
+		{http.MethodGet, "/api/v1/auth/identities", ""},
+		{http.MethodDelete, "/api/v1/organization", ""},
+	} {
+		r := c.do(call.method, call.path, call.body, h)
+		if r.code != http.StatusForbidden || r.body["type"] != "urn:proreta:problem:password-change-required" {
+			t.Errorf("%s %s: %d %s", call.method, call.path, r.code, r.raw)
+		}
+	}
+	// The CSRF check still comes first.
+	if r := c.do(http.MethodGet, "/api/v1/monitors", "", map[string]string{"Cookie": cookie["Cookie"]}); r.code != http.StatusForbidden && r.code != http.StatusOK {
+		t.Errorf("without csrf: %d", r.code)
+	}
+
+	body := func(current, next string) string {
+		return fmt.Sprintf(`{"currentPassword":%q,"newPassword":%q}`, current, next)
+	}
+	if r := c.do(http.MethodPost, "/api/v1/auth/password", body(ownerPassword, ownerPassword), h); r.code != http.StatusUnprocessableEntity || !strings.Contains(r.raw, `"newPassword"`) {
+		t.Fatalf("same password: %d %s", r.code, r.raw)
+	}
+	if r := c.do(http.MethodPost, "/api/v1/auth/password", body("not my password", "another long passphrase"), h); r.code != http.StatusUnprocessableEntity || !strings.Contains(r.raw, `"currentPassword"`) {
+		t.Fatalf("wrong current: %d %s", r.code, r.raw)
+	}
+	if r := c.do(http.MethodGet, "/api/v1/monitors", "", h); r.code != http.StatusForbidden {
+		t.Fatalf("after refused changes: %d", r.code)
+	}
+
+	r := c.do(http.MethodPost, "/api/v1/auth/password", body(ownerPassword, "another long passphrase"), h)
+	if r.code != http.StatusOK || r.body["mustChangePassword"] != false {
+		t.Fatalf("change: %d %s", r.code, r.raw)
+	}
+	newCookie, newCSRF := session(t, r)
+	if r := c.do(http.MethodGet, "/api/v1/monitors", "", withCSRF(newCookie, newCSRF)); r.code != http.StatusOK {
+		t.Fatalf("after the change: %d %s", r.code, r.raw)
+	}
+
+	// Signing out works while the change is pending.
+	pgtestExec(t, env, `UPDATE users SET password_must_change = true WHERE email = 'gate@example.com'`)
+	if r := c.do(http.MethodPost, "/api/v1/auth/logout", "", withCSRF(newCookie, newCSRF)); r.code != http.StatusNoContent {
+		t.Fatalf("logout: %d %s", r.code, r.raw)
+	}
+}

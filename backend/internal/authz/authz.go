@@ -243,6 +243,20 @@ var operations = map[string]Role{
 	"adminresetuserpassword":     Viewer,
 }
 
+// whileMustChangePassword lists the only operations a session may call while its user has to
+// change the password; every other operation, present or future, is refused (deny by default).
+var whileMustChangePassword = map[string]bool{
+	"getme":          true,
+	"logout":         true,
+	"changepassword": true,
+}
+
+// AllowedWhileMustChangePassword reports whether a session of a user who has to change the
+// password may call the operation.
+func AllowedWhileMustChangePassword(operationID string) bool {
+	return whileMustChangePassword[strings.ToLower(operationID)]
+}
+
 // MinRole returns the minimum role of an operation (Public for operations without a session)
 // and whether the operation is in the table. Operation ids are compared case-insensitively:
 // the generated server passes them as Go names.

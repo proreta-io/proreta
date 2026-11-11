@@ -914,3 +914,83 @@ func TestIntegrationBootstrapAdoptionOverridesChosenPassword(t *testing.T) {
 		t.Fatalf("marker = %v (%v), want NULL", marker, err)
 	}
 }
+
+func mustChangeFlag(t *testing.T, env *pgtest.Env, login string) bool {
+	t.Helper()
+	var flag bool
+	if err := env.AdminConn(t).QueryRow(context.Background(), `SELECT password_must_change FROM users WHERE email = $1`, login).Scan(&flag); err != nil {
+		t.Fatalf("password_must_change of %s: %v", login, err)
+	}
+	return flag
+}
+
+// The password from the Secret has to be replaced at the first sign-in: set by the first
+// bootstrap and by a new Secret hash, kept by restarts with the same one, cleared by the change.
+func TestIntegrationMustChangePasswordFromSecret(t *testing.T) {
+	env := pgtest.New(t, pgtest.DBName("auth_mustchange"))
+	ctx := context.Background()
+	secret1, _ := crypto.HashPassword("first", cheap)
+	secret2, _ := crypto.HashPassword("second", cheap)
+
+	svc := newBootstrapped(t, env, "admin", secret1)
+	if !mustChangeFlag(t, env, "admin") {
+		t.Fatal("a new admin must change the password")
+	}
+	res, err := login(t, svc, "admin", "first")
+	if err != nil || !res.User.MustChangePassword {
+		t.Fatalf("login: %+v %v, want mustChangePassword", res.User, err)
+	}
+	p := principalOf(t, svc, res.Token)
+	if !p.MustChangePassword {
+		t.Fatal("principal does not carry the flag")
+	}
+	if info, err := svc.Me(ctx, p); err != nil || !info.User.MustChangePassword {
+		t.Fatalf("me: %+v %v", info.User, err)
+	}
+
+	// Restarts with the same Secret keep the pending change.
+	svc = newBootstrapped(t, env, "admin", secret1)
+	if !mustChangeFlag(t, env, "admin") {
+		t.Fatal("a restart cleared the pending change")
+	}
+
+	// The new password must differ from the current one, and the flag stays until it does.
+	if _, err := svc.ChangePassword(ctx, principalOf(t, svc, mustLogin(t, svc, "admin", "first")), auth.ChangePasswordInput{Current: "first", New: "first", IP: testIP}); !fieldErrorOn(err, "newPassword") {
+		t.Fatalf("same password: err = %v", err)
+	}
+	if !mustChangeFlag(t, env, "admin") {
+		t.Fatal("a refused change cleared the flag")
+	}
+	if _, err := svc.ChangePassword(ctx, principalOf(t, svc, mustLogin(t, svc, "admin", "first")), auth.ChangePasswordInput{Current: "wrong", New: strongPassword, IP: testIP}); !fieldErrorOn(err, "currentPassword") {
+		t.Fatalf("wrong current: err = %v", err)
+	}
+	if !mustChangeFlag(t, env, "admin") {
+		t.Fatal("a wrong current password cleared the flag")
+	}
+	changed, err := svc.ChangePassword(ctx, principalOf(t, svc, mustLogin(t, svc, "admin", "first")), auth.ChangePasswordInput{Current: "first", New: strongPassword, IP: testIP})
+	if err != nil || changed.User.MustChangePassword {
+		t.Fatalf("change: %+v %v", changed.User, err)
+	}
+	if mustChangeFlag(t, env, "admin") || principalOf(t, svc, changed.Token).MustChangePassword {
+		t.Fatal("the change did not clear the flag")
+	}
+	newBootstrapped(t, env, "admin", secret1)
+	if mustChangeFlag(t, env, "admin") {
+		t.Fatal("a restart with the same Secret asked for another change")
+	}
+
+	// A new Secret hash is a reset: the temporary password must be replaced again.
+	svc = newBootstrapped(t, env, "admin", secret2)
+	if !mustChangeFlag(t, env, "admin") {
+		t.Fatal("a new Secret hash did not ask for a change")
+	}
+	mustLogin(t, svc, "admin", "second")
+
+	// An installation that predates the flag keeps its admin as it is: the same hash again does
+	// not ask for a change.
+	pgtest.MustExec(t, env.AdminConn(t), `UPDATE users SET password_must_change = false, configured_password_hash = NULL WHERE email = 'admin'`)
+	newBootstrapped(t, env, "admin", secret2)
+	if mustChangeFlag(t, env, "admin") {
+		t.Fatal("an upgrade with the same Secret asked for a change")
+	}
+}

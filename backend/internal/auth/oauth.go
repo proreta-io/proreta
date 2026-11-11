@@ -462,7 +462,7 @@ func (s *Service) oauthSession(ctx context.Context, tx pgx.Tx, in OAuthLoginInpu
 		return LoginResult{}, err
 	}
 	return LoginResult{Token: sess.token, SessionInfo: SessionInfo{
-		User:   User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, IsPlatformAdmin: u.IsPlatformAdmin},
+		User:   User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, IsPlatformAdmin: u.IsPlatformAdmin, MustChangePassword: u.PasswordMustChange},
 		Tenant: t, Role: role, CSRFToken: sess.csrf, ExpiresAt: sess.expiresAt,
 	}}, nil
 }
