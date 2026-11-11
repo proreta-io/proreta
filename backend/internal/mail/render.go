@@ -30,8 +30,9 @@ type kindSpec struct {
 }
 
 var specs = map[Kind]kindSpec{
-	KindTest:        {subject: "Proreta test message"},
-	KindVerifyEmail: {subject: "Confirm your email address for Proreta", linkPath: "/verify-email#"},
+	KindTest:          {subject: "Proreta test message"},
+	KindVerifyEmail:   {subject: "Confirm your email address for Proreta", linkPath: "/verify-email#"},
+	KindPasswordReset: {subject: "Reset your Proreta password", linkPath: "/reset-password#"},
 	KindInvitation: {
 		subject:  `{{if .Params.inviter}}{{.Params.inviter}} invited you to {{.Params.org}} on Proreta{{else}}You are invited to {{.Params.org}} on Proreta{{end}}`,
 		linkPath: "/invite#",

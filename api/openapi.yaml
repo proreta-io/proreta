@@ -322,6 +322,79 @@ paths:
           $ref: "#/components/responses/TooManyRequests"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/auth/forgot-password:
+    post:
+      operationId: requestPasswordReset
+      summary: Email a link to reset a forgotten password
+      description: |
+        Public (no session). Sends a one-time link to the address when it belongs to an account that
+        can be reset (active, with a password, not the platform admin) and answers 202 either way, so
+        the answer says nothing about which addresses are registered. The link is
+        `PRORETA_PUBLIC_URL/reset-password#<token>`; it works once and for one hour, and only the
+        newest link of an account works. A malformed address is 422 (that says nothing about
+        accounts). Every request counts against a per-client-IP limit (429 with Retry-After); beyond
+        three requests an hour for one address, or three links an hour for one account, requests are
+        answered 202 and send nothing. `404 urn:proreta:problem:not-found` when the installation
+        sends no email (`emailEnabled` false in `GET /api/v1/auth/providers`) or has the password
+        form turned off (`passwordLoginEnabled` false). Audited as `auth.password_reset_requested`
+        when a link was issued (no address in the metadata).
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordResetRequest"
+      responses:
+        "202":
+          description: Accepted; a link is sent if the address can be reset
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/auth/reset-password:
+    post:
+      operationId: resetPassword
+      summary: Set a new password with the emailed token
+      description: |
+        Public (no session): the token from the emailed link proves control of the mailbox. The token
+        and the password travel in the body, never in a URL. The password follows the registration
+        policy (12-128 characters, not the email address; 422 with `fieldErrors` otherwise). Unknown,
+        malformed, expired, used and replaced tokens all get the same 404
+        `urn:proreta:problem:not-found`. On success the password is replaced, **every session of the
+        account in every organization is ended**, the other open reset links die, and the address
+        counts as verified; the user is not signed in and must log in. Failed attempts count against
+        the per-client-IP limit and the password hash shares the login's bounded queue (429 with
+        Retry-After when it is full). Audited as `auth.password_reset_completed` (`sessionsRevoked`).
+        404 also when the installation sends no email or has the password form turned off.
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordResetComplete"
+      responses:
+        "204":
+          description: The password was changed and all sessions ended
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/auth/resend-verification:
     post:
       operationId: resendEmailVerification
@@ -4046,6 +4119,28 @@ components:
           format: password
           minLength: 1
           maxLength: 128
+    PasswordResetRequest:
+      type: object
+      additionalProperties: false
+      required: [email]
+      properties:
+        email:
+          type: string
+          maxLength: 254
+    PasswordResetComplete:
+      type: object
+      additionalProperties: false
+      required: [token, password]
+      properties:
+        token:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 128
+        password:
+          type: string
+          format: password
+          maxLength: 1024
     EmailVerificationToken:
       type: object
       additionalProperties: false

@@ -155,6 +155,9 @@ var operations = map[string]Role{
 	"lookupinvitation":  Public,
 	// The emailed token is the credential.
 	"verifyemail": Public,
+	// Forgotten password: the emailed token is the credential.
+	"requestpasswordreset": Public,
+	"resetpassword":        Public,
 	// OAuth sign-in: the start of a link checks the session and CSRF token itself.
 	"getauthproviders": Public,
 	"startoauth":       Public,

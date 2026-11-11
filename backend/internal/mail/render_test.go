@@ -107,3 +107,16 @@ func TestRenderInvitation(t *testing.T) {
 		t.Fatalf("unsafe message: %q\n%s", m.Subject, m.HTML)
 	}
 }
+
+func TestRenderPasswordReset(t *testing.T) {
+	m, err := Render(KindPasswordReset, "https://proreta.example.com", "ada@example.org",
+		map[string]string{"token": "tok-9", "email": "ada@example.org", "expires": "1 hour"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := "https://proreta.example.com/reset-password#tok-9"
+	if m.Subject != "Reset your Proreta password" || !strings.Contains(m.Text, link+"\n") || !strings.Contains(m.HTML, `href="`+link+`"`) ||
+		!strings.Contains(m.Text, "expires in 1 hour") || strings.Contains(m.Text+m.HTML, "<img") {
+		t.Fatalf("message = %+v", m)
+	}
+}

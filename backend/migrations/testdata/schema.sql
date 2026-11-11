@@ -22,6 +22,7 @@ monitors kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arw/pror
 notification_channels kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arw/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=r/proreta_owner
 notification_deliveries kind=r owner=proreta_owner rls=true force=true acl=proreta_api=r/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=ar/proreta_owner
 org_auth_domains kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arwd/proreta_owner,proreta_owner=arwdDxt/proreta_owner
+password_resets kind=r owner=proreta_owner rls=false force=false acl=proreta_api=ar/proreta_owner,proreta_owner=arwdDxt/proreta_owner
 plans kind=r owner=proreta_owner rls=false force=false acl=proreta_api=r/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=r/proreta_owner
 probe_locations kind=r owner=proreta_owner rls=false force=false acl=proreta_api=r/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=r/proreta_owner
 project_members kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arwd/proreta_owner,proreta_owner=arwdDxt/proreta_owner
@@ -195,6 +196,12 @@ org_auth_domains.5 enabled boolean not null default true
 org_auth_domains.6 created_by uuid not null
 org_auth_domains.7 created_at timestamp with time zone not null default now()
 org_auth_domains.8 updated_at timestamp with time zone not null default now()
+password_resets.1 token_hash bytea not null
+password_resets.2 user_id uuid not null
+password_resets.3 email citext not null
+password_resets.4 created_at timestamp with time zone not null default now()
+password_resets.5 expires_at timestamp with time zone not null
+password_resets.6 used_at timestamp with time zone acl=proreta_api=w/proreta_owner
 plans.1 key text not null
 plans.2 name text not null
 plans.3 limits jsonb not null
@@ -430,6 +437,11 @@ org_auth_domains org_auth_domains_domain_key UNIQUE (domain)
 org_auth_domains org_auth_domains_pkey PRIMARY KEY (id)
 org_auth_domains org_auth_domains_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id)
 org_auth_domains org_auth_domains_tenant_id_id_key UNIQUE (tenant_id, id)
+password_resets password_resets_check CHECK ((expires_at > created_at))
+password_resets password_resets_email_check CHECK (((length((email)::text) >= 3) AND (length((email)::text) <= 320)))
+password_resets password_resets_pkey PRIMARY KEY (token_hash)
+password_resets password_resets_token_hash_check CHECK ((length(token_hash) = 32))
+password_resets password_resets_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id)
 plans plans_features_names CHECK (((array_position(features, NULL::text) IS NULL) AND ((cardinality(features) = 0) OR (array_to_string(features, ','::text) ~ '^[a-z0-9_-]{1,64}(,[a-z0-9_-]{1,64})*$'::text))))
 plans plans_key_check CHECK ((key ~ '^[a-z0-9][a-z0-9-]{0,62}$'::text))
 plans plans_limits_check CHECK ((jsonb_typeof(limits) = 'object'::text))
@@ -564,6 +576,9 @@ CREATE UNIQUE INDEX org_auth_domains_domain_key ON public.org_auth_domains USING
 CREATE UNIQUE INDEX org_auth_domains_pkey ON public.org_auth_domains USING btree (id)
 CREATE UNIQUE INDEX org_auth_domains_tenant_id_id_key ON public.org_auth_domains USING btree (tenant_id, id)
 CREATE INDEX org_auth_domains_tenant_idx ON public.org_auth_domains USING btree (tenant_id, domain)
+CREATE INDEX password_resets_expires_idx ON public.password_resets USING btree (expires_at)
+CREATE UNIQUE INDEX password_resets_pkey ON public.password_resets USING btree (token_hash)
+CREATE INDEX password_resets_user_idx ON public.password_resets USING btree (user_id, created_at DESC)
 CREATE UNIQUE INDEX plans_pkey ON public.plans USING btree (key)
 CREATE UNIQUE INDEX probe_locations_code_key ON public.probe_locations USING btree (code)
 CREATE UNIQUE INDEX probe_locations_pkey ON public.probe_locations USING btree (id)
@@ -687,6 +702,7 @@ outbox_pending() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_ow
 purge_email_verifications() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 purge_expired_sessions() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 purge_mail_outbox(interval) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+purge_password_resets() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 reset_monitor_runtime(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 status_page_published_pages() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 status_page_slug_held(text) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
@@ -1772,6 +1788,25 @@ AS $function$
             SELECT e.id FROM mail_outbox AS e
             WHERE e.finished_at IS NOT NULL AND e.finished_at < now() - p_keep
             ORDER BY e.finished_at
+            LIMIT 1000
+            FOR UPDATE SKIP LOCKED
+        )
+        RETURNING 1
+    )
+    SELECT count(*)::integer FROM gone
+$function$
+CREATE OR REPLACE FUNCTION public.purge_password_resets()
+ RETURNS integer
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    WITH gone AS (
+        DELETE FROM password_resets AS r
+        WHERE r.token_hash IN (
+            SELECT e.token_hash FROM password_resets AS e
+            WHERE e.expires_at < now() - interval '1 day'
+            ORDER BY e.expires_at
             LIMIT 1000
             FOR UPDATE SKIP LOCKED
         )

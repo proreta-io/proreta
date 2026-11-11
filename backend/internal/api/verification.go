@@ -28,3 +28,17 @@ func (s *server) ResendEmailVerification(ctx context.Context, _ gen.ResendEmailV
 	}
 	return gen.ResendEmailVerification204Response{}, nil
 }
+
+func (s *server) RequestPasswordReset(ctx context.Context, req gen.RequestPasswordResetRequestObject) (gen.RequestPasswordResetResponseObject, error) {
+	if err := s.auth.RequestPasswordReset(ctx, req.Body.Email, s.limiterIP(ctx, httpRequest(ctx))); err != nil {
+		return nil, err
+	}
+	return gen.RequestPasswordReset202Response{}, nil
+}
+
+func (s *server) ResetPassword(ctx context.Context, req gen.ResetPasswordRequestObject) (gen.ResetPasswordResponseObject, error) {
+	if err := s.auth.ResetPassword(ctx, req.Body.Token, req.Body.Password, s.limiterIP(ctx, httpRequest(ctx))); err != nil {
+		return nil, err
+	}
+	return gen.ResetPassword204Response{}, nil
+}

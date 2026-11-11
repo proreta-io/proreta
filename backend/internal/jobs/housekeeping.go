@@ -43,6 +43,7 @@ const (
 	lockStatusPages      int64 = 0x7072_6f72_6574_0007
 	lockPurgeMail        int64 = 0x7072_6f72_6574_0008
 	lockPurgeVerifs      int64 = 0x7072_6f72_6574_0009
+	lockPurgeResets      int64 = 0x7072_6f72_6574_000a
 )
 
 // StatusPageEvery is how often the snapshots of published status pages are rebuilt;
@@ -82,6 +83,7 @@ func DefaultTasks(m *Metrics, log *slog.Logger, mon *monitors.Service) []Task {
 		{Name: "purge_expired_sessions", Every: time.Hour, LockKey: lockPurgeSessions, Run: scalar(`SELECT purge_expired_sessions()`)},
 		{Name: "purge_mail_outbox", Every: time.Hour, LockKey: lockPurgeMail, Run: purgeMail},
 		{Name: "purge_email_verifications", Every: 24 * time.Hour, LockKey: lockPurgeVerifs, Run: scalar(`SELECT purge_email_verifications()`)},
+		{Name: "purge_password_resets", Every: 24 * time.Hour, LockKey: lockPurgeResets, Run: scalar(`SELECT purge_password_resets()`)},
 		{Name: "enqueue_incident_reminders", Every: ReminderEvery, LockKey: lockReminders, Run: enqueueReminders},
 	}
 }
