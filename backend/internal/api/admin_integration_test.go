@@ -47,7 +47,7 @@ func newAdminServer(t *testing.T, env *pgtest.Env, logs *lockedBuffer) *client {
 	}
 	pgtest.MustExec(t, env.AdminConn(t), `UPDATE users SET password_must_change = false WHERE email = '`+adminLogin+`'`)
 	registration := platformsettings.NewRegistration(pool, true, log)
-	adminSvc, err := admin.NewService(pool, svc, admin.Options{Logger: log, Registerer: prometheus.NewRegistry(), Registration: registration})
+	adminSvc, err := admin.NewService(pool, svc, admin.Options{Logger: log, Registerer: prometheus.NewRegistry(), Registration: registration, Projects: projects.NewService(pool)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,6 +78,13 @@ func adminCalls(t *testing.T, tenantID, userID string) []struct{ method, path, b
 		for method := range spec.Paths.Value(path).Operations() {
 			body := ""
 			switch {
+			case strings.Contains(path, "/projects"):
+				switch method {
+				case http.MethodPost, http.MethodPatch:
+					body = `{"name":"Payments"}`
+				case http.MethodPut:
+					body = `{}`
+				}
 			case method == http.MethodPatch:
 				body = `{"status":"suspended"}`
 			case method == http.MethodPut && strings.HasSuffix(path, "/email"):
@@ -94,11 +101,11 @@ func adminCalls(t *testing.T, tenantID, userID string) []struct{ method, path, b
 				body = `{"role":"member"}`
 			}
 			out = append(out, struct{ method, path, body string }{method,
-				strings.NewReplacer("{tenantId}", tenantID, "{organizationId}", tenantID, "{userId}", userID, "{invitationId}", userID).Replace(path), body})
+				strings.NewReplacer("{tenantId}", tenantID, "{organizationId}", tenantID, "{userId}", userID, "{invitationId}", userID, "{projectId}", userID).Replace(path), body})
 		}
 	}
-	if len(out) != 26 {
-		t.Fatalf("%d admin operations in the spec, want 26", len(out))
+	if len(out) != 33 {
+		t.Fatalf("%d admin operations in the spec, want 33", len(out))
 	}
 	return out
 }

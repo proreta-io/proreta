@@ -39,6 +39,7 @@ import {
 import { formatDate, formatDateTime } from "../../lib/format";
 import AdminOrganizationInvitations from "./AdminOrganizationInvitations";
 import AdminOrganizationMembers from "./AdminOrganizationMembers";
+import AdminOrganizationProjects from "./AdminOrganizationProjects";
 import { OrganizationStatusBadge } from "./OrganizationStatusBadge";
 import { HIDDEN_PLANS } from "../../lib/usage";
 
@@ -112,6 +113,7 @@ function OrganizationDetails({ id }: { id: string }) {
       <OrganizationUsers organization={organization.data} />
       <AdminOrganizationMembers organization={organization.data} />
       <AdminOrganizationInvitations organization={organization.data} />
+      <AdminOrganizationProjects organization={organization.data} />
     </section>
   );
 }

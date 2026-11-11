@@ -100,7 +100,8 @@ func run() error {
 	// The platform admin can open or close registration in the panel; PRORETA_REGISTRATION_ENABLED
 	// is the value until a choice is stored.
 	registration := platformsettings.NewRegistration(pool, cfg.RegistrationEnabled, log)
-	adminSvc, err := admin.NewService(pool, authSvc, admin.Options{Logger: log, Registerer: reg, Mail: mailQueue, Settings: mailSettings, Registration: registration})
+	projectsSvc := projects.NewService(pool)
+	adminSvc, err := admin.NewService(pool, authSvc, admin.Options{Logger: log, Registerer: reg, Mail: mailQueue, Settings: mailSettings, Registration: registration, Projects: projectsSvc})
 	if err != nil {
 		return err
 	}
@@ -133,7 +134,7 @@ func run() error {
 		Monitors: monitors.NewService(pool, sched, incidents.NewService(sched)),
 		Queries:  queries.New(pool, nil),
 		Channels: notify.NewService(pool, keys, slack, cfg.PublicURL),
-		Plans:    plans.NewService(pool), Projects: projects.NewService(pool),
+		Plans:    plans.NewService(pool), Projects: projectsSvc,
 		StatusPages:  statuspages.NewService(pool, statuspages.Options{Logger: log}),
 		Admin:        adminSvc,
 		Registration: registration,
