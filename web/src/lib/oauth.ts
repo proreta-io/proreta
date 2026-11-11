@@ -36,11 +36,21 @@ export function useAuthProviders(): AuthProviders | undefined {
 }
 
 /**
- * Whether the installation sends email. False while loading or when the answer cannot be loaded,
+ * Whether the installation can send email: a server is set up and tested in the admin panel. False while loading or when the answer cannot be loaded,
  * so a page keeps showing the link it would show without email until the server says otherwise.
  */
 export function useEmailEnabled(): boolean {
   return useAuthProviders()?.emailEnabled === true;
+}
+
+/** Whether the forgot-password flow is on: the admin turned it on and the password form exists. */
+export function usePasswordResetEnabled(): boolean {
+  return useAuthProviders()?.passwordResetEnabled === true;
+}
+
+/** Whether registrations get a verification email (and so the banner has a link to resend). */
+export function useEmailVerificationEnabled(): boolean {
+  return useAuthProviders()?.emailVerificationEnabled === true;
 }
 
 /**

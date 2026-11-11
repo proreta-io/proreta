@@ -11,7 +11,14 @@ function wrapper({ children }: { children: ReactNode }) {
 
 const providers = (emailEnabled: boolean) => ({
   "GET /api/v1/auth/providers": () =>
-    json({ providers: [], passwordLoginEnabled: true, registrationEnabled: true, emailEnabled }),
+    json({
+      providers: [],
+      passwordLoginEnabled: true,
+      registrationEnabled: true,
+      emailEnabled,
+      passwordResetEnabled: false,
+      emailVerificationEnabled: false,
+    }),
 });
 
 describe("useEmailEnabled", () => {

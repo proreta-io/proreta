@@ -3,18 +3,18 @@ import { ApiError, errorMessage } from "../api/client";
 import { resendEmailVerification } from "../api/endpoints";
 import { useAuth } from "../auth/AuthProvider";
 import { formatDuration } from "../lib/format";
-import { useEmailEnabled } from "../lib/oauth";
+import { useEmailVerificationEnabled } from "../lib/oauth";
 import { useToast } from "./Toasts";
 import { Alert, Button } from "./ui";
 
 /**
- * Asks a signed-in user to verify their email address. Shown only when the installation sends
- * email and the login is an address that was not verified (the platform admin's login is never
+ * Asks a signed-in user to verify their email address. Shown only when the platform admin turned
+ * verification on and the login is an address that was not verified (the platform admin's login is never
  * one). Nothing depends on it: it is a reminder with a way to get the link again.
  */
 export default function VerifyEmailBanner() {
   const auth = useAuth();
-  const emailEnabled = useEmailEnabled();
+  const verificationEnabled = useEmailVerificationEnabled();
   const toast = useToast();
   const resend = useMutation({
     mutationFn: resendEmailVerification,
@@ -34,7 +34,7 @@ export default function VerifyEmailBanner() {
   });
   const user = auth.session?.user;
   if (
-    !emailEnabled ||
+    !verificationEnabled ||
     !user ||
     user.isPlatformAdmin ||
     user.emailVerified ||

@@ -174,6 +174,8 @@ describe("members page", () => {
           passwordLoginEnabled: true,
           registrationEnabled: false,
           emailEnabled,
+          passwordResetEnabled: false,
+          emailVerificationEnabled: false,
         }),
     });
     const base = () => ({
@@ -182,13 +184,63 @@ describe("members page", () => {
       "GET /api/v1/invitations": () => json({ items: [] }),
     });
 
-    it("offers the address field only when the installation sends email", async () => {
+    it("offers the address field and the checkbox only when the installation sends email", async () => {
       mockApi({ ...base(), ...providers(false) });
       renderApp("/members");
       await userEvent.click(await screen.findByRole("button", { name: "Invite someone" }));
       const dialog = await screen.findByRole("dialog", { name: "Invite someone" });
       expect(within(dialog).getByLabelText("Note (optional)")).toBeInTheDocument();
       expect(within(dialog).queryByLabelText("Email the link to (optional)")).toBeNull();
+      expect(within(dialog).queryByRole("checkbox", { name: "Send by email" })).toBeNull();
+    });
+
+    it("leaves the box unchecked unless the admin made emailing the default", async () => {
+      mockApi({ ...base(), ...providers(true) });
+      renderApp("/members");
+      await userEvent.click(await screen.findByRole("button", { name: "Invite someone" }));
+      const dialog = await screen.findByRole("dialog", { name: "Invite someone" });
+      expect(
+        await within(dialog).findByRole("checkbox", { name: "Send by email" }),
+      ).not.toBeChecked();
+    });
+
+    it("pre-checks the box when the admin turned on emailing invitations", async () => {
+      mockApi({
+        ...base(),
+        ...providers(true),
+        "GET /api/v1/auth/me": () => json({ ...session, emailInvitations: true }),
+      });
+      renderApp("/members");
+      await userEvent.click(await screen.findByRole("button", { name: "Invite someone" }));
+      const dialog = await screen.findByRole("dialog", { name: "Invite someone" });
+      expect(await within(dialog).findByRole("checkbox", { name: "Send by email" })).toBeChecked();
+    });
+
+    it("does not send the address when the box is unchecked", async () => {
+      const fetchMock = mockApi({
+        ...base(),
+        ...providers(true),
+        "POST /api/v1/invitations": () =>
+          json(
+            {
+              invitation: invitation({ id: "i3" }),
+              inviteUrl: "https://proreta.example.com/invite#OTHER",
+              emailQueued: false,
+            },
+            201,
+          ),
+      });
+      renderApp("/members");
+      await userEvent.click(await screen.findByRole("button", { name: "Invite someone" }));
+      const dialog = await screen.findByRole("dialog", { name: "Invite someone" });
+      await userEvent.type(
+        await within(dialog).findByLabelText("Email the link to (optional)"),
+        "guest@example.org",
+      );
+      await userEvent.click(within(dialog).getByRole("button", { name: "Create link" }));
+      expect(await screen.findByLabelText("Invitation link")).toBeInTheDocument();
+      const sent = requests(fetchMock, "POST", "/api/v1/invitations")[0]!;
+      expect(await sent.clone().json()).toEqual({ role: "member" });
     });
 
     it("sends the address, still shows the link and says where the email goes", async () => {
@@ -212,6 +264,7 @@ describe("members page", () => {
         await within(dialog).findByLabelText("Email the link to (optional)"),
         "Guest@Example.org",
       );
+      await userEvent.click(within(dialog).getByRole("checkbox", { name: "Send by email" }));
       await userEvent.click(
         within(dialog).getByRole("button", { name: "Create link and send email" }),
       );
@@ -221,7 +274,11 @@ describe("members page", () => {
         "https://proreta.example.com/invite#SECRET-TOKEN",
       );
       const sent = requests(fetchMock, "POST", "/api/v1/invitations")[0]!;
-      expect(await sent.clone().json()).toEqual({ role: "member", email: "Guest@Example.org" });
+      expect(await sent.clone().json()).toEqual({
+        role: "member",
+        email: "Guest@Example.org",
+        sendEmail: true,
+      });
     });
 
     it("shows the server's complaint about the address in the dialog", async () => {
@@ -241,6 +298,7 @@ describe("members page", () => {
         await within(dialog).findByLabelText("Email the link to (optional)"),
         "nobody",
       );
+      await userEvent.click(within(dialog).getByRole("checkbox", { name: "Send by email" }));
       await userEvent.click(
         within(dialog).getByRole("button", { name: "Create link and send email" }),
       );
