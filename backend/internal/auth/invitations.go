@@ -163,11 +163,15 @@ func (s *Service) CreateInvitationFor(ctx context.Context, a Actor, in Invitatio
 			return err
 		}
 		q := authdb.New(tx)
-		role, err := q.GetMembershipRole(ctx, authdb.GetMembershipRoleParams{TenantID: a.TenantID, UserID: a.UserID})
-		if err != nil {
-			return ErrUnauthenticated
+		role := authz.Owner
+		if !a.platform {
+			r, err := q.GetMembershipRole(ctx, authdb.GetMembershipRoleParams{TenantID: a.TenantID, UserID: a.UserID})
+			if err != nil {
+				return ErrUnauthenticated
+			}
+			role = authz.Role(r)
 		}
-		if !authz.CanInvite(authz.Actor{UserID: a.UserID, Role: authz.Role(role)}, authz.Role(inv.Role)) {
+		if !authz.CanInvite(authz.Actor{UserID: a.UserID, Role: role}, authz.Role(inv.Role)) {
 			return authz.ErrForbidden
 		}
 		u, err := q.GetUserByID(ctx, a.UserID)
@@ -197,8 +201,11 @@ func (s *Service) CreateInvitationFor(ctx context.Context, a Actor, in Invitatio
 			}
 			meta["emailed"] = true
 		}
+		if a.platform {
+			meta = map[string]any{"role": inv.Role, "emailed": to != ""}
+		}
 		return audit.Record(ctx, tx, audit.Entry{
-			TenantID: a.TenantID, ActorUserID: &a.UserID, Action: ActionMemberInvited,
+			TenantID: a.TenantID, ActorUserID: &a.UserID, Action: a.action(ActionMemberInvited),
 			EntityType: "invitation", EntityID: inv.ID.String(), IP: a.IP, Metadata: meta,
 		})
 	})
@@ -267,8 +274,15 @@ func (s *Service) ListInvitations(ctx context.Context, tenantID uuid.UUID) ([]In
 // RevokeInvitation stops an open invitation. Revoked and expired ones are left as they are; an
 // accepted one is ErrInvitationAccepted.
 func (s *Service) RevokeInvitation(ctx context.Context, a Actor, id uuid.UUID) error {
+	_, err := s.revokeInvitation(ctx, a, id)
+	return err
+}
+
+// revokeInvitation is RevokeInvitation that also reports whether an open invitation was revoked
+// (an audit row was written).
+func (s *Service) revokeInvitation(ctx context.Context, a Actor, id uuid.UUID) (revoked bool, err error) {
 	now := s.clock.Now()
-	err := db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
+	err = db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
 		q := authdb.New(tx)
 		inv, err := q.LockInvitation(ctx, authdb.LockInvitationParams{TenantID: a.TenantID, ID: id})
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -286,16 +300,17 @@ func (s *Service) RevokeInvitation(ctx context.Context, a Actor, id uuid.UUID) e
 		if _, err := q.RevokeInvitation(ctx, authdb.RevokeInvitationParams{TenantID: a.TenantID, ID: id, Now: &now}); err != nil {
 			return fmt.Errorf("revoke invitation: %w", err)
 		}
+		revoked = true
 		return audit.Record(ctx, tx, audit.Entry{
-			TenantID: a.TenantID, ActorUserID: &a.UserID, Action: ActionInvitationRevoked,
+			TenantID: a.TenantID, ActorUserID: &a.UserID, Action: a.action(ActionInvitationRevoked),
 			EntityType: "invitation", EntityID: id.String(), IP: a.IP,
 			Metadata: map[string]any{"role": inv.Role},
 		})
 	})
 	if err != nil && !errors.Is(err, ErrInvitationNotFound) && !errors.Is(err, ErrInvitationAccepted) {
-		return fmt.Errorf("auth: revoke invitation: %w", err)
+		return false, fmt.Errorf("auth: revoke invitation: %w", err)
 	}
-	return err
+	return revoked && err == nil, err
 }
 
 // invitationTarget is an open invitation found by its token before the tenant is known.

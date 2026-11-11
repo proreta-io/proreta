@@ -37,6 +37,8 @@ import {
   EmptyNote,
 } from "../../components/ui";
 import { formatDate, formatDateTime } from "../../lib/format";
+import AdminOrganizationInvitations from "./AdminOrganizationInvitations";
+import AdminOrganizationMembers from "./AdminOrganizationMembers";
 import { OrganizationStatusBadge } from "./OrganizationStatusBadge";
 import { HIDDEN_PLANS } from "../../lib/usage";
 
@@ -108,6 +110,8 @@ function OrganizationDetails({ id }: { id: string }) {
     <section className="flex flex-col gap-8 pt-4">
       <OrganizationInfo organization={organization.data} />
       <OrganizationUsers organization={organization.data} />
+      <AdminOrganizationMembers organization={organization.data} />
+      <AdminOrganizationInvitations organization={organization.data} />
     </section>
   );
 }

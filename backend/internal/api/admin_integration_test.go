@@ -86,13 +86,19 @@ func adminCalls(t *testing.T, tenantID, userID string) []struct{ method, path, b
 				body = `{"sendInvitations":false,"sendEmailVerification":false,"allowPasswordReset":false}`
 			case method == http.MethodPut && strings.HasSuffix(path, "/registration"):
 				body = `{"enabled":false}`
+			case method == http.MethodPut && strings.Contains(path, "/members/"):
+				body = `{"role":"member"}`
+			case method == http.MethodPost && strings.HasSuffix(path, "/members"):
+				body = `{"email":"someone@example.com","role":"member"}`
+			case method == http.MethodPost && strings.HasSuffix(path, "/invitations"):
+				body = `{"role":"member"}`
 			}
 			out = append(out, struct{ method, path, body string }{method,
-				strings.NewReplacer("{tenantId}", tenantID, "{userId}", userID).Replace(path), body})
+				strings.NewReplacer("{tenantId}", tenantID, "{organizationId}", tenantID, "{userId}", userID, "{invitationId}", userID).Replace(path), body})
 		}
 	}
-	if len(out) != 19 {
-		t.Fatalf("%d admin operations in the spec, want 19", len(out))
+	if len(out) != 26 {
+		t.Fatalf("%d admin operations in the spec, want 26", len(out))
 	}
 	return out
 }

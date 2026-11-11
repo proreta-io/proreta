@@ -47,6 +47,9 @@ type Actor struct {
 	TenantID uuid.UUID
 	UserID   uuid.UUID
 	IP       netip.Addr
+	// platform is set only by the Admin* methods: the platform admin acts with the owner's
+	// rights without being a member, and the audit rows carry the admin.* names.
+	platform bool
 }
 
 // Member is one membership of an organization.
@@ -57,6 +60,8 @@ type Member struct {
 	Role            string
 	JoinedAt        time.Time
 	IsPlatformAdmin bool
+	// Status is the account status (active or disabled); set by ListMembers.
+	Status string
 }
 
 // ListMembers returns the members of the organization, oldest first.
@@ -70,7 +75,7 @@ func (s *Service) ListMembers(ctx context.Context, tenantID uuid.UUID) ([]Member
 		out = make([]Member, len(rows))
 		for i, r := range rows {
 			out[i] = Member{UserID: r.UserID, Login: r.Email, DisplayName: r.DisplayName, Role: r.Role,
-				JoinedAt: r.CreatedAt, IsPlatformAdmin: r.IsPlatformAdmin}
+				JoinedAt: r.CreatedAt, IsPlatformAdmin: r.IsPlatformAdmin, Status: r.Status}
 		}
 		return nil
 	})
@@ -86,6 +91,9 @@ func (s *Service) ListMembers(ctx context.Context, tenantID uuid.UUID) ([]Member
 func lockActorRole(ctx context.Context, tx pgx.Tx, a Actor) (authz.Actor, error) {
 	if _, err := tenants.LockQuota(ctx, tx, a.TenantID); err != nil {
 		return authz.Actor{}, err
+	}
+	if a.platform {
+		return authz.Actor{UserID: a.UserID, Role: authz.Owner}, nil
 	}
 	role, err := authdb.New(tx).GetMembershipRole(ctx, authdb.GetMembershipRoleParams{TenantID: a.TenantID, UserID: a.UserID})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -134,38 +142,45 @@ func (s *Service) ChangeRole(ctx context.Context, a Actor, userID uuid.UUID, rol
 		if err != nil {
 			return err
 		}
-		q := authdb.New(tx)
-		m, err := q.LockMember(ctx, authdb.LockMemberParams{TenantID: a.TenantID, UserID: userID})
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrMemberNotFound
-		}
-		if err != nil {
-			return fmt.Errorf("lock member: %w", err)
-		}
-		if !authz.CanManage(actor, authz.Role(m.Role), authz.Role(role)) {
-			return authz.ErrForbidden
-		}
-		out = Member{UserID: userID, Login: m.Email, DisplayName: m.DisplayName, Role: m.Role, JoinedAt: m.CreatedAt, IsPlatformAdmin: m.IsPlatformAdmin}
-		if m.Role == role {
-			return nil
-		}
-		if _, err := lockTarget(ctx, q, a.TenantID, userID, role != RoleOwner); err != nil {
-			return err
-		}
-		if _, err := q.UpdateMembershipRole(ctx, authdb.UpdateMembershipRoleParams{TenantID: a.TenantID, UserID: userID, Role: role}); err != nil {
-			return fmt.Errorf("update role: %w", err)
-		}
-		out.Role = role
-		return audit.Record(ctx, tx, audit.Entry{
-			TenantID: a.TenantID, ActorUserID: &a.UserID, Action: ActionMemberRoleChanged,
-			EntityType: "user", EntityID: userID.String(), IP: a.IP,
-			Metadata: map[string]any{"from": m.Role, "to": role},
-		})
+		out, _, err = changeRole(ctx, tx, a, actor, userID, role)
+		return err
 	})
 	if err != nil {
 		return Member{}, wrapMemberErr("change role", err)
 	}
 	return out, nil
+}
+
+// changeRole is ChangeRole after the tenant row lock: it reports whether the role changed (the
+// audit row was written).
+func changeRole(ctx context.Context, tx pgx.Tx, a Actor, actor authz.Actor, userID uuid.UUID, role string) (Member, bool, error) {
+	q := authdb.New(tx)
+	m, err := q.LockMember(ctx, authdb.LockMemberParams{TenantID: a.TenantID, UserID: userID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Member{}, false, ErrMemberNotFound
+	}
+	if err != nil {
+		return Member{}, false, fmt.Errorf("lock member: %w", err)
+	}
+	if !authz.CanManage(actor, authz.Role(m.Role), authz.Role(role)) {
+		return Member{}, false, authz.ErrForbidden
+	}
+	out := Member{UserID: userID, Login: m.Email, DisplayName: m.DisplayName, Role: m.Role, JoinedAt: m.CreatedAt, IsPlatformAdmin: m.IsPlatformAdmin, Status: m.Status}
+	if m.Role == role {
+		return out, false, nil
+	}
+	if _, err := lockTarget(ctx, q, a.TenantID, userID, role != RoleOwner); err != nil {
+		return Member{}, false, err
+	}
+	if _, err := q.UpdateMembershipRole(ctx, authdb.UpdateMembershipRoleParams{TenantID: a.TenantID, UserID: userID, Role: role}); err != nil {
+		return Member{}, false, fmt.Errorf("update role: %w", err)
+	}
+	out.Role = role
+	return out, true, audit.Record(ctx, tx, audit.Entry{
+		TenantID: a.TenantID, ActorUserID: &a.UserID, Action: a.action(ActionMemberRoleChanged),
+		EntityType: "user", EntityID: userID.String(), IP: a.IP,
+		Metadata: map[string]any{"from": m.Role, "to": role},
+	})
 }
 
 // RemoveMember ends a membership and with it the user's sessions in the organization; the user
@@ -213,10 +228,13 @@ func (s *Service) deleteMembership(ctx context.Context, tx pgx.Tx, a Actor, user
 	if _, err := q.DeleteMembership(ctx, authdb.DeleteMembershipParams{TenantID: a.TenantID, UserID: userID}); err != nil {
 		return fmt.Errorf("delete membership: %w", err)
 	}
+	meta := map[string]any{"role": m.Role}
+	if !a.platform {
+		meta["self"] = self
+	}
 	return audit.Record(ctx, tx, audit.Entry{
-		TenantID: a.TenantID, ActorUserID: &a.UserID, Action: ActionMemberRemoved,
-		EntityType: "user", EntityID: userID.String(), IP: a.IP,
-		Metadata: map[string]any{"role": m.Role, "self": self},
+		TenantID: a.TenantID, ActorUserID: &a.UserID, Action: a.action(ActionMemberRemoved),
+		EntityType: "user", EntityID: userID.String(), IP: a.IP, Metadata: meta,
 	})
 }
 

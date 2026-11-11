@@ -2981,6 +2981,266 @@ paths:
           $ref: "#/components/responses/Forbidden"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/admin/organizations/{organizationId}/members:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      operationId: adminListOrganizationMembers
+      x-experimental: true
+      summary: Members of an organization
+      description: |
+        Every member of the organization (a deleted organization included), oldest first, with
+        login, display name, role, when they joined and whether the account is active or disabled.
+        Unlike `GET /api/v1/members` the logins are always shown. Platform admins only.
+      tags: [admin]
+      responses:
+        "200":
+          description: The members
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMemberList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: adminAddOrganizationMember
+      x-experimental: true
+      summary: Add an existing account to an organization by email
+      description: |
+        Finds the account with this email address and makes it a member with the role, or changes
+        its role when it already is one (same rules as `PUT .../members/{userId}`). When no account
+        has that address the answer is 404 and nothing is written: invite the person instead
+        (`POST .../invitations`). Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminMemberAdd"
+      responses:
+        "200":
+          description: The member after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMember"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/organizations/{organizationId}/members/{userId}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/MemberUserId"
+    put:
+      operationId: adminSetOrganizationMember
+      x-experimental: true
+      summary: Add a user to an organization or change their role
+      description: |
+        Makes an existing account a member with the role (any of `owner`, `admin`, `member`,
+        `viewer`), or changes the role of a member; setting the role a member already has changes
+        nothing and writes no audit row. An unknown user is 404. Adding respects the plan's member
+        limit (409 `urn:proreta:problem:plan-limit-reached`; raise the plan first). The organization
+        always keeps an active owner (409 `urn:proreta:problem:last-owner`). The platform admin's
+        membership of the default organization cannot be changed and the platform admin cannot be
+        added to another organization (409 `urn:proreta:problem:system-admin`). A deleted
+        organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). A disabled
+        account can be added but cannot sign in. A new role applies on the member's next request.
+        Audited in the organization as `admin.member.added` or `admin.member.role_changed`.
+        Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemberUpdate"
+      responses:
+        "200":
+          description: The member after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMember"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: adminRemoveOrganizationMember
+      x-experimental: true
+      summary: Remove a member from an organization
+      description: |
+        Ends the membership and the user's sessions in this organization at once; the user and
+        their other memberships stay. The last active owner and the platform admin cannot be
+        removed (409 `urn:proreta:problem:last-owner`, `urn:proreta:problem:system-admin`); a deleted
+        organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited as
+        `admin.member.removed`. Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Removed
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/organizations/{organizationId}/invitations:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      operationId: adminListOrganizationInvitations
+      x-experimental: true
+      summary: Invitations of an organization
+      description: The newest 200 invitations of the organization (a deleted organization included) with their state. The link of an invitation is never shown again. Platform admins only.
+      tags: [admin]
+      responses:
+        "200":
+          description: The invitations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitationList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: adminCreateOrganizationInvitation
+      x-experimental: true
+      summary: Invite someone to an organization
+      description: |
+        For a person without an account. Same rules and the same email option as
+        `POST /api/v1/invitations` (roles `admin`, `member`, `viewer`; the link is in the answer
+        only and is never logged or audited; `email` is sent only when the installation has a tested
+        mail server and the invitations switch is on). Open invitations count toward the plan's
+        member limit (409 `urn:proreta:problem:plan-limit-reached`). A deleted organization
+        cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in the
+        organization as `admin.invitation.created` (role and whether an email was queued, never
+        the address or the link). Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InvitationCreate"
+      responses:
+        "201":
+          description: The invitation and its link, shown once
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitationCreated"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/PlanLimitReached"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/organizations/{organizationId}/invitations/{invitationId}/revoke:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/InvitationId"
+    post:
+      operationId: adminRevokeOrganizationInvitation
+      x-experimental: true
+      summary: Revoke an invitation of an organization
+      description: |
+        The link stops working at once. Revoking a revoked or expired invitation changes nothing
+        (204); an accepted one is 409 `urn:proreta:problem:invitation-accepted`. Audited as
+        `admin.invitation.revoked`. Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Revoked
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/admin/email:
     get:
       operationId: adminGetEmailSettings
@@ -4600,6 +4860,51 @@ components:
           type: boolean
           nullable: true
           description: "`true` or `false` is the choice; `null` follows the environment again"
+    AdminMember:
+      type: object
+      additionalProperties: false
+      required: [userId, login, displayName, role, status, joinedAt, isPlatformAdmin]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        login:
+          type: string
+          description: The member's login (email address)
+        displayName:
+          type: string
+        role:
+          $ref: "#/components/schemas/MembershipRole"
+        status:
+          type: string
+          enum: [active, disabled]
+          description: A disabled account cannot sign in
+        joinedAt:
+          type: string
+          format: date-time
+        isPlatformAdmin:
+          type: boolean
+          description: The system admin; its membership cannot be changed or removed
+    AdminMemberList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminMember"
+    AdminMemberAdd:
+      type: object
+      additionalProperties: false
+      required: [email, role]
+      properties:
+        email:
+          type: string
+          maxLength: 254
+          description: Email address of an existing account
+        role:
+          $ref: "#/components/schemas/MembershipRole"
     AdminEmailTestRequest:
       type: object
       additionalProperties: false
