@@ -239,6 +239,39 @@ func TestIntegrationOAuthInvitation(t *testing.T) {
 	}
 }
 
+func TestIntegrationOAuthDomainAutoClaim(t *testing.T) {
+	e := newOAuthEnv(t, "auth_oauth_autoclaim", auth.Options{AllowedDomains: []string{"acme.example"}})
+	first, err := e.login(auth.OAuthLoginInput{Identity: google("g-first", "ann@acme.example", "acme.example"), RegistrationEnabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Role != auth.RoleOwner {
+		t.Fatalf("first user: %+v", first.SessionInfo)
+	}
+	if n := e.count(`SELECT count(*) FROM org_auth_domains WHERE tenant_id = $1 AND domain = 'acme.example' AND enabled AND default_role = 'viewer'`, first.Tenant.ID); n != 1 {
+		t.Fatalf("domain claims after the first sign-in: %d", n)
+	}
+	if n := e.count(`SELECT count(*) FROM audit_log WHERE action = 'organization.auth_domain_changed' AND tenant_id = $1`, first.Tenant.ID); n != 1 {
+		t.Fatalf("claim audit rows: %d", n)
+	}
+	second, err := e.login(auth.OAuthLoginInput{Identity: google("g-second", "bob@acme.example", "acme.example"), RegistrationEnabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Tenant.ID != first.Tenant.ID || second.Role != auth.RoleViewer {
+		t.Fatalf("second user did not join: %+v", second.SessionInfo)
+	}
+
+	// A domain off the allow-list claims nothing.
+	other, err := e.login(auth.OAuthLoginInput{Identity: google("g-other", "cy@other.example", "other.example"), RegistrationEnabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := e.count(`SELECT count(*) FROM org_auth_domains WHERE tenant_id = $1`, other.Tenant.ID); n != 0 {
+		t.Fatalf("claim of a domain off the list: %d", n)
+	}
+}
+
 func TestIntegrationOAuthDomains(t *testing.T) {
 	e := newOAuthEnv(t, "auth_oauth_domains", auth.Options{AllowedDomains: []string{"example.com", "proof.example"}})
 	admin := e.adminLogin()
