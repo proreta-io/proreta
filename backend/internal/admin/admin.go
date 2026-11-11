@@ -106,7 +106,7 @@ func NewService(pool *db.Pool, authSvc *auth.Service, opts Options) (*Service, e
 	s := &Service{pool: pool, auth: authSvc, log: opts.Logger, mail: opts.Mail, mailSettings: opts.Settings, registration: opts.Registration,
 		actions: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "proreta_admin_actions_total",
-			Help: "Platform admin changes by audit action (admin.organization.plan_changed, admin.organization.suspended, admin.organization.unsuspended, admin.organization.deleted, admin.user.password_reset, admin.email_settings.updated, admin.email_test.sent, admin.registration_settings.updated).",
+			Help: "Platform admin changes by audit action (admin.organization.plan_changed, admin.organization.suspended, admin.organization.unsuspended, admin.organization.deleted, admin.user.password_reset, admin.user.disabled, admin.user.enabled, admin.user.sessions_revoked, admin.email_settings.updated, admin.email_test.sent, admin.registration_settings.updated).",
 		}, []string{"action"}),
 	}
 	if opts.Registerer != nil {

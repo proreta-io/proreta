@@ -18,6 +18,7 @@ import (
 var adminDefiners = []string{
 	"auth_sync_platform_admin", "admin_list_tenants", "admin_get_tenant", "admin_set_tenant_plan",
 	"admin_set_tenant_status", "admin_delete_tenant", "admin_list_users", "admin_reset_user_password", "admin_stats",
+	"admin_list_all_users", "admin_get_user", "admin_list_user_memberships", "admin_set_user_status", "admin_revoke_user_sessions",
 }
 
 const (
@@ -141,6 +142,7 @@ func TestIntegrationPlatformAdminGrants(t *testing.T) {
 	// The internal helpers are not callable by the runtime roles at all.
 	for _, stmt := range []string{
 		`SELECT admin_require_platform_admin('` + userPlatform + `')`,
+		`SELECT admin_user_audit_tenant('` + userOwnerA + `')`,
 		`SELECT admin_audit('` + tenantA + `', NULL, gen_random_uuid(), 'x', 'x', NULL, '{}', NULL)`,
 	} {
 		for _, url := range []string{env.APIURL, env.WorkerURL} {

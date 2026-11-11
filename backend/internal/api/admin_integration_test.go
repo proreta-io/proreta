@@ -91,8 +91,8 @@ func adminCalls(t *testing.T, tenantID, userID string) []struct{ method, path, b
 				strings.NewReplacer("{tenantId}", tenantID, "{userId}", userID).Replace(path), body})
 		}
 	}
-	if len(out) != 14 {
-		t.Fatalf("%d admin operations in the spec, want 14", len(out))
+	if len(out) != 19 {
+		t.Fatalf("%d admin operations in the spec, want 19", len(out))
 	}
 	return out
 }
