@@ -3241,6 +3241,258 @@ paths:
           $ref: "#/components/responses/Conflict"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/admin/organizations/{organizationId}/projects:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      operationId: adminListOrganizationProjects
+      x-experimental: true
+      summary: Projects of an organization
+      description: Every project of the organization (deleted organizations included), Default first, then by name, with member, monitor and channel counts. Platform admins only.
+      tags: [admin]
+      responses:
+        "200":
+          description: The projects
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminProjectList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: adminCreateOrganizationProject
+      x-experimental: true
+      summary: Create a project in an organization
+      description: |
+        Same rules as `POST /api/v1/projects`: `slug` is derived from `name` when omitted, a slug in
+        use is 409 `urn:proreta:problem:slug-taken`, and at most 50 projects per organization (409
+        `urn:proreta:problem:plan-limit-reached`). A deleted organization cannot be changed (409
+        `urn:proreta:problem:organization-deleted`). Audited in the organization as
+        `admin.project.created`. Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectCreate"
+      responses:
+        "201":
+          description: The created project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminProject"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/organizations/{organizationId}/projects/{projectId}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ProjectId"
+    patch:
+      operationId: adminUpdateOrganizationProject
+      x-experimental: true
+      summary: Rename a project of an organization
+      description: |
+        Changes `name` and/or `slug` (409 `urn:proreta:problem:slug-taken`). A deleted organization
+        cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in the organization
+        as `admin.project.updated` (`changed`: the names of the changed fields); nothing is written
+        when nothing changes. Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectUpdate"
+      responses:
+        "200":
+          description: The project after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminProject"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: adminDeleteOrganizationProject
+      x-experimental: true
+      summary: Delete a project of an organization
+      description: |
+        Only an empty project can be deleted: one with monitors or channels that are not deleted is
+        409 `urn:proreta:problem:project-not-empty`; the Default project is 409
+        `urn:proreta:problem:default-project`. Soft delete; its member list is removed. A deleted
+        organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in
+        the organization as `admin.project.deleted`. Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/organizations/{organizationId}/projects/{projectId}/members:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      operationId: adminListOrganizationProjectMembers
+      x-experimental: true
+      summary: Members of a project of an organization
+      description: Same list as `GET /api/v1/projects/{projectId}/members`, with logins. Platform admins only.
+      tags: [admin]
+      responses:
+        "200":
+          description: The members
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectMemberList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/organizations/{organizationId}/projects/{projectId}/members/{userId}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/MemberUserId"
+    put:
+      operationId: adminPutOrganizationProjectMember
+      x-experimental: true
+      summary: Add a member to a project or change its override
+      description: |
+        Makes a member of the organization a member of the project, with an optional `role`
+        override (`viewer` makes it read-only there; an override never raises the organization role).
+        A user who is not a member of the organization is 422 on `userId`. A deleted organization
+        cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in the organization
+        as `admin.project_member.added`, or `admin.project_member.updated` (`from`, `to`) when the
+        override changes; saving the same override again writes nothing. Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectMemberPut"
+      responses:
+        "200":
+          description: The member after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectMember"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: adminRemoveOrganizationProjectMember
+      x-experimental: true
+      summary: Remove a member from a project
+      description: |
+        The member loses access to the project at its next request (in a project with `allMembers`
+        only the override is removed). 404 when the user is not listed on the project. A deleted
+        organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in the
+        organization as `admin.project_member.removed`. Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Removed
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/admin/email:
     get:
       operationId: adminGetEmailSettings
@@ -4905,6 +5157,51 @@ components:
           description: Email address of an existing account
         role:
           $ref: "#/components/schemas/MembershipRole"
+    AdminProject:
+      type: object
+      additionalProperties: false
+      required: [id, name, slug, isDefault, allMembers, memberCount, monitorCount, channelCount, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        isDefault:
+          type: boolean
+          description: The Default project of the organization; it cannot be deleted
+        allMembers:
+          type: boolean
+          description: Every member of the organization belongs to it without being listed (the Default project)
+        memberCount:
+          type: integer
+          minimum: 0
+          description: People with access to the project, as listed by its members operation
+        monitorCount:
+          type: integer
+          minimum: 0
+          description: Monitors and heartbeats that are not deleted
+        channelCount:
+          type: integer
+          minimum: 0
+          description: Notification channels of the project that are not deleted
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    AdminProjectList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminProject"
     AdminEmailTestRequest:
       type: object
       additionalProperties: false

@@ -90,7 +90,9 @@ var adminOperations = []string{"adminGetStats", "adminListOrganizations", "admin
 	"adminGetRegistration", "adminUpdateRegistration",
 	"adminListAllUsers", "adminGetUser", "adminDisableUser", "adminEnableUser", "adminRevokeUserSessions",
 	"adminListOrganizationMembers", "adminAddOrganizationMember", "adminSetOrganizationMember", "adminRemoveOrganizationMember",
-	"adminListOrganizationInvitations", "adminCreateOrganizationInvitation", "adminRevokeOrganizationInvitation"}
+	"adminListOrganizationInvitations", "adminCreateOrganizationInvitation", "adminRevokeOrganizationInvitation",
+	"adminListOrganizationProjects", "adminCreateOrganizationProject", "adminUpdateOrganizationProject", "adminDeleteOrganizationProject",
+	"adminListOrganizationProjectMembers", "adminPutOrganizationProjectMember", "adminRemoveOrganizationProjectMember"}
 
 func TestSpecAdminOperations(t *testing.T) {
 	spec, ops := specOperations(t)

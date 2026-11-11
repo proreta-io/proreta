@@ -1894,6 +1894,137 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/organizations/{organizationId}/projects": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+      };
+      cookie?: never;
+    };
+    /**
+     * Projects of an organization
+     * @description Every project of the organization (deleted organizations included), Default first, then by name, with member, monitor and channel counts. Platform admins only.
+     */
+    get: operations["adminListOrganizationProjects"];
+    put?: never;
+    /**
+     * Create a project in an organization
+     * @description Same rules as `POST /api/v1/projects`: `slug` is derived from `name` when omitted, a slug in
+     *     use is 409 `urn:proreta:problem:slug-taken`, and at most 50 projects per organization (409
+     *     `urn:proreta:problem:plan-limit-reached`). A deleted organization cannot be changed (409
+     *     `urn:proreta:problem:organization-deleted`). Audited in the organization as
+     *     `admin.project.created`. Platform admins only.
+     */
+    post: operations["adminCreateOrganizationProject"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/organizations/{organizationId}/projects/{projectId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+        /** @description Project id; a value that is not a UUID is answered with 400 */
+        projectId: components["parameters"]["ProjectId"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Delete a project of an organization
+     * @description Only an empty project can be deleted: one with monitors or channels that are not deleted is
+     *     409 `urn:proreta:problem:project-not-empty`; the Default project is 409
+     *     `urn:proreta:problem:default-project`. Soft delete; its member list is removed. A deleted
+     *     organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in
+     *     the organization as `admin.project.deleted`. Platform admins only.
+     */
+    delete: operations["adminDeleteOrganizationProject"];
+    options?: never;
+    head?: never;
+    /**
+     * Rename a project of an organization
+     * @description Changes `name` and/or `slug` (409 `urn:proreta:problem:slug-taken`). A deleted organization
+     *     cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in the organization
+     *     as `admin.project.updated` (`changed`: the names of the changed fields); nothing is written
+     *     when nothing changes. Platform admins only.
+     */
+    patch: operations["adminUpdateOrganizationProject"];
+    trace?: never;
+  };
+  "/api/v1/admin/organizations/{organizationId}/projects/{projectId}/members": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+        /** @description Project id; a value that is not a UUID is answered with 400 */
+        projectId: components["parameters"]["ProjectId"];
+      };
+      cookie?: never;
+    };
+    /**
+     * Members of a project of an organization
+     * @description Same list as `GET /api/v1/projects/{projectId}/members`, with logins. Platform admins only.
+     */
+    get: operations["adminListOrganizationProjectMembers"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/organizations/{organizationId}/projects/{projectId}/members/{userId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+        /** @description Project id; a value that is not a UUID is answered with 400 */
+        projectId: components["parameters"]["ProjectId"];
+        /** @description User id of the member; a value that is not a UUID is answered with 400 */
+        userId: components["parameters"]["MemberUserId"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Add a member to a project or change its override
+     * @description Makes a member of the organization a member of the project, with an optional `role`
+     *     override (`viewer` makes it read-only there; an override never raises the organization role).
+     *     A user who is not a member of the organization is 422 on `userId`. A deleted organization
+     *     cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in the organization
+     *     as `admin.project_member.added`, or `admin.project_member.updated` (`from`, `to`) when the
+     *     override changes; saving the same override again writes nothing. Platform admins only.
+     */
+    put: operations["adminPutOrganizationProjectMember"];
+    post?: never;
+    /**
+     * Remove a member from a project
+     * @description The member loses access to the project at its next request (in a project with `allMembers`
+     *     only the override is removed). 404 when the user is not listed on the project. A deleted
+     *     organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in the
+     *     organization as `admin.project_member.removed`. Platform admins only.
+     */
+    delete: operations["adminRemoveOrganizationProjectMember"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/email": {
     parameters: {
       query?: never;
@@ -2798,6 +2929,29 @@ export interface components {
       /** @description Email address of an existing account */
       email: string;
       role: components["schemas"]["MembershipRole"];
+    };
+    AdminProject: {
+      /** Format: uuid */
+      id: string;
+      name: string;
+      slug: string;
+      /** @description The Default project of the organization; it cannot be deleted */
+      isDefault: boolean;
+      /** @description Every member of the organization belongs to it without being listed (the Default project) */
+      allMembers: boolean;
+      /** @description People with access to the project, as listed by its members operation */
+      memberCount: number;
+      /** @description Monitors and heartbeats that are not deleted */
+      monitorCount: number;
+      /** @description Notification channels of the project that are not deleted */
+      channelCount: number;
+      /** Format: date-time */
+      createdAt: string;
+      /** Format: date-time */
+      updatedAt: string;
+    };
+    AdminProjectList: {
+      items: components["schemas"]["AdminProject"][];
     };
     AdminEmailTestRequest: {
       /** @description Recipient of the test message; omitted, the admin's own login if it is an email address (422 otherwise) */
@@ -6179,6 +6333,247 @@ export interface operations {
     requestBody?: never;
     responses: {
       /** @description Revoked */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminListOrganizationProjects: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The projects */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminProjectList"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminCreateOrganizationProject: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ProjectCreate"];
+      };
+    };
+    responses: {
+      /** @description The created project */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminProject"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      422: components["responses"]["UnprocessableEntity"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminDeleteOrganizationProject: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+        /** @description Project id; a value that is not a UUID is answered with 400 */
+        projectId: components["parameters"]["ProjectId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminUpdateOrganizationProject: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+        /** @description Project id; a value that is not a UUID is answered with 400 */
+        projectId: components["parameters"]["ProjectId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ProjectUpdate"];
+      };
+    };
+    responses: {
+      /** @description The project after the change */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminProject"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      422: components["responses"]["UnprocessableEntity"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminListOrganizationProjectMembers: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+        /** @description Project id; a value that is not a UUID is answered with 400 */
+        projectId: components["parameters"]["ProjectId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The members */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ProjectMemberList"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminPutOrganizationProjectMember: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+        /** @description Project id; a value that is not a UUID is answered with 400 */
+        projectId: components["parameters"]["ProjectId"];
+        /** @description User id of the member; a value that is not a UUID is answered with 400 */
+        userId: components["parameters"]["MemberUserId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ProjectMemberPut"];
+      };
+    };
+    responses: {
+      /** @description The member after the change */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ProjectMember"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      422: components["responses"]["UnprocessableEntity"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminRemoveOrganizationProjectMember: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+        /** @description Project id; a value that is not a UUID is answered with 400 */
+        projectId: components["parameters"]["ProjectId"];
+        /** @description User id of the member; a value that is not a UUID is answered with 400 */
+        userId: components["parameters"]["MemberUserId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Removed */
       204: {
         headers: {
           [name: string]: unknown;

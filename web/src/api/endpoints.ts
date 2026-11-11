@@ -30,6 +30,7 @@ export type AdminEmailFeaturesUpdate = Schemas["AdminEmailFeaturesUpdate"];
 export type AdminEmailTestResult = Schemas["AdminEmailTestResult"];
 export type AdminRegistrationSettings = Schemas["AdminRegistrationSettings"];
 export type AdminUser = Schemas["AdminUser"];
+export type AdminProject = Schemas["AdminProject"];
 export type AdminUserList = Schemas["AdminUserList"];
 export type AdminUserSummary = Schemas["AdminUserSummary"];
 export type AdminUserSummaryList = Schemas["AdminUserSummaryList"];
@@ -92,6 +93,9 @@ export const queryKeys = {
   adminOrganizations: (query: string, offset: number, includeDeleted: boolean) =>
     ["admin", "organizations", { query, offset, includeDeleted }] as const,
   adminOrganization: (id: string) => ["admin", "organization", id] as const,
+  adminProjects: (id: string) => ["admin", "organization", id, "projects"] as const,
+  adminProjectMembers: (id: string, projectId: string) =>
+    ["admin", "organization", id, "projects", projectId, "members"] as const,
   adminUsers: (id: string) => ["admin", "organization", id, "users"] as const,
   adminAllUsers: (query: string, status: string, offset: number) =>
     ["admin", "all-users", { query, status, offset }] as const,
@@ -616,4 +620,73 @@ export const deleteAuthDomain = (domainId: string) =>
     client.DELETE("/api/v1/organization/auth-domains/{domainId}", {
       params: { path: { domainId } },
     }),
+  );
+
+const adminProjectPath = (organizationId: string, projectId: string) => ({
+  params: { path: { organizationId, projectId } },
+});
+
+export const listAdminProjects = (organizationId: string) =>
+  unwrap(
+    client.GET("/api/v1/admin/organizations/{organizationId}/projects", {
+      params: { path: { organizationId } },
+    }),
+  );
+
+export const createAdminProject = (organizationId: string, name: string) =>
+  unwrap(
+    client.POST("/api/v1/admin/organizations/{organizationId}/projects", {
+      params: { path: { organizationId } },
+      body: { name },
+    }),
+  );
+
+export const renameAdminProject = (organizationId: string, projectId: string, name: string) =>
+  unwrap(
+    client.PATCH("/api/v1/admin/organizations/{organizationId}/projects/{projectId}", {
+      ...adminProjectPath(organizationId, projectId),
+      body: { name },
+    }),
+  );
+
+export const deleteAdminProject = (organizationId: string, projectId: string) =>
+  unwrap(
+    client.DELETE(
+      "/api/v1/admin/organizations/{organizationId}/projects/{projectId}",
+      adminProjectPath(organizationId, projectId),
+    ),
+  );
+
+export const listAdminProjectMembers = (organizationId: string, projectId: string) =>
+  unwrap(
+    client.GET(
+      "/api/v1/admin/organizations/{organizationId}/projects/{projectId}/members",
+      adminProjectPath(organizationId, projectId),
+    ),
+  );
+
+/** Adds a member of the organization to a project; "viewer" makes it read-only there. */
+export const putAdminProjectMember = (
+  organizationId: string,
+  projectId: string,
+  userId: string,
+  role?: ProjectRole,
+) =>
+  unwrap(
+    client.PUT(
+      "/api/v1/admin/organizations/{organizationId}/projects/{projectId}/members/{userId}",
+      { params: { path: { organizationId, projectId, userId } }, body: role ? { role } : {} },
+    ),
+  );
+
+export const removeAdminProjectMember = (
+  organizationId: string,
+  projectId: string,
+  userId: string,
+) =>
+  unwrap(
+    client.DELETE(
+      "/api/v1/admin/organizations/{organizationId}/projects/{projectId}/members/{userId}",
+      { params: { path: { organizationId, projectId, userId } } },
+    ),
   );

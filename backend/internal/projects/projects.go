@@ -35,6 +35,16 @@ const (
 	ActionMemberChanged = "project.member_changed"
 )
 
+// Audit actions written instead of the ones above when a platform admin acts (Actor.Admin).
+const (
+	AdminActionCreated       = "admin.project.created"
+	AdminActionUpdated       = "admin.project.updated"
+	AdminActionDeleted       = "admin.project.deleted"
+	AdminActionMemberAdded   = "admin.project_member.added"
+	AdminActionMemberUpdated = "admin.project_member.updated"
+	AdminActionMemberRemoved = "admin.project_member.removed"
+)
+
 var (
 	// ErrNotFound means no live project with that id exists in the tenant, or the actor does not
 	// see it (the two are not told apart, so ids of other projects reveal nothing).
@@ -55,6 +65,9 @@ type Actor struct {
 	TenantID uuid.UUID
 	IP       netip.Addr
 	Access   authz.Actor
+	// Admin marks a platform admin acting inside the tenant: the audit rows carry the admin.*
+	// action names instead of the customer-facing ones (never both).
+	Admin bool
 }
 
 // Project is a project with its counts and the actor's role in it.
@@ -276,7 +289,7 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Project,
 		if err := q.InsertProject(ctx, projectsdb.InsertProjectParams{ID: id, TenantID: a.TenantID, Name: name, Slug: slug}); err != nil {
 			return mapWriteErr("insert project", err)
 		}
-		if err := s.audit(ctx, tx, a, ActionCreated, id, map[string]any{"slug": slug}); err != nil {
+		if err := s.audit(ctx, tx, a, pick(a, ActionCreated, AdminActionCreated), id, map[string]any{"slug": slug}); err != nil {
 			return err
 		}
 		out, err = get(ctx, tx, a, id)
@@ -379,7 +392,11 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 			if err := q.UpdateProject(ctx, projectsdb.UpdateProjectParams{TenantID: a.TenantID, ID: id, Name: newName, Slug: newSlug}); err != nil {
 				return mapWriteErr("update project", err)
 			}
-			if err := s.audit(ctx, tx, a, ActionUpdated, id, map[string]any{"fields": changed}); err != nil {
+			key := "fields"
+			if a.Admin {
+				key = "changed"
+			}
+			if err := s.audit(ctx, tx, a, pick(a, ActionUpdated, AdminActionUpdated), id, map[string]any{key: changed}); err != nil {
 				return err
 			}
 		}
@@ -419,7 +436,7 @@ func (s *Service) Delete(ctx context.Context, a Actor, id uuid.UUID) error {
 		if err := q.SoftDeleteProject(ctx, projectsdb.SoftDeleteProjectParams{TenantID: a.TenantID, ID: id}); err != nil {
 			return fmt.Errorf("projects: delete: %w", err)
 		}
-		return s.audit(ctx, tx, a, ActionDeleted, id, map[string]any{"slug": cur.Slug, "membersRemoved": removed})
+		return s.audit(ctx, tx, a, pick(a, ActionDeleted, AdminActionDeleted), id, map[string]any{"slug": cur.Slug, "membersRemoved": removed})
 	})
 }
 
@@ -503,14 +520,28 @@ func (s *Service) PutMember(ctx context.Context, a Actor, id, userID uuid.UUID, 
 			v := string(*role)
 			r = &v
 		}
+		var prev *string
+		existed := true
+		if err := tx.QueryRow(ctx, `SELECT role FROM project_members WHERE tenant_id = $1 AND project_id = $2 AND user_id = $3`,
+			a.TenantID, id, userID).Scan(&prev); errors.Is(err, pgx.ErrNoRows) {
+			existed = false
+		} else if err != nil {
+			return fmt.Errorf("projects: current member: %w", err)
+		}
 		if err := q.UpsertProjectMember(ctx, projectsdb.UpsertProjectMemberParams{TenantID: a.TenantID, ProjectID: id, UserID: userID, Role: r}); err != nil {
 			return fmt.Errorf("projects: put member: %w", err)
 		}
-		meta := map[string]any{"userId": userID.String(), "change": "put", "role": "organization"}
-		if r != nil {
-			meta["role"] = *r
+		if a.Admin {
+			// Saving the same override again changes nothing and is not audited.
+			if !existed {
+				err = s.audit(ctx, tx, a, AdminActionMemberAdded, id, map[string]any{"userId": userID.String(), "role": roleLabel(r)})
+			} else if roleLabel(prev) != roleLabel(r) {
+				err = s.audit(ctx, tx, a, AdminActionMemberUpdated, id, map[string]any{"userId": userID.String(), "from": roleLabel(prev), "to": roleLabel(r)})
+			}
+		} else {
+			err = s.audit(ctx, tx, a, ActionMemberChanged, id, map[string]any{"userId": userID.String(), "change": "put", "role": roleLabel(r)})
 		}
-		if err := s.audit(ctx, tx, a, ActionMemberChanged, id, meta); err != nil {
+		if err != nil {
 			return err
 		}
 		rows, err := q.ListProjectMembers(ctx, projectsdb.ListProjectMembersParams{TenantID: a.TenantID, ProjectID: id, AllMembers: cur.AllMembers})
@@ -545,8 +576,26 @@ func (s *Service) RemoveMember(ctx context.Context, a Actor, id, userID uuid.UUI
 		if n == 0 {
 			return ErrMemberNotFound
 		}
+		if a.Admin {
+			return s.audit(ctx, tx, a, AdminActionMemberRemoved, id, map[string]any{"userId": userID.String()})
+		}
 		return s.audit(ctx, tx, a, ActionMemberChanged, id, map[string]any{"userId": userID.String(), "change": "removed"})
 	})
+}
+
+func pick(a Actor, customer, admin string) string {
+	if a.Admin {
+		return admin
+	}
+	return customer
+}
+
+// roleLabel names a project override for audit metadata; no override keeps the organization role.
+func roleLabel(r *string) string {
+	if r == nil {
+		return "organization"
+	}
+	return *r
 }
 
 func lockProject(ctx context.Context, q *projectsdb.Queries, tenantID, id uuid.UUID) (projectsdb.LockProjectRow, error) {
