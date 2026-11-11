@@ -40,10 +40,11 @@ const (
 // link or issued for an account that cannot be reset any more. They all look alike.
 var ErrResetInvalid = errors.New("auth: reset link is not valid")
 
-// PasswordResetEnabled reports whether the forgot-password flow exists on this installation: it
-// needs email to send the link and the password form to use the new password.
-func (s *Service) PasswordResetEnabled() bool {
-	return s.mail.Enabled() && !s.passwordLoginDisabled
+// PasswordResetEnabled reports whether the forgot-password flow exists on this installation: the
+// platform admin has turned it on (which needs a tested mail server) and the password form is
+// there to use the new password. Turning it off also stops links already sent.
+func (s *Service) PasswordResetEnabled(ctx context.Context) bool {
+	return s.mail.Features(ctx).PasswordReset && !s.passwordLoginDisabled
 }
 
 // RequestPasswordReset emails a reset link to the account with that address, if there is one that
@@ -54,7 +55,7 @@ func (s *Service) PasswordResetEnabled() bool {
 // counts against the per-client-IP limit (*RateLimitedError) and, silently, a per-address
 // budget and a per-account budget of three links an hour.
 func (s *Service) RequestPasswordReset(ctx context.Context, rawEmail string, ip netip.Addr) error {
-	if !s.PasswordResetEnabled() {
+	if !s.PasswordResetEnabled(ctx) {
 		return ErrEmailDisabled
 	}
 	email, msg := normalizeEmail(rawEmail)
@@ -144,7 +145,7 @@ func (s *Service) auditForUser(ctx context.Context, tx pgx.Tx, userID uuid.UUID,
 // transaction that changes the password, so it works once. It does not sign the user in. Failed
 // attempts count against the per-client-IP limit.
 func (s *Service) ResetPassword(ctx context.Context, token, newPassword string, ip netip.Addr) error {
-	if !s.PasswordResetEnabled() {
+	if !s.PasswordResetEnabled(ctx) {
 		return ErrEmailDisabled
 	}
 	if s.dummy == nil {

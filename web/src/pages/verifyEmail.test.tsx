@@ -5,7 +5,14 @@ import { json, mockApi, problem, renderApp, session } from "../test/utils";
 const noSession = { "GET /api/v1/auth/me": () => problem(401, "Not authenticated") };
 const providers = (emailEnabled: boolean) => ({
   "GET /api/v1/auth/providers": () =>
-    json({ providers: [], passwordLoginEnabled: true, registrationEnabled: true, emailEnabled }),
+    json({
+      providers: [],
+      passwordLoginEnabled: true,
+      registrationEnabled: true,
+      emailEnabled,
+      passwordResetEnabled: emailEnabled,
+      emailVerificationEnabled: emailEnabled,
+    }),
 });
 const user = (login: string, emailVerified: boolean, isPlatformAdmin = false) => ({
   "GET /api/v1/auth/me": () =>

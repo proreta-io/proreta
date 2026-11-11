@@ -144,7 +144,7 @@ export default function Login() {
                   />
                 )}
               </Field>
-              {providers?.emailEnabled === true && providers.passwordLoginEnabled && (
+              {providers?.passwordResetEnabled === true && (
                 <Link to="/forgot-password" className={cx(authLink, "self-start")}>
                   Forgot your password?
                 </Link>

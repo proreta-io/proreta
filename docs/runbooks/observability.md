@@ -19,7 +19,7 @@ No metric is labelled per organization, monitor, incident, user, channel, URL, h
 | `proreta_http_requests_total` | counter | `route`, `method`, `code` | Requests by route template and status; `route="unmatched"` for paths no route matched; `method` is one of `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`, else `other` |
 | `proreta_http_request_duration_seconds` | histogram | `route`, `method` | Request latency |
 | `proreta_auth_logins_total` | counter | `result` (`succeeded`, `failed`, `suspended`, `rate_limited`) | Login attempts; `suspended` is a correct password for an organization the platform admin suspended or deleted |
-| `proreta_mail_enqueued_total` | counter | `kind` (message kind) | Messages queued in the mail outbox; registered by the api, counts only with SMTP configured |
+| `proreta_mail_enqueued_total` | counter | `kind` (message kind) | Messages queued in the mail outbox; registered by the api, counts only once email is enabled in the admin panel (the test message included) |
 | `proreta_auth_registrations_total` | counter | `result` (`succeeded`, `invalid`, `invalid_invitation`, `invalid_credentials`, `email_taken`, `rate_limited`) | Self-service registrations and registrations through an invitation link (`invalid_invitation` is an unknown, used, revoked or expired token, `invalid_credentials` a wrong password for an existing account joining through a link); a burst of `succeeded` while registration is open is the signal for the kill switch |
 | `proreta_auth_password_changes_total` | counter | `result` (`succeeded`, `invalid`, `wrong_password`, `rate_limited`) | Password changes by signed-in users (`invalid` breaks the password policy, `wrong_password` is a wrong current password); a burst of `wrong_password` from one session is someone guessing the password of an open session |
 | `proreta_auth_oauth_logins_total` | counter | `provider` (`google`, `github`), `result` (`succeeded`, `linked`, `error`, or the error code of the callback redirect such as `state_invalid`, `not_invited`, `account_exists`, `email_unverified`, `failed`) | OAuth sign-ins and links; many `state_invalid` or `failed` point at forged callbacks or a misconfigured client (redirect URI, secret) |
@@ -49,7 +49,7 @@ No metric is labelled per organization, monitor, incident, user, channel, URL, h
 | `proreta_jobs_delivery_duration_seconds` | histogram | `channel_type` | One send to a notification channel |
 | `proreta_jobs_outbox_pending` | gauge | | Outbox rows waiting (including retries), all organizations; refreshed every 15 s |
 | `proreta_jobs_claim_errors_total` | counter | | Failed `claim_deliveries` calls |
-| `proreta_jobs_mail_total` | counter | `kind` (message kind), `result` (`sent`, `retry`, `failed`) | Outgoing email attempts recorded by `finish_mail`; only with SMTP configured |
+| `proreta_jobs_mail_total` | counter | `kind` (message kind), `result` (`sent`, `retry`, `failed`) | Outgoing email attempts recorded by `finish_mail`; only once an SMTP server is configured in the admin panel |
 | `proreta_jobs_mail_duration_seconds` | histogram | | One SMTP delivery |
 | `proreta_jobs_mail_pending` | gauge | | Mail outbox rows waiting (including retries); refreshed every 15 s |
 | `proreta_jobs_mail_claim_errors_total` | counter | | Failed `claim_mail` calls |
@@ -101,7 +101,7 @@ Written in PromQL for any Prometheus-compatible stack with Alertmanager; thresho
 | RetentionErrors | `increase(proreta_jobs_housekeeping_runs_total{task="drop_expired_partitions",result="error"}[1d]) > 2` | 0m | The detach keeps hitting its lock timeout |
 | PartitionsKept | `increase(proreta_jobs_partitions_kept_total{reason="rollups_incomplete"}[2d]) > 0` | 0m | An expired month still has hours without rollups: older than the 7-day catch-up, needs a manual `compute_rollups(from, to)` |
 | OutboxBacklog | `proreta_jobs_outbox_pending > 50` | 10m | Alerts are not leaving: Slack down, rate limits or jobs stuck |
-| MailBacklog | `proreta_jobs_mail_pending > 20` | 10m | Email is not leaving (only with SMTP configured): server down, rate limits or jobs stuck |
+| MailBacklog | `proreta_jobs_mail_pending > 20` | 10m | Email is not leaving (only once an SMTP server is configured in the admin panel): server down, rate limits or jobs stuck |
 | MailFailing | `increase(proreta_jobs_mail_total{result="failed"}[1h]) > 0` | 0m | A message was given up: rejected recipient, or five failed attempts. See [outgoing email](email.md) |
 | DeliveriesFailing | `sum(rate(proreta_jobs_deliveries_total{result="failed"}[1h])) > 0` | 0m | A delivery gave up after five attempts or its channel is unusable |
 | APIErrors | `sum(rate(proreta_http_requests_total{code=~"5.."}[5m])) / sum(rate(proreta_http_requests_total[5m])) > 0.05` | 10m | api failing |

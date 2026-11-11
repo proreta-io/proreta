@@ -51,7 +51,7 @@ func allMetrics(t *testing.T) map[string][]string {
 	if _, err := admin.NewService(nil, nil, admin.Options{Registerer: reg}); err != nil {
 		t.Fatal(err)
 	}
-	mail.NewQueue(nil, reg)
+	mail.NewQueue(nil, nil, reg)
 	worker.NewMetrics(reg)
 	jobs.NewMetrics(reg)
 	api.NewPingMetrics(reg)

@@ -1,7 +1,9 @@
 // Package mail is outgoing email: the templates, the SMTP sender and the queue (the
 // mail_outbox table) that the api writes in the transaction of the state change and cmd/jobs
-// delivers later with retries. Email is optional; with no SMTP host configured nothing is
-// queued and every flow works as before, showing its link in the UI instead.
+// delivers later with retries. Email is optional; until the platform admin has configured and tested a server nothing is
+// queued and every flow works as before, showing its link in the UI instead. The settings live
+// in the database and are edited in the admin panel (email_settings), so they change without a
+// redeploy.
 //
 // A message holds a recipient and a link with a bearer token, so nothing here logs a body, an
 // address or a token: failures are reported as a kind and an SMTP code only.
@@ -18,7 +20,8 @@ type Kind string
 
 // Kinds of message.
 const (
-	// KindTest is the message `proretactl mail test` sends to check the SMTP settings.
+	// KindTest is the message the admin panel's "Send test email" queues to check the SMTP
+	// settings. It is sent once, never retried.
 	KindTest Kind = "test"
 	// KindVerifyEmail asks the recipient to confirm an address by opening a one-time link.
 	KindVerifyEmail Kind = "verify_email"
@@ -40,6 +43,9 @@ type Message struct {
 // Error kinds of SendError.Kind; they end up in mail_outbox.last_error and metrics.
 const (
 	KindConnect    = "connect"
+	KindRefused    = "refused"
+	KindDNS        = "dns"
+	KindBlocked    = "blocked_address"
 	KindTLS        = "tls"
 	KindAuth       = "auth"
 	KindRecipient  = "recipient_rejected"

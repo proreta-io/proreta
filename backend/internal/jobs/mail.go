@@ -21,6 +21,18 @@ type MailSender interface {
 	Send(ctx context.Context, m mail.Message) error
 }
 
+// MailSettings is where the connection comes from: the email settings the platform admin edits in
+// the admin panel (*mail.Settings). They are read again for every message, so a change applies
+// to the next one without a restart.
+type MailSettings interface {
+	Connection(ctx context.Context) (mail.Connection, mail.ConnectionVersion, bool, error)
+	RecordTest(ctx context.Context, version mail.ConnectionVersion, sendErr error) (bool, error)
+}
+
+// settingsTTL is how long the loop trusts "no server configured" before asking again. While it is
+// true nothing is claimed, so mail queued before the admin finishes the setup waits.
+const settingsTTL = 5 * time.Second
+
 // Defaults of MailConfig.
 const (
 	DefaultMailPoll        = 2 * time.Second
@@ -59,12 +71,14 @@ type MailConfig struct {
 
 // MailDeps are the MailDeliverer's collaborators.
 type MailDeps struct {
-	Pool    *db.Pool
-	Keys    *crypto.Keyring
-	Sender  MailSender
-	Metrics *Metrics
-	Log     *slog.Logger
-	Clock   clock.Clock
+	Pool     *db.Pool
+	Keys     *crypto.Keyring
+	Settings MailSettings
+	// NewSender builds the sender for a connection; nil means mail.NewSMTPSender.
+	NewSender func(mail.Connection) MailSender
+	Metrics   *Metrics
+	Log       *slog.Logger
+	Clock     clock.Clock
 	// Sleep waits d or until ctx ends; tests replace it.
 	Sleep func(ctx context.Context, d time.Duration) error
 }
@@ -78,6 +92,9 @@ type MailDeliverer struct {
 	next     time.Time
 	slots    chan struct{}
 	inflight sync.WaitGroup
+
+	checkedAt  time.Time
+	configured bool
 }
 
 type mailRow struct {
@@ -101,6 +118,9 @@ func NewMailDeliverer(cfg MailConfig, d MailDeps) *MailDeliverer {
 	}
 	if d.Sleep == nil {
 		d.Sleep = sleep
+	}
+	if d.NewSender == nil {
+		d.NewSender = func(c mail.Connection) MailSender { return mail.NewSMTPSender(c) }
 	}
 	return &MailDeliverer{cfg: cfg, d: d, slots: make(chan struct{}, cfg.Concurrency)}
 }
@@ -152,7 +172,7 @@ func (r *MailDeliverer) RunOnce(ctx context.Context) int {
 
 func (r *MailDeliverer) tick(ctx, sendCtx context.Context) int {
 	free := cap(r.slots) - len(r.slots)
-	if free <= 0 || ctx.Err() != nil {
+	if free <= 0 || ctx.Err() != nil || !r.serverConfigured(ctx) {
 		return 0
 	}
 	claimed, err := r.claim(ctx, min(free, r.cfg.Batch))
@@ -170,6 +190,27 @@ func (r *MailDeliverer) tick(ctx, sendCtx context.Context) int {
 		}()
 	}
 	return len(claimed)
+}
+
+// serverConfigured is false while no SMTP server is set up; the answer is kept for settingsTTL.
+func (r *MailDeliverer) serverConfigured(ctx context.Context) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := r.d.Clock.Now()
+	if !r.checkedAt.IsZero() && now.Sub(r.checkedAt) < settingsTTL {
+		return r.configured
+	}
+	r.checkedAt = now
+	_, _, found, err := r.d.Settings.Connection(ctx)
+	if err != nil {
+		r.configured = false
+		if ctx.Err() == nil {
+			r.d.Log.WarnContext(ctx, "reading the email settings failed", "error", err)
+		}
+		return false
+	}
+	r.configured = found
+	return found
 }
 
 func (r *MailDeliverer) claim(ctx context.Context, n int) ([]mailRow, error) {
@@ -210,11 +251,36 @@ func (r *MailDeliverer) deliver(ctx context.Context, row mailRow) {
 			return // abandoned at shutdown; the lease expires
 		}
 	}
+	conn, version, found, err := r.d.Settings.Connection(ctx)
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		r.d.Log.WarnContext(ctx, "reading the email settings failed", "error", err)
+		r.finish(ctx, log, row, decideMail(row.Attempts, &mail.SendError{Kind: "settings"}, r.d.Clock.Now()))
+		return
+	}
+	if !found {
+		r.finish(ctx, log, row, decideMail(row.Attempts, &mail.SendError{Kind: "not_configured"}, r.d.Clock.Now()))
+		return
+	}
 	start := time.Now()
-	sendErr := r.d.Sender.Send(ctx, msg)
+	sendErr := r.d.NewSender(conn).Send(ctx, msg)
 	r.d.Metrics.mailDuration.Observe(time.Since(start).Seconds())
 	if sendErr != nil && ctx.Err() != nil {
 		return // abandoned at shutdown: not a real failure
+	}
+	if mail.Kind(row.Kind) == mail.KindTest {
+		// A test is sent once, and its result belongs to the settings it used.
+		if _, err := r.d.Settings.RecordTest(ctx, version, sendErr); err != nil {
+			r.d.Log.ErrorContext(ctx, "recording the email test failed", "error", err)
+		}
+		o := mailOutcome{status: statusSent}
+		if sendErr != nil {
+			o = mailOutcome{status: statusFailed, errKind: mail.ErrorKind(sendErr)}
+		}
+		r.finish(ctx, log, row, o)
+		return
 	}
 	r.finish(ctx, log, row, decideMail(row.Attempts, sendErr, r.d.Clock.Now()))
 }

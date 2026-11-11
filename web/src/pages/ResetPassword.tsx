@@ -1,10 +1,11 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { ApiError, errorMessage } from "../api/client";
-import { resetPassword } from "../api/endpoints";
+import { getAuthProviders, queryKeys, resetPassword } from "../api/endpoints";
+import { useAuth } from "../auth/AuthProvider";
 import AuthScreen, { AuthHeading, ShowPassword } from "../components/AuthScreen";
-import { Alert, Button, buttonClass, cx, Field, Input } from "../components/ui";
+import { Alert, Button, buttonClass, cx, Field, Input, Loading, Skeleton } from "../components/ui";
 import { formatDuration } from "../lib/format";
 import { PASSWORD_MAX, PASSWORD_MIN } from "../lib/registerForm";
 
@@ -18,6 +19,15 @@ const codePoints = (s: string) => [...s].length;
  */
 export default function ResetPassword() {
   const location = useLocation();
+  const auth = useAuth();
+  // Not before the session check has answered (see ForgotPassword).
+  const providers = useQuery({
+    queryKey: queryKeys.authProviders,
+    queryFn: getAuthProviders,
+    enabled: auth.status !== "loading",
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+  });
   const [token] = useState(() => location.hash.replace(/^#/, ""));
   useEffect(() => {
     if (globalThis.location?.hash) {
@@ -35,6 +45,32 @@ export default function ResetPassword() {
       Go to sign in
     </Link>
   );
+  if (providers.isPending) {
+    return (
+      <AuthScreen>
+        <Loading label="Loading…">
+          <Skeleton className="h-8 w-48" />
+          <Skeleton className="h-11 w-full" />
+        </Loading>
+      </AuthScreen>
+    );
+  }
+  // Off (or not set up): the server answers 404 to the link as well, so say so before asking for a
+  // password that could not be saved.
+  if (providers.data?.passwordResetEnabled !== true) {
+    return (
+      <AuthScreen>
+        <AuthHeading>Reset your password</AuthHeading>
+        <Alert tone="neutral" title="Password reset by email is not available.">
+          Ask the person who runs Proreta, or an administrator of your organization, to reset your
+          password.
+        </Alert>
+        <Link to="/login" className={cx(buttonClass(), "mt-1.5")}>
+          Back to sign in
+        </Link>
+      </AuthScreen>
+    );
+  }
   const expired = reset.error instanceof ApiError && reset.error.status === 404;
   if (token === "" || expired) {
     return (

@@ -8,7 +8,7 @@ import (
 )
 
 func (s *server) VerifyEmail(ctx context.Context, req gen.VerifyEmailRequestObject) (gen.VerifyEmailResponseObject, error) {
-	if !s.auth.EmailEnabled() {
+	if !s.auth.EmailVerificationEnabled(ctx) {
 		return nil, errNotFound
 	}
 	r := httpRequest(ctx)

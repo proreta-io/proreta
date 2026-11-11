@@ -88,8 +88,11 @@ type InvitationInput struct {
 	Label string
 	// Email, when set, is the address the link is also sent to. It is not stored and the
 	// invitation is not bound to it: the link stays a bearer secret that anyone holding it can
-	// use. Needs email to be configured (ErrEmailDisabled otherwise).
+	// use. Needs a tested mail server (a validation error on email otherwise).
 	Email string
+	// SendEmail says whether to send it. Nil means "yes when Email is set", as before the
+	// option existed; false ignores Email; true needs an Email.
+	SendEmail *bool
 }
 
 // Limits on invitation emails, per organization and per api replica: an admin must not be able
@@ -123,9 +126,15 @@ func (s *Service) CreateInvitationFor(ctx context.Context, a Actor, in Invitatio
 		verr.Add("label", fmt.Sprintf("must be at most %d characters", maxInvitationLabel))
 	}
 	to := ""
-	if strings.TrimSpace(in.Email) != "" {
-		if !s.mail.Enabled() {
+	sendMail := strings.TrimSpace(in.Email) != ""
+	if in.SendEmail != nil {
+		sendMail = *in.SendEmail
+	}
+	if sendMail {
+		if !s.mail.Features(ctx).Enabled {
 			verr.Add("email", invitationMailDisabledMessage)
+		} else if strings.TrimSpace(in.Email) == "" {
+			verr.Add("email", "is required to send the invitation by email")
 		} else if addr, msg := normalizeEmail(in.Email); msg != "" {
 			verr.Add("email", msg)
 		} else {

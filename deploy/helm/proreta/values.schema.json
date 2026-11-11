@@ -96,8 +96,7 @@
     "statuspage",
     "web",
     "migration",
-    "httpRoute",
-    "email"
+    "httpRoute"
   ],
   "properties": {
     "nameOverride": {
@@ -633,24 +632,6 @@
           "required": [
             "resources"
           ]
-        },
-        "smtp": {
-          "type": "object",
-          "title": "SMTP password",
-          "additionalProperties": false,
-          "description": "a Secret you created (existingSecret) or, with externalSecrets.enabled, the ExternalSecret <fullname>-smtp read from remoteKey; only read with email.enabled and email.smtp.username",
-          "properties": {
-            "existingSecret": {
-              "type": "string",
-              "title": "existing SMTP Secret",
-              "description": "Secret in the release namespace with key password; when set no ExternalSecret is rendered"
-            },
-            "remoteKey": {
-              "type": "string",
-              "title": "SMTP remote key",
-              "description": "JSON secret in your store with property password, used when existingSecret is empty"
-            }
-          }
         }
       },
       "required": [
@@ -658,8 +639,7 @@
         "crypto",
         "statuspage",
         "oauth",
-        "bootstrap",
-        "smtp"
+        "bootstrap"
       ]
     },
     "oauth": {
@@ -1403,74 +1383,6 @@
           ]
         }
       }
-    },
-    "email": {
-      "type": "object",
-      "title": "outgoing email",
-      "additionalProperties": false,
-      "description": "optional outgoing email through an SMTP server; off by default and then nothing is emailed",
-      "properties": {
-        "enabled": {
-          "type": "boolean",
-          "title": "email enabled",
-          "description": "queue and deliver email (PRORETA_SMTP_*); needs email.smtp.host and email.smtp.from"
-        },
-        "smtp": {
-          "type": "object",
-          "title": "SMTP server",
-          "additionalProperties": false,
-          "description": "the server jobs delivers to",
-          "properties": {
-            "host": {
-              "type": "string",
-              "title": "SMTP host",
-              "description": "PRORETA_SMTP_HOST: server name or address without a port; required when email is enabled",
-              "maxLength": 253,
-              "pattern": "^[A-Za-z0-9.:\\-\\[\\]]*$"
-            },
-            "port": {
-              "type": "integer",
-              "title": "SMTP port",
-              "description": "PRORETA_SMTP_PORT; 0 takes the default of the TLS mode (587 starttls, 465 tls, 25 none)",
-              "minimum": 0,
-              "maximum": 65535
-            },
-            "tls": {
-              "type": "string",
-              "title": "SMTP TLS mode",
-              "description": "PRORETA_SMTP_TLS: starttls, tls (implicit) or none (localhost only)",
-              "enum": [
-                "starttls",
-                "tls",
-                "none"
-              ]
-            },
-            "from": {
-              "type": "string",
-              "title": "sender address",
-              "description": "PRORETA_SMTP_FROM: address or \"Name <address>\"; required when email is enabled",
-              "maxLength": 320
-            },
-            "username": {
-              "type": "string",
-              "title": "SMTP username",
-              "description": "PRORETA_SMTP_USERNAME; empty means no login. The password comes from secrets.smtp",
-              "maxLength": 320
-            }
-          },
-          "required": [
-            "host",
-            "port",
-            "tls",
-            "from",
-            "username"
-          ]
-        }
-      },
-      "required": [
-        "enabled",
-        "smtp"
-      ]
     }
   }
 }

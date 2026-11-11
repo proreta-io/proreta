@@ -49,12 +49,15 @@ const (
 	oauthSessionExpired    = "session_expired"
 )
 
-func (s *server) GetAuthProviders(_ context.Context, _ gen.GetAuthProvidersRequestObject) (gen.GetAuthProvidersResponseObject, error) {
+func (s *server) GetAuthProviders(ctx context.Context, _ gen.GetAuthProvidersRequestObject) (gen.GetAuthProvidersResponseObject, error) {
+	features := s.auth.MailFeatures(ctx)
 	out := gen.GetAuthProviders200JSONResponse{
-		Providers:            []gen.AuthProvider{},
-		PasswordLoginEnabled: s.cfg.PasswordLoginEnabled,
-		RegistrationEnabled:  s.cfg.RegistrationEnabled,
-		EmailEnabled:         s.cfg.EmailEnabled,
+		Providers:                []gen.AuthProvider{},
+		PasswordLoginEnabled:     s.cfg.PasswordLoginEnabled,
+		RegistrationEnabled:      s.cfg.RegistrationEnabled,
+		EmailEnabled:             features.Enabled,
+		PasswordResetEnabled:     s.auth.PasswordResetEnabled(ctx),
+		EmailVerificationEnabled: features.Verification,
 	}
 	if s.oauth != nil {
 		for _, p := range s.oauth.Providers() {

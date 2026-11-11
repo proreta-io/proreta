@@ -15,19 +15,22 @@ import (
 	"net/textproto"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
-
-	"github.com/proreta-io/proreta/backend/internal/platform/config"
 )
 
 // sendTimeout bounds one whole delivery (connect, TLS, login and transfer).
 const sendTimeout = 30 * time.Second
 
+// dialTimeout bounds the TCP connect (and the TLS handshake of implicit TLS is bounded by the
+// whole-send timeout).
+const dialTimeout = 10 * time.Second
+
 // SMTPSender delivers a message to one SMTP server, one connection per message. It never
 // downgrades: with starttls a server that does not offer STARTTLS is an error, and the login is
 // only sent over TLS (or to a loopback server).
 type SMTPSender struct {
-	cfg config.SMTP
+	cfg Connection
 	// Timeout overrides sendTimeout.
 	Timeout time.Duration
 	// TLSConfig, when set, replaces the default TLS settings (server name is always the host).
@@ -37,8 +40,8 @@ type SMTPSender struct {
 	Now func() time.Time
 }
 
-// NewSMTPSender returns a sender for cfg, which must be Enabled.
-func NewSMTPSender(cfg config.SMTP) *SMTPSender { return &SMTPSender{cfg: cfg} }
+// NewSMTPSender returns a sender for cfg, which must be valid (Connection.Validate).
+func NewSMTPSender(cfg Connection) *SMTPSender { return &SMTPSender{cfg: cfg} }
 
 // Send delivers m. Failures are *SendError.
 func (s *SMTPSender) Send(ctx context.Context, m Message) error {
@@ -73,7 +76,7 @@ func (s *SMTPSender) Send(ctx context.Context, m Message) error {
 	if err := c.Hello(domainOf(s.cfg.FromAddress)); err != nil {
 		return classify(ctx, KindConnect, err)
 	}
-	if s.cfg.TLS == config.SMTPStartTLS {
+	if s.cfg.TLS == TLSStartTLS {
 		if ok, _ := c.Extension("STARTTLS"); !ok {
 			return &SendError{Kind: KindTLS}
 		}
@@ -122,11 +125,11 @@ func (s *SMTPSender) tlsConfig() *tls.Config {
 
 func (s *SMTPSender) dial(ctx context.Context) (net.Conn, error) {
 	addr := net.JoinHostPort(s.cfg.Host, strconv.Itoa(s.cfg.Port))
-	if s.cfg.TLS == config.SMTPImplicit {
-		d := tls.Dialer{Config: s.tlsConfig()}
-		return d.DialContext(ctx, "tcp", addr)
+	d := net.Dialer{Timeout: dialTimeout, Control: guardDial}
+	if s.cfg.TLS == TLSImplicit {
+		td := tls.Dialer{NetDialer: &d, Config: s.tlsConfig()}
+		return td.DialContext(ctx, "tcp", addr)
 	}
-	var d net.Dialer
 	return d.DialContext(ctx, "tcp", addr)
 }
 
@@ -135,6 +138,22 @@ func (s *SMTPSender) dial(ctx context.Context) (net.Conn, error) {
 func classify(ctx context.Context, kind string, err error) *SendError {
 	if ctx.Err() != nil || isTimeout(err) {
 		return &SendError{Kind: KindTimeout}
+	}
+	if kind == KindConnect {
+		var dns *net.DNSError
+		var cve *tls.CertificateVerificationError
+		var rhe tls.RecordHeaderError
+		var alert tls.AlertError
+		switch {
+		case errors.Is(err, errBlockedAddress):
+			return &SendError{Kind: KindBlocked}
+		case errors.Is(err, syscall.ECONNREFUSED):
+			return &SendError{Kind: KindRefused}
+		case errors.As(err, &dns):
+			return &SendError{Kind: KindDNS}
+		case errors.As(err, &cve), errors.As(err, &rhe), errors.As(err, &alert):
+			return &SendError{Kind: KindTLS}
+		}
 	}
 	var tp *textproto.Error
 	if errors.As(err, &tp) {

@@ -1,5 +1,5 @@
-// Command jobs delivers the notification outbox to Slack, the mail outbox over SMTP (when
-// configured) and runs the singleton housekeeping tasks: partitions, hourly rollups, retention,
+// Command jobs delivers the notification outbox to Slack, the mail outbox over SMTP (once the
+// platform admin has configured a server in the admin panel) and runs the singleton housekeeping tasks: partitions, hourly rollups, retention,
 // expired-session purge, the heartbeat evaluation and the status page snapshots (internal/jobs).
 package main
 
@@ -84,15 +84,12 @@ func run() error {
 			httpx.NewServer(cfg.AdminAddr, httpx.AdminHandler(log, pool.Ping, reg), log))
 	})
 	g.Go(func() error { return deliverer.Run(gctx) })
-	if cfg.SMTP.Enabled() {
-		mailer := jobs.NewMailDeliverer(jobs.MailConfig{PublicURL: cfg.PublicURL, DrainTimeout: cfg.ShutdownTimeout}, jobs.MailDeps{
-			Pool: pool, Keys: keys, Sender: mail.NewSMTPSender(cfg.SMTP), Metrics: m, Log: log,
-		})
-		log.Info("email enabled", "smtp", cfg.SMTP.String())
-		g.Go(func() error { return mailer.Run(gctx) })
-	} else {
-		log.Info("email disabled: PRORETA_SMTP_HOST is not set")
-	}
+	// The SMTP settings are read from the database (Admin, Email in the panel) for every message;
+	// until the platform admin has set a server up the loop claims nothing.
+	mailer := jobs.NewMailDeliverer(jobs.MailConfig{PublicURL: cfg.PublicURL, DrainTimeout: cfg.ShutdownTimeout}, jobs.MailDeps{
+		Pool: pool, Keys: keys, Settings: mail.NewSettings(pool, keys, log), Metrics: m, Log: log,
+	})
+	g.Go(func() error { return mailer.Run(gctx) })
 	g.Go(func() error { return housekeeper.Run(gctx) })
 	return g.Wait()
 }

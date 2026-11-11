@@ -15,7 +15,6 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/auth"
 	"github.com/proreta-io/proreta/backend/internal/jobs"
 	"github.com/proreta-io/proreta/backend/internal/mail"
-	"github.com/proreta-io/proreta/backend/internal/platform/config"
 	"github.com/proreta-io/proreta/backend/internal/platform/crypto"
 	"github.com/proreta-io/proreta/backend/internal/testsupport/pgtest"
 	"github.com/proreta-io/proreta/backend/internal/testsupport/smtptest"
@@ -28,13 +27,24 @@ var verifyLink = regexp.MustCompile(`https://proreta\.example\.com/verify-email#
 func startMail(t *testing.T, env *pgtest.Env, keys *crypto.Keyring, logs *lockedBuffer) (*smtptest.Server, *jobs.MailDeliverer) {
 	t.Helper()
 	srv := smtptest.New(t, smtptest.Options{Mode: smtptest.StartTLS, User: "mailer", Pass: "mailer-secret"})
-	sender := mail.NewSMTPSender(config.SMTP{
-		Host: srv.Host(), Port: srv.Port(), TLS: config.SMTPStartTLS, From: "Proreta <proreta@example.com>", FromAddress: "proreta@example.com",
-		Username: "mailer", Password: "mailer-secret",
-	})
-	sender.TLSConfig = &tls.Config{RootCAs: srv.Roots, MinVersion: tls.VersionTLS12}
+	pool := env.Pool(t, env.WorkerURL, 4)
+	settings := mail.NewSettings(pool, keys, nil)
+	sealed, keyID, err := settings.SealPassword("mailer-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin := env.AdminConn(t)
+	if _, err := admin.Exec(context.Background(), `UPDATE email_settings SET host = $1, port = $2, tls = 'starttls', from_header = 'Proreta <proreta@example.com>',
+		username = 'mailer', password_sealed = $3, password_key_id = $4`, srv.Host(), srv.Port(), sealed, keyID); err != nil {
+		t.Fatal(err)
+	}
+	newSender := func(c mail.Connection) jobs.MailSender {
+		s := mail.NewSMTPSender(c)
+		s.TLSConfig = &tls.Config{RootCAs: srv.Roots, MinVersion: tls.VersionTLS12}
+		return s
+	}
 	deliverer := jobs.NewMailDeliverer(jobs.MailConfig{PublicURL: "https://proreta.example.com"}, jobs.MailDeps{
-		Pool: env.Pool(t, env.WorkerURL, 4), Keys: keys, Sender: sender, Metrics: jobs.NewMetrics(prometheus.NewRegistry()),
+		Pool: pool, Keys: keys, Settings: settings, NewSender: newSender, Metrics: jobs.NewMetrics(prometheus.NewRegistry()),
 		Log: slog.New(slog.NewJSONHandler(logs, nil)),
 	})
 	return srv, deliverer
@@ -50,7 +60,7 @@ func TestIntegrationEmailVerificationEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := newRegistrationServer(t, env, auth.Options{Mail: mail.NewQueue(keys, nil)}, true, logs)
+	s := newRegistrationServer(t, env, auth.Options{Mail: mail.NewQueue(keys, mail.AllFeatures, nil)}, true, logs)
 
 	srv, deliverer := startMail(t, env, keys, logs)
 

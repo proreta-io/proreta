@@ -37,12 +37,12 @@ export default function ForgotPassword() {
       </AuthScreen>
     );
   }
-  const available = providers.data?.emailEnabled === true && providers.data.passwordLoginEnabled;
+  const available = providers.data?.passwordResetEnabled === true;
   if (!available) {
     return (
       <AuthScreen>
         <AuthHeading>Forgot your password?</AuthHeading>
-        <Alert tone="neutral" title="This installation cannot email a reset link.">
+        <Alert tone="neutral" title="Password reset by email is not available.">
           Ask the person who runs Proreta, or an administrator of your organization, to reset your
           password.
         </Alert>

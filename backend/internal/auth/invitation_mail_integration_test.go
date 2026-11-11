@@ -170,7 +170,7 @@ func TestIntegrationInvitationEmailRollsBackWithTheInvitation(t *testing.T) {
 func TestIntegrationInvitationEmailRateLimits(t *testing.T) {
 	e := newVerifyEnv(t, "auth_invite_mail_rate", true)
 	svc, err := auth.NewService(e.env.Pool(t, e.env.APIURL, 8), auth.Options{
-		SessionTTL: time.Hour, Mail: mail.NewQueue(e.keys, nil), Clock: e.clk,
+		SessionTTL: time.Hour, Mail: mail.NewQueue(e.keys, mail.AllFeatures, nil), Clock: e.clk,
 		InviteMailLimiter:          auth.NewLimiter(3, time.Hour, 100, clock.System{}),
 		InviteMailRecipientLimiter: auth.NewLimiter(1, 24*time.Hour, 100, clock.System{}),
 	})

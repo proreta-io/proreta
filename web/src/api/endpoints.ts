@@ -24,6 +24,10 @@ export type AdminStats = Schemas["AdminStats"];
 export type AdminOrganization = Schemas["AdminOrganization"];
 export type AdminOrganizationList = Schemas["AdminOrganizationList"];
 export type AdminOrganizationUpdate = Schemas["AdminOrganizationUpdate"];
+export type AdminEmailSettings = Schemas["AdminEmailSettings"];
+export type AdminEmailConnectionUpdate = Schemas["AdminEmailConnectionUpdate"];
+export type AdminEmailFeaturesUpdate = Schemas["AdminEmailFeaturesUpdate"];
+export type AdminEmailTestResult = Schemas["AdminEmailTestResult"];
 export type AdminUser = Schemas["AdminUser"];
 export type AdminUserList = Schemas["AdminUserList"];
 export type MembershipRole = Schemas["MembershipRole"];
@@ -77,6 +81,7 @@ export const queryKeys = {
   identities: ["identities"] as const,
   authDomains: ["auth-domains"] as const,
   adminStats: ["admin", "stats"] as const,
+  adminEmail: ["admin", "email"] as const,
   adminOrganizations: (query: string, offset: number, includeDeleted: boolean) =>
     ["admin", "organizations", { query, offset, includeDeleted }] as const,
   adminOrganization: (id: string) => ["admin", "organization", id] as const,
@@ -269,6 +274,21 @@ export const resetAdminUserPassword = (userId: string) =>
     }),
   );
 
+export const getAdminEmailSettings = () => unwrap(client.GET("/api/v1/admin/email"));
+
+/** Saves the SMTP connection. The password is write-only: leave it out to keep the stored one. */
+export const updateAdminEmailSettings = (body: AdminEmailConnectionUpdate) =>
+  unwrap(client.PUT("/api/v1/admin/email", { body }));
+
+export const deleteAdminEmailSettings = () => unwrap(client.DELETE("/api/v1/admin/email"));
+
+export const updateAdminEmailFeatures = (body: AdminEmailFeaturesUpdate) =>
+  unwrap(client.PUT("/api/v1/admin/email/features", { body }));
+
+/** Queues a real test message; poll getAdminEmailSettings for the result. */
+export const sendAdminTestEmail = (to: string) =>
+  unwrap(client.POST("/api/v1/admin/email/test", { body: to ? { to } : {} }));
+
 // Organizations, members and invitations.
 
 export const listOrganizations = () => unwrap(client.GET("/api/v1/auth/organizations"));
@@ -298,7 +318,13 @@ export const listInvitations = () => unwrap(client.GET("/api/v1/invitations"));
 export const createInvitation = (role: InvitationRole, label: string, email = "") =>
   unwrap(
     client.POST("/api/v1/invitations", {
-      body: { role, ...(label ? { label } : {}), ...(email ? { email } : {}) },
+      // An address is only sent when the box "Send by email" is checked, so it always asks for
+      // the email explicitly.
+      body: {
+        role,
+        ...(label ? { label } : {}),
+        ...(email ? { email, sendEmail: true } : {}),
+      },
     }),
   );
 

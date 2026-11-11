@@ -85,7 +85,8 @@ func concretePath(p string) string {
 // one of them, tagged admin, marked x-experimental and need a session; the integration test
 // TestIntegrationAdminOperationsRefuseNonAdmins checks each answers 403 to a normal user.
 var adminOperations = []string{"adminGetStats", "adminListOrganizations", "adminGetOrganization", "adminUpdateOrganization",
-	"adminDeleteOrganization", "adminListOrganizationUsers", "adminResetUserPassword"}
+	"adminDeleteOrganization", "adminListOrganizationUsers", "adminResetUserPassword", "adminGetEmailSettings", "adminUpdateEmailSettings",
+	"adminDeleteEmailSettings", "adminUpdateEmailFeatures", "adminSendTestEmail"}
 
 func TestSpecAdminOperations(t *testing.T) {
 	spec, ops := specOperations(t)

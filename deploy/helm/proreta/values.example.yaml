@@ -67,18 +67,6 @@ statuspage:
 #   oauth:
 #     existingSecret: proreta-oauth-clients
 
-# Optional: outgoing email (docs/runbooks/email.md). Without it nothing is emailed and links are shown
-# in the page. With a login, create the Secret first (key `password`).
-# email:
-#   enabled: true
-#   smtp:
-#     host: smtp.example.com
-#     from: "Proreta <proreta@example.com>"
-#     username: mailer
-# secrets:
-#   smtp:
-#     existingSecret: proreta-smtp
-
 # Optional alternative: read secrets from your secret store through the External Secrets Operator
 # (must be installed in the cluster). Then database.bootstrap.adminSecret.existingSecret may stay
 # empty (the login is read from database.bootstrap.adminSecret.remoteKey), and secrets.*.source may

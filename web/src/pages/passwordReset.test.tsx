@@ -3,9 +3,17 @@ import userEvent from "@testing-library/user-event";
 import { json, mockApi, problem, renderApp } from "../test/utils";
 
 const noSession = { "GET /api/v1/auth/me": () => problem(401, "Not authenticated") };
-const providers = (emailEnabled: boolean, passwordLoginEnabled = true) => ({
+/** resetOn is the platform admin's switch; it needs the password form and a tested server. */
+const providers = (emailEnabled: boolean, passwordLoginEnabled = true, resetOn = emailEnabled) => ({
   "GET /api/v1/auth/providers": () =>
-    json({ providers: [], passwordLoginEnabled, registrationEnabled: false, emailEnabled }),
+    json({
+      providers: [],
+      passwordLoginEnabled,
+      registrationEnabled: false,
+      emailEnabled,
+      passwordResetEnabled: resetOn && emailEnabled && passwordLoginEnabled,
+      emailVerificationEnabled: emailEnabled,
+    }),
 });
 const requests = (mock: ReturnType<typeof mockApi>, method: string, path: string) =>
   mock.mock.calls
@@ -25,6 +33,7 @@ describe("the forgot-password link", () => {
   it.each([
     ["the installation sends no email", providers(false)],
     ["the password form is off", providers(true, false)],
+    ["the admin switch is off", providers(true, true, false)],
   ])("is not offered when %s", async (_n, p) => {
     mockApi({ ...noSession, ...p });
     renderApp("/login?admin");
@@ -73,9 +82,17 @@ describe("asking for a reset link", () => {
     mockApi({ ...noSession, ...providers(false) });
     renderApp("/forgot-password");
     expect(
-      await screen.findByText("This installation cannot email a reset link."),
+      await screen.findByText("Password reset by email is not available."),
     ).toBeInTheDocument();
     expect(screen.queryByLabelText("Email")).toBeNull();
+  });
+
+  it("shows the same message when only the switch is off", async () => {
+    mockApi({ ...noSession, ...providers(true, true, false) });
+    renderApp("/forgot-password");
+    expect(
+      await screen.findByText("Password reset by email is not available."),
+    ).toBeInTheDocument();
   });
 });
 
@@ -89,6 +106,7 @@ describe("choosing a new password", () => {
   it("sends the token from the link in the body and ends at the sign-in link", async () => {
     const mock = mockApi({
       ...noSession,
+      ...providers(true),
       "POST /api/v1/auth/reset-password": () => new Response(null, { status: 204 }),
     });
     renderApp("/reset-password#TOKEN-9");
@@ -105,7 +123,7 @@ describe("choosing a new password", () => {
   });
 
   it("checks length and confirmation before calling the server", async () => {
-    const mock = mockApi(noSession);
+    const mock = mockApi({ ...noSession, ...providers(true) });
     renderApp("/reset-password#T");
     await fill("short");
     expect(await screen.findByText("Use 12 to 128 characters.")).toBeInTheDocument();
@@ -119,6 +137,7 @@ describe("choosing a new password", () => {
   it("offers a new link when the old one does not work", async () => {
     mockApi({
       ...noSession,
+      ...providers(true),
       "POST /api/v1/auth/reset-password": () =>
         problem(404, "Not found", { type: "urn:proreta:problem:not-found" }),
     });
@@ -132,9 +151,19 @@ describe("choosing a new password", () => {
   });
 
   it("explains a link without its token and calls nothing", async () => {
-    const mock = mockApi(noSession);
+    const mock = mockApi({ ...noSession, ...providers(true) });
     renderApp("/reset-password");
     expect(await screen.findByText("This link is incomplete.")).toBeInTheDocument();
+    expect(requests(mock, "POST", "/api/v1/auth/reset-password")).toHaveLength(0);
+  });
+
+  it("says the feature is not available, with a valid-looking link, when the switch is off", async () => {
+    const mock = mockApi({ ...noSession, ...providers(true, true, false) });
+    renderApp("/reset-password#VALID-TOKEN");
+    expect(
+      await screen.findByText("Password reset by email is not available."),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("New password")).toBeNull();
     expect(requests(mock, "POST", "/api/v1/auth/reset-password")).toHaveLength(0);
   });
 });

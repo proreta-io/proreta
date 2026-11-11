@@ -23,6 +23,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/admin"
 	"github.com/proreta-io/proreta/backend/internal/api/gen"
 	"github.com/proreta-io/proreta/backend/internal/auth"
+	"github.com/proreta-io/proreta/backend/internal/authz"
 	"github.com/proreta-io/proreta/backend/internal/monitors"
 	"github.com/proreta-io/proreta/backend/internal/notify"
 	"github.com/proreta-io/proreta/backend/internal/oauth"
@@ -52,6 +53,8 @@ const (
 	// channelTestInterval is the minimum spacing of POST /channels/{channelId}/test per tenant:
 	// each call makes an outbound request to the channel's service and writes an audit row.
 	channelTestInterval = 5 * time.Second
+	// emailTestInterval is the minimum spacing of POST /admin/email/test.
+	emailTestInterval = 10 * time.Second
 )
 
 // Config holds the HTTP-layer settings.
@@ -67,9 +70,6 @@ type Config struct {
 	// PasswordLoginEnabled is PRORETA_PASSWORD_LOGIN_ENABLED; auth enforces it, the api only
 	// reports it.
 	PasswordLoginEnabled bool
-	// EmailEnabled is true when an SMTP server is configured (PRORETA_SMTP_HOST); the api reports
-	// it so the web shows links where no email will arrive.
-	EmailEnabled bool
 }
 
 // Deps are the collaborators of the HTTP layer.
@@ -119,8 +119,11 @@ type server struct {
 	log          *slog.Logger
 	// channelTests limits channel test messages per tenant (per api replica, like the login limit).
 	channelTests *auth.Limiter
-	pingLimits   *pingLimits
-	pings        *PingMetrics
+	// emailTests limit the admin's test emails: one every 10 seconds and 20 an hour (per api
+	// replica; there is one platform admin).
+	emailTestBurst, emailTestHourly *auth.Limiter
+	pingLimits                      *pingLimits
+	pings                           *PingMetrics
 	// lastXFFWarn is the UnixNano time of the last missing X-Forwarded-For warning.
 	lastXFFWarn atomic.Int64
 }
@@ -142,9 +145,11 @@ func NewHandler(cfg Config, deps Deps) (http.Handler, error) {
 		pings = NewPingMetrics(prometheus.NewRegistry())
 	}
 	s := &server{cfg: cfg, auth: deps.Auth, monitors: deps.Monitors, queries: deps.Queries, channels: deps.Channels, plans: deps.Plans, projects: deps.Projects, pages: deps.StatusPages, admin: deps.Admin, oauth: deps.OAuth, entitlements: deps.Entitlements, log: deps.Logger,
-		channelTests: auth.NewLimiter(1, channelTestInterval, 10_000, clk),
-		pingLimits:   newPingLimits(clk),
-		pings:        pings}
+		channelTests:    auth.NewLimiter(1, channelTestInterval, 10_000, clk),
+		emailTestBurst:  auth.NewLimiter(1, emailTestInterval, 100, clk),
+		emailTestHourly: auth.NewLimiter(20, time.Hour, 100, clk),
+		pingLimits:      newPingLimits(clk),
+		pings:           pings}
 
 	r := chi.NewRouter()
 	r.Use(httpx.RequestID, httpx.AccessLog(deps.Logger), httpx.Recover(deps.Logger))
@@ -448,6 +453,7 @@ func (s *server) toSessionInfo(ctx context.Context, i auth.SessionInfo) gen.Sess
 	}
 	return gen.SessionInfo{
 		Features:           features,
+		EmailInvitations:   s.auth.MailFeatures(ctx).Invitations && authz.Can(authz.Actor{Role: authz.Role(i.Role)}, "createInvitation"),
 		MustChangePassword: i.User.MustChangePassword,
 		User:               gen.User{Id: i.User.ID, Login: i.User.Login, DisplayName: i.User.DisplayName, IsPlatformAdmin: i.User.IsPlatformAdmin, EmailVerified: i.User.EmailVerified},
 		Organization:       gen.OrganizationRef{Id: i.Tenant.ID, Slug: i.Tenant.Slug, Name: i.Tenant.Name},

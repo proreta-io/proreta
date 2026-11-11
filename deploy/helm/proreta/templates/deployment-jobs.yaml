@@ -1,10 +1,9 @@
 {{- /* jobs needs the encryption keys (decrypts the Slack webhook and the queued mail), the public URL (message
-       links) and, with email.enabled, the SMTP settings including the login.
-       It connects as the worker role: it claims through the SECURITY DEFINER functions. */ -}}
+       links). The SMTP settings are not in the environment: the platform admin sets them in the panel and jobs reads
+       them (the password sealed) from the database. It connects as the worker role: it claims through the SECURITY DEFINER functions. */ -}}
 {{- $env := join "\n" (list
   (include "proreta.env.common" (dict "ctx" . "dbKey" "worker_url"))
   (include "proreta.env.encryption" .)
   (include "proreta.env.guard" .)
-  (include "proreta.env.publicUrl" .)
-  (include "proreta.env.smtp" (dict "ctx" . "login" true))) -}}
+  (include "proreta.env.publicUrl" .)) -}}
 {{ include "proreta.backendDeployment" (dict "ctx" . "component" "jobs" "cfg" .Values.jobs "env" $env "httpPort" 0) }}

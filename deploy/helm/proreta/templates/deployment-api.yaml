@@ -3,6 +3,5 @@
   (include "proreta.env.encryption" .)
   (include "proreta.env.guard" .)
   (include "proreta.env.publicUrl" .)
-  (include "proreta.env.smtp" (dict "ctx" . "login" false))
   (include "proreta.env.api" .)) -}}
 {{ include "proreta.backendDeployment" (dict "ctx" . "component" "api" "cfg" .Values.api "env" $env "httpPort" .Values.api.httpPort) }}

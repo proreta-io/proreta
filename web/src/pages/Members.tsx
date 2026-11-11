@@ -24,6 +24,7 @@ import {
   Alert,
   Badge,
   Button,
+  Checkbox,
   ConfirmDialog,
   CopyField,
   EmptyNote,
@@ -290,6 +291,9 @@ function Invitations() {
   const [label, setLabel] = useState("");
   const emailEnabled = useEmailEnabled();
   const [email, setEmail] = useState("");
+  // Until the person touches the box it follows the platform admin's default.
+  const [sendChoice, setSendChoice] = useState<boolean | undefined>();
+  const sendByEmail = sendChoice ?? auth.session?.emailInvitations === true;
   const [emailError, setEmailError] = useState<string | undefined>();
   const [created, setCreated] = useState<CreatedLink | null>(null);
   const [error, setError] = useState<string | undefined>();
@@ -299,7 +303,8 @@ function Invitations() {
   );
 
   const create = useMutation({
-    mutationFn: () => createInvitation(role, label.trim(), emailEnabled ? email.trim() : ""),
+    mutationFn: () =>
+      createInvitation(role, label.trim(), emailEnabled && sendByEmail ? email.trim() : ""),
     // The answer holds the secret link: it must not stay in the query cache.
     gcTime: 0,
     onSuccess: (res) => {
@@ -311,6 +316,7 @@ function Invitations() {
       });
       setLabel("");
       setEmail("");
+      setSendChoice(undefined);
       create.reset();
       void queryClient.invalidateQueries({ queryKey: queryKeys.invitations });
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
@@ -448,7 +454,11 @@ function Invitations() {
       {dialog && (
         <ConfirmDialog
           title="Invite someone"
-          confirmLabel={emailEnabled && email.trim() ? "Create link and send email" : "Create link"}
+          confirmLabel={
+            emailEnabled && sendByEmail && email.trim()
+              ? "Create link and send email"
+              : "Create link"
+          }
           confirmVariant="primary"
           busy={create.isPending}
           onCancel={() => setDialog(false)}
@@ -475,25 +485,33 @@ function Invitations() {
               )}
             </Field>
             {emailEnabled && (
-              <Field
-                label="Email the link to (optional)"
-                hint="Proreta sends them the link. You still get it here, and anyone who has it can join."
-                error={emailError}
-              >
-                {(c) => (
-                  <Input
-                    {...c}
-                    type="email"
-                    autoComplete="off"
-                    maxLength={254}
-                    value={email}
-                    onChange={(e) => {
-                      setEmail(e.target.value);
-                      setEmailError(undefined);
-                    }}
-                  />
-                )}
-              </Field>
+              <>
+                <Field
+                  label="Email the link to (optional)"
+                  hint="You still get the link here, and anyone who has it can join."
+                  error={emailError}
+                >
+                  {(c) => (
+                    <Input
+                      {...c}
+                      type="email"
+                      autoComplete="off"
+                      maxLength={254}
+                      value={email}
+                      onChange={(e) => {
+                        setEmail(e.target.value);
+                        setEmailError(undefined);
+                      }}
+                    />
+                  )}
+                </Field>
+                <Checkbox
+                  label="Send by email"
+                  description="Proreta emails the link to this address when you create it."
+                  checked={sendByEmail}
+                  onChange={(e) => setSendChoice(e.target.checked)}
+                />
+              </>
             )}
             <Field label="Note (optional)" hint="For you only, for example the person's name.">
               {(c) => (

@@ -60,7 +60,7 @@ not contain `proreta` (`fullnameOverride` replaces it).
 | `config.adminPort` | `9090` | Health and metrics port of the backend pods. |
 | `config.sessionTTL`, `config.cookieSecure` | `24h`, `true` | Session lifetime; `Secure` cookies (keep `true`; `false` only with an `http://localhost` `config.publicUrl`, the api and statuspage refuse to start otherwise). |
 | `config.trustedProxyHops` | `0` | Trusted proxies in front of the api; `1` behind one Gateway. |
-| `config.registrationEnabled` | `false` | Self-service creation of organizations (addresses are verified by email only with `email.enabled`, and nothing requires it). |
+| `config.registrationEnabled` | `false` | Self-service creation of organizations (addresses are verified by email only when the platform admin turns that on in Admin, Email, and nothing requires it). |
 | `config.passwordLoginEnabled` | `true` | `false`: password form for the platform admin only; needs an OAuth provider. |
 | `config.blockedCIDRs` | `[]` | Extra ranges the SSRF guard refuses (cluster and VPC CIDRs). |
 | `database.secretName` | `""` | Secret with the connection URLs. Empty: `<fullname>-db`. |
@@ -76,12 +76,9 @@ not contain `proreta` (`fullnameOverride` replaces it).
 | `secrets.crypto.source`, `.keyId`, `.remoteKey` | `generate`, `k1`, `proreta/crypto` | Encryption key Secret `<fullname>-crypto`. |
 | `secrets.statuspage.source`, `.remoteKey` | `generate`, `proreta/statuspage` | Status page cookie key Secret `<fullname>-statuspage`. |
 | `secrets.oauth.existingSecret`, `.remoteKey` | `""`, `proreta/oauth` | OAuth client credentials. |
-| `secrets.smtp.existingSecret`, `.remoteKey` | `""`, `proreta/smtp` | SMTP password (key `password`), read only with `email.smtp.username`. |
 | `secrets.bootstrap.backoffLimit`, `.activeDeadlineSeconds`, `.ttlSecondsAfterFinished`, `.resources` | `2`, `300`, `600`, 50m/96Mi | Secrets bootstrap Job settings. |
 | `oauth.google.enabled`, `oauth.github.enabled` | `false` | Sign-in providers. |
 | `oauth.allowedDomains` | `[]` | Google Workspace domains organizations may claim. |
-| `email.enabled` | `false` | Queue and deliver email. Off: nothing is emailed and every link is shown in the page. |
-| `email.smtp.host`, `.port`, `.tls`, `.from`, `.username` | `""`, `0`, `starttls`, `""`, `""` | **host and from are required** when enabled. `port` 0 takes the mode's default (587 `starttls`, 465 `tls`, 25 `none`); `none` is for a server on localhost only. Empty `username`: no login. |
 | `externalSecrets.enabled` | `false` | Render ExternalSecrets (needs the operator). |
 | `externalSecrets.secretStoreRef.kind`, `.name` | `ClusterSecretStore`, `""` | The store; the name is required when enabled. |
 | `externalSecrets.apiVersion`, `.refreshInterval`, `.creationPolicy` | `external-secrets.io/v1`, `"0"`, `Owner` | ExternalSecret settings. |
@@ -161,8 +158,6 @@ Source of truth: `backend/internal/platform/config/config.go`. Secret names belo
 | `PRORETA_PASSWORD_LOGIN_ENABLED` (`config.passwordLoginEnabled`, default `true`, `false` keeps the password form for the platform admin only and needs an OAuth provider) | x | | | | |
 | `PRORETA_OAUTH_ALLOWED_DOMAINS` (`oauth.allowedDomains`, only rendered when non-empty; the Workspace domains organizations may claim) | x | | | | |
 | `PRORETA_OAUTH_GOOGLE_CLIENT_ID`/`_SECRET`, `PRORETA_OAUTH_GITHUB_CLIENT_ID`/`_SECRET` (`secrets.oauth.existingSecret` or `proreta-oauth`, only for providers enabled in `oauth.*.enabled`) | x | **never** | **never** | | |
-| `PRORETA_SMTP_HOST`, `_PORT`, `_TLS`, `_FROM` (`email.smtp.*`, only rendered with `email.enabled`; the api only queues mail and reports whether email is on) | x | **never** | x | | |
-| `PRORETA_SMTP_USERNAME`, `PRORETA_SMTP_PASSWORD` (`email.smtp.username`; the password from `secrets.smtp.existingSecret` or `proreta-smtp`, key `password`) | **never** | **never** | x | | |
 | `PRORETA_PUBLIC_URL` (`config.publicUrl`, required; also set on the statuspage Deployment, see below) | x | | x | | |
 | `PRORETA_BLOCKED_CIDRS` (`config.blockedCIDRs`, only rendered when non-empty) | x | x | x | | |
 | `PRORETA_WORKER_CLAIM_BATCH`, `_CONCURRENCY`, `_TENANT_CONCURRENCY`, `_HOST_CONCURRENCY` | | x | | | |
@@ -218,7 +213,7 @@ Workloads always read `<fullname>-admin` (`login`, `password_hash`) and `<fullna
     (`login`, `password`). Read it and log in: the first sign-in asks for a new password. Then delete
     `<fullname>-admin-initial` (always safe, nothing reads it; its password no longer works). It is never recreated.
   - crypto: one random 32-byte key with id `secrets.crypto.keyId` (default `k1`). It lives only in the cluster;
-    deleting the namespace loses it (it encrypts the Slack webhook URLs, which can be re-entered, and the queued emails, which are lost with it). Export it first: [docs/install.md](../../../docs/install.md#back-up-the-secrets).
+    deleting the namespace loses it (it encrypts the Slack webhook URLs and the SMTP password, which can be re-entered, and the queued emails, which are lost with it). Export it first: [docs/install.md](../../../docs/install.md#back-up-the-secrets).
 - `externalSecret`: an ExternalSecret (`externalSecrets.secretStoreRef`, wave -2) materialises it. Needs
   `externalSecrets.enabled: true`; rendering fails otherwise.
 
@@ -228,17 +223,11 @@ OAuth client credentials (only when a provider in `oauth` is enabled), keys `goo
 - the ExternalSecret `<fullname>-oauth` read from `secrets.oauth.remoteKey` (needs `externalSecrets.enabled`).
 Rendering fails when neither is configured. See [docs/runbooks/oauth.md](../../../docs/runbooks/oauth.md).
 
-SMTP password (only with `email.enabled` and `email.smtp.username`), key `password`, from either a Secret you create
-named in `secrets.smtp.existingSecret`, or the ExternalSecret `<fullname>-smtp` read from `secrets.smtp.remoteKey`
-(needs `externalSecrets.enabled`). Rendering fails when neither is configured. Only jobs, which connects to the
-server, receives it. See [docs/runbooks/email.md](../../../docs/runbooks/email.md).
-
 | Remote key (External Secrets only) | Properties | K8s Secret |
 |---|---|---|
 | `secrets.admin.remoteKey` (`proreta/admin`) | `login`, `password_hash` | `<fullname>-admin` |
 | `secrets.crypto.remoteKey` (`proreta/crypto`) | `keys` (JSON string), `active_key_id` | `<fullname>-crypto` |
 | `secrets.statuspage.remoteKey` (`proreta/statuspage`) | `cookie_key` | `<fullname>-statuspage` |
-| `secrets.smtp.remoteKey` (`proreta/smtp`, when `secrets.smtp.existingSecret` is empty and `email.smtp.username` is set) | `password` | `<fullname>-smtp` |
 | `secrets.oauth.remoteKey` (`proreta/oauth`, when `secrets.oauth.existingSecret` is empty) | `google_client_id`, `google_client_secret`, `github_client_id`, `github_client_secret` (only those of enabled providers) | `<fullname>-oauth` |
 | `database.bootstrap.adminSecret.remoteKey` (`proreta/db-admin`, when `database.bootstrap.adminSecret.existingSecret` is empty) | `usernameKey`, `passwordKey` (default `username`, `password`) | `<database Secret>-admin` (hook, deleted after success) |
 
@@ -312,7 +301,7 @@ run, and it reduces standing privileges), while the Jobs stay until the next run
 |---|---|
 | -4 | `proreta-db-admin` ExternalSecret (External Secrets only), db and secrets bootstrap ServiceAccount/Role/RoleBinding |
 | -3 | `proreta-db-bootstrap` and `proreta-secrets-bootstrap` Jobs |
-| -2 | migrate ServiceAccount; ArgoCD also applies the `proreta-admin` / `proreta-crypto` / `proreta-statuspage` / `proreta-oauth` / `proreta-smtp` ExternalSecrets here (with Helm they are ordinary resources) |
+| -2 | migrate ServiceAccount; ArgoCD also applies the `proreta-admin` / `proreta-crypto` / `proreta-statuspage` / `proreta-oauth` / ExternalSecrets here (with Helm they are ordinary resources) |
 | -1 | `proreta-migrate` Job |
 | 0 | workloads (api, worker, jobs, statuspage, web), Services, HTTPRoute |
 
