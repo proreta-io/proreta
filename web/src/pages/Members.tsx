@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { errorMessage } from "../api/client";
+import { ApiError, errorMessage } from "../api/client";
 import {
   createInvitation,
   deleteOrganization,
@@ -18,6 +18,7 @@ import {
   type MembershipRole,
 } from "../api/endpoints";
 import { useAuth } from "../auth/AuthProvider";
+import { useEmailEnabled } from "../lib/oauth";
 import { useToast } from "../components/Toasts";
 import {
   Alert,
@@ -270,6 +271,8 @@ const STATUS_TONES: Record<Invitation["status"], BadgeTone> = {
 interface CreatedLink {
   url: string;
   role: InvitationRole;
+  /** The address the link was queued to, when the admin gave one. */
+  emailedTo?: string;
 }
 
 function absoluteLink(url: string) {
@@ -285,6 +288,9 @@ function Invitations() {
   const [dialog, setDialog] = useState(false);
   const [role, setRole] = useState<InvitationRole>("member");
   const [label, setLabel] = useState("");
+  const emailEnabled = useEmailEnabled();
+  const [email, setEmail] = useState("");
+  const [emailError, setEmailError] = useState<string | undefined>();
   const [created, setCreated] = useState<CreatedLink | null>(null);
   const [error, setError] = useState<string | undefined>();
   const [revoking, setRevoking] = useState<Invitation | null>(null);
@@ -293,18 +299,27 @@ function Invitations() {
   );
 
   const create = useMutation({
-    mutationFn: () => createInvitation(role, label.trim()),
+    mutationFn: () => createInvitation(role, label.trim(), emailEnabled ? email.trim() : ""),
     // The answer holds the secret link: it must not stay in the query cache.
     gcTime: 0,
     onSuccess: (res) => {
       setDialog(false);
-      setCreated({ url: absoluteLink(res.inviteUrl), role: res.invitation.role });
+      setCreated({
+        url: absoluteLink(res.inviteUrl),
+        role: res.invitation.role,
+        emailedTo: res.emailQueued ? email.trim().toLowerCase() : undefined,
+      });
       setLabel("");
+      setEmail("");
       create.reset();
       void queryClient.invalidateQueries({ queryKey: queryKeys.invitations });
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
     },
-    onError: (err) => setError(errorMessage(err)),
+    onError: (err) => {
+      const fieldMessage = err instanceof ApiError ? err.fieldErrorMap().email : undefined;
+      if (fieldMessage) setEmailError(fieldMessage);
+      else setError(errorMessage(err));
+    },
   });
 
   const revoke = useMutation({
@@ -331,10 +346,19 @@ function Invitations() {
           <h3 id="invite-link-heading" className="text-lead font-semibold">
             Invitation link ({ROLE_LABELS[created.role].toLowerCase()})
           </h3>
+          {created.emailedTo && (
+            <Alert tone="neutral">
+              An email with the link is on its way to <strong>{created.emailedTo}</strong>. You can
+              also copy it here.
+            </Alert>
+          )}
           <CopyField label="Invitation link" value={created.url} copyLabel="Copy link" />
           <p className="text-muted-foreground">
             Anyone with this link can join as {ROLE_LABELS[created.role].toLowerCase()} until it is
-            used, revoked or 7 days pass. Send it over a channel you trust, not a public chat.
+            used, revoked or 7 days pass, whatever email address they use.{" "}
+            {created.emailedTo
+              ? "Do not share it further."
+              : "Send it over a channel you trust, not a public chat."}{" "}
             Proreta keeps only a hash of it.
           </p>
           <div>
@@ -348,6 +372,7 @@ function Invitations() {
           <Button
             onClick={() => {
               setError(undefined);
+              setEmailError(undefined);
               setDialog(true);
             }}
           >
@@ -423,7 +448,7 @@ function Invitations() {
       {dialog && (
         <ConfirmDialog
           title="Invite someone"
-          confirmLabel="Create link"
+          confirmLabel={emailEnabled && email.trim() ? "Create link and send email" : "Create link"}
           confirmVariant="primary"
           busy={create.isPending}
           onCancel={() => setDialog(false)}
@@ -449,6 +474,27 @@ function Invitations() {
                 </Select>
               )}
             </Field>
+            {emailEnabled && (
+              <Field
+                label="Email the link to (optional)"
+                hint="Proreta sends them the link. You still get it here, and anyone who has it can join."
+                error={emailError}
+              >
+                {(c) => (
+                  <Input
+                    {...c}
+                    type="email"
+                    autoComplete="off"
+                    maxLength={254}
+                    value={email}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      setEmailError(undefined);
+                    }}
+                  />
+                )}
+              </Field>
+            )}
             <Field label="Note (optional)" hint="For you only, for example the person's name.">
               {(c) => (
                 <Input

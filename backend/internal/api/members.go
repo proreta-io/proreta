@@ -152,11 +152,15 @@ func (s *server) CreateInvitation(ctx context.Context, req gen.CreateInvitationR
 	if req.Body.Label != nil {
 		label = *req.Body.Label
 	}
-	inv, token, err := s.auth.CreateInvitation(ctx, a, string(req.Body.Role), label)
+	var email string
+	if req.Body.Email != nil {
+		email = *req.Body.Email
+	}
+	inv, token, emailed, err := s.auth.CreateInvitationFor(ctx, a, auth.InvitationInput{Role: string(req.Body.Role), Label: label, Email: email})
 	if err != nil {
 		return nil, err
 	}
-	return gen.CreateInvitation201JSONResponse{Invitation: toInvitation(inv), InviteUrl: s.cfg.PublicURL + "/invite#" + token}, nil
+	return gen.CreateInvitation201JSONResponse{Invitation: toInvitation(inv), InviteUrl: s.cfg.PublicURL + "/invite#" + token, EmailQueued: emailed}, nil
 }
 
 func (s *server) RevokeInvitation(ctx context.Context, req gen.RevokeInvitationRequestObject) (gen.RevokeInvitationResponseObject, error) {

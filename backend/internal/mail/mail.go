@@ -22,6 +22,8 @@ const (
 	KindTest Kind = "test"
 	// KindVerifyEmail asks the recipient to confirm an address by opening a one-time link.
 	KindVerifyEmail Kind = "verify_email"
+	// KindInvitation carries an organization invitation link to the person invited.
+	KindInvitation Kind = "invitation"
 )
 
 // Message is one email ready to send. Both bodies are always set.

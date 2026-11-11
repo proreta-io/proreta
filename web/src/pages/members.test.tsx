@@ -166,6 +166,88 @@ describe("members page", () => {
     expect(await within(dialog).findByText(/at most 3 members/)).toBeInTheDocument();
   });
 
+  describe("inviting by email", () => {
+    const providers = (emailEnabled: boolean) => ({
+      "GET /api/v1/auth/providers": () =>
+        json({
+          providers: [],
+          passwordLoginEnabled: true,
+          registrationEnabled: false,
+          emailEnabled,
+        }),
+    });
+    const base = () => ({
+      ...as("owner"),
+      "GET /api/v1/members": () => json({ items: [me] }),
+      "GET /api/v1/invitations": () => json({ items: [] }),
+    });
+
+    it("offers the address field only when the installation sends email", async () => {
+      mockApi({ ...base(), ...providers(false) });
+      renderApp("/members");
+      await userEvent.click(await screen.findByRole("button", { name: "Invite someone" }));
+      const dialog = await screen.findByRole("dialog", { name: "Invite someone" });
+      expect(within(dialog).getByLabelText("Note (optional)")).toBeInTheDocument();
+      expect(within(dialog).queryByLabelText("Email the link to (optional)")).toBeNull();
+    });
+
+    it("sends the address, still shows the link and says where the email goes", async () => {
+      const fetchMock = mockApi({
+        ...base(),
+        ...providers(true),
+        "POST /api/v1/invitations": () =>
+          json(
+            {
+              invitation: invitation({ id: "i2", label: "guest@example.org" }),
+              inviteUrl: "https://proreta.example.com/invite#SECRET-TOKEN",
+              emailQueued: true,
+            },
+            201,
+          ),
+      });
+      renderApp("/members");
+      await userEvent.click(await screen.findByRole("button", { name: "Invite someone" }));
+      const dialog = await screen.findByRole("dialog", { name: "Invite someone" });
+      await userEvent.type(
+        await within(dialog).findByLabelText("Email the link to (optional)"),
+        "Guest@Example.org",
+      );
+      await userEvent.click(
+        within(dialog).getByRole("button", { name: "Create link and send email" }),
+      );
+      expect(await screen.findByText("guest@example.org")).toBeInTheDocument();
+      expect(screen.getByText(/An email with the link is on its way to/)).toBeInTheDocument();
+      expect(await screen.findByLabelText("Invitation link")).toHaveValue(
+        "https://proreta.example.com/invite#SECRET-TOKEN",
+      );
+      const sent = requests(fetchMock, "POST", "/api/v1/invitations")[0]!;
+      expect(await sent.clone().json()).toEqual({ role: "member", email: "Guest@Example.org" });
+    });
+
+    it("shows the server's complaint about the address in the dialog", async () => {
+      mockApi({
+        ...base(),
+        ...providers(true),
+        "POST /api/v1/invitations": () =>
+          problem(422, "Validation failed", {
+            type: "urn:proreta:problem:validation",
+            fieldErrors: [{ field: "email", message: "must contain exactly one @" }],
+          }),
+      });
+      renderApp("/members");
+      await userEvent.click(await screen.findByRole("button", { name: "Invite someone" }));
+      const dialog = await screen.findByRole("dialog", { name: "Invite someone" });
+      await userEvent.type(
+        await within(dialog).findByLabelText("Email the link to (optional)"),
+        "nobody",
+      );
+      await userEvent.click(
+        within(dialog).getByRole("button", { name: "Create link and send email" }),
+      );
+      expect(await within(dialog).findByText("must contain exactly one @")).toBeInTheDocument();
+    });
+  });
+
   it("keeps admins away from owners", async () => {
     mockApi({
       ...as("admin", { user: { ...session.user, id: "u3" } }),

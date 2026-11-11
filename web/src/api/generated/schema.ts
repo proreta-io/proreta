@@ -83,7 +83,8 @@ export interface paths {
      * Register a new account and workspace
      * @description Self-service registration. Creates an organization on the `free` plan, the user as its
      *     `owner` and a session, sets the session cookie and answers like login (the user is
-     *     logged in). There is no email verification and no email is sent.
+     *     logged in). When the installation sends email (`emailEnabled`), a verification email for the
+     *     address is queued in the same transaction; nothing depends on it being used.
      *
      *     The email is trimmed and lowercased; it must be 3-254 characters of `a-z 0-9 . _ + - @`
      *     (the characters a login may contain) with one `@`, a non-empty local part and a domain
@@ -1035,10 +1036,23 @@ export interface paths {
      * @description Creates a single-use invitation with the role `admin`, `member` or `viewer` (`owner` is
      *     granted by changing a member's role). It expires after 7 days. The answer carries `inviteUrl` with
      *     the secret token in the URL fragment; it is shown only here (only its SHA-256 is stored)
-     *     and must be handed over like a password. No email is sent. Open invitations count
+     *     and must be handed over like a password. With `email` the same link is also emailed to that
+     *     address (see below); the link is shown either way. Open invitations count
      *     toward the member limit of the plan: 409 `urn:proreta:problem:plan-limit-reached` (`limit`
      *     is `members`) when members plus open invitations already reach it. Audited as
-     *     `member.invited` (without the token). Admin or owner.
+     *     `member.invited` (without the token or the address; `emailed` says whether a message
+     *     was queued). Admin or owner.
+     *
+     *     **Email.** `email` is accepted only when the installation sends email (`emailEnabled` in
+     *     `GET /api/v1/auth/providers`); otherwise 422 on the field. The message is queued in the same
+     *     transaction as the invitation, so it exists exactly when the invitation does, and is
+     *     delivered a moment later by the background jobs process (`emailQueued` only means it was
+     *     queued, not that the mailbox accepted it). It names this organization, the role and the
+     *     inviter's display name, nothing else. The address is not stored and the invitation is
+     *     not bound to it: whoever holds the link can use it, with any email address, exactly as
+     *     without email. When `label` is empty and the address is at most 80 characters, the
+     *     address becomes the label. Limited to 30 invitation emails per organization per hour and
+     *     3 per recipient per day (429 with Retry-After).
      */
     post: operations["createInvitation"];
     delete?: never;
@@ -2239,6 +2253,11 @@ export interface components {
       role: components["schemas"]["InvitationRole"];
       /** @description An optional note for yourself, for example the person's name */
       label?: string;
+      /**
+       * @description Also email the link to this address (letters a-z, digits and `. _ + - @`, the
+       *     registration rules). Needs `emailEnabled`; not stored, not binding.
+       */
+      email?: string;
     };
     InvitationCreated: {
       invitation: components["schemas"]["Invitation"];
@@ -2247,6 +2266,8 @@ export interface components {
        * @example https://proreta.example.com/invite#3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
        */
       inviteUrl: string;
+      /** @description Whether an email with the link was queued (the request had an `email`) */
+      emailQueued: boolean;
     };
     InvitationToken: {
       /** Format: password */
@@ -4220,6 +4241,7 @@ export interface operations {
       403: components["responses"]["Forbidden"];
       409: components["responses"]["PlanLimitReached"];
       422: components["responses"]["UnprocessableEntity"];
+      429: components["responses"]["TooManyRequests"];
       default: components["responses"]["Error"];
     };
   };

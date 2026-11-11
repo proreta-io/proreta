@@ -1,0 +1,14 @@
+{{if .Params.inviter}}{{.Params.inviter}} invited you{{else}}You are invited{{end}} to join {{.Params.org}} on Proreta as {{.Params.role}}.
+
+Proreta watches websites and services from outside and tells the team when one goes down.
+
+To accept, open this link:
+
+{{.Link}}
+
+The link works once and expires in {{.Params.expires}}. It is personal: anyone who has it can join, so do not forward it.
+
+If you were not expecting this, ignore this message: nothing happens unless the link is opened.
+
+--
+Sent by {{.PublicHost}}.

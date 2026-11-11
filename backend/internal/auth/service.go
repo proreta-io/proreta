@@ -78,6 +78,10 @@ type Options struct {
 	// VerifyLimiter limits email verification attempts per client IP; every attempt that does
 	// not end in success counts. Defaults to 20 per 15 minutes.
 	VerifyLimiter *Limiter
+	// InviteMailLimiter and InviteMailRecipientLimiter limit invitation emails per organization
+	// and per organization and recipient. They default to 30 per hour and 3 per day.
+	InviteMailLimiter          *Limiter
+	InviteMailRecipientLimiter *Limiter
 	// Mail queues the messages the service sends (email verification). Nil, or a queue without
 	// keys, means email is off: nothing is queued and every flow behaves as without email.
 	Mail *mail.Queue
@@ -101,9 +105,12 @@ type Service struct {
 	loginLimit  *Limiter
 	inviteLimit *Limiter
 	verifyLimit *Limiter
-	mail        *mail.Queue
-	hashSem     chan struct{}
-	hashWait    time.Duration
+	// inviteMail* limit invitation emails (see InviteMailLimiter).
+	inviteMailLimit          *Limiter
+	inviteMailRecipientLimit *Limiter
+	mail                     *mail.Queue
+	hashSem                  chan struct{}
+	hashWait                 time.Duration
 	// dummy is verified for unknown or password-less users. BootstrapAdmin builds it with the
 	// admin hash's parameters, so both cost the same and timing does not reveal the login.
 	dummy         *crypto.ParsedHash
@@ -150,25 +157,34 @@ func NewService(pool *db.Pool, opts Options) (*Service, error) {
 	if opts.VerifyLimiter == nil {
 		opts.VerifyLimiter = NewLimiter(20, 15*time.Minute, 100_000, opts.Clock)
 	}
+	if opts.InviteMailLimiter == nil {
+		opts.InviteMailLimiter = NewLimiter(invitationMailsPerHour, time.Hour, 100_000, opts.Clock)
+	}
+	if opts.InviteMailRecipientLimiter == nil {
+		opts.InviteMailRecipientLimiter = NewLimiter(invitationMailsPerRecipient, 24*time.Hour, 100_000, opts.Clock)
+	}
 	if opts.HashQueueWait <= 0 {
 		opts.HashQueueWait = defaultHashQueueWait
 	}
 	s := &Service{
-		pool:                  pool,
-		ttl:                   opts.SessionTTL,
-		clock:                 opts.Clock,
-		log:                   opts.Logger,
-		ipLimit:               opts.IPLimiter,
-		loginLimit:            opts.LoginLimiter,
-		inviteLimit:           opts.InviteLimiter,
-		verifyLimit:           opts.VerifyLimiter,
-		mail:                  opts.Mail,
-		hashSem:               make(chan struct{}, maxConcurrentHashes),
-		hashWait:              opts.HashQueueWait,
-		afterVerify:           func() {},
-		passwordLoginDisabled: opts.PasswordLoginDisabled,
-		allowedDomains:        map[string]bool{},
-		beforeJoin:            func() {},
+		pool:            pool,
+		ttl:             opts.SessionTTL,
+		clock:           opts.Clock,
+		log:             opts.Logger,
+		ipLimit:         opts.IPLimiter,
+		loginLimit:      opts.LoginLimiter,
+		inviteLimit:     opts.InviteLimiter,
+		verifyLimit:     opts.VerifyLimiter,
+		inviteMailLimit: opts.InviteMailLimiter,
+
+		inviteMailRecipientLimit: opts.InviteMailRecipientLimiter,
+		mail:                     opts.Mail,
+		hashSem:                  make(chan struct{}, maxConcurrentHashes),
+		hashWait:                 opts.HashQueueWait,
+		afterVerify:              func() {},
+		passwordLoginDisabled:    opts.PasswordLoginDisabled,
+		allowedDomains:           map[string]bool{},
+		beforeJoin:               func() {},
 		logins: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "proreta_auth_logins_total",
 			Help: "Login attempts by result (succeeded, failed, suspended, rate_limited).",
