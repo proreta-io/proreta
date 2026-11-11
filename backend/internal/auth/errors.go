@@ -22,6 +22,8 @@ var (
 	// ErrPasswordLoginDisabled means password login (and registration with a password) is turned
 	// off (PRORETA_PASSWORD_LOGIN_ENABLED=false); only the configured admin login keeps it.
 	ErrPasswordLoginDisabled = errors.New("auth: password login is disabled")
+	// ErrNoPassword means the user has no password (it signs in with a provider only).
+	ErrNoPassword = errors.New("auth: the user has no password")
 	// ErrAdminLoginInUse stops BootstrapAdmin when the configured login belongs to a user with a
 	// membership outside the default tenant, for example someone who registered that email.
 	ErrAdminLoginInUse = errors.New("auth: PRORETA_ADMIN_LOGIN belongs to a user of another tenant; " +

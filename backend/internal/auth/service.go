@@ -101,6 +101,8 @@ type Service struct {
 	logins        *prometheus.CounterVec
 	registrations *prometheus.CounterVec
 	oauthLogins   *prometheus.CounterVec
+	// passwordChanges counts password changes by result.
+	passwordChanges *prometheus.CounterVec
 
 	passwordLoginDisabled bool
 	allowedDomains        map[string]bool
@@ -165,12 +167,16 @@ func NewService(pool *db.Pool, opts Options) (*Service, error) {
 			Name: "proreta_auth_oauth_logins_total",
 			Help: "OAuth sign-ins and links by provider and result (succeeded, or the error code of the redirect).",
 		}, []string{"provider", "result"}),
+		passwordChanges: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "proreta_auth_password_changes_total",
+			Help: "Password changes by result (succeeded, invalid, wrong_password, rate_limited).",
+		}, []string{"result"}),
 	}
 	for _, d := range opts.AllowedDomains {
 		s.allowedDomains[d] = true
 	}
 	if opts.Registerer != nil {
-		for _, c := range []prometheus.Collector{s.logins, s.registrations, s.oauthLogins} {
+		for _, c := range []prometheus.Collector{s.logins, s.registrations, s.oauthLogins, s.passwordChanges} {
 			if err := opts.Registerer.Register(c); err != nil {
 				return nil, fmt.Errorf("auth: register metrics: %w", err)
 			}
@@ -232,11 +238,20 @@ func (s *Service) BootstrapAdmin(ctx context.Context, login, passwordHash string
 		if err != nil {
 			return fmt.Errorf("get admin user: %w", err)
 		}
-		changed, err := q.UpdateUserPasswordHash(ctx, authdb.UpdateUserPasswordHashParams{ID: u.ID, PasswordHash: &passwordHash})
-		if err != nil {
-			return fmt.Errorf("update admin password hash: %w", err)
+		// The Secret's hash is applied unless the user changed the password in the app and the
+		// Secret is the same one as at the previous start; a new Secret (the documented reset)
+		// wins. An adopted user takes it whatever it chose before: the operator must sign in.
+		keepChosen := u.PasswordChangedAt != nil && u.ConfiguredPasswordHash != nil && *u.ConfiguredPasswordHash == passwordHash
+		changed := false
+		if adopted || !keepChosen {
+			changed = u.PasswordHash == nil || *u.PasswordHash != passwordHash
+			if changed || u.PasswordChangedAt != nil || u.ConfiguredPasswordHash == nil || *u.ConfiguredPasswordHash != passwordHash {
+				if _, err := q.ApplyConfiguredPasswordHash(ctx, authdb.ApplyConfiguredPasswordHashParams{ID: u.ID, PasswordHash: &passwordHash}); err != nil {
+					return fmt.Errorf("update admin password hash: %w", err)
+				}
+			}
 		}
-		if changed > 0 || adopted {
+		if changed || adopted {
 			n, err := revokeUserSessions(ctx, tx, u.ID)
 			if err != nil {
 				return fmt.Errorf("revoke admin sessions: %w", err)

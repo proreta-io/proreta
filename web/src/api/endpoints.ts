@@ -115,6 +115,21 @@ export async function register(
   return session;
 }
 
+/**
+ * Changes the signed-in user's password. The server ends every session and answers with a new one
+ * in the same organization (new cookie, new CSRF token).
+ */
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<SessionInfo> {
+  const session = await unwrap(
+    client.POST("/api/v1/auth/password", { body: { currentPassword, newPassword } }),
+  );
+  setCsrfToken(session.csrfToken);
+  return session;
+}
+
 /** Settings the app needs before login (no session). */
 export const getPublicConfig = () => unwrap(client.GET("/api/v1/public/config"));
 

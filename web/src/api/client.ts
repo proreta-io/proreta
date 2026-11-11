@@ -18,6 +18,9 @@ export const ACCOUNT_SUSPENDED_PROBLEM_TYPE = "urn:proreta:problem:account-suspe
 /** Invitations: the link is unknown, used, revoked or expired; the user is already a member. */
 export const INVITATION_INVALID_PROBLEM_TYPE = "urn:proreta:problem:invitation-invalid";
 export const ALREADY_MEMBER_PROBLEM_TYPE = "urn:proreta:problem:already-member";
+/** Changing the password: the user has none (provider sign-in only), or password sign-in is off. */
+export const NO_PASSWORD_PROBLEM_TYPE = "urn:proreta:problem:no-password";
+export const PASSWORD_LOGIN_DISABLED_PROBLEM_TYPE = "urn:proreta:problem:password-login-disabled";
 const LOGIN_PATH = "/api/v1/auth/login";
 /** A wrong password for an existing account when joining through an invitation is a 401 too. */
 const REGISTER_PATH = "/api/v1/auth/register";

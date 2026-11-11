@@ -59,6 +59,7 @@ const (
 	problemDefaultProject     = "urn:proreta:problem:default-project"
 	problemPasswordLoginOff   = "urn:proreta:problem:password-login-disabled" //nolint:gosec // G101: problem type URN, not a credential
 	problemLastLoginMethod    = "urn:proreta:problem:last-login-method"
+	problemNoPassword         = "urn:proreta:problem:no-password" //nolint:gosec // G101: problem type URN, not a credential
 	problemDomainNotVerified  = "urn:proreta:problem:domain-not-verified"
 	problemDomainTaken        = "urn:proreta:problem:domain-taken"
 	problemDomainNotAllowed   = "urn:proreta:problem:domain-not-allowed"
@@ -171,7 +172,7 @@ func writeError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 		}
 	case errors.Is(err, admin.ErrSystemAdmin):
 		p.Type, p.Title, p.Status = problemSystemAdmin, "The system administrator's password cannot be reset here", http.StatusConflict
-		p.Detail = "Its credentials come from the proreta-admin Secret: change the password hash there (docs/runbooks/admin-panel.md)."
+		p.Detail = "The platform administrator changes its own password under Profile; see docs/runbooks/admin-panel.md for a reset."
 	case errors.Is(err, admin.ErrTenantDeleted):
 		p.Type, p.Title, p.Status = problemOrgDeleted, "The organization is deleted", http.StatusConflict
 		p.Detail = "A deleted organization cannot be changed."
@@ -182,6 +183,9 @@ func writeError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 	case errors.Is(err, auth.ErrPasswordLoginDisabled):
 		p.Type, p.Title, p.Status = problemPasswordLoginOff, "Password sign-in is turned off", http.StatusForbidden
 		p.Detail = "Sign in with one of the offered providers."
+	case errors.Is(err, auth.ErrNoPassword):
+		p.Type, p.Title, p.Status = problemNoPassword, "This account has no password", http.StatusConflict
+		p.Detail = "You sign in with a provider, so there is no password to change."
 	case errors.Is(err, auth.ErrLastLoginMethod):
 		p.Type, p.Title, p.Status = problemLastLoginMethod, "This is your last way to sign in", http.StatusConflict
 		p.Detail = "Link another provider first."

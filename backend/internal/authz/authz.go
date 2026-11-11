@@ -163,6 +163,7 @@ var operations = map[string]Role{
 	"getme":              Viewer,
 	"listorganizations":  Viewer,
 	"switchorganization": Viewer,
+	"changepassword":     Viewer,
 	"acceptinvitation":   Viewer,
 	"leaveorganization":  Viewer,
 	"listidentities":     Viewer,
