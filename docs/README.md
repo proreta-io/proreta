@@ -14,7 +14,7 @@ Operator and contributor documentation for Proreta.
 |---|---|
 | [Database bootstrap](runbooks/database-bootstrap.md) | Creating the database and roles, the bootstrap Job, manual fallback |
 | [Database migrations](runbooks/migrations.md) | Writing migrations, what the tests enforce, rollouts and rollbacks |
-| [Platform admin panel](runbooks/admin-panel.md) | Plans, suspension, deletion, password resets, audit |
+| [Platform admin panel](runbooks/admin-panel.md) | Plans, suspension, deletion, users, members, projects, registration switch, password resets, audit |
 | [Members, roles and invitations](runbooks/invitations.md) | Roles, invitation links, organization switcher, recovery |
 | [Sign-in with Google and GitHub](runbooks/oauth.md) | OAuth clients, redirect URIs, Workspace domains, OAuth-only mode |
 | [Outgoing email](runbooks/email.md) | Optional SMTP, set up in Admin → Email: settings, what is sent, delivery and troubleshooting |
