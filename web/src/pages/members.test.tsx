@@ -398,7 +398,7 @@ describe("organization switcher", () => {
   });
 });
 
-describe("invitation page", () => {
+describe("invitation page: new account and invalid links", () => {
   const preview = { organizationName: "Acme", role: "member", expiresAt: "2026-11-12T10:00:00Z" };
 
   it("registers a new person through the link without a workspace of their own", async () => {
@@ -474,7 +474,7 @@ describe("invitation page", () => {
   });
 });
 
-describe("invitation page", () => {
+describe("invitation page: existing account", () => {
   const preview = { organizationName: "Acme", role: "member", expiresAt: "2026-11-12T10:00:00Z" };
 
   it("removes the token from the address bar and joins with an existing account", async () => {

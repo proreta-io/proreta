@@ -20,7 +20,8 @@ out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
 
 # External Secrets is opt-in; these combos switch it on.
-eso="--set externalSecrets.enabled=true --set externalSecrets.secretStoreRef.name=my-secret-store"
+eso_args=(--set externalSecrets.enabled=true --set externalSecrets.secretStoreRef.name=my-secret-store)
+eso="${eso_args[*]}"
 oauth_secret="--set secrets.oauth.existingSecret=proreta-oauth-clients"
 smtp="--set email.enabled=true --set email.smtp.host=smtp.example.com --set email.smtp.from=proreta@example.com"
 
@@ -140,7 +141,7 @@ expect_fail "invalid database Secret name" --set database.secretName=Proreta_DB
 expect_fail "OAuth without existingSecret and without External Secrets" -f "$example" --set oauth.github.enabled=true
 expect_fail "admin source externalSecret without External Secrets" -f "$example" --set secrets.admin.source=externalSecret
 expect_fail "statuspage source externalSecret without External Secrets" -f "$example" --set secrets.statuspage.source=externalSecret
-expect_fail "External Secrets without a store" -f "$example" $eso --set externalSecrets.secretStoreRef=null
+expect_fail "External Secrets without a store" -f "$example" "${eso_args[@]}" --set externalSecrets.secretStoreRef=null
 expect_fail "External Secrets without a store name" --msg "externalSecrets.secretStoreRef.name" -f "$example" --set externalSecrets.enabled=true
 expect_fail "email without a host" --msg "email.smtp.host is required" --set email.enabled=true --set email.smtp.from=proreta@example.com
 expect_fail "email without a sender" --msg "email.smtp.from is required" --set email.enabled=true --set email.smtp.host=smtp.example.com
@@ -170,18 +171,18 @@ expect_fail "registrationEnabled not a boolean" --set-string config.registration
 expect_fail "empty admin login in generate mode" --set secrets.admin.login=
 expect_fail "admin login removed in generate mode" -f "$example" --set secrets.admin.login=null
 expect_fail "invalid crypto key id" --set "secrets.crypto.keyId=k 1"
-expect_fail "externalSecret without remote key" $eso --set secrets.crypto.source=externalSecret --set secrets.crypto.remoteKey=
-expect_fail "statuspage cookie key externalSecret without remote key" $eso --set secrets.statuspage.source=externalSecret --set secrets.statuspage.remoteKey=
+expect_fail "externalSecret without remote key" "${eso_args[@]}" --set secrets.crypto.source=externalSecret --set secrets.crypto.remoteKey=
+expect_fail "statuspage cookie key externalSecret without remote key" "${eso_args[@]}" --set secrets.statuspage.source=externalSecret --set secrets.statuspage.remoteKey=
 expect_fail "status path moved" --set httpRoute.statusPathPrefix=/pages
 expect_fail "password login off without an OAuth provider" --set config.passwordLoginEnabled=false
 expect_fail "passwordLoginEnabled not a boolean" --set-string config.passwordLoginEnabled=no
 expect_fail "upper-case allowed domain" --set oauth.allowedDomains[0]=Example.com
 expect_fail "wildcard allowed domain" --set "oauth.allowedDomains[0]=*.example.com"
-expect_fail "oauth without remote key" $eso --set oauth.google.enabled=true --set secrets.oauth.remoteKey=
+expect_fail "oauth without remote key" "${eso_args[@]}" --set oauth.google.enabled=true --set secrets.oauth.remoteKey=
 expect_fail "invalid worker location" --set worker.location=Home_1
 
 echo "== defaults: web on, host names from config.publicUrl"
-grep -q '^kind: Deployment' "$out/defaults.yaml" && grep -q 'name: proreta-web$' "$out/defaults.yaml" || { echo "FAIL: web is not enabled by default" >&2; exit 1; }
+if ! { grep -q '^kind: Deployment' "$out/defaults.yaml" && grep -q 'name: proreta-web$' "$out/defaults.yaml"; }; then echo "FAIL: web is not enabled by default" >&2; exit 1; fi
 if grep -q 'name: proreta-web$' "$out/example-no-web.yaml"; then echo "FAIL: web.enabled=false still renders the web" >&2; exit 1; fi
 python3 - "$out" <<'EOF'
 import sys, yaml
