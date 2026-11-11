@@ -389,6 +389,9 @@ func (s *Service) oauthRegister(ctx context.Context, in OAuthLoginInput) (LoginR
 			}); err != nil {
 				return err
 			}
+			if err := s.claimWorkspaceDomain(ctx, tx, in, tenantID, userID); err != nil {
+				return err
+			}
 			res, err = s.oauthSession(ctx, tx, in, t, userID, RoleOwner, true, map[string]any{"via": "registration"})
 			return err
 		})
@@ -400,6 +403,36 @@ func (s *Service) oauthRegister(ctx context.Context, in OAuthLoginInput) (LoginR
 		}
 		return res, oauthTxErr(uuid.Nil, nil, err)
 	}
+}
+
+// claimWorkspaceDomain makes the organization created by a Google sign-in the claimant of the
+// user's Workspace domain, so colleagues who sign in later join it instead of creating their own.
+// The sign-in itself is the proof of control, and the operator allow-list still applies. A domain
+// already claimed (also by a concurrent first sign-in) is left alone, hence the savepoint.
+func (s *Service) claimWorkspaceDomain(ctx context.Context, tx pgx.Tx, in OAuthLoginInput, tenantID, userID uuid.UUID) error {
+	domain := in.Identity.HostedDomain
+	if in.Identity.Provider != ProviderGoogle || domain == "" || !s.allowedDomains[domain] {
+		return nil
+	}
+	sp, err := tx.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	d := Domain{ID: uuidv7.New(), Domain: domain, DefaultRole: RoleViewer, Enabled: true}
+	err = authdb.New(sp).InsertAuthDomain(ctx, authdb.InsertAuthDomainParams{
+		ID: d.ID, TenantID: tenantID, Domain: domain, DefaultRole: d.DefaultRole, Enabled: true, CreatedBy: userID, Now: s.clock.Now(),
+	})
+	if err != nil {
+		_ = sp.Rollback(ctx)
+		if db.IsUniqueViolation(err, "org_auth_domains_domain_key") {
+			return nil
+		}
+		return fmt.Errorf("claim domain: %w", err)
+	}
+	if err := sp.Commit(ctx); err != nil {
+		return err
+	}
+	return s.auditDomain(ctx, tx, Actor{TenantID: tenantID, UserID: userID, IP: in.IP}, d, "created")
 }
 
 // insertOAuthUser creates a password-less user with the provider's verified email and links the
