@@ -29,7 +29,7 @@ func TestIntegrationMigrateFromScratchAndRerun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "audit_log,auth_identities,check_results,heartbeat_tokens,incident_monitors,incidents,invitations,memberships,monitor_channels,monitor_location_state," +
+	want := "audit_log,auth_identities,check_results,heartbeat_tokens,incident_monitors,incidents,invitations,mail_outbox,memberships,monitor_channels,monitor_location_state," +
 		"monitor_locations,monitor_state,monitors,notification_channels,notification_deliveries,org_auth_domains,plans,probe_locations,project_members,projects,result_rollups_hourly,rollup_state,sessions," +
 		"status_page_components,status_page_released_slugs,status_page_snapshots,status_pages,tenants,users"
 	if got := strings.Join(tables, ","); got != want {
@@ -73,6 +73,11 @@ var definerAllowList = map[string][]string{
 	"finish_delivery":           {"proreta_worker"},
 	// Outbox backlog gauge of jobs.
 	"outbox_pending": {"proreta_worker"},
+	// The outgoing email queue: jobs claims, finishes, counts and purges messages.
+	"claim_mail":        {"proreta_worker"},
+	"finish_mail":       {"proreta_worker"},
+	"mail_pending":      {"proreta_worker"},
+	"purge_mail_outbox": {"proreta_worker"},
 	// Pause, resume and URL change reset the schedule within the caller's tenant.
 	"reset_monitor_runtime": {"proreta_api"},
 	// The public heartbeat ping finds its heartbeat by token hash before the tenant is known, and

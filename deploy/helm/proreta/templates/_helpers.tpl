@@ -119,6 +119,51 @@ helm.sh/hook-delete-policy: {{ ternary "before-hook-creation" "before-hook-creat
 {{- .Values.networkPolicy.gatewayNamespace | default .Values.httpRoute.parentRef.namespace | default .Release.Namespace }}
 {{- end }}
 
+{{/* SMTP credentials: a Secret you created (secrets.smtp.existingSecret) or the ExternalSecret target. */}}
+{{- define "proreta.secret.smtp" -}}{{ .Values.secrets.smtp.existingSecret | default (printf "%s-smtp" (include "proreta.fullname" .)) }}{{- end }}
+
+{{/* True when the SMTP login comes from a Secret: email on and email.smtp.username set. Arg: root context */}}
+{{- define "proreta.smtp.login" -}}
+{{- if and .Values.email.enabled .Values.email.smtp.username }}true{{ end }}
+{{- end }}
+
+{{/*
+Outgoing email (config.SMTP). Rendered only with email.enabled; without it the backend has no
+PRORETA_SMTP_* variable and email is off. The api only queues messages, so only jobs (which
+connects to the server) gets the login. Args: dict ctx, login (bool)
+*/}}
+{{- define "proreta.env.smtp" -}}
+{{- $v := .ctx.Values.email }}
+{{- if $v.enabled }}
+{{- $s := $v.smtp }}
+- name: PRORETA_SMTP_HOST
+  value: {{ required "email.smtp.host is required when email.enabled is true" $s.host | quote }}
+{{- if $s.port }}
+- name: PRORETA_SMTP_PORT
+  value: {{ $s.port | quote }}
+{{- end }}
+{{- if and (eq $s.tls "none") (not (has (lower $s.host) (list "localhost" "127.0.0.1" "::1"))) }}
+{{- fail "email.smtp.tls=none is allowed only for localhost; use starttls or tls for a remote server" }}
+{{- end }}
+- name: PRORETA_SMTP_TLS
+  value: {{ $s.tls | quote }}
+- name: PRORETA_SMTP_FROM
+  value: {{ required "email.smtp.from is required when email.enabled is true" $s.from | quote }}
+{{- if and .login $s.username }}
+{{- if and (not .ctx.Values.secrets.smtp.existingSecret) (not .ctx.Values.externalSecrets.enabled) }}
+{{- fail "email.smtp.username needs the password: create a Secret with key password and set secrets.smtp.existingSecret, or enable externalSecrets and set secrets.smtp.remoteKey (docs/runbooks/email.md)" }}
+{{- end }}
+- name: PRORETA_SMTP_USERNAME
+  value: {{ $s.username | quote }}
+- name: PRORETA_SMTP_PASSWORD
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "proreta.secret.smtp" .ctx }}
+      key: password
+{{- end }}
+{{- end }}
+{{- end }}
+
 {{/* True when any OAuth provider is enabled. Arg: root context */}}
 {{- define "proreta.oauth.enabled" -}}
 {{- if or .Values.oauth.google.enabled .Values.oauth.github.enabled }}true{{ end }}

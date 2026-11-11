@@ -117,6 +117,7 @@ func run() error {
 		RegistrationEnabled:  cfg.RegistrationEnabled,
 		PublicURL:            cfg.PublicURL,
 		PasswordLoginEnabled: cfg.PasswordLoginEnabled,
+		EmailEnabled:         cfg.SMTP.Enabled(),
 	}, api.Deps{
 		Auth:     authSvc,
 		Monitors: monitors.NewService(pool, sched, incidents.NewService(sched)),

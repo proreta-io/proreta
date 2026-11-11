@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/proreta-io/proreta/backend/internal/platform/crypto"
+	"github.com/proreta-io/proreta/backend/internal/testsupport/smtptest"
 )
 
 func pipeStdin(t *testing.T, s string) *os.File {
@@ -37,5 +39,36 @@ func TestHashpwMemoryCap(t *testing.T) {
 	}
 	if ok, err := crypto.VerifyPassword("pw", strings.TrimSpace(out.String())); err != nil || !ok {
 		t.Fatalf("hash does not verify: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestMailTest(t *testing.T) {
+	srv := smtptest.New(t, smtptest.Options{Mode: smtptest.Plain})
+	env := map[string]string{
+		"PRORETA_SMTP_HOST": srv.Host(), "PRORETA_SMTP_PORT": strconv.Itoa(srv.Port()), "PRORETA_SMTP_TLS": "none",
+		"PRORETA_SMTP_FROM": "proreta@example.com", "PRORETA_PUBLIC_URL": "https://proreta.example.com",
+	}
+	lookup := func(k string) (string, bool) { v, ok := env[k]; return v, ok }
+
+	var out bytes.Buffer
+	if err := mailTest([]string{"-to", "ops@example.org"}, lookup, &out); err != nil {
+		t.Fatal(err)
+	}
+	got := srv.Messages()
+	if len(got) != 1 || got[0].To[0] != "ops@example.org" || !strings.Contains(out.String(), "accepted") {
+		t.Fatalf("messages %+v, output %q", got, out.String())
+	}
+
+	srv.Reply("RCPT", "550 5.1.1 mailbox ops@example.org unknown")
+	err := mailTest([]string{"-to", "ops@example.org"}, lookup, &out)
+	if err == nil || !strings.Contains(err.Error(), "recipient_rejected 550") || strings.Contains(err.Error(), "unknown") {
+		t.Fatalf("err = %v, want the failing step without the server's text", err)
+	}
+	if err := mailTest(nil, lookup, &out); err == nil || !strings.Contains(err.Error(), "-to") {
+		t.Fatalf("missing -to: %v", err)
+	}
+	delete(env, "PRORETA_SMTP_HOST")
+	if err := mailTest([]string{"-to", "a@example.org"}, lookup, &out); err == nil {
+		t.Fatal("email not configured must fail")
 	}
 }

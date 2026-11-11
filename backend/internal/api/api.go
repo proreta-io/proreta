@@ -67,6 +67,9 @@ type Config struct {
 	// PasswordLoginEnabled is PRORETA_PASSWORD_LOGIN_ENABLED; auth enforces it, the api only
 	// reports it.
 	PasswordLoginEnabled bool
+	// EmailEnabled is true when an SMTP server is configured (PRORETA_SMTP_HOST); the api reports
+	// it so the web shows links where no email will arrive.
+	EmailEnabled bool
 }
 
 // Deps are the collaborators of the HTTP layer.

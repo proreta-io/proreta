@@ -210,6 +210,36 @@ def check(path):
     for comp in deployments:
         if comp != "api" and any(n.startswith("PRORETA_OAUTH_") or n == "PRORETA_PASSWORD_LOGIN_ENABLED" for n in env_of(comp)):
             fail(f"{comp} has OAuth settings (api only)")
+    # Outgoing email: the api only queues, so it never gets the SMTP login; jobs connects, so it
+    # alone reads the password, from the SMTP Secret by the key `password`; the worker (tenant
+    # targets) and everything else get nothing.
+    smtp_names = lambda env: {n for n in env if n.startswith("PRORETA_SMTP_")}
+    for comp in deployments:
+        if comp not in ("api", "jobs") and smtp_names(env_of(comp)):
+            fail(f"{comp} has SMTP settings (api and jobs only)")
+    if smtp_names(api):
+        for n in ("PRORETA_SMTP_HOST", "PRORETA_SMTP_FROM", "PRORETA_SMTP_TLS"):
+            if n not in api or n not in jobs:
+                fail(f"email is on but api or jobs lacks {n}")
+        for n in smtp_names(api) - {"PRORETA_SMTP_HOST", "PRORETA_SMTP_FROM", "PRORETA_SMTP_TLS", "PRORETA_SMTP_PORT"}:
+            fail(f"api has {n} (jobs only: the api never connects to the server)")
+        if {n: api[n].get("value") for n in smtp_names(api)} != {n: jobs[n].get("value") for n in smtp_names(api)}:
+            fail("api and jobs disagree on the SMTP settings")
+    if smtp_names(api) != smtp_names(jobs) - {"PRORETA_SMTP_USERNAME", "PRORETA_SMTP_PASSWORD"}:
+        fail(f"api and jobs have different SMTP settings: {sorted(smtp_names(api))} / {sorted(smtp_names(jobs))}")
+    if ("PRORETA_SMTP_USERNAME" in jobs) != ("PRORETA_SMTP_PASSWORD" in jobs):
+        fail("jobs has only one of PRORETA_SMTP_USERNAME and PRORETA_SMTP_PASSWORD")
+    pw = jobs.get("PRORETA_SMTP_PASSWORD")
+    smtp_secret = None
+    if pw:
+        ref = pw.get("valueFrom", {}).get("secretKeyRef", {})
+        if set(ref) != {"name", "key"} or ref["key"] != "password":
+            fail(f"jobs PRORETA_SMTP_PASSWORD must come from <smtp secret>/password, got {ref}")
+        smtp_secret = ref.get("name")
+    es_smtp = {d["spec"]["target"]["name"] for d in docs if d["kind"] == "ExternalSecret"
+               and {x["secretKey"] for x in d["spec"].get("data", [])} == {"password"}}
+    if es_smtp and es_smtp != {smtp_secret}:
+        fail(f"SMTP ExternalSecret(s) {sorted(es_smtp)} rendered but jobs reads {smtp_secret}")
     if ADMIN_ENV & set(jobs):
         fail("jobs has admin credentials")
     for n, key in ADMIN_SECRET_KEYS.items():

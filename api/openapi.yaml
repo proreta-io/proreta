@@ -444,8 +444,8 @@ paths:
         Public, needs no session. The OAuth providers that have credentials configured
         (a provider without them is not listed and its start answers 404), whether the password
         form is offered to everyone (`PRORETA_PASSWORD_LOGIN_ENABLED`; when false only the platform
-        admin signs in with a password, on `/login?admin`) and whether self-service registration
-        is open.
+        admin signs in with a password, on `/login?admin`), whether self-service registration
+        is open and whether the installation sends email.
       tags: [auth]
       security: []
       responses:
@@ -4366,7 +4366,7 @@ components:
     AuthProviders:
       type: object
       additionalProperties: false
-      required: [providers, passwordLoginEnabled, registrationEnabled]
+      required: [providers, passwordLoginEnabled, registrationEnabled, emailEnabled]
       properties:
         providers:
           type: array
@@ -4379,6 +4379,12 @@ components:
         registrationEnabled:
           type: boolean
           description: Whether an OAuth sign-in or `POST /api/v1/auth/register` may create a new organization
+        emailEnabled:
+          type: boolean
+          description: |
+            Whether the installation sends email (an SMTP server is configured,
+            `PRORETA_SMTP_HOST`). When false nothing is ever emailed and every flow that could send
+            a message shows its link in the page instead.
     AuthProvider:
       type: object
       additionalProperties: false

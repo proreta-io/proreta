@@ -99,7 +99,7 @@ database:
 #                   never overwrites it. The admin password is generated and readable ONCE from the
 #                   Secret `<fullname>-admin-initial` (delete it after the first login). A generated
 #                   key exists only in the cluster: losing the namespace loses it (it only encrypts the
-#                   Slack webhook URLs, which can be re-entered).
+#                   Slack webhook URLs, which can be re-entered, and the queued emails).
 #   externalSecret  an ExternalSecret reads it from the secret store (`remoteKey`, wave -2).
 secrets:
   admin:
@@ -130,6 +130,15 @@ secrets:
   oauth:
     existingSecret: ""
     remoteKey: proreta/oauth
+  # SMTP password, only read with email.enabled and email.smtp.username. Key `password`. Never put it
+  # in a values file. Either
+  #   existingSecret  the name of a Secret you create in the namespace (no External Secrets needed), or
+  #   remoteKey       a JSON secret in your store with property `password`, read through the
+  #                   ExternalSecret `<fullname>-smtp` (needs externalSecrets.enabled; used when
+  #                   existingSecret is empty).
+  smtp:
+    existingSecret: ""
+    remoteKey: proreta/smtp
   # The hook Job (Helm pre-install/pre-upgrade or ArgoCD Sync, weight/wave -3) rendered when any
   # source is generate. It has no database credentials; its Role can only create Secrets and
   # read/update the Secrets above.
@@ -156,12 +165,34 @@ oauth:
   # Removing a domain here stops auto-join for an organization that already claimed it.
   allowedDomains: []
 
+# Outgoing email (optional, off by default). Without it nothing is ever emailed and every flow that
+# could send a message shows its link in the page, exactly as before. With it, jobs delivers the
+# messages (from a database queue, with retries) to the SMTP server below; the api only queues them.
+# docs/runbooks/email.md.
+email:
+  enabled: false
+  smtp:
+    # Server name or address, no port. REQUIRED when email is enabled.
+    host: ""
+    # 0: the default of the TLS mode (587 starttls, 465 tls, 25 none).
+    port: 0
+    # starttls (default; refused if the server does not offer it), tls (implicit TLS) or none
+    # (only for a server on the pod's own localhost, such as a sidecar relay; the login is never
+    # sent without TLS).
+    tls: starttls
+    # Sender, REQUIRED: proreta@example.com or "Proreta <proreta@example.com>". Use an address your
+    # domain's SPF/DKIM allows the server to send for.
+    from: ""
+    # Login name; empty means no login (a relay that trusts the network). The password is read from
+    # secrets.smtp (key `password`).
+    username: ""
+
 # External Secrets Operator (optional, off by default; any provider behind the referenced store).
 # The default install needs no External Secrets: the admin and crypto Secrets are generated in the
 # cluster and the database admin login comes from database.bootstrap.adminSecret.existingSecret.
 # When enabled, it is used by the database admin ExternalSecret (when existingSecret is empty), by
-# every `secrets.*.source: externalSecret` and by OAuth without secrets.oauth.existingSecret
-# (wave -2). Needs the operator and its CRDs (external-secrets.io/v1) installed in the cluster.
+# every `secrets.*.source: externalSecret`, by OAuth without secrets.oauth.existingSecret and by the
+# SMTP password without secrets.smtp.existingSecret (wave -2). Needs the operator and its CRDs (external-secrets.io/v1) installed in the cluster.
 # The database Secret (database.secretName) is never an ExternalSecret.
 externalSecrets:
   enabled: false
@@ -242,7 +273,7 @@ worker:
   env: []
 
 jobs:
-  replicas: 1              # 0 or 1 only (schema); 0 stops Slack delivery and housekeeping
+  replicas: 1              # 0 or 1 only (schema); 0 stops Slack and email delivery and housekeeping
   # Up to 25 s for sends in flight on SIGTERM, then the lease expires.
   terminationGracePeriodSeconds: 45
   resources:

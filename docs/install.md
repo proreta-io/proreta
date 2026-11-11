@@ -222,7 +222,7 @@ The Secret `proreta-db` (the role passwords) stays; it is not managed by Helm. I
 
 **Back up the encryption key.** Do this now, once. The Secret `proreta-crypto` holds the keys that encrypt the Slack webhook URLs stored in the database. Without it the webhook URLs in the database (and in any backup of it) cannot be decrypted: they are lost and each Slack channel must be entered again. The Secret `proreta-statuspage` (the cookie signing key of the status page) is less critical: losing it only signs visitors of password-protected pages out, but it is cheap to keep with the other one. [Back up the secrets](#back-up-the-secrets) shows how.
 
-**Optional next steps:** Slack channels in the app, [sign-in with Google or GitHub](runbooks/oauth.md), [status pages](runbooks/status-page.md), [Alertmanager watchdog](runbooks/heartbeat-alertmanager.md), [metrics and alerts](runbooks/observability.md). Add the CIDRs of your cluster and VPC to `config.blockedCIDRs` so monitors cannot probe internal addresses ([chart README](../deploy/helm/proreta/README.md)).
+**Optional next steps:** Slack channels in the app, [outgoing email](runbooks/email.md) (an SMTP server; off by default, and nothing is emailed without it), [sign-in with Google or GitHub](runbooks/oauth.md), [status pages](runbooks/status-page.md), [Alertmanager watchdog](runbooks/heartbeat-alertmanager.md), [metrics and alerts](runbooks/observability.md). Add the CIDRs of your cluster and VPC to `config.blockedCIDRs` so monitors cannot probe internal addresses ([chart README](../deploy/helm/proreta/README.md)).
 
 ## Back up the secrets
 The database backup alone is not enough to restore an installation. Two Secrets are generated in the cluster and exist nowhere else (with `secrets.*.source: externalSecret` your secret store is the copy, and you can skip this):
@@ -273,7 +273,7 @@ Rotating also ends OAuth sign-ins that are in progress ([OAuth runbook](runbooks
 helm uninstall proreta -n proreta
 ```
 This removes the Deployments, Services, HTTPRoute and ServiceAccounts. It leaves:
-- the Secrets created by the bootstrap Jobs: `proreta-db`, `proreta-admin`, `proreta-crypto`, `proreta-statuspage` (and `proreta-admin-initial` if you did not delete it). Keep them to reinstall later with the same data: `proreta-crypto` holds the key that encrypts the Slack webhook URLs stored in the database, so [export it](#back-up-the-secrets) before deleting anything;
+- the Secrets created by the bootstrap Jobs: `proreta-db`, `proreta-admin`, `proreta-crypto`, `proreta-statuspage` (and `proreta-admin-initial` if you did not delete it). Keep them to reinstall later with the same data: `proreta-crypto` holds the key that encrypts the Slack webhook URLs stored in the database (and the emails waiting in the queue), so [export it](#back-up-the-secrets) before deleting anything;
 - the finished Jobs, until `ttlSecondsAfterFinished` removes them (10 minutes for the bootstrap Jobs, 1 hour for the migration);
 - the database and the four roles on your PostgreSQL server. There are no PersistentVolumeClaims.
 

@@ -3,6 +3,7 @@
 //	proretactl hashpw [-m KiB] [-t iterations] [-p parallelism]   print an argon2id hash of a password read from stdin
 //	proretactl db bootstrap                                       create/repair the database and roles, or skip when they are ready (see internal/dbbootstrap)
 //	proretactl secrets bootstrap                                  create the admin and encryption Secrets if absent (see internal/secretsbootstrap)
+//	proretactl mail test -to ADDRESS                              send a test message with the PRORETA_SMTP_* settings, bypassing the queue
 package main
 
 import (
@@ -24,6 +25,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/proreta-io/proreta/backend/internal/dbbootstrap"
+	"github.com/proreta-io/proreta/backend/internal/mail"
 	"github.com/proreta-io/proreta/backend/internal/platform/config"
 	"github.com/proreta-io/proreta/backend/internal/platform/crypto"
 	"github.com/proreta-io/proreta/backend/internal/platform/logging"
@@ -39,6 +41,7 @@ const usage = `usage:
   proretactl hashpw [-m KiB] [-t iterations] [-p parallelism]
   proretactl db bootstrap
   proretactl secrets bootstrap
+  proretactl mail test -to ADDRESS
   proretactl version
 `
 
@@ -61,6 +64,8 @@ func run(args []string) error {
 		return dbBootstrap()
 	case args[0] == "secrets" && len(args) > 1 && args[1] == "bootstrap":
 		return secretsBootstrap()
+	case args[0] == "mail" && len(args) > 1 && args[1] == "test":
+		return mailTest(args[2:], os.LookupEnv, os.Stdout)
 	case args[0] == "version":
 		fmt.Printf("proretactl %s (%s)\n", version, commit)
 		return nil
@@ -240,4 +245,33 @@ func adminConnConfig(cfg config.Bootstrap) (*pgx.ConnConfig, error) {
 		return nil, errors.New("invalid admin connection settings")
 	}
 	return c, nil
+}
+
+// mailTest sends one test message straight to the SMTP server named by PRORETA_SMTP_*, with a
+// 30 s timeout. It does not touch the database or the queue: it answers "do these settings work?".
+// The error says which step failed, never what the server answered.
+func mailTest(args []string, lookup config.LookupFunc, stdout io.Writer) error {
+	fs := flag.NewFlagSet("mail test", flag.ContinueOnError)
+	to := fs.String("to", "", "recipient address")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *to == "" {
+		return errors.New("mail test: -to ADDRESS is required")
+	}
+	cfg, err := config.LoadMailer(lookup)
+	if err != nil {
+		return err
+	}
+	msg, err := mail.Render(mail.KindTest, cfg.PublicURL, *to, nil)
+	if err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	defer stop()
+	if err := mail.NewSMTPSender(cfg.SMTP).Send(ctx, msg); err != nil {
+		return fmt.Errorf("mail test: %s: %s", cfg.SMTP, mail.ErrorKind(err))
+	}
+	_, err = fmt.Fprintf(stdout, "test message accepted by %s\n", cfg.SMTP)
+	return err
 }
