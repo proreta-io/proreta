@@ -86,7 +86,8 @@ func concretePath(p string) string {
 // TestIntegrationAdminOperationsRefuseNonAdmins checks each answers 403 to a normal user.
 var adminOperations = []string{"adminGetStats", "adminListOrganizations", "adminGetOrganization", "adminUpdateOrganization",
 	"adminDeleteOrganization", "adminListOrganizationUsers", "adminResetUserPassword", "adminGetEmailSettings", "adminUpdateEmailSettings",
-	"adminDeleteEmailSettings", "adminUpdateEmailFeatures", "adminSendTestEmail"}
+	"adminDeleteEmailSettings", "adminUpdateEmailFeatures", "adminSendTestEmail",
+	"adminGetRegistration", "adminUpdateRegistration"}
 
 func TestSpecAdminOperations(t *testing.T) {
 	spec, ops := specOperations(t)

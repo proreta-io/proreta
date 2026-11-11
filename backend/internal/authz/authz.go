@@ -252,6 +252,8 @@ var operations = map[string]Role{
 	"admindeleteemailsettings":   Viewer,
 	"adminupdateemailfeatures":   Viewer,
 	"adminsendtestemail":         Viewer,
+	"admingetregistration":       Viewer,
+	"adminupdateregistration":    Viewer,
 }
 
 // whileMustChangePassword lists the only operations a session may call while its user has to

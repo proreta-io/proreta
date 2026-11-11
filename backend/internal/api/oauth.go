@@ -54,7 +54,7 @@ func (s *server) GetAuthProviders(ctx context.Context, _ gen.GetAuthProvidersReq
 	out := gen.GetAuthProviders200JSONResponse{
 		Providers:                []gen.AuthProvider{},
 		PasswordLoginEnabled:     s.cfg.PasswordLoginEnabled,
-		RegistrationEnabled:      s.cfg.RegistrationEnabled,
+		RegistrationEnabled:      s.registrationEnabled(ctx),
 		EmailEnabled:             features.Enabled,
 		PasswordResetEnabled:     s.auth.PasswordResetEnabled(ctx),
 		EmailVerificationEnabled: features.Verification,
@@ -208,7 +208,7 @@ func (s *server) OauthCallback(ctx context.Context, req gen.OauthCallbackRequest
 	}
 
 	res, err := s.auth.OAuthLogin(ctx, auth.OAuthLoginInput{
-		Identity: identity, InviteHash: st.InviteHash, RegistrationEnabled: s.cfg.RegistrationEnabled,
+		Identity: identity, InviteHash: st.InviteHash, RegistrationEnabled: s.registrationEnabled(ctx),
 		IP: ip, UserAgent: r.UserAgent(),
 	})
 	if err != nil {

@@ -25,6 +25,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/platform/httpx"
 	"github.com/proreta-io/proreta/backend/internal/platform/logging"
 	"github.com/proreta-io/proreta/backend/internal/platform/metrics"
+	"github.com/proreta-io/proreta/backend/internal/platformsettings"
 	"github.com/proreta-io/proreta/backend/internal/projects"
 	"github.com/proreta-io/proreta/backend/internal/queries"
 	"github.com/proreta-io/proreta/backend/internal/scheduler"
@@ -96,7 +97,10 @@ func run() error {
 	}
 	log.Info("admin bootstrap done")
 
-	adminSvc, err := admin.NewService(pool, authSvc, admin.Options{Logger: log, Registerer: reg, Mail: mailQueue, Settings: mailSettings})
+	// The platform admin can open or close registration in the panel; PRORETA_REGISTRATION_ENABLED
+	// is the value until a choice is stored.
+	registration := platformsettings.NewRegistration(pool, cfg.RegistrationEnabled, log)
+	adminSvc, err := admin.NewService(pool, authSvc, admin.Options{Logger: log, Registerer: reg, Mail: mailQueue, Settings: mailSettings, Registration: registration})
 	if err != nil {
 		return err
 	}
@@ -132,6 +136,7 @@ func run() error {
 		Plans:    plans.NewService(pool), Projects: projects.NewService(pool),
 		StatusPages:  statuspages.NewService(pool, statuspages.Options{Logger: log}),
 		Admin:        adminSvc,
+		Registration: registration,
 		OAuth:        flow,
 		Entitlements: entitlements.NewService(pool),
 		Logger:       log,

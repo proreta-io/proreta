@@ -18,6 +18,7 @@ import Settings from "./pages/Settings";
 import StatusPageSettings from "./pages/StatusPage";
 import VerifyEmail from "./pages/VerifyEmail";
 import AdminEmail from "./pages/admin/AdminEmail";
+import AdminRegistration from "./pages/admin/AdminRegistration";
 import AdminOverview from "./pages/admin/AdminOverview";
 import AdminOrganizationDetails from "./pages/admin/AdminOrganizationDetails";
 import AdminOrganizations from "./pages/admin/AdminOrganizations";
@@ -46,6 +47,7 @@ export default function App() {
             <Route index element={<AdminOverview />} />
             <Route path="organizations" element={<AdminOrganizations />} />
             <Route path="email" element={<AdminEmail />} />
+            <Route path="registration" element={<AdminRegistration />} />
             <Route path="organizations/:id" element={<AdminOrganizationDetails />} />
             <Route path="*" element={<NotFound />} />
           </Route>
