@@ -65,11 +65,15 @@ database:
   # Hook Job (Helm pre-install/pre-upgrade or ArgoCD Sync, weight/wave -3) running
   # `proretactl db bootstrap` BEFORE the migration Job: creates the database and the roles
   # (idempotent) and the Secret `secretName`.
-  # SECURITY TRADE-OFF: while enabled, the Job holds the database server admin login (for example the
-  # RDS master login) and runs on every upgrade. Set `enabled: false` after the first successful
-  # install (the Secret persists), then delete the admin login Secret.
+  # Safe to leave enabled: once the Secret exists, proreta_owner connects and the migration table
+  # exists, the Job skips itself without reading the admin login. The admin Secret is optional for
+  # the pod, so it may be deleted after the first install (recommended: it is the database server
+  # admin login, for example the RDS master login). Turn `enabled` off to stop running the Job.
   bootstrap:
     enabled: false
+    # Run the full bootstrap even if the database looks ready (password rotation, a new role).
+    # Needs the admin Secret. Turn it off again afterwards.
+    force: false
     # Database server admin login (LOGIN, CREATEROLE, CREATEDB). Either a plain Secret you create in
     # the namespace (`existingSecret`, the default way), or, with externalSecrets.enabled and
     # `existingSecret` empty, a short-lived ExternalSecret `<secretName>-admin` read from `remoteKey`

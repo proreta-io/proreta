@@ -290,13 +290,18 @@
         "bootstrap": {
           "type": "object",
           "title": "database bootstrap",
-          "description": "hook Job that creates the database, the roles and the database Secret; turn it off after the first successful install",
+          "description": "hook Job that creates the database, the roles and the database Secret; it skips itself once the database is set up, so it may stay on",
           "additionalProperties": false,
           "properties": {
             "enabled": {
               "type": "boolean",
               "title": "run the database bootstrap",
-              "description": "render the bootstrap hook Job; it holds the database server admin login while enabled"
+              "description": "render the bootstrap hook Job; it reads the database server admin login only when the database is not set up yet (or force is on), and the admin Secret is optional"
+            },
+            "force": {
+              "type": "boolean",
+              "title": "force the database bootstrap",
+              "description": "run the full bootstrap even if the database looks ready (password rotation, a new role); needs the admin Secret"
             },
             "adminSecret": {
               "type": "object",
