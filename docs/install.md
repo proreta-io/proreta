@@ -24,7 +24,7 @@ Contents: [Prerequisites](#prerequisites) · [Install](#install) · [After insta
 - **What the bootstrap does with it** (`proretactl db bootstrap`, idempotent, under an advisory lock):
   - creates the roles `proreta_owner` (migrations), `proreta_api`, `proreta_worker` and `proreta_statuspage`, all `LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`, with connection limits 3, 20, 20 and 10 and per-role statement timeouts. Passwords are random, sent as SCRAM verifiers, and stored only in the Secret `proreta-db` in your namespace;
   - creates the database `proreta` (`database.name`) owned by `proreta_owner`, revokes `PUBLIC` access, grants `CONNECT` to the four roles;
-  - temporarily grants itself `proreta_owner` (needed on RDS to create a database owned by another role) and revokes it at the end. On PostgreSQL 16 and newer the admin keeps an implicit membership as the role's creator; the bootstrap log reports it (`admin member of proreta_owner: true`);
+  - temporarily grants itself `proreta_owner` (needed on RDS to create a database owned by another role) and revokes it at the end. On PostgreSQL 16 and newer the admin keeps an implicit membership as the role's creator; the bootstrap log reports whether the admin is still a member (`admin member of proreta_owner: true` or `false`, depending on the server and its version); both are fine, because the migrations and the application do not depend on it;
   - in the new database: makes `proreta_owner` the owner of schema `public` and creates the extension **`citext`** as `proreta_owner`.
 - **Extensions:** only `citext` is needed. It is a trusted extension, so the database owner may create it without superuser rights. It is part of the standard contrib modules (present in the official images, RDS, Aurora and Cloud SQL). On Azure Database for PostgreSQL allow-list it first (server parameter `azure.extensions` must include `CITEXT`). The migrations themselves create no extensions.
 - **One installation per PostgreSQL server:** the role names (`proreta_owner`, `proreta_api`, `proreta_worker`, `proreta_statuspage`) are fixed and not configurable, so one PostgreSQL server hosts exactly one Proreta installation. A second installation on the same server, even with another `database.name`, would reset the role passwords of the first one. Use a separate server (or managed instance) per installation.
@@ -38,7 +38,7 @@ Contents: [Prerequisites](#prerequisites) · [Install](#install) · [After insta
 
 The commands below install the chart from a git checkout. Every release is also published as an OCI artifact; see [Installing from the OCI registry](#installing-from-the-oci-registry) for the three steps that differ.
 
-Worked example: host `proreta.example.com`, Gateway `gateway` with the HTTPS listener `https` in namespace `gateway-system`, PostgreSQL at `postgres.example.internal`. The resource and Secret names below are those of the release `proreta`; another release name gives `<release>-proreta-...` names (for example the database Secret `<release>-proreta-db`, or `database.secretName` when set), so several releases can share a namespace, each with its own PostgreSQL server.
+Worked example: host `proreta.example.com`, Gateway `gateway` with the HTTPS listener `https` in namespace `gateway-system`, PostgreSQL at `postgres.example.internal`. The resource and Secret names below are those of the release `proreta`; a release name that does not contain `proreta` gives `<release>-proreta-...` names (for example the database Secret `<release>-proreta-db`, or `database.secretName` when set), and a name that contains it is used as it is (a release called `platform-proreta` gives `platform-proreta-api`, `platform-proreta-admin-initial` and so on; Argo CD uses the name of the Application as the release name unless you set `helm.releaseName`), so several releases can share a namespace, each with its own PostgreSQL server.
 
 **1. Get the chart**
 ```sh
@@ -113,7 +113,7 @@ kubectl -n gateway-system get gateway gateway     # ADDRESS: point the DNS name 
 kubectl -n proreta get secret proreta-admin-initial -o jsonpath='{.data.login}' | base64 -d; echo
 kubectl -n proreta get secret proreta-admin-initial -o jsonpath='{.data.password}' | base64 -d; echo
 ```
-Open `config.publicUrl`, sign in with that login (default `admin`) and password, store the password in a password manager, then delete the plaintext copy. It is never recreated:
+Open `config.publicUrl`, sign in with that login (default `admin`) and password and store the password in a password manager. The application reads only the hash (Secret `proreta-admin`), so nothing breaks if you keep `proreta-admin-initial`, but it is the live password in plain text and readable by everyone who can read Secrets in the namespace, so deleting it is recommended. It is never recreated:
 ```sh
 kubectl -n proreta delete secret proreta-admin-initial
 ```
@@ -148,6 +148,50 @@ VERSION=0.1.0
 helm upgrade --install proreta oci://ghcr.io/proreta-io/charts/proreta --version "$VERSION" -n proreta -f my-values.yaml --wait --timeout 10m
 ```
 `helm show values oci://ghcr.io/proreta-io/charts/proreta --version "$VERSION"` prints every default with its comment, as a reference. For later upgrades pass the new `--version`.
+
+### Installing with Argo CD
+The chart works under Argo CD with the same order as Helm: the ServiceAccounts, Roles, bootstrap Jobs and the migration Job are hooks ordered by sync waves, the workloads come last. Tested with Argo CD 3.x, Envoy Gateway and Amazon RDS (PostgreSQL 16), from the git source below; installing from the OCI registry as an Argo CD source was not tested (it needs the registry registered in Argo CD as a Helm repository with OCI enabled).
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: proreta
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/proreta-io/proreta.git
+    targetRevision: v0.1.0            # the release tag; chart and image tag come from the same version
+    path: deploy/helm/proreta
+    helm:
+      releaseName: proreta            # Argo CD otherwise uses the Application name, which changes every resource name
+      parameters:
+        - name: image.tag
+          value: "0.1.0"              # required from a git checkout; image tags have no leading v
+      valuesObject:                   # the minimal values from "Installing from the OCI registry"
+        config:
+          publicUrl: https://proreta.example.com
+          trustedProxyHops: 1
+        database:
+          host: postgres.example.internal
+          bootstrap:
+            enabled: true
+            adminSecret:
+              existingSecret: proreta-db-admin-login
+        httpRoute:
+          parentRef: {name: gateway, namespace: gateway-system, sectionName: https}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: proreta
+  syncPolicy:
+    syncOptions: [CreateNamespace=true]
+```
+
+- Create the namespace yourself if you want Pod Security enforcement (`pod-security.kubernetes.io/enforce=restricted`; the pods satisfy it) instead of `CreateNamespace=true`.
+- The database admin Secret (`proreta-db-admin-login`, keys `username` and `password`) can come from an ExternalSecret or any other source; it only has to exist before the first sync.
+- If you do not set `helm.releaseName`, replace `proreta-` in the Secret and workload names used elsewhere in this guide with the Application name (for example `platform-proreta-admin-initial`).
+- Turning the bootstrap off later is a second change to the Application (`bootstrap.enabled: false`) and a sync; only then remove the admin Secret ([After installing](#after-installing)).
 
 ### Trying it without a Gateway controller
 For a local trial (kind, minikube) you can skip the Gateway controller, but the Gateway API CRDs are still required: the chart creates an `HTTPRoute`. Without a controller the route has no `status` and nothing serves the host name, yet the pods and the API work. Set `httpRoute.parentRef.name` to any name. The Services listen on port 8080 (not 80); reach them with port-forwards:
