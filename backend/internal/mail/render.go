@@ -30,7 +30,8 @@ type kindSpec struct {
 }
 
 var specs = map[Kind]kindSpec{
-	KindTest: {subject: "Proreta test message"},
+	KindTest:        {subject: "Proreta test message"},
+	KindVerifyEmail: {subject: "Confirm your email address for Proreta", linkPath: "/verify-email#"},
 }
 
 // Kinds returns every kind that has a template, in a stable order.

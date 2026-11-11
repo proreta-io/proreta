@@ -14,6 +14,7 @@ import Projects from "./pages/Projects";
 import Register from "./pages/Register";
 import Settings from "./pages/Settings";
 import StatusPageSettings from "./pages/StatusPage";
+import VerifyEmail from "./pages/VerifyEmail";
 import AdminOverview from "./pages/admin/AdminOverview";
 import AdminOrganizationDetails from "./pages/admin/AdminOrganizationDetails";
 import AdminOrganizations from "./pages/admin/AdminOrganizations";
@@ -24,6 +25,7 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
       <Route path="/invite" element={<Invite />} />
+      <Route path="/verify-email" element={<VerifyEmail />} />
       <Route element={<RequireAuth />}>
         <Route element={<Layout />}>
           <Route path="/" element={<Monitors />} />

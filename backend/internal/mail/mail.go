@@ -20,6 +20,8 @@ type Kind string
 const (
 	// KindTest is the message `proretactl mail test` sends to check the SMTP settings.
 	KindTest Kind = "test"
+	// KindVerifyEmail asks the recipient to confirm an address by opening a one-time link.
+	KindVerifyEmail Kind = "verify_email"
 )
 
 // Message is one email ready to send. Both bodies are always set.

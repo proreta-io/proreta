@@ -139,6 +139,9 @@ func (s *Service) createAccount(ctx context.Context, email, passwordHash string,
 			}
 			return fmt.Errorf("insert user: %w", err)
 		}
+		if err := s.issueVerification(ctx, tx, q, userID, email); err != nil {
+			return err
+		}
 		if err := q.InsertMembership(ctx, authdb.InsertMembershipParams{TenantID: tenantID, UserID: userID, Role: RoleOwner}); err != nil {
 			return fmt.Errorf("insert membership: %w", err)
 		}
@@ -312,7 +315,7 @@ func (s *Service) joinExistingAccount(ctx context.Context, row authdb.GetUserByE
 			return err
 		}
 		res = LoginResult{Token: sess.token, SessionInfo: SessionInfo{
-			User: User{ID: row.ID, Login: row.Email, DisplayName: row.DisplayName, MustChangePassword: row.PasswordMustChange}, Tenant: t, Role: role,
+			User: User{ID: row.ID, Login: row.Email, DisplayName: row.DisplayName, MustChangePassword: row.PasswordMustChange, EmailVerified: row.EmailVerifiedAt != nil}, Tenant: t, Role: role,
 			CSRFToken: sess.csrf, ExpiresAt: sess.expiresAt,
 		}}
 		return nil
@@ -335,6 +338,9 @@ func (s *Service) createInvitedAccount(ctx context.Context, email, passwordHash 
 				return ErrEmailTaken
 			}
 			return fmt.Errorf("insert user: %w", err)
+		}
+		if err := s.issueVerification(ctx, tx, q, userID, email); err != nil {
+			return err
 		}
 		role, err := s.joinInvited(ctx, tx, tenantID, userID, hashToken(in.InviteToken), in.IP)
 		if err != nil {

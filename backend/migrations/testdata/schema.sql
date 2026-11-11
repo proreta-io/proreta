@@ -5,6 +5,7 @@
 audit_log kind=r owner=proreta_owner rls=true force=true acl=proreta_api=a/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=a/proreta_owner
 auth_identities kind=r owner=proreta_owner rls=false force=false acl=proreta_api=ard/proreta_owner,proreta_owner=arwdDxt/proreta_owner
 check_results kind=p owner=proreta_owner rls=true force=true partition by RANGE (checked_at) acl=proreta_api=r/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=ar/proreta_owner
+email_verifications kind=r owner=proreta_owner rls=false force=false acl=proreta_api=ar/proreta_owner,proreta_owner=arwdDxt/proreta_owner
 goose_db_version kind=r owner=proreta_owner rls=false force=false acl=proreta_api=r/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=r/proreta_owner
 goose_db_version_id_seq kind=S owner=proreta_owner rls=false force=false
 heartbeat_tokens kind=r owner=proreta_owner rls=true force=true acl=proreta_api=ar/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=r/proreta_owner
@@ -61,6 +62,12 @@ check_results.6 status_code smallint
 check_results.7 latency_ms integer
 check_results.8 error_kind text
 check_results.9 tls_not_after timestamp with time zone
+email_verifications.1 token_hash bytea not null
+email_verifications.2 user_id uuid not null
+email_verifications.3 email citext not null
+email_verifications.4 created_at timestamp with time zone not null default now()
+email_verifications.5 expires_at timestamp with time zone not null
+email_verifications.6 used_at timestamp with time zone acl=proreta_api=w/proreta_owner
 goose_db_version.1 id integer not null identity d
 goose_db_version.2 version_id bigint not null
 goose_db_version.3 is_applied boolean not null
@@ -309,6 +316,11 @@ check_results check_results_latency_ms_check CHECK ((latency_ms >= 0))
 check_results check_results_pkey PRIMARY KEY (monitor_id, checked_at, location_id)
 check_results check_results_status_code_check CHECK (((status_code >= 100) AND (status_code <= 599)))
 check_results check_results_tenant_id_monitor_id_fkey FOREIGN KEY (tenant_id, monitor_id) REFERENCES monitors(tenant_id, id)
+email_verifications email_verifications_check CHECK ((expires_at > created_at))
+email_verifications email_verifications_email_check CHECK (((length((email)::text) >= 3) AND (length((email)::text) <= 320)))
+email_verifications email_verifications_pkey PRIMARY KEY (token_hash)
+email_verifications email_verifications_token_hash_check CHECK ((length(token_hash) = 32))
+email_verifications email_verifications_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id)
 goose_db_version goose_db_version_pkey PRIMARY KEY (id)
 heartbeat_tokens heartbeat_tokens_pkey PRIMARY KEY (monitor_id)
 heartbeat_tokens heartbeat_tokens_tenant_id_monitor_id_fkey FOREIGN KEY (tenant_id, monitor_id) REFERENCES monitors(tenant_id, id)
@@ -503,6 +515,9 @@ CREATE INDEX auth_identities_user_id_idx ON public.auth_identities USING btree (
 CREATE UNIQUE INDEX auth_identities_user_provider_key ON public.auth_identities USING btree (user_id, provider)
 CREATE INDEX check_results_checked_at_brin ON ONLY public.check_results USING brin (checked_at)
 CREATE UNIQUE INDEX check_results_pkey ON ONLY public.check_results USING btree (monitor_id, checked_at, location_id)
+CREATE INDEX email_verifications_expires_idx ON public.email_verifications USING btree (expires_at)
+CREATE UNIQUE INDEX email_verifications_pkey ON public.email_verifications USING btree (token_hash)
+CREATE INDEX email_verifications_user_idx ON public.email_verifications USING btree (user_id, created_at DESC)
 CREATE UNIQUE INDEX goose_db_version_pkey ON public.goose_db_version USING btree (id)
 CREATE UNIQUE INDEX heartbeat_tokens_pkey ON public.heartbeat_tokens USING btree (monitor_id)
 CREATE UNIQUE INDEX heartbeat_tokens_tenant_id_monitor_id_key ON public.heartbeat_tokens USING btree (tenant_id, monitor_id)
@@ -669,6 +684,7 @@ list_due_heartbeats(integer) owner=proreta_owner definer=true acl=proreta_owner=
 mail_pending() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 org_delete_tenant(uuid,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 outbox_pending() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+purge_email_verifications() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 purge_expired_sessions() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 purge_mail_outbox(interval) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 reset_monitor_runtime(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
@@ -1715,6 +1731,25 @@ CREATE OR REPLACE FUNCTION public.outbox_pending()
  SET search_path TO 'public', 'pg_temp'
 AS $function$
     SELECT count(*) FROM notification_deliveries WHERE status = 'pending'
+$function$
+CREATE OR REPLACE FUNCTION public.purge_email_verifications()
+ RETURNS integer
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    WITH gone AS (
+        DELETE FROM email_verifications AS v
+        WHERE v.token_hash IN (
+            SELECT e.token_hash FROM email_verifications AS e
+            WHERE e.expires_at < now() - interval '1 day'
+            ORDER BY e.expires_at
+            LIMIT 1000
+            FOR UPDATE SKIP LOCKED
+        )
+        RETURNING 1
+    )
+    SELECT count(*)::integer FROM gone
 $function$
 CREATE OR REPLACE FUNCTION public.purge_expired_sessions()
  RETURNS integer

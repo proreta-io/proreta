@@ -338,5 +338,5 @@ func TestIntegrationUnsafeOperationsNeedCSRF(t *testing.T) {
 
 func isCSRFExemptOperation(id string) bool {
 	return strings.EqualFold(id, "login") || strings.EqualFold(id, "register") || strings.EqualFold(id, "pingHeartbeatPost") || strings.EqualFold(id, "lookupInvitation") ||
-		strings.EqualFold(id, "startOAuth")
+		strings.EqualFold(id, "startOAuth") || strings.EqualFold(id, "verifyEmail")
 }

@@ -230,7 +230,8 @@ func writeError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 	case errors.Is(err, errNotFound), errors.Is(err, routers.ErrPathNotFound), errors.Is(err, monitors.ErrNotFound), errors.Is(err, queries.ErrNotFound), errors.Is(err, admin.ErrNotFound),
 		errors.Is(err, notify.ErrChannelNotFound), errors.Is(err, auth.ErrMemberNotFound), errors.Is(err, auth.ErrInvitationNotFound),
 		errors.Is(err, auth.ErrOrganizationNotFound), errors.Is(err, projects.ErrNotFound), errors.Is(err, projects.ErrMemberNotFound),
-		errors.Is(err, statuspages.ErrNotFound), errors.Is(err, auth.ErrIdentityNotFound), errors.Is(err, auth.ErrAuthDomainNotFound):
+		errors.Is(err, statuspages.ErrNotFound), errors.Is(err, auth.ErrIdentityNotFound), errors.Is(err, auth.ErrAuthDomainNotFound),
+		errors.Is(err, auth.ErrVerificationInvalid), errors.Is(err, auth.ErrEmailDisabled):
 		p.Type, p.Title, p.Status = problemNotFound, "Not found", http.StatusNotFound
 	case errors.Is(err, errMethodNotAllowed), errors.Is(err, routers.ErrMethodNotAllowed):
 		p.Type, p.Title, p.Status = problemMethodNotAllowed, "Method not allowed", http.StatusMethodNotAllowed

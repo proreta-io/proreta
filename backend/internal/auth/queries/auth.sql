@@ -1,5 +1,5 @@
 -- name: GetUserByEmail :one
-SELECT id, email, password_hash, display_name, status, is_platform_admin, updated_at, password_changed_at, configured_password_hash, password_must_change
+SELECT id, email, password_hash, display_name, status, is_platform_admin, updated_at, password_changed_at, configured_password_hash, password_must_change, email_verified_at
 FROM users
 WHERE email = @email;
 
@@ -13,7 +13,7 @@ WHERE id = @id
 FOR SHARE;
 
 -- name: GetUserByID :one
-SELECT id, email, display_name, status, is_platform_admin, password_must_change
+SELECT id, email, display_name, status, is_platform_admin, password_must_change, email_verified_at
 FROM users
 WHERE id = @id;
 

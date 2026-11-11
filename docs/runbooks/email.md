@@ -3,7 +3,13 @@
 Email is optional. With no SMTP server configured nothing is ever emailed and every flow behaves as it always did: links that could be mailed are shown in the page for the user to copy. This page covers turning it on, what is sent, how delivery works and how to troubleshoot it.
 
 ## What the installation sends
-The messages Proreta can send are listed here as features arrive; each one is explained in the runbook of its feature. All of them:
+The messages Proreta can send:
+
+| Message | Sent when | Link |
+|---|---|---|
+| Confirm your email address | A person registers with a password (their own organization or through an invitation link), or asks for it again from the banner | `<PRORETA_PUBLIC_URL>/verify-email#<token>` |
+
+All of them:
 
 - come from the one sender address you configure and go to a single recipient;
 - are plain text plus a simple HTML alternative, in English, with **no tracking pixels, no remote images and no tracking links**;
@@ -11,6 +17,19 @@ The messages Proreta can send are listed here as features arrive; each one is ex
 - are sent one at a time, never to several recipients, and never contain data of another organization.
 
 Deployments that only need the monitoring features can leave email off.
+
+## Email verification
+With email on, a person who registers with a password gets a message with a one-time link. Opening it marks the address as verified (`emailVerified` in the session). Until then the web app shows a banner with a button to send the link again.
+
+- The token has 256 random bits; only its SHA-256 is stored. A link works once, for 24 hours, and only the newest link of an account works (asking again invalidates the older ones). It confirms the address it was issued for; if the account's address changed meanwhile, it does nothing.
+- The link page works in any browser, signed in or not: the token is the proof. Unknown, expired, used and replaced tokens all get the same answer, and failed attempts are limited per client address.
+- Resending is limited to one email a minute and five a day per user.
+- The platform admin's login and a user created by an OAuth sign-in are not asked: the latter is verified by the provider when the account is created. A person who links a provider later is verified the same way.
+- **Nothing depends on verification.** An unverified user can do everything a verified one can; making verification a condition of anything (for example creating monitors) is not implemented. The banner is a reminder.
+- Audit: `auth.email_verification_requested` when a user asks for the link again, `auth.email_verified` when a link is used. Neither holds the address.
+- Without email nothing changes: no banner, no message, and `POST /api/v1/auth/resend-verification` and `/auth/verify-email` answer 404.
+
+An address that was registered before email was turned on stays unverified until its owner asks for the link from the banner.
 
 ## Turning it on
 Set the server in the Helm values (see the [chart README](../../deploy/helm/proreta/README.md)):
@@ -69,7 +88,7 @@ kubectl --context <cluster-context> -n proreta exec deploy/proreta-jobs -- /app/
 A message is queued in the same database transaction as the change it announces (for example creating an invitation), in the table `mail_outbox`, and delivered a moment later by `jobs`. So:
 
 - a message exists exactly when its change was committed, and a slow or down mail server never slows a request or loses a message;
-- the row holds the recipient and the one-time token **encrypted** (AES-256-GCM with the installation's encryption key, bound to the row). As soon as the message is sent or given up, the encrypted payload is emptied; finished rows are deleted after 14 days;
+- the row holds the recipient and the one-time token **encrypted** (AES-256-GCM with the installation's encryption key, bound to the row). As soon as the message is sent or given up, the encrypted payload is emptied; finished rows are deleted after 14 days, and verification tokens a day after they expire;
 - delivery is at least once: a crash between the SMTP acceptance and the database update can send a message twice;
 - `jobs` sends at most 4 messages at once and starts at most 4 per second per process. A failed send is retried after 30 s, 2 min, 10 min and 30 min; the fifth failure gives up. A rejected recipient (a 5xx answer to the address or the message) is not retried. A message that has outlived the token it carries is dropped, never sent late;
 - `jobs` runs as one replica; if it is stopped, messages wait in the queue and go out when it is back.
@@ -77,7 +96,7 @@ A message is queued in the same database transaction as the change it announces 
 If email is switched off while messages are queued, they stay in the queue until they expire.
 
 ## Metrics and logs
-Metrics (all in the [observability runbook](observability.md)): `proreta_jobs_mail_total{kind,result}`, `proreta_jobs_mail_duration_seconds`, `proreta_jobs_mail_pending`, `proreta_jobs_mail_claim_errors_total`.
+Metrics (all in the [observability runbook](observability.md)): `proreta_mail_enqueued_total{kind}` (api), `proreta_jobs_mail_total{kind,result}`, `proreta_jobs_mail_duration_seconds`, `proreta_jobs_mail_pending`, `proreta_jobs_mail_claim_errors_total`.
 
 Logs never contain a message body, an address or a token. A failure is logged once per attempt as `mail not sent` with the message id, the kind and an error kind such as `connect`, `tls`, `auth`, `timeout` or `recipient_rejected 550`.
 

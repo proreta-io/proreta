@@ -36,6 +36,7 @@ var definerCalls = map[string]string{
 	"finish_mail":                     `SELECT finish_mail(gen_random_uuid(), gen_random_uuid(), 'sent', NULL, NULL)`,
 	"mail_pending":                    `SELECT mail_pending()`,
 	"purge_mail_outbox":               `SELECT purge_mail_outbox('30 days')`,
+	"purge_email_verifications":       `SELECT purge_email_verifications()`,
 	"reset_monitor_runtime":           `SELECT reset_monitor_runtime(gen_random_uuid())`,
 	"heartbeat_ping":                  `SELECT * FROM heartbeat_ping('\x00')`,
 	"list_due_heartbeats":             `SELECT * FROM list_due_heartbeats(1)`,
