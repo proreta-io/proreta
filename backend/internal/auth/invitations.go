@@ -15,6 +15,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/audit"
 	"github.com/proreta-io/proreta/backend/internal/auth/authdb"
 	"github.com/proreta-io/proreta/backend/internal/authz"
+	"github.com/proreta-io/proreta/backend/internal/mail"
 	"github.com/proreta-io/proreta/backend/internal/plans"
 	"github.com/proreta-io/proreta/backend/internal/platform/db"
 	"github.com/proreta-io/proreta/backend/internal/platform/uuidv7"
@@ -81,22 +82,72 @@ func invitationStatus(now, expires time.Time, accepted, revoked *time.Time) stri
 	return InvitationOpen
 }
 
+// InvitationInput is a new invitation.
+type InvitationInput struct {
+	Role  string
+	Label string
+	// Email, when set, is the address the link is also sent to. It is not stored and the
+	// invitation is not bound to it: the link stays a bearer secret that anyone holding it can
+	// use. Needs email to be configured (ErrEmailDisabled otherwise).
+	Email string
+}
+
+// Limits on invitation emails, per organization and per api replica: an admin must not be able
+// to turn Proreta into a mailer for strangers. Open invitations are also capped by max_members.
+const (
+	invitationMailsPerHour      = 30
+	invitationMailsPerRecipient = 3
+)
+
+// invitationMailDisabledMessage is the validation failure of an invitation email on an
+// installation without email.
+const invitationMailDisabledMessage = "this installation does not send email"
+
 // CreateInvitation creates an invitation (admin or owner, role admin, member or viewer) and
 // returns it with its token, which is shown once and never stored (only its SHA-256). Open
-// invitations count toward max_members, checked under the tenant row lock.
+// invitations count toward max_members, checked under the tenant row lock. No email is sent.
 func (s *Service) CreateInvitation(ctx context.Context, a Actor, role, label string) (Invitation, string, error) {
-	label = strings.TrimSpace(label)
+	inv, token, _, err := s.CreateInvitationFor(ctx, a, InvitationInput{Role: role, Label: label})
+	return inv, token, err
+}
+
+// CreateInvitationFor is CreateInvitation with an optional address to send the link to. The
+// email is queued in the transaction that creates the invitation, so it exists exactly when the
+// invitation does; emailed reports whether one was queued. The answer still carries the token,
+// so the admin can hand the link over as before. When the label is empty and the address is
+// short enough, the address becomes the label, so the invitations list says who was invited.
+func (s *Service) CreateInvitationFor(ctx context.Context, a Actor, in InvitationInput) (inv Invitation, token string, emailed bool, err error) {
+	label := strings.TrimSpace(in.Label)
+	var verr validation.Error
 	if utf8.RuneCountInString(label) > maxInvitationLabel {
-		var verr validation.Error
 		verr.Add("label", fmt.Sprintf("must be at most %d characters", maxInvitationLabel))
-		return Invitation{}, "", verr.Err()
 	}
-	token, err := newToken()
-	if err != nil {
-		return Invitation{}, "", err
+	to := ""
+	if strings.TrimSpace(in.Email) != "" {
+		if !s.mail.Enabled() {
+			verr.Add("email", invitationMailDisabledMessage)
+		} else if addr, msg := normalizeEmail(in.Email); msg != "" {
+			verr.Add("email", msg)
+		} else {
+			to = addr
+		}
+	}
+	if err := verr.Err(); err != nil {
+		return Invitation{}, "", false, err
+	}
+	if to != "" && label == "" && utf8.RuneCountInString(to) <= maxInvitationLabel {
+		label = to
+	}
+	if token, err = newToken(); err != nil {
+		return Invitation{}, "", false, err
+	}
+	if to != "" {
+		if err := s.reserveInvitationMail(ctx, a.TenantID, to); err != nil {
+			return Invitation{}, "", false, err
+		}
 	}
 	now := s.clock.Now()
-	inv := Invitation{ID: uuidv7.New(), Role: role, Label: label, Status: InvitationOpen, CreatedAt: now, ExpiresAt: now.Add(InvitationTTL)}
+	inv = Invitation{ID: uuidv7.New(), Role: in.Role, Label: label, Status: InvitationOpen, CreatedAt: now, ExpiresAt: now.Add(InvitationTTL)}
 	err = db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
 		// CheckCreate takes the tenant row lock first, like every member change.
 		if err := plans.CheckCreate(ctx, tx, a.TenantID, plans.ResourceMember); err != nil {
@@ -121,20 +172,64 @@ func (s *Service) CreateInvitation(ctx context.Context, a Actor, role, label str
 		}); err != nil {
 			return fmt.Errorf("insert invitation: %w", err)
 		}
+		meta := map[string]any{"role": inv.Role, "expiresAt": inv.ExpiresAt.UTC().Format(time.RFC3339)}
+		if to != "" {
+			t, err := tenants.Get(ctx, tx, a.TenantID)
+			if err != nil {
+				return err
+			}
+			// Only this organization's name and the inviter's display name go into the message:
+			// the inviter's login is an address and is not shared with the invitee.
+			if err := s.mail.Enqueue(ctx, tx, mail.Request{
+				Kind: mail.KindInvitation, To: to, ExpiresAt: inv.ExpiresAt,
+				Params: map[string]string{"token": token, "org": t.Name, "role": inv.Role, "inviter": u.DisplayName, "expires": "7 days"},
+			}); err != nil {
+				return err
+			}
+			meta["emailed"] = true
+		}
 		return audit.Record(ctx, tx, audit.Entry{
 			TenantID: a.TenantID, ActorUserID: &a.UserID, Action: ActionMemberInvited,
-			EntityType: "invitation", EntityID: inv.ID.String(), IP: a.IP,
-			Metadata: map[string]any{"role": inv.Role, "expiresAt": inv.ExpiresAt.UTC().Format(time.RFC3339)},
+			EntityType: "invitation", EntityID: inv.ID.String(), IP: a.IP, Metadata: meta,
 		})
 	})
 	if err != nil {
+		if to != "" {
+			s.refundInvitationMail(a.TenantID, to)
+		}
 		var limit *plans.LimitError
 		if errors.As(err, &limit) || errors.Is(err, authz.ErrForbidden) || errors.Is(err, ErrUnauthenticated) {
-			return Invitation{}, "", err
+			return Invitation{}, "", false, err
 		}
-		return Invitation{}, "", fmt.Errorf("auth: create invitation: %w", err)
+		return Invitation{}, "", false, fmt.Errorf("auth: create invitation: %w", err)
 	}
-	return inv, token, nil
+	return inv, token, to != "", nil
+}
+
+func invitationMailKeys(tenantID uuid.UUID, to string) (tenantKey, recipientKey string) {
+	return "tenant:" + tenantID.String(), "tenant:" + tenantID.String() + ":" + to
+}
+
+// reserveInvitationMail counts one invitation email against the organization's hourly budget and
+// the recipient's daily one; it returns *RateLimitedError when either is spent.
+func (s *Service) reserveInvitationMail(ctx context.Context, tenantID uuid.UUID, to string) error {
+	tenantKey, recipientKey := invitationMailKeys(tenantID, to)
+	if ok, wait := s.inviteMailLimit.Reserve(tenantKey); !ok {
+		s.log.WarnContext(ctx, "invitation emails rate limited", "tenant_id", tenantID)
+		return &RateLimitedError{RetryAfter: wait}
+	}
+	if ok, wait := s.inviteMailRecipientLimit.Reserve(recipientKey); !ok {
+		s.inviteMailLimit.Refund(tenantKey)
+		s.log.WarnContext(ctx, "invitation emails to one recipient rate limited", "tenant_id", tenantID)
+		return &RateLimitedError{RetryAfter: wait}
+	}
+	return nil
+}
+
+func (s *Service) refundInvitationMail(tenantID uuid.UUID, to string) {
+	tenantKey, recipientKey := invitationMailKeys(tenantID, to)
+	s.inviteMailLimit.Refund(tenantKey)
+	s.inviteMailRecipientLimit.Refund(recipientKey)
 }
 
 // ListInvitations returns the newest 200 invitations of the organization.

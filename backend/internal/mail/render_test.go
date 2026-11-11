@@ -74,3 +74,36 @@ func TestRenderRejectsBadTokens(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderInvitation(t *testing.T) {
+	params := map[string]string{"token": "tok-123", "org": "Acme Corp", "role": "member", "inviter": "Grace", "expires": "7 days"}
+	m, err := Render(KindInvitation, "https://proreta.example.com", "bob@example.org", params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := "https://proreta.example.com/invite#tok-123"
+	if m.Subject != "Grace invited you to Acme Corp on Proreta" || !strings.Contains(m.Text, link) || !strings.Contains(m.HTML, `href="`+link+`"`) ||
+		!strings.Contains(m.Text, "as member") || !strings.Contains(m.Text, "expires in 7 days") {
+		t.Fatalf("message = %+v", m)
+	}
+
+	delete(params, "inviter")
+	m, err = Render(KindInvitation, "https://proreta.example.com", "bob@example.org", params)
+	if err != nil || m.Subject != "You are invited to Acme Corp on Proreta" {
+		t.Fatalf("without inviter: %q %v", m.Subject, err)
+	}
+	if !strings.HasPrefix(m.Text, "You are invited to join Acme Corp") {
+		t.Fatalf("text without inviter: %q", m.Text)
+	}
+
+	// Names are user input: no markup, no header injection.
+	params["org"] = "Evil\r\nBcc: x@example.net <b>x</b>"
+	params["inviter"] = "<script>alert(1)</script>"
+	m, err = Render(KindInvitation, "https://proreta.example.com", "bob@example.org", params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.ContainsAny(m.Subject, "\r\n") || strings.Contains(m.HTML, "<script>") || strings.Contains(m.HTML, "<b>x</b>") {
+		t.Fatalf("unsafe message: %q\n%s", m.Subject, m.HTML)
+	}
+}

@@ -23,6 +23,23 @@ import (
 
 var verifyLink = regexp.MustCompile(`https://proreta\.example\.com/verify-email#([A-Za-z0-9_-]{43})`)
 
+// startMail runs an in-process SMTP server (STARTTLS and a login) and the jobs delivery code that
+// sends to it.
+func startMail(t *testing.T, env *pgtest.Env, keys *crypto.Keyring, logs *lockedBuffer) (*smtptest.Server, *jobs.MailDeliverer) {
+	t.Helper()
+	srv := smtptest.New(t, smtptest.Options{Mode: smtptest.StartTLS, User: "mailer", Pass: "mailer-secret"})
+	sender := mail.NewSMTPSender(config.SMTP{
+		Host: srv.Host(), Port: srv.Port(), TLS: config.SMTPStartTLS, From: "Proreta <proreta@example.com>", FromAddress: "proreta@example.com",
+		Username: "mailer", Password: "mailer-secret",
+	})
+	sender.TLSConfig = &tls.Config{RootCAs: srv.Roots, MinVersion: tls.VersionTLS12}
+	deliverer := jobs.NewMailDeliverer(jobs.MailConfig{PublicURL: "https://proreta.example.com"}, jobs.MailDeps{
+		Pool: env.Pool(t, env.WorkerURL, 4), Keys: keys, Sender: sender, Metrics: jobs.NewMetrics(prometheus.NewRegistry()),
+		Log: slog.New(slog.NewJSONHandler(logs, nil)),
+	})
+	return srv, deliverer
+}
+
 // TestIntegrationEmailVerificationEndToEnd registers over HTTP, delivers the queued mail through
 // the real jobs delivery code to an in-process SMTP server over STARTTLS, opens the link's token
 // the way the web page does and watches the session change.
@@ -35,16 +52,7 @@ func TestIntegrationEmailVerificationEndToEnd(t *testing.T) {
 	}
 	s := newRegistrationServer(t, env, auth.Options{Mail: mail.NewQueue(keys, nil)}, true, logs)
 
-	srv := smtptest.New(t, smtptest.Options{Mode: smtptest.StartTLS, User: "mailer", Pass: "mailer-secret"})
-	sender := mail.NewSMTPSender(config.SMTP{
-		Host: srv.Host(), Port: srv.Port(), TLS: config.SMTPStartTLS, From: "Proreta <proreta@example.com>", FromAddress: "proreta@example.com",
-		Username: "mailer", Password: "mailer-secret",
-	})
-	sender.TLSConfig = &tls.Config{RootCAs: srv.Roots, MinVersion: tls.VersionTLS12}
-	deliverer := jobs.NewMailDeliverer(jobs.MailConfig{PublicURL: "https://proreta.example.com"}, jobs.MailDeps{
-		Pool: env.Pool(t, env.WorkerURL, 4), Keys: keys, Sender: sender, Metrics: jobs.NewMetrics(prometheus.NewRegistry()),
-		Log: slog.New(slog.NewJSONHandler(logs, nil)),
-	})
+	srv, deliverer := startMail(t, env, keys, logs)
 
 	cookie, csrf, reg := s.register("ada@example.com")
 	if user, _ := reg.body["user"].(map[string]any); user["emailVerified"] != false {

@@ -8,6 +8,7 @@ The messages Proreta can send:
 | Message | Sent when | Link |
 |---|---|---|
 | Confirm your email address | A person registers with a password (their own organization or through an invitation link), or asks for it again from the banner | `<PRORETA_PUBLIC_URL>/verify-email#<token>` |
+| You are invited to an organization | An admin invites someone and gives their address ([invitations](invitations.md#emailing-the-link)) | `<PRORETA_PUBLIC_URL>/invite#<token>` |
 
 All of them:
 
