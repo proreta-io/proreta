@@ -8,7 +8,7 @@ Requires Node 22 (`.nvmrc`).
 
 ```bash
 npm ci               # install from the lockfile
-npm run dev          # dev server on :5173, /api proxied to PRORETA_API_TARGET (default http://localhost:8080); the component gallery is at /ui-kit.html
+npm run dev          # dev server on :5173, /api proxied to PRORETA_API_TARGET (default http://localhost:8080), /status to PRORETA_STATUSPAGE_TARGET (default http://localhost:8081), port from PRORETA_WEB_PORT; the component gallery is at /ui-kit.html
 npm run build        # typecheck + production build into dist/
 npm run preview      # serve dist/ locally
 npm run lint         # eslint (flat config)

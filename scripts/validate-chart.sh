@@ -20,7 +20,8 @@ out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
 
 # External Secrets is opt-in; these combos switch it on.
-eso="--set externalSecrets.enabled=true --set externalSecrets.secretStoreRef.name=my-secret-store"
+eso_args=(--set externalSecrets.enabled=true --set externalSecrets.secretStoreRef.name=my-secret-store)
+eso="${eso_args[*]}"
 oauth_secret="--set secrets.oauth.existingSecret=proreta-oauth-clients"
 
 # A chart packaged like the release workflow does (appVersion from the tag), installed without image.tag.
@@ -33,6 +34,7 @@ tar -xzf "$packaged/proreta-1.2.3.tgz" -C "$packaged"
 combos=(
   "defaults|$min"
   "defaults-url-port|$min --set config.publicUrl=https://Status.Example.org:8443/proreta"
+  "local-http|$min --set config.publicUrl=http://localhost:8081 --set config.cookieSecure=false"
   "defaults-hostnames|$min --set httpRoute.hostnames[0]=proreta.example.com --set httpRoute.hostnames[1]=status.example.com"
   "example|-f $example $tag"
   "example-bootstrap-force|-f $example $tag --set database.bootstrap.force=true"
@@ -134,11 +136,13 @@ expect_fail "invalid database Secret name" --set database.secretName=Proreta_DB
 expect_fail "OAuth without existingSecret and without External Secrets" -f "$example" --set oauth.github.enabled=true
 expect_fail "admin source externalSecret without External Secrets" -f "$example" --set secrets.admin.source=externalSecret
 expect_fail "statuspage source externalSecret without External Secrets" -f "$example" --set secrets.statuspage.source=externalSecret
-expect_fail "External Secrets without a store" -f "$example" $eso --set externalSecrets.secretStoreRef=null
+expect_fail "External Secrets without a store" -f "$example" "${eso_args[@]}" --set externalSecrets.secretStoreRef=null
 expect_fail "External Secrets without a store name" --msg "externalSecrets.secretStoreRef.name" -f "$example" --set externalSecrets.enabled=true
 expect_fail "image tag with a leading v" --set image.tag=v1.2.3
 expect_fail "hostname with an inner wildcard" -f "$example" --set "httpRoute.hostnames[0]=a*b.example.com"
 expect_fail "http public URL" --set config.publicUrl=http://proreta.example.com
+expect_fail "http localhost public URL with Secure cookies" --msg "cookieSecure" --set config.publicUrl=http://localhost:8081
+expect_fail "http public URL on another host even without Secure cookies" --set config.publicUrl=http://localhost.example.com --set config.cookieSecure=false
 expect_fail "public URL with trailing slash" --set config.publicUrl=https://proreta.example.com/
 expect_fail "PreSync migration with bootstrap" -f "$example" --set database.bootstrap.enabled=true --set migration.hookPhase=PreSync
 expect_fail "session TTL that is not a duration" --msg "sessionTTL" --set config.sessionTTL=tomorrow
@@ -156,18 +160,18 @@ expect_fail "registrationEnabled not a boolean" --set-string config.registration
 expect_fail "empty admin login in generate mode" --set secrets.admin.login=
 expect_fail "admin login removed in generate mode" -f "$example" --set secrets.admin.login=null
 expect_fail "invalid crypto key id" --set "secrets.crypto.keyId=k 1"
-expect_fail "externalSecret without remote key" $eso --set secrets.crypto.source=externalSecret --set secrets.crypto.remoteKey=
-expect_fail "statuspage cookie key externalSecret without remote key" $eso --set secrets.statuspage.source=externalSecret --set secrets.statuspage.remoteKey=
+expect_fail "externalSecret without remote key" "${eso_args[@]}" --set secrets.crypto.source=externalSecret --set secrets.crypto.remoteKey=
+expect_fail "statuspage cookie key externalSecret without remote key" "${eso_args[@]}" --set secrets.statuspage.source=externalSecret --set secrets.statuspage.remoteKey=
 expect_fail "status path moved" --set httpRoute.statusPathPrefix=/pages
 expect_fail "password login off without an OAuth provider" --set config.passwordLoginEnabled=false
 expect_fail "passwordLoginEnabled not a boolean" --set-string config.passwordLoginEnabled=no
 expect_fail "upper-case allowed domain" --set oauth.allowedDomains[0]=Example.com
 expect_fail "wildcard allowed domain" --set "oauth.allowedDomains[0]=*.example.com"
-expect_fail "oauth without remote key" $eso --set oauth.google.enabled=true --set secrets.oauth.remoteKey=
+expect_fail "oauth without remote key" "${eso_args[@]}" --set oauth.google.enabled=true --set secrets.oauth.remoteKey=
 expect_fail "invalid worker location" --set worker.location=Home_1
 
 echo "== defaults: web on, host names from config.publicUrl"
-grep -q '^kind: Deployment' "$out/defaults.yaml" && grep -q 'name: proreta-web$' "$out/defaults.yaml" || { echo "FAIL: web is not enabled by default" >&2; exit 1; }
+if ! { grep -q '^kind: Deployment' "$out/defaults.yaml" && grep -q 'name: proreta-web$' "$out/defaults.yaml"; }; then echo "FAIL: web is not enabled by default" >&2; exit 1; fi
 if grep -q 'name: proreta-web$' "$out/example-no-web.yaml"; then echo "FAIL: web.enabled=false still renders the web" >&2; exit 1; fi
 python3 - "$out" <<'EOF'
 import sys, yaml
@@ -177,7 +181,7 @@ def route(name):
     r = [d for d in docs if d["kind"] == "HTTPRoute"]
     return r[0]["spec"] if r else None
 want = {"defaults": ["proreta.example.com"], "example": ["proreta.example.com"],
-        "defaults-url-port": ["status.example.org"],
+        "defaults-url-port": ["status.example.org"], "local-http": ["localhost"],
         "defaults-hostnames": ["proreta.example.com", "status.example.com"]}
 for name, hosts in want.items():
     got = route(name)["hostnames"]

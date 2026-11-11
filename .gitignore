@@ -17,6 +17,7 @@ web/dist/
 web/.vite/
 
 # Secrets and local env
+/.dev/
 .env*
 !.env.example
 *.pem
