@@ -5,6 +5,7 @@
 audit_log kind=r owner=proreta_owner rls=true force=true acl=proreta_api=a/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=a/proreta_owner
 auth_identities kind=r owner=proreta_owner rls=false force=false acl=proreta_api=ard/proreta_owner,proreta_owner=arwdDxt/proreta_owner
 check_results kind=p owner=proreta_owner rls=true force=true partition by RANGE (checked_at) acl=proreta_api=r/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=ar/proreta_owner
+email_settings kind=r owner=proreta_owner rls=false force=false acl=proreta_owner=arwdDxt/proreta_owner
 email_verifications kind=r owner=proreta_owner rls=false force=false acl=proreta_api=ar/proreta_owner,proreta_owner=arwdDxt/proreta_owner
 goose_db_version kind=r owner=proreta_owner rls=false force=false acl=proreta_api=r/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=r/proreta_owner
 goose_db_version_id_seq kind=S owner=proreta_owner rls=false force=false
@@ -63,6 +64,27 @@ check_results.6 status_code smallint
 check_results.7 latency_ms integer
 check_results.8 error_kind text
 check_results.9 tls_not_after timestamp with time zone
+email_settings.1 id boolean not null default true
+email_settings.2 host text not null default ''::text
+email_settings.3 port integer not null default 587
+email_settings.4 tls text not null default 'starttls'::text
+email_settings.5 from_header text not null default ''::text
+email_settings.6 username text not null default ''::text
+email_settings.7 password_sealed bytea not null default '\x'::bytea
+email_settings.8 password_key_id text not null default ''::text
+email_settings.9 connection_version uuid not null default gen_random_uuid()
+email_settings.10 tested_version uuid
+email_settings.11 tested_at timestamp with time zone
+email_settings.12 send_invitations boolean not null default false
+email_settings.13 send_email_verification boolean not null default false
+email_settings.14 allow_password_reset boolean not null default false
+email_settings.15 test_requested_at timestamp with time zone
+email_settings.16 test_finished_at timestamp with time zone
+email_settings.17 test_ok boolean
+email_settings.18 test_error text
+email_settings.19 test_error_code integer
+email_settings.20 updated_at timestamp with time zone not null default now()
+email_settings.21 updated_by uuid
 email_verifications.1 token_hash bytea not null
 email_verifications.2 user_id uuid not null
 email_verifications.3 email citext not null
@@ -323,6 +345,22 @@ check_results check_results_latency_ms_check CHECK ((latency_ms >= 0))
 check_results check_results_pkey PRIMARY KEY (monitor_id, checked_at, location_id)
 check_results check_results_status_code_check CHECK (((status_code >= 100) AND (status_code <= 599)))
 check_results check_results_tenant_id_monitor_id_fkey FOREIGN KEY (tenant_id, monitor_id) REFERENCES monitors(tenant_id, id)
+email_settings email_settings_check CHECK (((username = ''::text) = (octet_length(password_sealed) = 0)))
+email_settings email_settings_check1 CHECK (((username = ''::text) OR (tls <> 'none'::text)))
+email_settings email_settings_check2 CHECK (((host = ''::text) = (from_header = ''::text)))
+email_settings email_settings_check3 CHECK (((tested_version IS NULL) = (tested_at IS NULL)))
+email_settings email_settings_check4 CHECK (((host <> ''::text) OR ((tested_version IS NULL) AND (NOT (send_invitations OR send_email_verification OR allow_password_reset)))))
+email_settings email_settings_check5 CHECK (((NOT (send_invitations OR send_email_verification OR allow_password_reset)) OR (tested_version = connection_version)))
+email_settings email_settings_from_header_check CHECK ((length(from_header) <= 320))
+email_settings email_settings_host_check CHECK ((length(host) <= 253))
+email_settings email_settings_id_check CHECK (id)
+email_settings email_settings_password_key_id_check CHECK ((length(password_key_id) <= 64))
+email_settings email_settings_password_sealed_check CHECK ((octet_length(password_sealed) <= 1024))
+email_settings email_settings_pkey PRIMARY KEY (id)
+email_settings email_settings_port_check CHECK (((port >= 1) AND (port <= 65535)))
+email_settings email_settings_test_error_check CHECK ((length(test_error) <= 40))
+email_settings email_settings_tls_check CHECK ((tls = ANY (ARRAY['starttls'::text, 'tls'::text, 'none'::text])))
+email_settings email_settings_username_check CHECK ((length(username) <= 256))
 email_verifications email_verifications_check CHECK ((expires_at > created_at))
 email_verifications email_verifications_email_check CHECK (((length((email)::text) >= 3) AND (length((email)::text) <= 320)))
 email_verifications email_verifications_pkey PRIMARY KEY (token_hash)
@@ -527,6 +565,7 @@ CREATE INDEX auth_identities_user_id_idx ON public.auth_identities USING btree (
 CREATE UNIQUE INDEX auth_identities_user_provider_key ON public.auth_identities USING btree (user_id, provider)
 CREATE INDEX check_results_checked_at_brin ON ONLY public.check_results USING brin (checked_at)
 CREATE UNIQUE INDEX check_results_pkey ON ONLY public.check_results USING btree (monitor_id, checked_at, location_id)
+CREATE UNIQUE INDEX email_settings_pkey ON public.email_settings USING btree (id)
 CREATE INDEX email_verifications_expires_idx ON public.email_verifications USING btree (expires_at)
 CREATE UNIQUE INDEX email_verifications_pkey ON public.email_verifications USING btree (token_hash)
 CREATE INDEX email_verifications_user_idx ON public.email_verifications USING btree (user_id, created_at DESC)
@@ -664,6 +703,11 @@ CREATE TRIGGER tenants_create_default_project AFTER INSERT ON public.tenants FOR
 -- function privileges
 admin_audit(uuid,uuid,uuid,text,text,text,jsonb,inet) owner=proreta_owner definer=false acl=proreta_owner=X/proreta_owner
 admin_delete_tenant(uuid,uuid,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+admin_email_settings_clear(uuid,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+admin_email_settings_get(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+admin_email_settings_set_features(uuid,boolean,boolean,boolean,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+admin_email_settings_update(uuid,text,integer,text,text,text,bytea,text,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+admin_email_test_request(uuid,text,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_get_tenant(uuid,uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_list_tenants(uuid,text,boolean,integer,integer) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_list_users(uuid,uuid,text,integer,integer) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
@@ -688,6 +732,10 @@ compute_rollups(timestamp with time zone,timestamp with time zone) owner=proreta
 compute_rollups_catch_up(integer,integer) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 detach_expired_partition(text) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 drop_detached_partition(text) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+email_settings_features() owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+email_settings_for_jobs() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+email_settings_record_test(uuid,boolean,text,integer) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+email_settings_test_state(email_settings) owner=proreta_owner definer=false acl=proreta_owner=X/proreta_owner
 enqueue_incident_reminders(integer) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 ensure_partitions() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 fail_deleted_channel_deliveries(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
@@ -761,6 +809,192 @@ BEGIN
     PERFORM admin_audit(p_tenant_id, p_actor, p_audit_id, 'admin.organization.deleted', 'organization', p_tenant_id::text,
                         jsonb_build_object('status', v_status, 'plan', v_plan), p_ip);
     RETURN true;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.admin_email_settings_clear(p_actor uuid, p_audit_id uuid, p_ip inet)
+ RETURNS boolean
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    s        email_settings%ROWTYPE;
+    v_tenant uuid;
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    SELECT * INTO s FROM email_settings WHERE id FOR UPDATE;
+    IF s.host = '' THEN
+        RETURN false;
+    END IF;
+    UPDATE email_settings AS e
+    SET host = '', port = 587, tls = 'starttls', from_header = '', username = '',
+        password_sealed = ''::bytea, password_key_id = '',
+        connection_version = gen_random_uuid(), tested_version = NULL, tested_at = NULL,
+        send_invitations = false, send_email_verification = false, allow_password_reset = false,
+        test_requested_at = NULL, test_finished_at = NULL, test_ok = NULL, test_error = NULL, test_error_code = NULL,
+        updated_at = now(), updated_by = p_actor
+    WHERE e.id;
+    v_tenant := auth_login_tenant(p_actor);
+    IF v_tenant IS NOT NULL THEN
+        PERFORM admin_audit(v_tenant, p_actor, p_audit_id, 'admin.email_settings_updated', 'email_settings', 'email',
+                            jsonb_build_object('changed', jsonb_build_array('removed'),
+                                               'switchesDisabled', s.send_invitations OR s.send_email_verification OR s.allow_password_reset), p_ip);
+    END IF;
+    RETURN true;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.admin_email_settings_get(p_actor uuid)
+ RETURNS TABLE(host text, port integer, tls text, from_header text, username text, password_set boolean, send_invitations boolean, send_email_verification boolean, allow_password_reset boolean, tested boolean, tested_at timestamp with time zone, test_state text, test_requested_at timestamp with time zone, test_finished_at timestamp with time zone, test_error text, test_error_code integer, updated_at timestamp with time zone)
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+#variable_conflict use_column
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    RETURN QUERY
+    SELECT s.host, s.port, s.tls, s.from_header, s.username, octet_length(s.password_sealed) > 0,
+           s.send_invitations, s.send_email_verification, s.allow_password_reset,
+           s.host <> '' AND s.tested_version IS NOT DISTINCT FROM s.connection_version, s.tested_at,
+           CASE WHEN s.host = '' THEN 'none' ELSE email_settings_test_state(s) END,
+           s.test_requested_at, s.test_finished_at,
+           CASE WHEN email_settings_test_state(s) = 'failed' AND s.test_finished_at IS NULL THEN 'not_delivered' ELSE s.test_error END,
+           s.test_error_code, s.updated_at
+    FROM email_settings AS s;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.admin_email_settings_set_features(p_actor uuid, p_invitations boolean, p_verification boolean, p_reset boolean, p_audit_id uuid, p_ip inet)
+ RETURNS boolean
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    s        email_settings%ROWTYPE;
+    v_tenant uuid;
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    IF p_invitations IS NULL OR p_verification IS NULL OR p_reset IS NULL THEN
+        RAISE EXCEPTION 'admin: invalid switches' USING ERRCODE = 'PRA04';
+    END IF;
+    SELECT * INTO s FROM email_settings WHERE id FOR UPDATE;
+    IF (p_invitations OR p_verification OR p_reset) AND NOT (s.host <> '' AND s.tested_version IS NOT DISTINCT FROM s.connection_version) THEN
+        RAISE EXCEPTION 'admin: the settings have not passed a test' USING ERRCODE = 'PRA10';
+    END IF;
+    IF s.send_invitations = p_invitations AND s.send_email_verification = p_verification AND s.allow_password_reset = p_reset THEN
+        RETURN false;
+    END IF;
+    UPDATE email_settings AS e
+    SET send_invitations = p_invitations, send_email_verification = p_verification, allow_password_reset = p_reset,
+        updated_at = now(), updated_by = p_actor
+    WHERE e.id;
+    v_tenant := auth_login_tenant(p_actor);
+    IF v_tenant IS NOT NULL THEN
+        PERFORM admin_audit(v_tenant, p_actor, p_audit_id, 'admin.email_settings_updated', 'email_settings', 'email',
+                            jsonb_build_object('changed', jsonb_build_array('switches'), 'sendInvitations', p_invitations,
+                                               'sendEmailVerification', p_verification, 'allowPasswordReset', p_reset), p_ip);
+    END IF;
+    RETURN true;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.admin_email_settings_update(p_actor uuid, p_host text, p_port integer, p_tls text, p_from text, p_username text, p_password_sealed bytea, p_key_id text, p_audit_id uuid, p_ip inet)
+ RETURNS TABLE(changed text[], switches_disabled boolean)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+#variable_conflict use_column
+DECLARE
+    s        email_settings%ROWTYPE;
+    v_keep   boolean := p_password_sealed IS NULL;
+    v_pw     bytea;
+    v_key    text;
+    v_changed text[] := ARRAY[]::text[];
+    v_off    boolean;
+    v_tenant uuid;
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    IF COALESCE(p_host, '') = '' OR COALESCE(p_from, '') = '' OR p_port IS NULL OR p_tls IS NULL
+       OR p_tls NOT IN ('starttls', 'tls', 'none') OR p_port NOT BETWEEN 1 AND 65535 OR p_username IS NULL
+       OR (p_tls = 'none' AND p_username <> '') THEN
+        RAISE EXCEPTION 'admin: invalid email settings' USING ERRCODE = 'PRA04';
+    END IF;
+    SELECT * INTO s FROM email_settings WHERE id FOR UPDATE;
+    IF p_username = '' THEN
+        v_pw := ''::bytea;
+        v_key := '';
+    ELSIF v_keep THEN
+        IF octet_length(s.password_sealed) = 0 THEN
+            RAISE EXCEPTION 'admin: a password is required with a username' USING ERRCODE = 'PRA13';
+        END IF;
+        IF p_host IS DISTINCT FROM s.host OR p_port IS DISTINCT FROM s.port OR p_username IS DISTINCT FROM s.username THEN
+            RAISE EXCEPTION 'admin: enter the password again' USING ERRCODE = 'PRA09';
+        END IF;
+        v_pw := s.password_sealed;
+        v_key := s.password_key_id;
+    ELSE
+        IF octet_length(p_password_sealed) = 0 THEN
+            RAISE EXCEPTION 'admin: empty password' USING ERRCODE = 'PRA04';
+        END IF;
+        v_pw := p_password_sealed;
+        v_key := COALESCE(p_key_id, '');
+    END IF;
+
+    IF p_host IS DISTINCT FROM s.host THEN v_changed := array_append(v_changed, 'host'::text); END IF;
+    IF p_port IS DISTINCT FROM s.port THEN v_changed := array_append(v_changed, 'port'::text); END IF;
+    IF p_tls IS DISTINCT FROM s.tls THEN v_changed := array_append(v_changed, 'tls'::text); END IF;
+    IF p_from IS DISTINCT FROM s.from_header THEN v_changed := array_append(v_changed, 'from'::text); END IF;
+    IF p_username IS DISTINCT FROM s.username THEN v_changed := array_append(v_changed, 'username'::text); END IF;
+    IF (p_username <> '' AND NOT v_keep) OR (p_username = '' AND octet_length(s.password_sealed) > 0) THEN v_changed := array_append(v_changed, 'password'::text); END IF;
+    IF cardinality(v_changed) = 0 THEN
+        RETURN QUERY SELECT v_changed, false;
+        RETURN;
+    END IF;
+
+    v_off := s.send_invitations OR s.send_email_verification OR s.allow_password_reset;
+    UPDATE email_settings AS e
+    SET host = p_host, port = p_port, tls = p_tls, from_header = p_from, username = p_username,
+        password_sealed = v_pw, password_key_id = v_key,
+        connection_version = gen_random_uuid(), tested_version = NULL, tested_at = NULL,
+        send_invitations = false, send_email_verification = false, allow_password_reset = false,
+        test_requested_at = NULL, test_finished_at = NULL, test_ok = NULL, test_error = NULL, test_error_code = NULL,
+        updated_at = now(), updated_by = p_actor
+    WHERE e.id;
+    v_tenant := auth_login_tenant(p_actor);
+    IF v_tenant IS NOT NULL THEN
+        PERFORM admin_audit(v_tenant, p_actor, p_audit_id, 'admin.email_settings_updated', 'email_settings', 'email',
+                            jsonb_build_object('changed', to_jsonb(v_changed), 'switchesDisabled', v_off), p_ip);
+    END IF;
+    RETURN QUERY SELECT v_changed, v_off;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.admin_email_test_request(p_actor uuid, p_to_domain text, p_audit_id uuid, p_ip inet)
+ RETURNS uuid
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    s        email_settings%ROWTYPE;
+    v_tenant uuid;
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    SELECT * INTO s FROM email_settings WHERE id FOR UPDATE;
+    IF s.host = '' THEN
+        RAISE EXCEPTION 'admin: no email server is configured' USING ERRCODE = 'PRA11';
+    END IF;
+    IF email_settings_test_state(s) = 'pending' THEN
+        RAISE EXCEPTION 'admin: a test message is already on its way' USING ERRCODE = 'PRA12';
+    END IF;
+    UPDATE email_settings AS e
+    SET test_requested_at = now(), test_finished_at = NULL, test_ok = NULL, test_error = NULL, test_error_code = NULL
+    WHERE e.id;
+    v_tenant := auth_login_tenant(p_actor);
+    IF v_tenant IS NOT NULL THEN
+        PERFORM admin_audit(v_tenant, p_actor, p_audit_id, 'admin.email_test_sent', 'email_settings', 'email',
+                            jsonb_build_object('toDomain', left(COALESCE(p_to_domain, ''), 253)), p_ip);
+    END IF;
+    RETURN s.connection_version;
 END
 $function$
 CREATE OR REPLACE FUNCTION public.admin_get_tenant(p_actor uuid, p_tenant_id uuid)
@@ -1460,6 +1694,58 @@ BEGIN
     EXECUTE format('DROP TABLE %I', p_name);
     RETURN true;
 END
+$function$
+CREATE OR REPLACE FUNCTION public.email_settings_features()
+ RETURNS TABLE(enabled boolean, send_invitations boolean, send_email_verification boolean, allow_password_reset boolean)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    SELECT s.host <> '' AND s.tested_version IS NOT DISTINCT FROM s.connection_version,
+           s.send_invitations, s.send_email_verification, s.allow_password_reset
+    FROM email_settings AS s
+$function$
+CREATE OR REPLACE FUNCTION public.email_settings_for_jobs()
+ RETURNS TABLE(host text, port integer, tls text, from_header text, username text, password_sealed bytea, connection_version uuid)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    SELECT s.host, s.port, s.tls, s.from_header, s.username, s.password_sealed, s.connection_version
+    FROM email_settings AS s
+    WHERE s.host <> ''
+$function$
+CREATE OR REPLACE FUNCTION public.email_settings_record_test(p_version uuid, p_ok boolean, p_error text, p_code integer)
+ RETURNS boolean
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+    UPDATE email_settings AS s
+    SET test_finished_at = now(),
+        test_ok = p_ok,
+        test_error = CASE WHEN p_ok THEN NULL ELSE left(COALESCE(p_error, 'other'), 40) END,
+        test_error_code = CASE WHEN p_ok OR COALESCE(p_code, 0) = 0 THEN NULL ELSE p_code END,
+        tested_version = CASE WHEN p_ok THEN p_version ELSE s.tested_version END,
+        tested_at = CASE WHEN p_ok THEN now() ELSE s.tested_at END
+    WHERE s.connection_version = p_version AND s.host <> '' AND s.test_requested_at IS NOT NULL;
+    RETURN FOUND;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.email_settings_test_state(s email_settings)
+ RETURNS text
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    SELECT CASE
+        WHEN s.test_requested_at IS NULL THEN 'none'
+        WHEN s.test_finished_at IS NOT NULL AND s.test_ok THEN 'succeeded'
+        WHEN s.test_finished_at IS NOT NULL THEN 'failed'
+        WHEN s.test_requested_at > now() - interval '3 minutes' THEN 'pending'
+        ELSE 'failed'
+    END
 $function$
 CREATE OR REPLACE FUNCTION public.enqueue_incident_reminders(p_limit integer)
  RETURNS integer
