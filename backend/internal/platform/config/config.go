@@ -174,13 +174,17 @@ type Migrate struct {
 // Bootstrap is the configuration of `proretactl db bootstrap`.
 type Bootstrap struct {
 	Base
-	Host          string
-	Port          int
+	Host string
+	Port int
+	// AdminUser and AdminPassword are empty when the admin Secret is absent; the bootstrap then
+	// only works if the database is already set up.
 	AdminUser     string
 	AdminPassword Secret
-	DBName        string
-	SSLMode       string
-	SecretName    string
+	// Force runs the full bootstrap even if the database looks ready.
+	Force      bool
+	DBName     string
+	SSLMode    string
+	SecretName string
 	// Namespace is empty when PRORETA_BOOTSTRAP_NAMESPACE is unset; the caller then reads the
 	// pod's service account namespace.
 	Namespace string
@@ -336,13 +340,17 @@ func LoadBootstrap(lookup LookupFunc) (Bootstrap, error) {
 		Base:          l.base(),
 		Host:          l.required("PRORETA_BOOTSTRAP_HOST"),
 		Port:          l.integer("PRORETA_BOOTSTRAP_PORT", 5432, 1, 65535),
-		AdminUser:     l.required("PRORETA_BOOTSTRAP_ADMIN_USER"),
-		AdminPassword: Secret(l.required("PRORETA_BOOTSTRAP_ADMIN_PASSWORD")),
+		AdminUser:     l.optional("PRORETA_BOOTSTRAP_ADMIN_USER"),
+		AdminPassword: Secret(l.optional("PRORETA_BOOTSTRAP_ADMIN_PASSWORD")),
+		Force:         l.boolean("PRORETA_BOOTSTRAP_FORCE", false),
 		DBName:        l.identifier("PRORETA_BOOTSTRAP_DB_NAME", "proreta"),
 		SSLMode:       l.oneOf("PRORETA_BOOTSTRAP_SSLMODE", "require", "disable", "allow", "prefer", "require", "verify-ca", "verify-full"),
 		SecretName:    l.dnsLabel("PRORETA_BOOTSTRAP_SECRET_NAME", "proreta-db"),
 		Namespace:     l.optional("PRORETA_BOOTSTRAP_NAMESPACE"),
 		SecretFile:    l.optional("PRORETA_BOOTSTRAP_SECRET_FILE"),
+	}
+	if (cfg.AdminUser == "") != (cfg.AdminPassword == "") {
+		l.fail("PRORETA_BOOTSTRAP_ADMIN_USER", "and PRORETA_BOOTSTRAP_ADMIN_PASSWORD must be set together")
 	}
 	if cfg.Namespace != "" && !isDNSLabel(cfg.Namespace) {
 		l.fail("PRORETA_BOOTSTRAP_NAMESPACE", "must be a DNS label")

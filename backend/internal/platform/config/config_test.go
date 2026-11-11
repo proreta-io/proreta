@@ -244,10 +244,40 @@ func TestLoadBootstrap(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	for _, name := range []string{"HOST", "ADMIN_USER", "ADMIN_PASSWORD", "PORT", "DB_NAME", "SSLMODE", "SECRET_NAME", "NAMESPACE"} {
+	for _, name := range []string{"HOST", "PORT", "DB_NAME", "SSLMODE", "SECRET_NAME", "NAMESPACE"} {
 		if !strings.Contains(err.Error(), "PRORETA_BOOTSTRAP_"+name) {
 			t.Errorf("error does not mention PRORETA_BOOTSTRAP_%s", name)
 		}
+	}
+}
+
+func TestLoadBootstrapAdminAndForce(t *testing.T) {
+	base := map[string]string{"PRORETA_BOOTSTRAP_HOST": "db.example.internal"}
+	with := func(extra map[string]string) map[string]string {
+		m := map[string]string{}
+		for k, v := range base {
+			m[k] = v
+		}
+		for k, v := range extra {
+			m[k] = v
+		}
+		return m
+	}
+	cfg, err := LoadBootstrap(env(base))
+	if err != nil || cfg.AdminUser != "" || cfg.AdminPassword != "" || cfg.Force {
+		t.Fatalf("no admin login must be accepted: %+v, %v", cfg, err)
+	}
+	cfg, err = LoadBootstrap(env(with(map[string]string{
+		"PRORETA_BOOTSTRAP_ADMIN_USER": "postgres", "PRORETA_BOOTSTRAP_ADMIN_PASSWORD": "pw", "PRORETA_BOOTSTRAP_FORCE": "true",
+	})))
+	if err != nil || cfg.AdminUser != "postgres" || !cfg.Force {
+		t.Fatalf("admin login and force: %+v, %v", cfg, err)
+	}
+	if _, err = LoadBootstrap(env(with(map[string]string{"PRORETA_BOOTSTRAP_ADMIN_USER": "postgres"}))); err == nil {
+		t.Fatal("a user without a password must be rejected")
+	}
+	if _, err = LoadBootstrap(env(with(map[string]string{"PRORETA_BOOTSTRAP_FORCE": "maybe"}))); err == nil {
+		t.Fatal("a bad force value must be rejected")
 	}
 }
 
