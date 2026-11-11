@@ -8,6 +8,7 @@ The messages Proreta can send:
 | Message | Sent when | Link |
 |---|---|---|
 | Confirm your email address | A person registers with a password (their own organization or through an invitation link), or asks for it again from the banner | `<PRORETA_PUBLIC_URL>/verify-email#<token>` |
+| Reset your password | Someone asks for it on the sign-in page ("Forgot your password?") | `<PRORETA_PUBLIC_URL>/reset-password#<token>` |
 | You are invited to an organization | An admin invites someone and gives their address ([invitations](invitations.md#emailing-the-link)) | `<PRORETA_PUBLIC_URL>/invite#<token>` |
 
 All of them:
@@ -31,6 +32,18 @@ With email on, a person who registers with a password gets a message with a one-
 - Without email nothing changes: no banner, no message, and `POST /api/v1/auth/resend-verification` and `/auth/verify-email` answer 404.
 
 An address that was registered before email was turned on stays unverified until its owner asks for the link from the banner.
+
+## Forgotten passwords
+With email on (and the password form on, `config.passwordLoginEnabled`), the sign-in page offers **Forgot your password?**. The user enters their address and always sees the same answer ("if that address has an account, a link is on its way"); the API answers 202 whether or not the address is registered, so the form cannot be used to find out who has an account. The platform admin's reset in the admin panel stays as it is, and is still the way for users on an installation without email.
+
+- The link works once, for **one hour**, and only the newest link of an account works. It carries a 256-bit token in the URL fragment; only its SHA-256 is stored. It is tied to the address the account had when it was issued.
+- Only an active account with a password gets a link. Accounts that sign in only with Google or GitHub, disabled accounts and the platform admin's login get nothing (and the same answer). A user who has only a provider cannot add a password this way.
+- Limits (all answered the same, so they reveal nothing): 10 requests and attempts per client address per 15 minutes (429 with `Retry-After`, per api replica); beyond that, 3 requests per address per hour and 3 links per account per hour are answered 202 and send nothing.
+- Setting the new password uses the same bounded hashing queue as sign-in, so a flood is answered 429 instead of exhausting memory. The link is checked before the hash is computed.
+- **Completing a reset ends every session of the account in every organization**, closes the other open reset links, and marks the address verified (the link went to that mailbox). It does not sign the user in.
+- Audit: `auth.password_reset_requested` (a link was issued) and `auth.password_reset_completed` (`sessionsRevoked`); neither holds the address or the token. Requests that send nothing are not audited; they are counted in the logs as rate-limited.
+- The answers are "constant-ish": a request for a registered address does a few more database writes than one for an unknown address (milliseconds), and the mail itself leaves later. Someone with precise timing and many requests per client address could in principle tell them apart; the per-address and per-client limits keep that impractical.
+- Without email, or with the password form off, `POST /api/v1/auth/forgot-password` and `/auth/reset-password` answer 404 and the sign-in page shows no link.
 
 ## Turning it on
 Set the server in the Helm values (see the [chart README](../../deploy/helm/proreta/README.md)):
