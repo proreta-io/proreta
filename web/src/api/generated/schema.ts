@@ -1628,7 +1628,7 @@ export interface paths {
      *     Any change to a connection setting forgets the last successful test and turns the three
      *     switches off; a request that changes nothing does nothing. The change takes effect for
      *     mail already queued, and in the other api replicas within a few seconds. Audited as
-     *     `admin.email_settings_updated` (names of the changed settings, never values). Platform
+     *     `admin.email_settings.updated` (names of the changed settings, never values). Platform
      *     admins only.
      */
     put: operations["adminUpdateEmailSettings"];
@@ -1636,7 +1636,7 @@ export interface paths {
     /**
      * Remove the SMTP server
      * @description Erases the connection settings including the password and turns every switch off.
-     *     Idempotent. Audited as `admin.email_settings_updated`. Platform admins only.
+     *     Idempotent. Audited as `admin.email_settings.updated`. Platform admins only.
      */
     delete: operations["adminDeleteEmailSettings"];
     options?: never;
@@ -1657,7 +1657,7 @@ export interface paths {
      * @description Sets the three switches, all off by default. Turning one on needs a successful test
      *     message for the current connection settings (409
      *     `urn:proreta:problem:email-settings-conflict` otherwise); turning them off is always allowed. Audited as
-     *     `admin.email_settings_updated`. Platform admins only.
+     *     `admin.email_settings.updated`. Platform admins only.
      */
     put: operations["adminUpdateEmailFeatures"];
     post?: never;
@@ -1689,7 +1689,7 @@ export interface paths {
      *     `not_delivered`. 409 `urn:proreta:problem:email-settings-conflict` when no server is configured or
      *     a test is still pending; limited to
      *     one request per 10 seconds and 20 per hour (429 with Retry-After). Audited as
-     *     `admin.email_test_sent` (the recipient's domain only). Platform admins only.
+     *     `admin.email_test.sent` (the recipient's domain only). Platform admins only.
      */
     post: operations["adminSendTestEmail"];
     delete?: never;

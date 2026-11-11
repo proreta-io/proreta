@@ -836,7 +836,7 @@ BEGIN
     WHERE e.id;
     v_tenant := auth_login_tenant(p_actor);
     IF v_tenant IS NOT NULL THEN
-        PERFORM admin_audit(v_tenant, p_actor, p_audit_id, 'admin.email_settings_updated', 'email_settings', 'email',
+        PERFORM admin_audit(v_tenant, p_actor, p_audit_id, 'admin.email_settings.updated', 'email_settings', 'email',
                             jsonb_build_object('changed', jsonb_build_array('removed'),
                                                'switchesDisabled', s.send_invitations OR s.send_email_verification OR s.allow_password_reset), p_ip);
     END IF;
@@ -890,7 +890,7 @@ BEGIN
     WHERE e.id;
     v_tenant := auth_login_tenant(p_actor);
     IF v_tenant IS NOT NULL THEN
-        PERFORM admin_audit(v_tenant, p_actor, p_audit_id, 'admin.email_settings_updated', 'email_settings', 'email',
+        PERFORM admin_audit(v_tenant, p_actor, p_audit_id, 'admin.email_settings.updated', 'email_settings', 'email',
                             jsonb_build_object('changed', jsonb_build_array('switches'), 'sendInvitations', p_invitations,
                                                'sendEmailVerification', p_verification, 'allowPasswordReset', p_reset), p_ip);
     END IF;
@@ -962,7 +962,7 @@ BEGIN
     WHERE e.id;
     v_tenant := auth_login_tenant(p_actor);
     IF v_tenant IS NOT NULL THEN
-        PERFORM admin_audit(v_tenant, p_actor, p_audit_id, 'admin.email_settings_updated', 'email_settings', 'email',
+        PERFORM admin_audit(v_tenant, p_actor, p_audit_id, 'admin.email_settings.updated', 'email_settings', 'email',
                             jsonb_build_object('changed', to_jsonb(v_changed), 'switchesDisabled', v_off), p_ip);
     END IF;
     RETURN QUERY SELECT v_changed, v_off;
@@ -991,7 +991,7 @@ BEGIN
     WHERE e.id;
     v_tenant := auth_login_tenant(p_actor);
     IF v_tenant IS NOT NULL THEN
-        PERFORM admin_audit(v_tenant, p_actor, p_audit_id, 'admin.email_test_sent', 'email_settings', 'email',
+        PERFORM admin_audit(v_tenant, p_actor, p_audit_id, 'admin.email_test.sent', 'email_settings', 'email',
                             jsonb_build_object('toDomain', left(COALESCE(p_to_domain, ''), 253)), p_ip);
     END IF;
     RETURN s.connection_version;

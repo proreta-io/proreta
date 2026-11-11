@@ -16,8 +16,8 @@ import (
 
 // Audit actions of the email settings (also label values of proreta_admin_actions_total).
 const (
-	ActionEmailSettingsUpdated = "admin.email_settings_updated"
-	ActionEmailTestSent        = "admin.email_test_sent"
+	ActionEmailSettingsUpdated = "admin.email_settings.updated"
+	ActionEmailTestSent        = "admin.email_test.sent"
 )
 
 // Errors of the email settings, mapped to HTTP problems in internal/api.

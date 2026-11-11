@@ -261,7 +261,7 @@ func TestIntegrationEmailSettingsEndToEnd(t *testing.T) {
 
 	// 7. Audit rows exist and hold no secret or address; logs hold none either.
 	var audits int
-	if err := env.AdminConn(t).QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action IN ('admin.email_settings_updated', 'admin.email_test_sent')
+	if err := env.AdminConn(t).QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action IN ('admin.email_settings.updated', 'admin.email_test.sent')
 		AND metadata::text !~* '(mailer-secret|wrong-password|@)'`).Scan(&audits); err != nil || audits < 6 {
 		t.Fatalf("audit rows without secrets = %d, err %v", audits, err)
 	}

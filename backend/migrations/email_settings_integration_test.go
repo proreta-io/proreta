@@ -159,7 +159,7 @@ func TestIntegrationEmailSettings(t *testing.T) {
 
 	// The audit rows carry no secret and no address.
 	var audits int
-	if err := admin.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action IN ('admin.email_settings_updated', 'admin.email_test_sent')
+	if err := admin.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action IN ('admin.email_settings.updated', 'admin.email_test.sent')
 		AND metadata::text !~* '(sealed|smtp[.]|@)'`).Scan(&audits); err != nil || audits != 5 {
 		t.Fatalf("audit rows = %d, err = %v; want 5 (2 updates, test, switches, update)", audits, err)
 	}

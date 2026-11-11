@@ -73,7 +73,7 @@ The whole chain is also available as an API for automation (`/api/v1/admin/email
 - It is **write-only**: no API or screen returns it, only "a password is set". To change it, enter a new one; leaving the field empty keeps the stored one.
 - Changing the host, port or username while keeping the stored password is refused: type the password again. A stolen admin session therefore cannot make the installation log in to a server of the attacker's choosing with the stored password.
 - Only `jobs` reads the sealed value (through a database function only its role can run) and decrypts it. The api never sees it.
-- Audit: `admin.email_settings_updated` (the names of the changed settings, never values) and `admin.email_test_sent` (only the recipient's domain). Both are written to the admin's own organization.
+- Audit: `admin.email_settings.updated` (the names of the changed settings, never values) and `admin.email_test.sent` (only the recipient's domain). Both are written to the admin's own organization.
 - Removing the server (the panel's "Remove server") erases the password and turns every switch off.
 
 ### Which servers are allowed
