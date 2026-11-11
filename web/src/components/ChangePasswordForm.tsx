@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   ApiError,
   errorMessage,
@@ -53,9 +53,11 @@ export function passwordChangeErrors(err: unknown): {
 
 /**
  * Change password for the signed-in user. A success replaces the session (the other devices are
- * signed out), so the page stays as it is and says what happened.
+ * signed out), so the page stays as it is and says what happened. `forced` is the first-sign-in
+ * screen: it takes focus, asks for the one-time password and says nothing after the change (the
+ * app opens instead).
  */
-export default function ChangePasswordForm() {
+export default function ChangePasswordForm({ forced = false }: { forced?: boolean }) {
   const auth = useAuth();
   const toast = useToast();
   const [values, setValues] = useState<PasswordChangeValues>(EMPTY);
@@ -63,6 +65,11 @@ export default function ChangePasswordForm() {
   const [general, setGeneral] = useState<string | undefined>();
   const [submitting, setSubmitting] = useState(false);
   const [shown, setShown] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  useEffect(() => {
+    if (forced) formRef.current?.querySelector<HTMLInputElement>("input[name=current]")?.focus();
+  }, [forced]);
 
   function set(field: PasswordChangeField, value: string) {
     setValues((v) => ({ ...v, [field]: value }));
@@ -89,7 +96,7 @@ export default function ChangePasswordForm() {
       await auth.changePassword(values.current, values.next);
       setValues(EMPTY);
       setShown(false);
-      toast("Password changed. Your other devices were signed out.");
+      if (!forced) toast("Password changed. Your other devices were signed out.");
     } catch (err) {
       const mapped = passwordChangeErrors(err);
       setErrors(mapped.fields);
@@ -104,9 +111,18 @@ export default function ChangePasswordForm() {
   const confirmMatches = values.confirm !== "" && values.confirm === values.next && !errors.confirm;
 
   return (
-    <form onSubmit={onSubmit} noValidate className="flex max-w-[420px] flex-col gap-[18px]">
+    <form
+      ref={formRef}
+      onSubmit={onSubmit}
+      noValidate
+      className={forced ? "flex flex-col gap-[18px]" : "flex max-w-[420px] flex-col gap-[18px]"}
+    >
       {(general || hasErrors) && <Alert>{general ?? "Check the highlighted fields."}</Alert>}
-      <Field label="Current password" error={errors.current}>
+      <Field
+        label="Current password"
+        hint={forced ? "The password you just signed in with." : undefined}
+        error={errors.current}
+      >
         {(c) => (
           <Input
             {...c}
@@ -164,8 +180,8 @@ export default function ChangePasswordForm() {
           />
         )}
       </Field>
-      <Button type="submit" busy={submitting} className="self-start">
-        {submitting ? "Changing password…" : "Change password"}
+      <Button type="submit" busy={submitting} className={forced ? undefined : "self-start"}>
+        {submitting ? "Changing password…" : forced ? "Set new password" : "Change password"}
       </Button>
     </form>
   );

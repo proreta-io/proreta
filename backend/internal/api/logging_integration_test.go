@@ -48,6 +48,7 @@ func TestIntegrationRequestLogsCarryNoSecrets(t *testing.T) {
 	if err := svc.BootstrapAdmin(ctx, adminLogin, hash); err != nil {
 		t.Fatal(err)
 	}
+	pgtest.MustExec(t, env.AdminConn(t), `UPDATE users SET password_must_change = false WHERE email = '`+adminLogin+`'`)
 	keys, err := crypto.NewKeyring(map[string][]byte{"k1": bytes.Repeat([]byte{7}, 32)}, "k1")
 	if err != nil {
 		t.Fatal(err)

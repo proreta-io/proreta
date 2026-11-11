@@ -275,6 +275,7 @@ users.8 is_platform_admin boolean not null default false
 users.9 email_verified_at timestamp with time zone acl=proreta_api=aw/proreta_owner
 users.10 password_changed_at timestamp with time zone acl=proreta_api=w/proreta_owner
 users.11 configured_password_hash text acl=proreta_api=w/proreta_owner
+users.12 password_must_change boolean not null default false acl=proreta_api=aw/proreta_owner
 
 -- constraints
 audit_log audit_log_action_check CHECK (((length(action) >= 1) AND (length(action) <= 100)))
@@ -827,8 +828,8 @@ BEGIN
         RAISE EXCEPTION 'admin: user has no membership' USING ERRCODE = 'PRA02';
     END IF;
     -- updated_at changes with the hash: a login verified against the old hash is refused when
-    -- it creates its session.
-    UPDATE users SET password_hash = p_password_hash, updated_at = now() WHERE id = p_user_id;
+    -- it creates its session. The user must replace the temporary password at the next sign-in.
+    UPDATE users SET password_hash = p_password_hash, password_must_change = true, updated_at = now() WHERE id = p_user_id;
     v_n := auth_revoke_user_sessions(p_user_id);
     PERFORM admin_audit(v_tenant, p_actor, p_audit_id, 'admin.user.password_reset', 'user', p_user_id::text,
                         jsonb_build_object('sessionsRevoked', v_n), p_ip);

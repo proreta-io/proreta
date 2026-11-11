@@ -92,6 +92,9 @@ func (s *server) StartOAuth(ctx context.Context, req gen.StartOAuthRequestObject
 		if !auth.CSRFValid(p.CSRFToken, r.Header.Get(csrfHeader)) {
 			return nil, auth.ErrCSRF
 		}
+		if p.MustChangePassword {
+			return nil, errPasswordChangeRequired
+		}
 		userID = p.UserID
 	default:
 		if req.Body.InviteToken != nil {

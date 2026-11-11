@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type FormEvent } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import {
   ALREADY_MEMBER_PROBLEM_TYPE,
   ApiError,
@@ -86,6 +86,7 @@ export default function Invite() {
     return <Invalid title="Cannot check the invitation." text={errorMessage(err)} />;
   }
   if (!preview.data) return null;
+  if (auth.session?.mustChangePassword) return <Navigate to="/" replace />;
   return auth.session ? (
     <AcceptAsUser token={token} preview={preview.data} onJoining={setJoining} />
   ) : (

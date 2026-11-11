@@ -456,7 +456,8 @@ function OrganizationUsers({ organization }: { organization: AdminOrganization }
         >
           <p>
             The current password stops working and all of the user&apos;s sessions end. You get a
-            temporary password once, to hand over yourself. Verify who asked for it first.
+            temporary password once, to hand over yourself; the user must choose a new password at
+            the next sign-in. Verify who asked for it first.
           </p>
         </ConfirmDialog>
       )}
