@@ -26,7 +26,7 @@ func TestIntegrationInvitationEmailEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := newRegistrationServer(t, env, auth.Options{Mail: mail.NewQueue(keys, nil)}, true, logs)
+	s := newRegistrationServer(t, env, auth.Options{Mail: mail.NewQueue(keys, mail.AllFeatures, nil)}, true, logs)
 	srv, deliverer := startMail(t, env, keys, logs)
 	cookie, csrf, _ := s.register("owner@example.com")
 	hdr := map[string]string{"Cookie": cookie["Cookie"], "X-CSRF-Token": csrf, "X-Forwarded-For": "198.51.100.30"}

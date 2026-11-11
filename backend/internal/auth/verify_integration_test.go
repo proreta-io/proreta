@@ -46,7 +46,7 @@ func newVerifyEnv(t *testing.T, name string, withMail bool) *verifyEnv {
 	clk := &fakeClock{now: time.Now().UTC().Truncate(time.Second)}
 	opts := auth.Options{SessionTTL: time.Hour, Clock: clk}
 	if withMail {
-		opts.Mail = mail.NewQueue(keys, nil)
+		opts.Mail = mail.NewQueue(keys, mail.AllFeatures, nil)
 	}
 	svc, err := auth.NewService(env.Pool(t, env.APIURL, 8), opts)
 	if err != nil {
@@ -159,8 +159,8 @@ func TestIntegrationNoMailWithoutEmail(t *testing.T) {
 	if err := e.admin.QueryRow(e.ctx, `SELECT (SELECT count(*) FROM mail_outbox) + (SELECT count(*) FROM email_verifications)`).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("rows with email off: %d %v", n, err)
 	}
-	if e.svc.EmailEnabled() {
-		t.Fatal("EmailEnabled without a queue")
+	if e.svc.EmailVerificationEnabled(e.ctx) {
+		t.Fatal("verification enabled without a queue")
 	}
 	if err := e.svc.ResendVerification(e.ctx, e.principal(res), testIP); !errors.Is(err, auth.ErrEmailDisabled) {
 		t.Fatalf("resend: %v", err)

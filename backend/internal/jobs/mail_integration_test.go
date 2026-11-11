@@ -15,7 +15,6 @@ import (
 
 	"github.com/proreta-io/proreta/backend/internal/jobs"
 	"github.com/proreta-io/proreta/backend/internal/mail"
-	"github.com/proreta-io/proreta/backend/internal/platform/config"
 	"github.com/proreta-io/proreta/backend/internal/testsupport/pgtest"
 	"github.com/proreta-io/proreta/backend/internal/testsupport/smtptest"
 )
@@ -34,16 +33,26 @@ type mailEnv struct {
 func newMailEnv(t *testing.T, name string) *mailEnv {
 	e := newEnv(t, name)
 	srv := smtptest.New(t, smtptest.Options{Mode: smtptest.StartTLS, User: "mailer", Pass: "mailer-secret"})
-	sender := mail.NewSMTPSender(config.SMTP{
-		Host: srv.Host(), Port: srv.Port(), TLS: config.SMTPStartTLS, From: "Proreta <proreta@example.com>", FromAddress: "proreta@example.com",
-		Username: "mailer", Password: "mailer-secret",
-	})
-	sender.TLSConfig = &tls.Config{RootCAs: srv.Roots, MinVersion: tls.VersionTLS12}
-	sender.Timeout = 5 * time.Second
-	me := &mailEnv{env: e, smtp: srv, queue: mail.NewQueue(e.keys, nil), reg: prometheus.NewRegistry(), sleeps: new([]time.Duration)}
+	pool := e.Pool(t, e.WorkerURL, 4)
+	settings := mail.NewSettings(pool, e.keys, nil)
+	sealed, keyID, err := settings.SealPassword("mailer-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.admin.Exec(e.ctx, `UPDATE email_settings SET host = $1, port = $2, tls = 'starttls', from_header = 'Proreta <proreta@example.com>',
+		username = 'mailer', password_sealed = $3, password_key_id = $4`, srv.Host(), srv.Port(), sealed, keyID); err != nil {
+		t.Fatal(err)
+	}
+	newSender := func(c mail.Connection) jobs.MailSender {
+		s := mail.NewSMTPSender(c)
+		s.TLSConfig = &tls.Config{RootCAs: srv.Roots, MinVersion: tls.VersionTLS12}
+		s.Timeout = 5 * time.Second
+		return s
+	}
+	me := &mailEnv{env: e, smtp: srv, queue: mail.NewQueue(e.keys, mail.AllFeatures, nil), reg: prometheus.NewRegistry(), sleeps: new([]time.Duration)}
 	var mu sync.Mutex
 	me.d = jobs.NewMailDeliverer(jobs.MailConfig{PublicURL: "https://proreta.example.com", PollInterval: 20 * time.Millisecond}, jobs.MailDeps{
-		Pool: e.Pool(t, e.WorkerURL, 4), Keys: e.keys, Sender: sender, Metrics: jobs.NewMetrics(me.reg),
+		Pool: pool, Keys: e.keys, Settings: settings, NewSender: newSender, Metrics: jobs.NewMetrics(me.reg),
 		Log: slog.New(slog.NewJSONHandler(e, &slog.HandlerOptions{Level: slog.LevelDebug})),
 		Sleep: func(_ context.Context, d time.Duration) error {
 			mu.Lock()
@@ -63,7 +72,8 @@ func (me *mailEnv) enqueue(to string) {
 	if err != nil {
 		me.t.Fatal(err)
 	}
-	if err := me.queue.Enqueue(me.ctx, tx, mail.Request{Kind: mail.KindTest, To: to, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+	if err := me.queue.Enqueue(me.ctx, tx, mail.Request{Kind: mail.KindVerifyEmail, To: to, ExpiresAt: time.Now().Add(time.Hour),
+		Params: map[string]string{"token": "dG9rZW4tZm9yLXRlc3RzLW9ubHk", "email": to, "expires": "24 hours"}}); err != nil {
 		me.t.Fatal(err)
 	}
 	if err := tx.Commit(me.ctx); err != nil {
@@ -119,13 +129,13 @@ func TestIntegrationMailDelivery(t *testing.T) {
 			t.Fatalf("claimed %d", n)
 		}
 		got := me.smtp.Messages()
-		if len(got) != 1 || got[0].To[0] != recipient || !got[0].TLS || !got[0].Authed || !strings.Contains(got[0].Data, "outgoing email is working") {
+		if len(got) != 1 || got[0].To[0] != recipient || !got[0].TLS || !got[0].Authed || !strings.Contains(got[0].Data, "dG9rZW4tZm9yLXRlc3RzLW9ubHk") {
 			t.Fatalf("received %+v", got)
 		}
 		if rows := me.rows(); len(rows) != 1 || rows[0].status != "sent" || rows[0].attempts != 1 || rows[0].payload != 0 || rows[0].lastError != nil {
 			t.Fatalf("row = %+v", rows)
 		}
-		if v := metric(t, me.reg, "proreta_jobs_mail_total", "test", "sent"); v != 1 {
+		if v := metric(t, me.reg, "proreta_jobs_mail_total", "verify_email", "sent"); v != 1 {
 			t.Fatalf("sent metric = %v", v)
 		}
 		if n := me.d.RunOnce(me.ctx); n != 0 || len(me.smtp.Messages()) != 1 {
@@ -151,7 +161,7 @@ func TestIntegrationMailDelivery(t *testing.T) {
 		if rows := me.rows(); rows[0].status != "sent" || rows[0].attempts != 2 {
 			t.Fatalf("after the retry: %+v", rows)
 		}
-		if v := metric(t, me.reg, "proreta_jobs_mail_total", "test", "retry"); v != 1 {
+		if v := metric(t, me.reg, "proreta_jobs_mail_total", "verify_email", "retry"); v != 1 {
 			t.Fatalf("retry metric = %v", v)
 		}
 	})
@@ -215,7 +225,7 @@ func TestIntegrationMailDelivery(t *testing.T) {
 
 	t.Run("nothing sensitive is logged", func(t *testing.T) {
 		logs := me.logText()
-		for _, secret := range []string{"alice", "example.org", "mailer-secret", "outgoing email is working", "greylisted", "no such user"} {
+		for _, secret := range []string{"alice", "example.org", "mailer-secret", "dG9rZW4tZm9yLXRlc3RzLW9ubHk", "greylisted", "no such user"} {
 			if strings.Contains(logs, secret) {
 				t.Errorf("logs contain %q", secret)
 			}
@@ -241,7 +251,8 @@ func TestIntegrationMailEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := me.queue.Enqueue(me.ctx, tx, mail.Request{Kind: mail.KindTest, To: "rolled-back@example.org", ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+	if err := me.queue.Enqueue(me.ctx, tx, mail.Request{Kind: mail.KindVerifyEmail, To: "rolled-back@example.org", ExpiresAt: time.Now().Add(time.Hour),
+		Params: map[string]string{"token": "dG9rZW4", "email": "rolled-back@example.org", "expires": "24 hours"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.Rollback(me.ctx); err != nil {
@@ -329,5 +340,59 @@ func TestIntegrationMailPurgeTask(t *testing.T) {
 	}
 	if rows := me.rows(); len(rows) != 0 {
 		t.Fatalf("rows left: %+v", rows)
+	}
+}
+
+// Nothing is claimed while no server is configured, and the settings are read for every message.
+func TestIntegrationMailWaitsForSettings(t *testing.T) {
+	me := newMailEnv(t, "jobsmailsettings")
+	pgtest.MustExec(t, me.admin, `UPDATE email_settings SET host = '', from_header = '', username = '', password_sealed = ''::bytea, password_key_id = ''`)
+	me.enqueue(recipient)
+	if n := me.d.RunOnce(me.ctx); n != 0 || len(me.smtp.Messages()) != 0 {
+		t.Fatalf("claimed %d without a server", n)
+	}
+	if rows := me.rows(); len(rows) != 1 || rows[0].status != "pending" || rows[0].attempts != 0 {
+		t.Fatalf("row = %+v", rows)
+	}
+}
+
+// A test message is sent once with the stored settings, its result is recorded for those
+// settings, and a failure is not retried.
+func TestIntegrationMailTestMessage(t *testing.T) {
+	me := newMailEnv(t, "jobsmailtest")
+	request := func() {
+		t.Helper()
+		pgtest.MustExec(t, me.admin, `UPDATE email_settings SET test_requested_at = now(), test_finished_at = NULL, test_ok = NULL`)
+		api := me.Conn(t, me.APIURL)
+		tx, _ := api.Begin(me.ctx)
+		if err := me.queue.Enqueue(me.ctx, tx, mail.Request{Kind: mail.KindTest, To: recipient, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(me.ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	state := func() (ok *bool, errKind *string, code *int, tested bool) {
+		if err := me.admin.QueryRow(me.ctx, `SELECT test_ok, test_error, test_error_code, tested_version IS NOT DISTINCT FROM connection_version FROM email_settings`).Scan(&ok, &errKind, &code, &tested); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	pgtest.MustExec(t, me.admin, `DELETE FROM mail_outbox`)
+	me.smtp.Reply("AUTH", "535 5.7.8 nope")
+	request()
+	me.d.RunOnce(me.ctx)
+	ok, kind, code, tested := state()
+	if ok == nil || *ok || kind == nil || *kind != "auth" || code == nil || *code != 535 || tested {
+		t.Fatalf("after a failure: ok=%v kind=%v code=%v tested=%t", ok, kind, code, tested)
+	}
+	if rows := me.rows(); len(rows) != 1 || rows[0].status != "failed" || rows[0].attempts != 1 {
+		t.Fatalf("a failed test must not be retried: %+v", rows)
+	}
+	pgtest.MustExec(t, me.admin, `DELETE FROM mail_outbox`)
+	request()
+	me.d.RunOnce(me.ctx)
+	if ok, kind, _, tested := state(); ok == nil || !*ok || kind != nil || !tested {
+		t.Fatalf("after a success: ok=%v kind=%v tested=%t", ok, kind, tested)
 	}
 }

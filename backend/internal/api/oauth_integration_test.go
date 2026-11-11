@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/proreta-io/proreta/backend/internal/api"
 	"github.com/proreta-io/proreta/backend/internal/auth"
+	"github.com/proreta-io/proreta/backend/internal/mail"
 	"github.com/proreta-io/proreta/backend/internal/oauth"
 	"github.com/proreta-io/proreta/backend/internal/plans"
 	"github.com/proreta-io/proreta/backend/internal/platform/clock"
@@ -394,9 +396,18 @@ func TestIntegrationOAuthHTTPRateLimitAndPasswordOff(t *testing.T) {
 	if r := s.do(http.MethodGet, "/api/v1/auth/providers", "", nil); r.body["passwordLoginEnabled"] != false {
 		t.Fatalf("providers: %s", r.raw)
 	}
-	mailOn := newOAuthServer(t, env, membersOpts(), api.Config{RegistrationEnabled: true, PasswordLoginEnabled: true, EmailEnabled: true})
-	if r := mailOn.do(http.MethodGet, "/api/v1/auth/providers", "", nil); r.body["emailEnabled"] != true {
-		t.Fatalf("emailEnabled with SMTP: %s", r.raw)
+	if r := s.do(http.MethodGet, "/api/v1/auth/providers", "", nil); r.body["emailEnabled"] != false || r.body["passwordResetEnabled"] != false || r.body["emailVerificationEnabled"] != false {
+		t.Fatalf("email flags by default: %s", r.raw)
+	}
+	keys, err := crypto.NewKeyring(map[string][]byte{"k1": bytes.Repeat([]byte{7}, 32)}, "k1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mailOpts := membersOpts()
+	mailOpts.Mail = mail.NewQueue(keys, mail.AllFeatures, nil)
+	mailOn := newOAuthServer(t, env, mailOpts, api.Config{RegistrationEnabled: true, PasswordLoginEnabled: true})
+	if r := mailOn.do(http.MethodGet, "/api/v1/auth/providers", "", nil); r.body["emailEnabled"] != true || r.body["passwordResetEnabled"] != true || r.body["emailVerificationEnabled"] != true {
+		t.Fatalf("email flags with every feature on: %s", r.raw)
 	}
 	r := s.do(http.MethodPost, "/api/v1/auth/login", `{"login":"someone@example.com","password":"x"}`, map[string]string{"X-Forwarded-For": "198.51.100.40"})
 	if r.code != http.StatusForbidden || r.body["type"] != "urn:proreta:problem:password-login-disabled" {

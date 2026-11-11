@@ -19,7 +19,7 @@ import (
 )
 
 func sender(srv *smtptest.Server, mode smtptest.Mode, user, pass string) *mail.SMTPSender {
-	s := mail.NewSMTPSender(config.SMTP{
+	s := mail.NewSMTPSender(mail.Connection{
 		Host: srv.Host(), Port: srv.Port(), TLS: string(mode), From: "Proreta <proreta@example.com>", FromAddress: "proreta@example.com",
 		Username: user, Password: config.Secret(pass),
 	})

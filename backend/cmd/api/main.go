@@ -72,12 +72,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	// Without an SMTP host the queue is disabled: nothing is queued and every flow behaves as it
-	// did before email existed.
-	mailKeys := keys
-	if !cfg.SMTP.Enabled() {
-		mailKeys = nil
-	}
+	// The email settings live in the database (Admin, Email in the panel). Until the platform
+	// admin has configured and tested a server, every feature is off: nothing is queued and every
+	// flow behaves as it did before email existed. The api never reads the SMTP password.
+	mailSettings := mail.NewSettings(pool, keys, log)
+	mailQueue := mail.NewQueue(keys, mailSettings, reg)
 	authSvc, err := auth.NewService(pool, auth.Options{
 		SessionTTL: cfg.SessionTTL,
 		Clock:      clock.System{},
@@ -87,7 +86,7 @@ func run() error {
 		PasswordLoginDisabled: !cfg.PasswordLoginEnabled,
 		// Only operator-approved Workspace domains can be claimed and joined by.
 		AllowedDomains: cfg.OAuth.AllowedDomains,
-		Mail:           mail.NewQueue(mailKeys, reg),
+		Mail:           mailQueue,
 	})
 	if err != nil {
 		return err
@@ -97,7 +96,7 @@ func run() error {
 	}
 	log.Info("admin bootstrap done")
 
-	adminSvc, err := admin.NewService(pool, authSvc, admin.Options{Logger: log, Registerer: reg})
+	adminSvc, err := admin.NewService(pool, authSvc, admin.Options{Logger: log, Registerer: reg, Mail: mailQueue, Settings: mailSettings})
 	if err != nil {
 		return err
 	}
@@ -125,7 +124,6 @@ func run() error {
 		RegistrationEnabled:  cfg.RegistrationEnabled,
 		PublicURL:            cfg.PublicURL,
 		PasswordLoginEnabled: cfg.PasswordLoginEnabled,
-		EmailEnabled:         cfg.SMTP.Enabled(),
 	}, api.Deps{
 		Auth:     authSvc,
 		Monitors: monitors.NewService(pool, sched, incidents.NewService(sched)),

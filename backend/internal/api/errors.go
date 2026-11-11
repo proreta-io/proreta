@@ -66,6 +66,7 @@ const (
 	problemPasswordChange     = "urn:proreta:problem:password-change-required" //nolint:gosec // G101: problem type URN, not a credential
 	problemInternal           = "urn:proreta:problem:internal"
 	problemFeatureUnavailable = "urn:proreta:problem:feature-unavailable"
+	problemEmailConflict      = "urn:proreta:problem:email-settings-conflict"
 )
 
 // badRequestError is a request the handler itself rejected (the validator catches most).
@@ -177,6 +178,15 @@ func writeError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 	case errors.Is(err, admin.ErrSystemAdmin):
 		p.Type, p.Title, p.Status = problemSystemAdmin, "The system administrator's password cannot be reset here", http.StatusConflict
 		p.Detail = "The platform administrator changes its own password under Profile; see docs/runbooks/admin-panel.md for a reset."
+	case errors.Is(err, admin.ErrEmailNotTested):
+		p.Type, p.Title, p.Status = problemEmailConflict, "The email settings have not passed a test", http.StatusConflict
+		p.Detail = "Send a test email with the current settings first; changing any connection setting makes it necessary again."
+	case errors.Is(err, admin.ErrEmailNotConfigured):
+		p.Type, p.Title, p.Status = problemEmailConflict, "No email server is configured", http.StatusConflict
+		p.Detail = "Save the SMTP connection settings first."
+	case errors.Is(err, admin.ErrEmailTestPending):
+		p.Type, p.Title, p.Status = problemEmailConflict, "A test email is already on its way", http.StatusConflict
+		p.Detail = "Wait for its result, up to three minutes."
 	case errors.Is(err, admin.ErrTenantDeleted):
 		p.Type, p.Title, p.Status = problemOrgDeleted, "The organization is deleted", http.StatusConflict
 		p.Detail = "A deleted organization cannot be changed."

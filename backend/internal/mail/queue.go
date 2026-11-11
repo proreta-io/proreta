@@ -15,8 +15,9 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/platform/uuidv7"
 )
 
-// ErrDisabled is returned by Enqueue when email is not configured. Callers check Enabled first
-// and keep their no-email behaviour; this is the guard for a caller that forgot to.
+// ErrDisabled is returned by Enqueue on a queue without a keyring. Callers check Features first
+// and keep their no-email behaviour; whether email is configured is decided by Features, not here:
+// the admin panel's test message is queued before any switch is on.
 var ErrDisabled = errors.New("mail: email is not configured")
 
 // maxParamBytes bounds the stored parameters of one message.
@@ -47,15 +48,18 @@ type payload struct {
 }
 
 // Queue writes messages to the mail_outbox in the caller's transaction, so a message exists
-// exactly when the state change it announces is committed. The zero value and nil are disabled.
+// exactly when the state change it announces is committed. The zero value and nil have every
+// feature off.
 type Queue struct {
 	keys     *crypto.Keyring
+	features FeatureSource
 	enqueued *prometheus.CounterVec
 }
 
-// NewQueue returns a Queue; a nil keyring (email off) gives a disabled one. reg may be nil.
-func NewQueue(keys *crypto.Keyring, reg prometheus.Registerer) *Queue {
-	q := &Queue{keys: keys}
+// NewQueue returns a Queue. features says what the admin has turned on (nil: nothing); reg may be
+// nil.
+func NewQueue(keys *crypto.Keyring, features FeatureSource, reg prometheus.Registerer) *Queue {
+	q := &Queue{keys: keys, features: features}
 	q.enqueued = prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "proreta_mail_enqueued_total", Help: "Messages queued in the mail outbox, by kind.",
 	}, []string{"kind"})
@@ -68,13 +72,18 @@ func NewQueue(keys *crypto.Keyring, reg prometheus.Registerer) *Queue {
 	return q
 }
 
-// Enabled reports whether messages are queued. Every flow that can send mail asks first and
-// otherwise behaves exactly as it did before email existed.
-func (q *Queue) Enabled() bool { return q != nil && q.keys != nil }
+// Features says which emails the installation sends right now. Every flow that can send mail
+// asks first and otherwise behaves exactly as it did before email existed.
+func (q *Queue) Features(ctx context.Context) Features {
+	if q == nil || q.keys == nil || q.features == nil {
+		return Features{}
+	}
+	return q.features.Features(ctx)
+}
 
 // Enqueue inserts the message. The caller's transaction decides whether it survives.
 func (q *Queue) Enqueue(ctx context.Context, tx Execer, r Request) error {
-	if !q.Enabled() {
+	if q == nil || q.keys == nil {
 		return ErrDisabled
 	}
 	if !Known(r.Kind) {

@@ -44,8 +44,11 @@ var (
 	ErrEmailDisabled = errors.New("auth: email is not available")
 )
 
-// EmailEnabled reports whether this installation queues email.
-func (s *Service) EmailEnabled() bool { return s.mail.Enabled() }
+// EmailVerificationEnabled reports whether the platform admin turned address verification on:
+// registrations get a verification email and the links work.
+func (s *Service) EmailVerificationEnabled(ctx context.Context) bool {
+	return s.mail.Features(ctx).Verification
+}
 
 // isEmailAddress tells a registered email from a system login such as `admin`: registration
 // requires an @, a system login never has one.
@@ -55,7 +58,7 @@ func isEmailAddress(login string) bool { return strings.Contains(login, "@") }
 // It does nothing when email is off or the login is not an address. Only the hash of the token
 // is stored; the token itself exists in the sealed mail_outbox payload until the mail is sent.
 func (s *Service) issueVerification(ctx context.Context, tx pgx.Tx, q *authdb.Queries, userID uuid.UUID, email string) error {
-	if !s.mail.Enabled() || !isEmailAddress(email) {
+	if !s.EmailVerificationEnabled(ctx) || !isEmailAddress(email) {
 		return nil
 	}
 	token, err := newToken()
@@ -83,7 +86,7 @@ func (s *Service) issueVerification(ctx context.Context, tx pgx.Tx, q *authdb.Qu
 // address that is already verified, and is limited per user to one link a minute and five a day
 // (*RateLimitedError).
 func (s *Service) ResendVerification(ctx context.Context, p Principal, ip netip.Addr) error {
-	if !s.mail.Enabled() {
+	if !s.EmailVerificationEnabled(ctx) {
 		return ErrEmailDisabled
 	}
 	err := db.WithTenantTx(ctx, s.pool, p.TenantID, func(tx pgx.Tx) error {
@@ -210,3 +213,6 @@ func (s *Service) VerifyEmail(ctx context.Context, token string, ip netip.Addr) 
 	s.verifyLimit.Refund(key)
 	return nil
 }
+
+// MailFeatures says which emails the platform admin turned on.
+func (s *Service) MailFeatures(ctx context.Context) mail.Features { return s.mail.Features(ctx) }

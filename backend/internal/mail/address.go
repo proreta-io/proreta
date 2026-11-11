@@ -21,3 +21,9 @@ func parseBare(raw string) (string, error) {
 	}
 	return a.Address, nil
 }
+
+// ValidRecipient reports whether raw is a plain address that can receive mail.
+func ValidRecipient(raw string) bool {
+	_, err := parseBare(raw)
+	return err == nil
+}

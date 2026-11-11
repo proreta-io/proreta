@@ -156,7 +156,7 @@ func (s *server) CreateInvitation(ctx context.Context, req gen.CreateInvitationR
 	if req.Body.Email != nil {
 		email = *req.Body.Email
 	}
-	inv, token, emailed, err := s.auth.CreateInvitationFor(ctx, a, auth.InvitationInput{Role: string(req.Body.Role), Label: label, Email: email})
+	inv, token, emailed, err := s.auth.CreateInvitationFor(ctx, a, auth.InvitationInput{Role: string(req.Body.Role), Label: label, Email: email, SendEmail: req.Body.SendEmail})
 	if err != nil {
 		return nil, err
 	}

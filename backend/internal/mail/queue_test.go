@@ -18,10 +18,11 @@ import (
 
 func TestQueueDisabled(t *testing.T) {
 	var nilQueue *mail.Queue
-	if nilQueue.Enabled() || mail.NewQueue(nil, nil).Enabled() {
-		t.Fatal("a queue without keys is enabled")
+	ctx := context.Background()
+	if nilQueue.Features(ctx) != (mail.Features{}) || mail.NewQueue(nil, mail.AllFeatures, nil).Features(ctx) != (mail.Features{}) {
+		t.Fatal("a queue without keys has features on")
 	}
-	if err := mail.NewQueue(nil, nil).Enqueue(context.Background(), nil, mail.Request{}); !errors.Is(err, mail.ErrDisabled) {
+	if err := mail.NewQueue(nil, nil, nil).Enqueue(context.Background(), nil, mail.Request{}); !errors.Is(err, mail.ErrDisabled) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -34,8 +35,8 @@ func TestIntegrationQueue(t *testing.T) {
 		t.Fatal(err)
 	}
 	reg := prometheus.NewRegistry()
-	q := mail.NewQueue(keys, reg)
-	if !q.Enabled() {
+	q := mail.NewQueue(keys, mail.AllFeatures, reg)
+	if !q.Features(ctx).Enabled {
 		t.Fatal("queue with keys is disabled")
 	}
 	api := env.Conn(t, env.APIURL)

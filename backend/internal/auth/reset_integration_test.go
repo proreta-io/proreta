@@ -208,7 +208,7 @@ func TestIntegrationPasswordResetAddressChangeKillsTheLink(t *testing.T) {
 func TestIntegrationPasswordResetLimits(t *testing.T) {
 	e := newVerifyEnv(t, "auth_reset_limits", true)
 	svc, err := auth.NewService(e.env.Pool(t, e.env.APIURL, 8), auth.Options{
-		SessionTTL: time.Hour, Mail: mail.NewQueue(e.keys, nil), Clock: e.clk,
+		SessionTTL: time.Hour, Mail: mail.NewQueue(e.keys, mail.AllFeatures, nil), Clock: e.clk,
 		ResetLimiter:        auth.NewLimiter(5, time.Hour, 100, clock.System{}),
 		ResetAddressLimiter: auth.NewLimiter(1, time.Hour, 100, clock.System{}),
 	})
@@ -245,7 +245,7 @@ func TestIntegrationPasswordResetLimits(t *testing.T) {
 func TestIntegrationPasswordResetPerAccountCap(t *testing.T) {
 	e := newVerifyEnv(t, "auth_reset_cap", true)
 	svc, err := auth.NewService(e.env.Pool(t, e.env.APIURL, 8), auth.Options{
-		SessionTTL: time.Hour, Mail: mail.NewQueue(e.keys, nil), Clock: e.clk,
+		SessionTTL: time.Hour, Mail: mail.NewQueue(e.keys, mail.AllFeatures, nil), Clock: e.clk,
 		ResetLimiter:        auth.NewLimiter(100, time.Hour, 100, clock.System{}),
 		ResetAddressLimiter: auth.NewLimiter(100, time.Hour, 100, clock.System{}),
 	})
@@ -284,7 +284,7 @@ func TestIntegrationPasswordResetDisabled(t *testing.T) {
 	}
 
 	e := newVerifyEnv(t, "auth_reset_nopw", true)
-	svc, err := auth.NewService(e.env.Pool(t, e.env.APIURL, 4), auth.Options{SessionTTL: time.Hour, Mail: mail.NewQueue(e.keys, nil), PasswordLoginDisabled: true})
+	svc, err := auth.NewService(e.env.Pool(t, e.env.APIURL, 4), auth.Options{SessionTTL: time.Hour, Mail: mail.NewQueue(e.keys, mail.AllFeatures, nil), PasswordLoginDisabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}

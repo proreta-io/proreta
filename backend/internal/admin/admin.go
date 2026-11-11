@@ -21,6 +21,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/proreta-io/proreta/backend/internal/auth"
+	"github.com/proreta-io/proreta/backend/internal/mail"
 	"github.com/proreta-io/proreta/backend/internal/platform/db"
 	"github.com/proreta-io/proreta/backend/internal/platform/uuidv7"
 	"github.com/proreta-io/proreta/backend/internal/platform/validation"
@@ -75,6 +76,10 @@ var (
 type Options struct {
 	Logger     *slog.Logger
 	Registerer prometheus.Registerer
+	// Mail queues the test email and Settings seals the SMTP password and drops the cached
+	// features after a change. Both are needed for the email settings operations.
+	Mail     *mail.Queue
+	Settings *mail.Settings
 }
 
 // Service implements the admin operations.
@@ -83,6 +88,9 @@ type Service struct {
 	auth    *auth.Service
 	log     *slog.Logger
 	actions *prometheus.CounterVec
+
+	mail         *mail.Queue
+	mailSettings *mail.Settings
 }
 
 // NewService builds the service. The auth service hashes temporary passwords through its bounded
@@ -91,10 +99,10 @@ func NewService(pool *db.Pool, authSvc *auth.Service, opts Options) (*Service, e
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
 	}
-	s := &Service{pool: pool, auth: authSvc, log: opts.Logger,
+	s := &Service{pool: pool, auth: authSvc, log: opts.Logger, mail: opts.Mail, mailSettings: opts.Settings,
 		actions: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "proreta_admin_actions_total",
-			Help: "Platform admin changes by audit action (admin.organization.plan_changed, admin.organization.suspended, admin.organization.unsuspended, admin.organization.deleted, admin.user.password_reset).",
+			Help: "Platform admin changes by audit action (admin.organization.plan_changed, admin.organization.suspended, admin.organization.unsuspended, admin.organization.deleted, admin.user.password_reset, admin.email_settings_updated, admin.email_test_sent).",
 		}, []string{"action"}),
 	}
 	if opts.Registerer != nil {
@@ -469,6 +477,16 @@ func mapError(op string, err error) error {
 			return ErrSystemAdmin
 		case "PRA08":
 			return ErrTenantDeleted
+		case "PRA09":
+			return &validation.Error{Fields: []validation.FieldError{{Field: "password", Message: "enter the password again when you change the host, port or username"}}}
+		case "PRA10":
+			return ErrEmailNotTested
+		case "PRA11":
+			return ErrEmailNotConfigured
+		case "PRA12":
+			return ErrEmailTestPending
+		case "PRA13":
+			return &validation.Error{Fields: []validation.FieldError{{Field: "password", Message: "is required with a username"}}}
 		}
 	}
 	return fmt.Errorf("admin: %s: %w", op, err)

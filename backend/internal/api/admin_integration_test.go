@@ -75,15 +75,20 @@ func adminCalls(t *testing.T, tenantID, userID string) []struct{ method, path, b
 		}
 		for method := range spec.Paths.Value(path).Operations() {
 			body := ""
-			if method == http.MethodPatch {
+			switch {
+			case method == http.MethodPatch:
 				body = `{"status":"suspended"}`
+			case method == http.MethodPut && strings.HasSuffix(path, "/email"):
+				body = `{"host":"smtp.example.com","port":587,"tls":"starttls","from":"proreta@example.com"}`
+			case method == http.MethodPut && strings.HasSuffix(path, "/features"):
+				body = `{"sendInvitations":false,"sendEmailVerification":false,"allowPasswordReset":false}`
 			}
 			out = append(out, struct{ method, path, body string }{method,
 				strings.NewReplacer("{tenantId}", tenantID, "{userId}", userID).Replace(path), body})
 		}
 	}
-	if len(out) != 7 {
-		t.Fatalf("%d admin operations in the spec, want 7", len(out))
+	if len(out) != 12 {
+		t.Fatalf("%d admin operations in the spec, want 12", len(out))
 	}
 	return out
 }

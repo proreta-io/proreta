@@ -83,8 +83,9 @@ export interface paths {
      * Register a new account and workspace
      * @description Self-service registration. Creates an organization on the `free` plan, the user as its
      *     `owner` and a session, sets the session cookie and answers like login (the user is
-     *     logged in). When the installation sends email (`emailEnabled`), a verification email for the
-     *     address is queued in the same transaction; nothing depends on it being used.
+     *     logged in). When the platform admin turned address verification on
+     *     (`emailVerificationEnabled`), a verification email for the address is queued in the same
+     *     transaction; nothing depends on it being used.
      *
      *     The email is trimmed and lowercased; it must be 3-254 characters of `a-z 0-9 . _ + - @`
      *     (the characters a login may contain) with one `@`, a non-empty local part and a domain
@@ -153,8 +154,9 @@ export interface paths {
      *     still has the address it was issued for. Unknown, malformed, expired, used and replaced
      *     tokens all get the same 404 `urn:proreta:problem:not-found`. Each failed attempt counts
      *     against a per-client-IP limit (429 with Retry-After). A success is audited as
-     *     `auth.email_verified`. Only meaningful when `emailEnabled` is true in
-     *     `GET /api/v1/auth/providers`; otherwise no token exists and the answer is 404.
+     *     `auth.email_verified`. Only meaningful when `emailVerificationEnabled` is true in
+     *     `GET /api/v1/auth/providers`; otherwise the answer is 404 (also for a link sent earlier:
+     *     turning the switch off ends the links).
      */
     post: operations["verifyEmail"];
     delete?: never;
@@ -181,9 +183,10 @@ export interface paths {
      *     newest link of an account works. A malformed address is 422 (that says nothing about
      *     accounts). Every request counts against a per-client-IP limit (429 with Retry-After); beyond
      *     three requests an hour for one address, or three links an hour for one account, requests are
-     *     answered 202 and send nothing. `404 urn:proreta:problem:not-found` when the installation
-     *     sends no email (`emailEnabled` false in `GET /api/v1/auth/providers`) or has the password
-     *     form turned off (`passwordLoginEnabled` false). Audited as `auth.password_reset_requested`
+     *     answered 202 and send nothing. `404 urn:proreta:problem:not-found` when password reset is not
+     *     on (`passwordResetEnabled` false in `GET /api/v1/auth/providers`: the platform admin has not
+     *     turned it on, or the password form is off); `POST /api/v1/auth/reset-password` answers
+     *     the same, so turning the switch off also ends links already sent. Audited as `auth.password_reset_requested`
      *     when a link was issued (no address in the metadata).
      */
     post: operations["requestPasswordReset"];
@@ -235,8 +238,8 @@ export interface paths {
      * Send the signed-in user a new verification link
      * @description Queues a new verification email to the user's address and invalidates the older links.
      *     Any role. 204 also when the address is already verified (nothing is sent). 404
-     *     `urn:proreta:problem:not-found` when the installation sends no email
-     *     (`emailEnabled` false) or the login is not an email address (the system admin). Limited
+     *     `urn:proreta:problem:not-found` when address verification is not on
+     *     (`emailVerificationEnabled` false) or the login is not an email address (the system admin). Limited
      *     per user to one email a minute and five a day (429 with Retry-After). Audited as
      *     `auth.email_verification_requested`.
      */
@@ -1095,15 +1098,19 @@ export interface paths {
      * @description Creates a single-use invitation with the role `admin`, `member` or `viewer` (`owner` is
      *     granted by changing a member's role). It expires after 7 days. The answer carries `inviteUrl` with
      *     the secret token in the URL fragment; it is shown only here (only its SHA-256 is stored)
-     *     and must be handed over like a password. With `email` the same link is also emailed to that
-     *     address (see below); the link is shown either way. Open invitations count
+     *     and must be handed over like a password. With `email` (and `sendEmail` not false) the same
+     *     link is also emailed to that address (see below); the link is shown either way. Open invitations count
      *     toward the member limit of the plan: 409 `urn:proreta:problem:plan-limit-reached` (`limit`
      *     is `members`) when members plus open invitations already reach it. Audited as
      *     `member.invited` (without the token or the address; `emailed` says whether a message
      *     was queued). Admin or owner.
      *
-     *     **Email.** `email` is accepted only when the installation sends email (`emailEnabled` in
-     *     `GET /api/v1/auth/providers`); otherwise 422 on the field. The message is queued in the same
+     *     **Email.** Sending is possible only when the installation has a tested mail server
+     *     (`emailEnabled` in `GET /api/v1/auth/providers`); otherwise a request that asks for it is
+     *     422 on `email`. A request with an `email` and no `sendEmail` sends, as before `sendEmail`
+     *     existed; `sendEmail: false` ignores the address (the dialog sends it unchecked);
+     *     `sendEmail: true` needs an `email`. `emailInvitations` in `GET /api/v1/auth/me` tells a
+     *     client whether to pre-check the option. The message is queued in the same
      *     transaction as the invitation, so it exists exactly when the invitation does, and is
      *     delivered a moment later by the background jobs process (`emailQueued` only means it was
      *     queued, not that the mailbox accepted it). It names this organization, the role and the
@@ -1593,6 +1600,104 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/email": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Outgoing email settings
+     * @description The SMTP connection, the three event switches and the state of the last test message.
+     *     The SMTP password is write-only: it is never returned, only `passwordSet`. Email is off
+     *     until a platform admin configures a server here, a test message succeeds and a switch is
+     *     turned on. Platform admins only.
+     */
+    get: operations["adminGetEmailSettings"];
+    /**
+     * Set the SMTP connection
+     * @description Replaces the connection settings. `password` is write-only: omit it to keep the stored
+     *     one. Changing `host`, `port` or `username` while keeping the password is 422 on
+     *     `password` (enter it again), so a stored password is never sent to a server it was not
+     *     typed for; an empty `username` removes the login and the password. `tls` `none` is
+     *     accepted only for a loopback host and without a login; a login is never sent without TLS.
+     *     Link-local (including cloud metadata) and unspecified addresses are refused as host; a
+     *     relay on a private network is fine.
+     *
+     *     Any change to a connection setting forgets the last successful test and turns the three
+     *     switches off; a request that changes nothing does nothing. The change takes effect for
+     *     mail already queued, and in the other api replicas within a few seconds. Audited as
+     *     `admin.email_settings_updated` (names of the changed settings, never values). Platform
+     *     admins only.
+     */
+    put: operations["adminUpdateEmailSettings"];
+    post?: never;
+    /**
+     * Remove the SMTP server
+     * @description Erases the connection settings including the password and turns every switch off.
+     *     Idempotent. Audited as `admin.email_settings_updated`. Platform admins only.
+     */
+    delete: operations["adminDeleteEmailSettings"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/email/features": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Turn the email features on or off
+     * @description Sets the three switches, all off by default. Turning one on needs a successful test
+     *     message for the current connection settings (409
+     *     `urn:proreta:problem:email-settings-conflict` otherwise); turning them off is always allowed. Audited as
+     *     `admin.email_settings_updated`. Platform admins only.
+     */
+    put: operations["adminUpdateEmailFeatures"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/email/test": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Send a test email
+     * @description Queues a real test message to `to` (default: the admin's own login when it is an email
+     *     address). The background jobs process sends it with the stored settings, once and without
+     *     retries, through the same code that sends every other message; this call returns at once
+     *     with `lastTest.state` `pending`. Poll `GET /api/v1/admin/email` until the state is
+     *     `succeeded` or `failed`. A success makes the current settings "tested", which the switches
+     *     need. A failure reports a category (`connect`, `refused`, `dns`, `blocked_address`, `tls`,
+     *     `auth`, `timeout`, `recipient_rejected`, `rejected`) and the SMTP reply code, never the
+     *     server's text; a test that jobs never picked up within three minutes is `failed` with
+     *     `not_delivered`. 409 `urn:proreta:problem:email-settings-conflict` when no server is configured or
+     *     a test is still pending; limited to
+     *     one request per 10 seconds and 20 per hour (429 with Retry-After). Audited as
+     *     `admin.email_test_sent` (the recipient's domain only). Platform admins only.
+     */
+    post: operations["adminSendTestEmail"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1662,6 +1767,13 @@ export interface components {
       mustChangePassword: boolean;
       organization: components["schemas"]["OrganizationRef"];
       role: components["schemas"]["MembershipRole"];
+      /**
+       * @description Whether the invite dialog pre-checks "send by email": the platform admin turned
+       *     "Send invitation links by email" on and the role of the session may invite (`admin`
+       *     or `owner`). False for everyone else and on an installation without email; an
+       *     invitation can still be emailed whenever `emailEnabled` is true.
+       */
+      emailInvitations: boolean;
       /** @description Send as `X-CSRF-Token` on unsafe requests */
       csrfToken: string;
       /**
@@ -1694,7 +1806,7 @@ export interface components {
        * @description Whether the login's email address was confirmed, by the link in a verification email or
        *     by an identity provider that reported it verified. Always false for a login that is not
        *     an email address (the system admin). Verification emails are sent only when
-       *     `emailEnabled` is true in `GET /api/v1/auth/providers`; a user of an installation
+       *     `emailVerificationEnabled` is true in `GET /api/v1/auth/providers`; a user of an installation
        *     without email stays unverified, and nothing depends on it.
        */
       emailVerified: boolean;
@@ -2229,6 +2341,86 @@ export interface components {
       /** @description Organizations on the plan that are not deleted */
       organizations: number;
     };
+    AdminEmailSettings: {
+      /** @description Whether an SMTP server is set */
+      configured: boolean;
+      /** @description Empty when not configured */
+      host: string;
+      port: number;
+      tls: components["schemas"]["AdminEmailTls"];
+      /** @description The sender, `addr@example.com` or `Name <addr@example.com>` */
+      from: string;
+      /** @description Empty for a relay without a login */
+      username: string;
+      /** @description Whether a password is stored. The password itself is never returned. */
+      passwordSet: boolean;
+      /** @description Send invitation links by email. When on, the invite dialog pre-checks "Send by email". */
+      sendInvitations: boolean;
+      /** @description Send a verification email at registration */
+      sendEmailVerification: boolean;
+      /** @description Offer the forgot-password flow */
+      allowPasswordReset: boolean;
+      /** @description Whether a test message succeeded with the current connection settings. Any change of host, port, tls, from, username or password makes this false. */
+      tested: boolean;
+      /**
+       * Format: date-time
+       * @description When the successful test of the current settings finished
+       */
+      testedAt: string | null;
+      /** @description The last test message of the current settings, null when there was none */
+      lastTest: components["schemas"]["AdminEmailTestResult"] | null;
+      /** Format: date-time */
+      updatedAt: string;
+    };
+    /**
+     * @description `starttls` upgrades the connection (port 587, default), `tls` is TLS from the first byte (465), `none` is plain and only for localhost without a login
+     * @enum {string}
+     */
+    AdminEmailTls: "starttls" | "tls" | "none";
+    AdminEmailTestResult: {
+      /** @enum {string} */
+      state: "pending" | "succeeded" | "failed";
+      /** Format: date-time */
+      requestedAt: string;
+      /** Format: date-time */
+      finishedAt: string | null;
+      /**
+       * @description The failure category when `state` is `failed`: `connect`, `refused`, `dns`,
+       *     `blocked_address`, `tls`, `auth`, `timeout`, `recipient_rejected`, `rejected`,
+       *     `bad_message`, `not_delivered` or `other`. Never server text.
+       */
+      error: string | null;
+      /** @description The SMTP reply code of the failing step, when there was one */
+      smtpCode: number | null;
+    };
+    AdminEmailConnectionUpdate: {
+      /**
+       * @description Host name or IP address of the SMTP server, without scheme or port
+       * @example smtp.example.com
+       */
+      host: string;
+      /** @example 587 */
+      port: number;
+      tls: components["schemas"]["AdminEmailTls"];
+      /** @example Proreta <proreta@example.com> */
+      from: string;
+      /** @description Empty or omitted for a relay without a login */
+      username?: string;
+      /**
+       * Format: password
+       * @description Write-only. Omit to keep the stored password; required with a changed host, port or username.
+       */
+      password?: string;
+    };
+    AdminEmailFeaturesUpdate: {
+      sendInvitations: boolean;
+      sendEmailVerification: boolean;
+      allowPasswordReset: boolean;
+    };
+    AdminEmailTestRequest: {
+      /** @description Recipient of the test message; omitted, the admin's own login if it is an email address (422 otherwise) */
+      to?: string;
+    };
     AdminStats: {
       organizations: {
         /** @description Organizations that are not deleted */
@@ -2317,6 +2509,11 @@ export interface components {
        *     registration rules). Needs `emailEnabled`; not stored, not binding.
        */
       email?: string;
+      /**
+       * @description Whether to email the link to `email`. Omitted: yes when `email` is given. `false`
+       *     ignores `email`; `true` requires it.
+       */
+      sendEmail?: boolean;
     };
     InvitationCreated: {
       invitation: components["schemas"]["Invitation"];
@@ -2554,11 +2751,23 @@ export interface components {
       /** @description Whether an OAuth sign-in or `POST /api/v1/auth/register` may create a new organization */
       registrationEnabled: boolean;
       /**
-       * @description Whether the installation sends email (an SMTP server is configured,
-       *     `PRORETA_SMTP_HOST`). When false nothing is ever emailed and every flow that could send
-       *     a message shows its link in the page instead.
+       * @description Whether the installation can send email: the platform admin configured an SMTP server
+       *     in the admin panel (Admin, Email) and a test message with the current settings
+       *     succeeded. When false nothing is ever emailed and every flow that could send a message
+       *     shows its link in the page instead. This is the default of every installation.
        */
       emailEnabled: boolean;
+      /**
+       * @description Whether the forgot-password flow exists: the platform admin turned it on (which needs a
+       *     tested server) and the password form is offered (`passwordLoginEnabled`). When false
+       *     `POST /api/v1/auth/forgot-password` is 404.
+       */
+      passwordResetEnabled: boolean;
+      /**
+       * @description Whether registrations get a verification email and the verification links work. Turned
+       *     on by the platform admin, which needs a tested server.
+       */
+      emailVerificationEnabled: boolean;
     };
     AuthProvider: {
       id: components["schemas"]["OAuthProvider"];
@@ -2655,6 +2864,7 @@ export interface components {
      *     | `urn:proreta:problem:method-not-allowed` | 405 | The path exists, the method does not |
      *     | `urn:proreta:problem:not-a-heartbeat` | 409 | The operation exists only for heartbeat monitors |
      *     | `urn:proreta:problem:email-taken` | 409 | The email is already registered |
+     *     | `urn:proreta:problem:email-settings-conflict` | 409 | The email settings do not allow this now: no server configured, no successful test of the current settings, or a test already pending |
      *     | `urn:proreta:problem:plan-limit-reached` | 409 | The plan allows no more of a resource; carries `limit` and `max` |
      *     | `urn:proreta:problem:protected-organization` | 409 | The default organization, or the admin's own, cannot be suspended or deleted |
      *     | `urn:proreta:problem:organization-deleted` | 409 | A deleted organization cannot be changed |
@@ -5152,6 +5362,151 @@ export interface operations {
       403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
       409: components["responses"]["Conflict"];
+      429: components["responses"]["TooManyRequests"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminGetEmailSettings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The settings */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminEmailSettings"];
+        };
+      };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminUpdateEmailSettings: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminEmailConnectionUpdate"];
+      };
+    };
+    responses: {
+      /** @description The settings after the change */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminEmailSettings"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      422: components["responses"]["UnprocessableEntity"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminDeleteEmailSettings: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description No server is configured */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminUpdateEmailFeatures: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminEmailFeaturesUpdate"];
+      };
+    };
+    responses: {
+      /** @description The settings after the change */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminEmailSettings"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      409: components["responses"]["Conflict"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminSendTestEmail: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["AdminEmailTestRequest"];
+      };
+    };
+    responses: {
+      /** @description The test message is queued */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminEmailSettings"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      409: components["responses"]["Conflict"];
+      422: components["responses"]["UnprocessableEntity"];
       429: components["responses"]["TooManyRequests"];
       default: components["responses"]["Error"];
     };
