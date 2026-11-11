@@ -31,6 +31,10 @@ export type AdminEmailTestResult = Schemas["AdminEmailTestResult"];
 export type AdminRegistrationSettings = Schemas["AdminRegistrationSettings"];
 export type AdminUser = Schemas["AdminUser"];
 export type AdminUserList = Schemas["AdminUserList"];
+export type AdminUserSummary = Schemas["AdminUserSummary"];
+export type AdminUserSummaryList = Schemas["AdminUserSummaryList"];
+export type AdminUserDetail = Schemas["AdminUserDetail"];
+export type AdminUserMembership = Schemas["AdminUserMembership"];
 export type MembershipRole = Schemas["MembershipRole"];
 export type Organization = Schemas["Organization"];
 export type Member = Schemas["Member"];
@@ -88,6 +92,9 @@ export const queryKeys = {
     ["admin", "organizations", { query, offset, includeDeleted }] as const,
   adminOrganization: (id: string) => ["admin", "organization", id] as const,
   adminUsers: (id: string) => ["admin", "organization", id, "users"] as const,
+  adminAllUsers: (query: string, status: string, offset: number) =>
+    ["admin", "all-users", { query, status, offset }] as const,
+  adminUser: (id: string) => ["admin", "user", id] as const,
   organizations: ["organizations"] as const,
   members: ["members"] as const,
   invitations: ["invitations"] as const,
@@ -275,6 +282,38 @@ export const resetAdminUserPassword = (userId: string) =>
       params: { path: { userId } },
     }),
   );
+
+export type AdminUserStatusFilter = "active" | "disabled";
+
+export const listAdminAllUsers = (
+  query: string,
+  status: AdminUserStatusFilter | "",
+  offset: number,
+) =>
+  unwrap(
+    client.GET("/api/v1/admin/users", {
+      params: {
+        query: { query, offset, limit: ADMIN_PAGE_SIZE, ...(status ? { status } : {}) },
+      },
+    }),
+  );
+
+const userPath = (userId: string) => ({ params: { path: { userId } } });
+
+/** One user with every membership and the number of open sessions. */
+export const getAdminUser = (userId: string) =>
+  unwrap(client.GET("/api/v1/admin/users/{userId}", userPath(userId)));
+
+/** Refuses sign-in and deletes all of the user's sessions. */
+export const disableAdminUser = (userId: string) =>
+  unwrap(client.POST("/api/v1/admin/users/{userId}/disable", userPath(userId)));
+
+export const enableAdminUser = (userId: string) =>
+  unwrap(client.POST("/api/v1/admin/users/{userId}/enable", userPath(userId)));
+
+/** Deletes all of the user's sessions; answers how many were open. */
+export const revokeAdminUserSessions = (userId: string) =>
+  unwrap(client.POST("/api/v1/admin/users/{userId}/sessions/revoke", userPath(userId)));
 
 export const getAdminEmailSettings = () => unwrap(client.GET("/api/v1/admin/email"));
 

@@ -717,15 +717,21 @@ admin_email_settings_set_features(uuid,boolean,boolean,boolean,uuid,inet) owner=
 admin_email_settings_update(uuid,text,integer,text,text,text,bytea,text,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_email_test_request(uuid,text,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_get_tenant(uuid,uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+admin_get_user(uuid,uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+admin_list_all_users(uuid,text,text,integer,integer) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_list_tenants(uuid,text,boolean,integer,integer) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+admin_list_user_memberships(uuid,uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_list_users(uuid,uuid,text,integer,integer) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_registration_get(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_registration_set(uuid,boolean,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_require_platform_admin(uuid) owner=proreta_owner definer=false acl=proreta_owner=X/proreta_owner
 admin_reset_user_password(uuid,uuid,text,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+admin_revoke_user_sessions(uuid,uuid,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_set_tenant_plan(uuid,uuid,text,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_set_tenant_status(uuid,uuid,text,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+admin_set_user_status(uuid,uuid,text,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_stats(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+admin_user_audit_tenant(uuid) owner=proreta_owner definer=false acl=proreta_owner=X/proreta_owner
 auth_count_other_memberships(uuid,uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 auth_create_tenant(uuid,text,text) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 auth_domain_lookup(text) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
@@ -1030,6 +1036,55 @@ BEGIN
     END IF;
 END
 $function$
+CREATE OR REPLACE FUNCTION public.admin_get_user(p_actor uuid, p_user_id uuid)
+ RETURNS TABLE(id uuid, login text, display_name text, status text, is_platform_admin boolean, email_verified boolean, must_change_password boolean, created_at timestamp with time zone, organization_count integer, open_sessions integer)
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+#variable_conflict use_column
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    RETURN QUERY
+    SELECT u.id, u.email::text, u.display_name, u.status, u.is_platform_admin, u.email_verified_at IS NOT NULL,
+           u.password_must_change, u.created_at,
+           (SELECT count(*)::integer FROM memberships AS m WHERE m.user_id = u.id),
+           (SELECT count(*)::integer FROM sessions AS s WHERE s.user_id = u.id AND s.expires_at > now())
+    FROM users AS u
+    WHERE u.id = p_user_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'admin: user not found' USING ERRCODE = 'PRA02';
+    END IF;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.admin_list_all_users(p_actor uuid, p_query text, p_status text, p_limit integer, p_offset integer)
+ RETURNS TABLE(id uuid, login text, display_name text, status text, is_platform_admin boolean, email_verified boolean, must_change_password boolean, created_at timestamp with time zone, organization_count integer, total_count integer)
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+#variable_conflict use_column
+DECLARE
+    q  text := lower(btrim(COALESCE(p_query, '')));
+    st text := COALESCE(p_status, '');
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    IF st NOT IN ('', 'active', 'disabled') THEN
+        RAISE EXCEPTION 'admin: invalid status' USING ERRCODE = 'PRA04';
+    END IF;
+    RETURN QUERY
+    SELECT u.id, u.email::text, u.display_name, u.status, u.is_platform_admin, u.email_verified_at IS NOT NULL,
+           u.password_must_change, u.created_at,
+           (SELECT count(*)::integer FROM memberships AS m WHERE m.user_id = u.id),
+           (count(*) OVER ())::integer
+    FROM users AS u
+    WHERE (st = '' OR u.status = st)
+      AND (q = '' OR strpos(lower(u.email::text), q) > 0 OR strpos(lower(u.display_name), q) > 0)
+    ORDER BY u.created_at DESC, u.id
+    LIMIT least(greatest(COALESCE(p_limit, 25), 1), 100)
+    OFFSET greatest(COALESCE(p_offset, 0), 0);
+END
+$function$
 CREATE OR REPLACE FUNCTION public.admin_list_tenants(p_actor uuid, p_query text, p_include_deleted boolean, p_limit integer, p_offset integer)
  RETURNS TABLE(id uuid, slug text, name text, plan_key text, plan_name text, status text, created_at timestamp with time zone, deleted_at timestamp with time zone, user_count integer, monitor_count integer, heartbeat_count integer, total_count integer)
  LANGUAGE plpgsql
@@ -1067,6 +1122,26 @@ BEGIN
     FROM page AS p
     JOIN plans AS pl ON pl.key = p.plan_key
     ORDER BY p.created_at DESC, p.id DESC;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.admin_list_user_memberships(p_actor uuid, p_user_id uuid)
+ RETURNS TABLE(organization_id uuid, organization_name text, organization_slug text, organization_status text, role text, joined_at timestamp with time zone)
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+#variable_conflict use_column
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    IF NOT EXISTS (SELECT 1 FROM users AS u WHERE u.id = p_user_id) THEN
+        RAISE EXCEPTION 'admin: user not found' USING ERRCODE = 'PRA02';
+    END IF;
+    RETURN QUERY
+    SELECT t.id, t.name, t.slug, CASE WHEN t.deleted_at IS NOT NULL THEN 'deleted' ELSE t.status END, m.role, m.created_at
+    FROM memberships AS m
+    JOIN tenants AS t ON t.id = m.tenant_id
+    WHERE m.user_id = p_user_id
+    ORDER BY m.created_at, t.id;
 END
 $function$
 CREATE OR REPLACE FUNCTION public.admin_list_users(p_actor uuid, p_tenant_id uuid, p_query text, p_limit integer, p_offset integer)
@@ -1185,6 +1260,33 @@ BEGIN
     RETURN QUERY SELECT v_tenant, v_n;
 END
 $function$
+CREATE OR REPLACE FUNCTION public.admin_revoke_user_sessions(p_actor uuid, p_user_id uuid, p_audit_id uuid, p_ip inet)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_tenant uuid;
+    v_n      integer;
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    PERFORM 1 FROM users AS u WHERE u.id = p_user_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'admin: user not found' USING ERRCODE = 'PRA02';
+    END IF;
+    SELECT count(*)::integer INTO v_n FROM sessions AS s WHERE s.user_id = p_user_id AND s.expires_at > now();
+    PERFORM auth_revoke_user_sessions(p_user_id);
+    IF v_n > 0 THEN
+        v_tenant := admin_user_audit_tenant(p_user_id);
+        IF v_tenant IS NOT NULL THEN
+            PERFORM admin_audit(v_tenant, p_actor, p_audit_id, 'admin.user.sessions_revoked', 'user', p_user_id::text,
+                                jsonb_build_object('sessionsRevoked', v_n), p_ip);
+        END IF;
+    END IF;
+    RETURN v_n;
+END
+$function$
 CREATE OR REPLACE FUNCTION public.admin_set_tenant_plan(p_actor uuid, p_tenant_id uuid, p_plan_key text, p_audit_id uuid, p_ip inet)
  RETURNS boolean
  LANGUAGE plpgsql
@@ -1267,6 +1369,49 @@ BEGIN
     RETURN true;
 END
 $function$
+CREATE OR REPLACE FUNCTION public.admin_set_user_status(p_actor uuid, p_user_id uuid, p_status text, p_audit_id uuid, p_ip inet)
+ RETURNS TABLE(changed boolean, sessions_revoked integer)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+#variable_conflict use_column
+DECLARE
+    v_status text;
+    v_admin  boolean;
+    v_tenant uuid;
+    v_n      integer := 0;
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    IF p_status IS NULL OR p_status NOT IN ('active', 'disabled') THEN
+        RAISE EXCEPTION 'admin: invalid status' USING ERRCODE = 'PRA04';
+    END IF;
+    SELECT u.status, u.is_platform_admin INTO v_status, v_admin FROM users AS u WHERE u.id = p_user_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'admin: user not found' USING ERRCODE = 'PRA02';
+    END IF;
+    IF v_status = p_status THEN
+        RETURN QUERY SELECT false, 0;
+        RETURN;
+    END IF;
+    IF p_status = 'disabled' AND v_admin THEN
+        RAISE EXCEPTION 'admin: a platform admin cannot be disabled' USING ERRCODE = 'PRA07';
+    END IF;
+    UPDATE users SET status = p_status, updated_at = now() WHERE id = p_user_id;
+    IF p_status = 'disabled' THEN
+        SELECT count(*)::integer INTO v_n FROM sessions AS s WHERE s.user_id = p_user_id AND s.expires_at > now();
+        PERFORM auth_revoke_user_sessions(p_user_id);
+    END IF;
+    v_tenant := admin_user_audit_tenant(p_user_id);
+    IF v_tenant IS NOT NULL THEN
+        PERFORM admin_audit(v_tenant, p_actor, p_audit_id,
+                            CASE p_status WHEN 'disabled' THEN 'admin.user.disabled' ELSE 'admin.user.enabled' END,
+                            'user', p_user_id::text,
+                            CASE p_status WHEN 'disabled' THEN jsonb_build_object('sessionsRevoked', v_n) ELSE '{}'::jsonb END, p_ip);
+    END IF;
+    RETURN QUERY SELECT true, v_n;
+END
+$function$
 CREATE OR REPLACE FUNCTION public.admin_stats(p_actor uuid)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -1294,6 +1439,14 @@ BEGIN
                   FROM plans AS p)
     );
 END
+$function$
+CREATE OR REPLACE FUNCTION public.admin_user_audit_tenant(p_user_id uuid)
+ RETURNS uuid
+ LANGUAGE sql
+ STABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    SELECT COALESCE(auth_login_tenant(p_user_id), (SELECT t.id FROM tenants AS t WHERE t.slug = 'default'))
 $function$
 CREATE OR REPLACE FUNCTION public.auth_count_other_memberships(p_user_id uuid, p_tenant_id uuid)
  RETURNS integer

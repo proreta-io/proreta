@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -65,5 +66,13 @@ func TestMapError(t *testing.T) {
 	other := errors.New("boom")
 	if got := mapError("op", other); !errors.Is(got, other) || !strings.Contains(got.Error(), "admin: op") {
 		t.Errorf("other error: %v", got)
+	}
+}
+
+func TestListAccountsRejectsUnknownStatus(t *testing.T) {
+	var verr *validation.Error
+	_, err := (&Service{}).ListAccounts(context.Background(), Actor{}, Page{}, "paused")
+	if !errors.As(err, &verr) || verr.Fields[0].Field != "status" {
+		t.Fatalf("err = %v, want a validation error on status", err)
 	}
 }

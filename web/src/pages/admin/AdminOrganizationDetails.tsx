@@ -407,7 +407,12 @@ function OrganizationUsers({ organization }: { organization: AdminOrganization }
               <Tr key={u.id}>
                 <Td>
                   <span className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-[13px] break-all">{u.login}</span>
+                    <Link
+                      to={`/admin/users/${u.id}`}
+                      className="font-mono text-[13px] break-all hover:underline"
+                    >
+                      {u.login}
+                    </Link>
                     {u.isPlatformAdmin && <Badge tone="inverse">System admin</Badge>}
                   </span>
                 </Td>

@@ -1572,6 +1572,130 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/users": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Users of all organizations
+     * @description Every user of the installation, newest first. `query` matches the email or the display
+     *     name; `status` keeps only `active` or `disabled` users. `organizationCount` is the number
+     *     of memberships, deleted organizations included. Platform admins only.
+     */
+    get: operations["adminListAllUsers"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/users/{userId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description User id; a value that is not a UUID is answered with 400 */
+        userId: components["parameters"]["AdminUserId"];
+      };
+      cookie?: never;
+    };
+    /**
+     * One user with every membership
+     * @description The user, every organization the user belongs to (deleted ones included, with their
+     *     status) and the number of open sessions in all organizations. Platform admins only.
+     */
+    get: operations["adminGetUser"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/users/{userId}/disable": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description User id; a value that is not a UUID is answered with 400 */
+        userId: components["parameters"]["AdminUserId"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Disable a user
+     * @description The user can no longer sign in (password, OAuth or invitation) and all of the user's
+     *     sessions in every organization are deleted. Memberships stay. A platform admin cannot be
+     *     disabled (409 `urn:proreta:problem:system-admin`). Disabling a user who is already
+     *     disabled changes nothing and writes no audit row. Audited as `admin.user.disabled`
+     *     (`sessionsRevoked`), in the user's last used organization. Platform admins only.
+     */
+    post: operations["adminDisableUser"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/users/{userId}/enable": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description User id; a value that is not a UUID is answered with 400 */
+        userId: components["parameters"]["AdminUserId"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Enable a user
+     * @description Lets a disabled user sign in again; the sessions that were deleted when the user was
+     *     disabled stay deleted. Enabling a user who is already active changes nothing and writes no
+     *     audit row. Audited as `admin.user.enabled`, in the user's last used organization.
+     *     Platform admins only.
+     */
+    post: operations["adminEnableUser"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/users/{userId}/sessions/revoke": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description User id; a value that is not a UUID is answered with 400 */
+        userId: components["parameters"]["AdminUserId"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Sign a user out everywhere
+     * @description Deletes all of the user's sessions in every organization. `sessionsRevoked` is the number
+     *     of open sessions that were deleted. Audited as `admin.user.sessions_revoked`
+     *     (`sessionsRevoked`) only when that number is above zero. Platform admins only.
+     */
+    post: operations["adminRevokeUserSessions"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/users/{userId}/reset-password": {
     parameters: {
       query?: never;
@@ -2356,6 +2480,49 @@ export interface components {
       /** @description The system admin; its password is managed by its Secret and cannot be reset here */
       isPlatformAdmin: boolean;
     };
+    AdminUserSummary: {
+      /** Format: uuid */
+      id: string;
+      /** @description The email address (the system admin's login is not an address) */
+      login: string;
+      displayName: string;
+      /** @enum {string} */
+      status: "active" | "disabled";
+      isPlatformAdmin: boolean;
+      /** @description Whether an identity provider or an emailed link confirmed the address */
+      emailVerified: boolean;
+      /** @description The password was issued by someone else and has to be replaced at the next sign-in */
+      mustChangePassword: boolean;
+      /** Format: date-time */
+      createdAt: string;
+      organizationCount: number;
+    };
+    AdminUserSummaryList: {
+      items: components["schemas"]["AdminUserSummary"][];
+      total: number;
+      limit: number;
+      offset: number;
+    };
+    AdminUserMembership: {
+      /** Format: uuid */
+      organizationId: string;
+      organizationName: string;
+      organizationSlug: string;
+      /** @enum {string} */
+      organizationStatus: "active" | "suspended" | "deleted";
+      role: components["schemas"]["MembershipRole"];
+      /** Format: date-time */
+      joinedAt: string;
+    };
+    AdminUserDetail: {
+      user: components["schemas"]["AdminUserSummary"];
+      memberships: components["schemas"]["AdminUserMembership"][];
+      /** @description Sessions that have not expired, in all organizations */
+      openSessions: number;
+    };
+    AdminUserSessionsRevoked: {
+      sessionsRevoked: number;
+    };
     AdminUserList: {
       items: components["schemas"]["AdminUser"][];
       total: number;
@@ -3086,6 +3253,8 @@ export interface components {
     InvitationId: string;
     /** @description Case-insensitive substring to search for; empty lists everything */
     AdminQuery: string;
+    /** @description User id; a value that is not a UUID is answered with 400 */
+    AdminUserId: string;
     /** @description Page size */
     Limit: number;
     /** @description Number of items to skip */
@@ -5378,6 +5547,162 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AdminUserList"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminListAllUsers: {
+    parameters: {
+      query?: {
+        /** @description Case-insensitive substring to search for; empty lists everything */
+        query?: components["parameters"]["AdminQuery"];
+        /** @description Only users with this status; omit for all */
+        status?: "active" | "disabled";
+        /** @description Page size */
+        limit?: components["parameters"]["Limit"];
+        /** @description Number of items to skip */
+        offset?: components["parameters"]["Offset"];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description One page of users */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminUserSummaryList"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      422: components["responses"]["UnprocessableEntity"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminGetUser: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description User id; a value that is not a UUID is answered with 400 */
+        userId: components["parameters"]["AdminUserId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The user */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminUserDetail"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminDisableUser: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description User id; a value that is not a UUID is answered with 400 */
+        userId: components["parameters"]["AdminUserId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The user after the change */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminUserDetail"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminEnableUser: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description User id; a value that is not a UUID is answered with 400 */
+        userId: components["parameters"]["AdminUserId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The user after the change */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminUserDetail"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminRevokeUserSessions: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description User id; a value that is not a UUID is answered with 400 */
+        userId: components["parameters"]["AdminUserId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The number of sessions deleted */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminUserSessionsRevoked"];
         };
       };
       400: components["responses"]["BadRequest"];

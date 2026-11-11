@@ -87,7 +87,8 @@ func concretePath(p string) string {
 var adminOperations = []string{"adminGetStats", "adminListOrganizations", "adminGetOrganization", "adminUpdateOrganization",
 	"adminDeleteOrganization", "adminListOrganizationUsers", "adminResetUserPassword", "adminGetEmailSettings", "adminUpdateEmailSettings",
 	"adminDeleteEmailSettings", "adminUpdateEmailFeatures", "adminSendTestEmail",
-	"adminGetRegistration", "adminUpdateRegistration"}
+	"adminGetRegistration", "adminUpdateRegistration",
+	"adminListAllUsers", "adminGetUser", "adminDisableUser", "adminEnableUser", "adminRevokeUserSessions"}
 
 func TestSpecAdminOperations(t *testing.T) {
 	spec, ops := specOperations(t)

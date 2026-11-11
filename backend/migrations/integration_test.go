@@ -59,9 +59,15 @@ var definerAllowList = map[string][]string{
 	"admin_list_users":          {"proreta_api"},
 	"admin_reset_user_password": {"proreta_api"},
 	"admin_stats":               {"proreta_api"},
-	"ensure_partitions":         {"proreta_worker"},
-	"claim_due_monitors":        {"proreta_worker"},
-	"compute_rollups":           {"proreta_worker"},
+	// Users across organizations: list, detail, memberships, disable or enable, sign out.
+	"admin_list_all_users":        {"proreta_api"},
+	"admin_get_user":              {"proreta_api"},
+	"admin_list_user_memberships": {"proreta_api"},
+	"admin_set_user_status":       {"proreta_api"},
+	"admin_revoke_user_sessions":  {"proreta_api"},
+	"ensure_partitions":           {"proreta_worker"},
+	"claim_due_monitors":          {"proreta_worker"},
+	"compute_rollups":             {"proreta_worker"},
 	// Rollups from the watermark in rollup_state.
 	"compute_rollups_catch_up": {"proreta_worker"},
 	// Retention in three steps driven by jobs.

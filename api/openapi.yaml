@@ -2697,6 +2697,179 @@ paths:
           $ref: "#/components/responses/NotFound"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/admin/users:
+    get:
+      operationId: adminListAllUsers
+      x-experimental: true
+      summary: Users of all organizations
+      description: |
+        Every user of the installation, newest first. `query` matches the email or the display
+        name; `status` keeps only `active` or `disabled` users. `organizationCount` is the number
+        of memberships, deleted organizations included. Platform admins only.
+      tags: [admin]
+      parameters:
+        - $ref: "#/components/parameters/AdminQuery"
+        - name: status
+          in: query
+          required: false
+          description: Only users with this status; omit for all
+          schema:
+            type: string
+            enum: [active, disabled]
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: One page of users
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserSummaryList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/users/{userId}:
+    parameters:
+      - $ref: "#/components/parameters/AdminUserId"
+    get:
+      operationId: adminGetUser
+      x-experimental: true
+      summary: One user with every membership
+      description: |
+        The user, every organization the user belongs to (deleted ones included, with their
+        status) and the number of open sessions in all organizations. Platform admins only.
+      tags: [admin]
+      responses:
+        "200":
+          description: The user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/users/{userId}/disable:
+    parameters:
+      - $ref: "#/components/parameters/AdminUserId"
+    post:
+      operationId: adminDisableUser
+      x-experimental: true
+      summary: Disable a user
+      description: |
+        The user can no longer sign in (password, OAuth or invitation) and all of the user's
+        sessions in every organization are deleted. Memberships stay. A platform admin cannot be
+        disabled (409 `urn:proreta:problem:system-admin`). Disabling a user who is already
+        disabled changes nothing and writes no audit row. Audited as `admin.user.disabled`
+        (`sessionsRevoked`), in the user's last used organization. Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: The user after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/users/{userId}/enable:
+    parameters:
+      - $ref: "#/components/parameters/AdminUserId"
+    post:
+      operationId: adminEnableUser
+      x-experimental: true
+      summary: Enable a user
+      description: |
+        Lets a disabled user sign in again; the sessions that were deleted when the user was
+        disabled stay deleted. Enabling a user who is already active changes nothing and writes no
+        audit row. Audited as `admin.user.enabled`, in the user's last used organization.
+        Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: The user after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/users/{userId}/sessions/revoke:
+    parameters:
+      - $ref: "#/components/parameters/AdminUserId"
+    post:
+      operationId: adminRevokeUserSessions
+      x-experimental: true
+      summary: Sign a user out everywhere
+      description: |
+        Deletes all of the user's sessions in every organization. `sessionsRevoked` is the number
+        of open sessions that were deleted. Audited as `admin.user.sessions_revoked`
+        (`sessionsRevoked`) only when that number is above zero. Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: The number of sessions deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserSessionsRevoked"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/admin/users/{userId}/reset-password:
     parameters:
       - name: userId
@@ -3070,6 +3243,14 @@ components:
       schema:
         type: string
         maxLength: 200
+    AdminUserId:
+      name: userId
+      in: path
+      required: true
+      description: User id; a value that is not a UUID is answered with 400
+      schema:
+        type: string
+        format: uuid
     Limit:
       name: limit
       in: query
@@ -4143,6 +4324,95 @@ components:
         isPlatformAdmin:
           type: boolean
           description: The system admin; its password is managed by its Secret and cannot be reset here
+    AdminUserSummary:
+      type: object
+      additionalProperties: false
+      required: [id, login, displayName, status, isPlatformAdmin, emailVerified, mustChangePassword, createdAt, organizationCount]
+      properties:
+        id:
+          type: string
+          format: uuid
+        login:
+          type: string
+          description: The email address (the system admin's login is not an address)
+        displayName:
+          type: string
+        status:
+          type: string
+          enum: [active, disabled]
+        isPlatformAdmin:
+          type: boolean
+        emailVerified:
+          type: boolean
+          description: Whether an identity provider or an emailed link confirmed the address
+        mustChangePassword:
+          type: boolean
+          description: The password was issued by someone else and has to be replaced at the next sign-in
+        createdAt:
+          type: string
+          format: date-time
+        organizationCount:
+          type: integer
+          minimum: 0
+    AdminUserSummaryList:
+      type: object
+      additionalProperties: false
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminUserSummary"
+        total:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+        offset:
+          type: integer
+    AdminUserMembership:
+      type: object
+      additionalProperties: false
+      required: [organizationId, organizationName, organizationSlug, organizationStatus, role, joinedAt]
+      properties:
+        organizationId:
+          type: string
+          format: uuid
+        organizationName:
+          type: string
+        organizationSlug:
+          type: string
+        organizationStatus:
+          type: string
+          enum: [active, suspended, deleted]
+        role:
+          $ref: "#/components/schemas/MembershipRole"
+        joinedAt:
+          type: string
+          format: date-time
+    AdminUserDetail:
+      type: object
+      additionalProperties: false
+      required: [user, memberships, openSessions]
+      properties:
+        user:
+          $ref: "#/components/schemas/AdminUserSummary"
+        memberships:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminUserMembership"
+        openSessions:
+          type: integer
+          minimum: 0
+          description: Sessions that have not expired, in all organizations
+    AdminUserSessionsRevoked:
+      type: object
+      additionalProperties: false
+      required: [sessionsRevoked]
+      properties:
+        sessionsRevoked:
+          type: integer
+          minimum: 0
     AdminUserList:
       type: object
       additionalProperties: false
