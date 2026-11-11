@@ -93,6 +93,7 @@ func newOAuthServerCookies(t *testing.T, env *pgtest.Env, opts auth.Options, cfg
 	if err := svc.BootstrapAdmin(ctx, adminLogin, hash); err != nil {
 		t.Fatal(err)
 	}
+	pgtest.MustExec(t, env.AdminConn(t), `UPDATE users SET password_must_change = false WHERE email = '`+adminLogin+`'`)
 	g, gh := newStub("google"), newStub("github")
 	flow, err := oauth.NewFlow([]byte(strings.Repeat("k", 32)), "https://proreta.example.com", nil, g, gh)
 	if err != nil {

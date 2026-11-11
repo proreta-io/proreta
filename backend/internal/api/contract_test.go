@@ -15,6 +15,7 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 
+	"github.com/proreta-io/proreta/backend/internal/auth"
 	"github.com/proreta-io/proreta/backend/internal/authz"
 
 	"github.com/proreta-io/proreta/backend/internal/api/gen"
@@ -219,6 +220,50 @@ func TestAuthzTableCoversSpec(t *testing.T) {
 		if !inSpec[id] {
 			t.Errorf("authorization table lists %q, which is not in the spec", id)
 		}
+	}
+}
+
+// While the user has to change the password, the authorization middleware lets through only
+// the session basics and the change itself; every other operation of the spec, public ones
+// aside, is refused before its handler runs.
+func TestAuthorizeRefusesEverythingButPasswordChange(t *testing.T) {
+	s := &server{log: discard()}
+	_, ops := specOperations(t)
+	allowed := []string{"getMe", "logout", "changePassword"}
+	var passed []string
+	for _, o := range ops {
+		called := false
+		h := s.authorize(func(context.Context, http.ResponseWriter, *http.Request, any) (any, error) {
+			called = true
+			return nil, nil
+		}, o.id)
+		slot := &sessionSlot{}
+		slot.once.Do(func() {
+			slot.principal = auth.Principal{Role: string(authz.Owner), MustChangePassword: true}
+		})
+		r := httptest.NewRequest(o.method, o.path, nil)
+		r = r.WithContext(context.WithValue(r.Context(), slotKey{}, slot))
+		_, err := h(r.Context(), httptest.NewRecorder(), r, nil)
+		public := slices.ContainsFunc(publicOperations, func(id string) bool { return strings.EqualFold(id, o.id) })
+		want := slices.ContainsFunc(allowed, func(id string) bool { return strings.EqualFold(id, o.id) })
+		switch {
+		case public:
+			if !called || err != nil {
+				t.Errorf("%s: public operation refused: called=%v err=%v", o.id, called, err)
+			}
+		case want:
+			passed = append(passed, o.id)
+			if !called || err != nil {
+				t.Errorf("%s: refused while a password change is required: called=%v err=%v", o.id, called, err)
+			}
+		default:
+			if called || !errors.Is(err, errPasswordChangeRequired) {
+				t.Errorf("%s %s (%s): called=%v err=%v, want password-change-required", o.method, o.path, o.id, called, err)
+			}
+		}
+	}
+	if len(passed) != len(allowed) {
+		t.Errorf("operations allowed: %v, want %v", passed, allowed)
 	}
 }
 

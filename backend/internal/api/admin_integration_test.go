@@ -44,6 +44,7 @@ func newAdminServer(t *testing.T, env *pgtest.Env, logs *lockedBuffer) *client {
 	if err := svc.BootstrapAdmin(ctx, adminLogin, hash); err != nil {
 		t.Fatal(err)
 	}
+	pgtest.MustExec(t, env.AdminConn(t), `UPDATE users SET password_must_change = false WHERE email = '`+adminLogin+`'`)
 	adminSvc, err := admin.NewService(pool, svc, admin.Options{Logger: log, Registerer: prometheus.NewRegistry()})
 	if err != nil {
 		t.Fatal(err)
@@ -278,6 +279,19 @@ func TestIntegrationAdminPanel(t *testing.T) {
 		}
 		userCookie, userCSRF = session(t, login)
 		uh = withCSRF(userCookie, userCSRF)
+		// The temporary password has to be replaced before anything else works.
+		if login.body["mustChangePassword"] != true {
+			t.Fatalf("temporary password login: %s", login.raw)
+		}
+		if r := c.do(http.MethodGet, "/api/v1/monitors", "", userCookie); r.code != http.StatusForbidden || r.body["type"] != "urn:proreta:problem:password-change-required" {
+			t.Fatalf("monitors with a temporary password: %d %s", r.code, r.raw)
+		}
+		cr := c.do(http.MethodPost, "/api/v1/auth/password", `{"currentPassword":"`+password+`","newPassword":"a fresh passphrase for alice"}`, uh)
+		if cr.code != http.StatusOK || cr.body["mustChangePassword"] != false {
+			t.Fatalf("change of the temporary password: %d %s", cr.code, cr.raw)
+		}
+		userCookie, userCSRF = session(t, cr)
+		uh = withCSRF(userCookie, userCSRF)
 		// The temporary password satisfies the registration policy (it could be registered).
 		if r := c.do(http.MethodPost, "/api/v1/auth/register", registerBody("dave@delta.example", password), map[string]string{"X-Forwarded-For": "198.51.100.30"}); r.code != http.StatusCreated {
 			t.Fatalf("temporary password against the policy: %d %s", r.code, r.raw)
@@ -432,5 +446,28 @@ func TestIntegrationAdminPanel(t *testing.T) {
 	// Other tenants are unaffected by all of it.
 	if r := c.do(http.MethodPost, "/api/v1/auth/login", `{"login":"bob@beta.example","password":"`+ownerPassword+`"}`, nil); r.code != http.StatusOK {
 		t.Fatalf("other tenant login: %d %s", r.code, r.raw)
+	}
+}
+
+// The generated first password of the platform admin has to be replaced before the panel opens.
+func TestIntegrationPlatformAdminFirstSignIn(t *testing.T) {
+	env := pgtest.New(t, pgtest.DBName("apiadminfirst"))
+	c := newAdminServer(t, env, &lockedBuffer{})
+	pgtest.MustExec(t, env.AdminConn(t), `UPDATE users SET password_must_change = true WHERE email = '`+adminLogin+`'`)
+	cookie, csrf := c.login()
+	h := withCSRF(cookie, csrf)
+	if r := c.do(http.MethodGet, "/api/v1/auth/me", "", h); r.code != http.StatusOK || r.body["mustChangePassword"] != true {
+		t.Fatalf("me: %d %s", r.code, r.raw)
+	}
+	if r := c.do(http.MethodGet, "/api/v1/admin/stats", "", h); r.code != http.StatusForbidden || r.body["type"] != "urn:proreta:problem:password-change-required" {
+		t.Fatalf("stats before the change: %d %s", r.code, r.raw)
+	}
+	r := c.do(http.MethodPost, "/api/v1/auth/password", `{"currentPassword":"`+adminPassword+`","newPassword":"a new admin passphrase"}`, h)
+	if r.code != http.StatusOK || r.body["mustChangePassword"] != false {
+		t.Fatalf("change: %d %s", r.code, r.raw)
+	}
+	cookie, csrf = session(t, r)
+	if r := c.do(http.MethodGet, "/api/v1/admin/stats", "", withCSRF(cookie, csrf)); r.code != http.StatusOK {
+		t.Fatalf("stats after the change: %d %s", r.code, r.raw)
 	}
 }

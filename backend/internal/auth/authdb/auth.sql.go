@@ -30,19 +30,22 @@ func (q *Queries) ActivateUser(ctx context.Context, id uuid.UUID) (int64, error)
 const applyConfiguredPasswordHash = `-- name: ApplyConfiguredPasswordHash :execrows
 UPDATE users
 SET password_hash = $1, password_changed_at = NULL, configured_password_hash = $1,
+    password_must_change = password_must_change OR $2,
     updated_at = CASE WHEN password_hash IS DISTINCT FROM $1 THEN now() ELSE updated_at END
-WHERE id = $2
+WHERE id = $3
 `
 
 type ApplyConfiguredPasswordHashParams struct {
 	PasswordHash *string
+	MustChange   bool
 	ID           uuid.UUID
 }
 
 // The configured admin hash replaces the password and clears the in-app marker; it is also
-// remembered, so that the next start can tell an unchanged Secret from a new one.
+// remembered, so that the next start can tell an unchanged Secret from a new one. A new hash
+// (must_change) asks for a change at the next sign-in; the flag is never cleared here.
 func (q *Queries) ApplyConfiguredPasswordHash(ctx context.Context, arg ApplyConfiguredPasswordHashParams) (int64, error) {
-	result, err := q.db.Exec(ctx, applyConfiguredPasswordHash, arg.PasswordHash, arg.ID)
+	result, err := q.db.Exec(ctx, applyConfiguredPasswordHash, arg.PasswordHash, arg.MustChange, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -91,8 +94,23 @@ func (q *Queries) GetMembershipRole(ctx context.Context, arg GetMembershipRolePa
 	return role, err
 }
 
+const getPasswordMustChange = `-- name: GetPasswordMustChange :one
+SELECT password_must_change
+FROM users
+WHERE id = $1
+`
+
+// Read for every authenticated request: while it is true the api answers only the session and
+// password-change operations.
+func (q *Queries) GetPasswordMustChange(ctx context.Context, id uuid.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, getPasswordMustChange, id)
+	var password_must_change bool
+	err := row.Scan(&password_must_change)
+	return password_must_change, err
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, display_name, status, is_platform_admin, updated_at, password_changed_at, configured_password_hash
+SELECT id, email, password_hash, display_name, status, is_platform_admin, updated_at, password_changed_at, configured_password_hash, password_must_change
 FROM users
 WHERE email = $1
 `
@@ -107,6 +125,7 @@ type GetUserByEmailRow struct {
 	UpdatedAt              time.Time
 	PasswordChangedAt      *time.Time
 	ConfiguredPasswordHash *string
+	PasswordMustChange     bool
 }
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEmailRow, error) {
@@ -122,22 +141,24 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEm
 		&i.UpdatedAt,
 		&i.PasswordChangedAt,
 		&i.ConfiguredPasswordHash,
+		&i.PasswordMustChange,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, display_name, status, is_platform_admin
+SELECT id, email, display_name, status, is_platform_admin, password_must_change
 FROM users
 WHERE id = $1
 `
 
 type GetUserByIDRow struct {
-	ID              uuid.UUID
-	Email           string
-	DisplayName     string
-	Status          string
-	IsPlatformAdmin bool
+	ID                 uuid.UUID
+	Email              string
+	DisplayName        string
+	Status             string
+	IsPlatformAdmin    bool
+	PasswordMustChange bool
 }
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (GetUserByIDRow, error) {
@@ -149,6 +170,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (GetUserByIDRow
 		&i.DisplayName,
 		&i.Status,
 		&i.IsPlatformAdmin,
+		&i.PasswordMustChange,
 	)
 	return i, err
 }
@@ -252,8 +274,8 @@ func (q *Queries) InsertUser(ctx context.Context, arg InsertUserParams) error {
 }
 
 const insertUserIfMissing = `-- name: InsertUserIfMissing :exec
-INSERT INTO users (id, email, password_hash, display_name)
-VALUES ($1, $2, $3, $4)
+INSERT INTO users (id, email, password_hash, display_name, password_must_change)
+VALUES ($1, $2, $3, $4, true)
 ON CONFLICT (email) DO NOTHING
 `
 
@@ -264,6 +286,7 @@ type InsertUserIfMissingParams struct {
 	DisplayName  string
 }
 
+// A user created from the Secret signs in with a password somebody else knows: it must change it.
 func (q *Queries) InsertUserIfMissing(ctx context.Context, arg InsertUserIfMissingParams) error {
 	_, err := q.db.Exec(ctx, insertUserIfMissing,
 		arg.ID,
@@ -383,7 +406,7 @@ func (q *Queries) LockUserForPasswordChange(ctx context.Context, id uuid.UUID) (
 
 const setUserPassword = `-- name: SetUserPassword :exec
 UPDATE users
-SET password_hash = $1, password_changed_at = $2, updated_at = $2
+SET password_hash = $1, password_changed_at = $2, password_must_change = false, updated_at = $2
 WHERE id = $3
 `
 

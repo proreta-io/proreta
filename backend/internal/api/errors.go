@@ -63,6 +63,7 @@ const (
 	problemDomainNotVerified  = "urn:proreta:problem:domain-not-verified"
 	problemDomainTaken        = "urn:proreta:problem:domain-taken"
 	problemDomainNotAllowed   = "urn:proreta:problem:domain-not-allowed"
+	problemPasswordChange     = "urn:proreta:problem:password-change-required" //nolint:gosec // G101: problem type URN, not a credential
 	problemInternal           = "urn:proreta:problem:internal"
 	problemFeatureUnavailable = "urn:proreta:problem:feature-unavailable"
 )
@@ -119,6 +120,9 @@ func writeError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 		// Only after a correct password (auth.Login), so it reveals nothing to a guess.
 		p.Type, p.Title, p.Status = problemAccountSuspended, "Account suspended", http.StatusForbidden
 		p.Detail = "This organization was suspended by the platform administrator. Contact them to restore access."
+	case errors.Is(err, errPasswordChangeRequired):
+		p.Type, p.Title, p.Status = problemPasswordChange, "Password change required", http.StatusForbidden
+		p.Detail = "Choose a new password first (POST /api/v1/auth/password); nothing else works until then."
 	case errors.As(err, &featureErr):
 		p.Type, p.Title, p.Status = problemFeatureUnavailable, "Feature not available", http.StatusForbidden
 		p.Detail = fmt.Sprintf("The plan of this organization does not include the %q feature.", featureErr.feature)

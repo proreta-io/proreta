@@ -256,6 +256,7 @@ func TestIntegrationEndToEnd(t *testing.T) {
 	if err := authSvc.BootstrapAdmin(ctx, adminLogin, hash); err != nil {
 		t.Fatal(err)
 	}
+	pgtest.MustExec(t, env.AdminConn(t), `UPDATE users SET password_must_change = false WHERE email = '`+adminLogin+`'`)
 	sched := scheduler.New()
 	// Drives the api's in-memory rate limits (one heartbeat ping per token per second).
 	apiClock := clock.NewFake(time.Now())

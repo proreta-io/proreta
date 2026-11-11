@@ -312,7 +312,7 @@ func (s *Service) joinExistingAccount(ctx context.Context, row authdb.GetUserByE
 			return err
 		}
 		res = LoginResult{Token: sess.token, SessionInfo: SessionInfo{
-			User: User{ID: row.ID, Login: row.Email, DisplayName: row.DisplayName}, Tenant: t, Role: role,
+			User: User{ID: row.ID, Login: row.Email, DisplayName: row.DisplayName, MustChangePassword: row.PasswordMustChange}, Tenant: t, Role: role,
 			CSRFToken: sess.csrf, ExpiresAt: sess.expiresAt,
 		}}
 		return nil

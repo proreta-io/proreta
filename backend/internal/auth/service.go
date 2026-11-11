@@ -246,7 +246,7 @@ func (s *Service) BootstrapAdmin(ctx context.Context, login, passwordHash string
 		if adopted || !keepChosen {
 			changed = u.PasswordHash == nil || *u.PasswordHash != passwordHash
 			if changed || u.PasswordChangedAt != nil || u.ConfiguredPasswordHash == nil || *u.ConfiguredPasswordHash != passwordHash {
-				if _, err := q.ApplyConfiguredPasswordHash(ctx, authdb.ApplyConfiguredPasswordHashParams{ID: u.ID, PasswordHash: &passwordHash}); err != nil {
+				if _, err := q.ApplyConfiguredPasswordHash(ctx, authdb.ApplyConfiguredPasswordHashParams{ID: u.ID, PasswordHash: &passwordHash, MustChange: changed || adopted}); err != nil {
 					return fmt.Errorf("update admin password hash: %w", err)
 				}
 			}
@@ -374,6 +374,9 @@ type User struct {
 	DisplayName string
 	// IsPlatformAdmin is set only for the configured system admin.
 	IsPlatformAdmin bool
+	// MustChangePassword is set while the password was issued by somebody else (the admin's
+	// Secret, a temporary password from the panel): the api refuses everything but changing it.
+	MustChangePassword bool
 }
 
 // SessionInfo describes the current session.
@@ -401,6 +404,8 @@ type Principal struct {
 	Role      string
 	CSRFToken string
 	ExpiresAt time.Time
+	// MustChangePassword is read on every request, like Role.
+	MustChangePassword bool
 }
 
 // Login verifies credentials and creates a session.
@@ -588,7 +593,7 @@ func (s *Service) checkPassword(ctx context.Context, login, password string) (*U
 	if row == nil {
 		return nil, uuid.Nil, credential{}, false, nil
 	}
-	u := &User{ID: row.ID, Login: row.Email, DisplayName: row.DisplayName, IsPlatformAdmin: row.IsPlatformAdmin}
+	u := &User{ID: row.ID, Login: row.Email, DisplayName: row.DisplayName, IsPlatformAdmin: row.IsPlatformAdmin, MustChangePassword: row.PasswordMustChange}
 	ok := match && hash != s.dummy && row.Status == userStatusActive
 	var cred credential
 	if ok {
@@ -742,6 +747,13 @@ func (s *Service) Authenticate(ctx context.Context, token string) (Principal, er
 			return fmt.Errorf("get membership: %w", err)
 		}
 		p.Role = role
+		p.MustChangePassword, err = authdb.New(tx).GetPasswordMustChange(ctx, p.UserID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrUnauthenticated
+		}
+		if err != nil {
+			return fmt.Errorf("get password flag: %w", err)
+		}
 		return nil
 	})
 	if errors.Is(err, ErrUnauthenticated) {
@@ -789,7 +801,7 @@ func (s *Service) Me(ctx context.Context, p Principal) (SessionInfo, error) {
 			return err
 		}
 		info = SessionInfo{
-			User:   User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, IsPlatformAdmin: u.IsPlatformAdmin},
+			User:   User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, IsPlatformAdmin: u.IsPlatformAdmin, MustChangePassword: u.PasswordMustChange},
 			Tenant: t, Role: role, CSRFToken: p.CSRFToken, ExpiresAt: p.ExpiresAt,
 		}
 		return nil
