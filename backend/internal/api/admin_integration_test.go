@@ -236,13 +236,13 @@ func TestIntegrationAdminPanel(t *testing.T) {
 				t.Errorf("%s default: %d %s", rq.method, r.code, r.raw)
 			}
 		}
-		// The system admin's password is managed by its Secret.
+		// The system admin changes its own password.
 		var adminID string
 		if err := env.AdminConn(t).QueryRow(ctx, `SELECT id::text FROM users WHERE email = 'admin'`).Scan(&adminID); err != nil {
 			t.Fatal(err)
 		}
 		r := c.do(http.MethodPost, "/api/v1/admin/users/"+adminID+"/reset-password", "", ah)
-		if r.code != http.StatusConflict || r.body["type"] != "urn:proreta:problem:system-admin" || !strings.Contains(fmt.Sprint(r.body["detail"]), "Secret") {
+		if r.code != http.StatusConflict || r.body["type"] != "urn:proreta:problem:system-admin" || !strings.Contains(fmt.Sprint(r.body["detail"]), "Profile") {
 			t.Fatalf("reset of the system admin: %d %s", r.code, r.raw)
 		}
 		if r := c.do(http.MethodPost, "/api/v1/admin/users/0192b9c4-7c5e-7000-8000-000000000999/reset-password", "", ah); r.code != http.StatusNotFound {

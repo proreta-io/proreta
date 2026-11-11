@@ -10,6 +10,7 @@ import {
   type OAuthProvider,
 } from "../api/endpoints";
 import { useAuth } from "../auth/AuthProvider";
+import ChangePasswordForm from "../components/ChangePasswordForm";
 import { useToast } from "../components/Toasts";
 import {
   Alert,
@@ -55,6 +56,7 @@ export default function Profile() {
     identities.data?.items.some((i) => i.provider === param)
       ? (param as OAuthProvider)
       : undefined;
+  const passwordUsable = identities.data?.passwordSet && identities.data.passwordLoginEnabled;
   return (
     <section className="flex max-w-[960px] flex-col gap-6">
       <h1 className="pt-6 text-headline leading-[1.1] font-semibold tracking-[-0.02em] sm:pt-10 sm:text-display">
@@ -89,6 +91,17 @@ export default function Profile() {
         </h2>
         <SignInMethods />
       </section>
+      {passwordUsable && (
+        <section aria-labelledby="password-heading" className="flex flex-col gap-3">
+          <h2 id="password-heading" className="text-lead font-semibold">
+            Change password
+          </h2>
+          <p className="max-w-[60ch] text-muted-foreground">
+            Your other devices are signed out when the password changes.
+          </p>
+          <ChangePasswordForm />
+        </section>
+      )}
     </section>
   );
 }

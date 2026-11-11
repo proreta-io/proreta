@@ -113,11 +113,11 @@ kubectl -n gateway-system get gateway gateway     # ADDRESS: point the DNS name 
 kubectl -n proreta get secret proreta-admin-initial -o jsonpath='{.data.login}' | base64 -d; echo
 kubectl -n proreta get secret proreta-admin-initial -o jsonpath='{.data.password}' | base64 -d; echo
 ```
-Open `config.publicUrl`, sign in with that login (default `admin`) and password and store the password in a password manager. The application reads only the hash (Secret `proreta-admin`), so nothing breaks if you keep `proreta-admin-initial`, but it is the live password in plain text and readable by everyone who can read Secrets in the namespace, so deleting it is recommended. It is never recreated:
+Open `config.publicUrl` and sign in with that login (default `admin`) and password. Then choose your own password under **Profile → Change password** and store it in a password manager. The application reads only the hash (Secret `proreta-admin`), so nothing breaks if you keep `proreta-admin-initial`, but it is the live first password in plain text and readable by everyone who can read Secrets in the namespace, so deleting it is recommended once you have changed the password. It is never recreated:
 ```sh
 kubectl -n proreta delete secret proreta-admin-initial
 ```
-There is no way to change this password in the app yet. To reset it, delete the Secrets `proreta-admin` and `proreta-admin-initial`, run the same `helm upgrade` again (a new one-time password is generated) and restart the api, which reads the hash only at start: `kubectl -n proreta rollout restart deploy/proreta-api` ([admin panel runbook](runbooks/admin-panel.md)).
+A password you chose in the app is kept: the api compares the hash in the Secret `proreta-admin` with the one it saw at its previous start and only applies it when it is a new one. If you lose the password, reset it: delete the Secrets `proreta-admin` and `proreta-admin-initial`, run the same `helm upgrade` again (a new one-time password is generated), restart the api (`kubectl -n proreta rollout restart deploy/proreta-api`) and sign in with the new one-time password, which replaces the one you chose and ends the admin's sessions ([admin panel runbook](runbooks/admin-panel.md)).
 
 **7. Start using it.** The admin is the owner of the organization **Default** (slug `default`; plan `internal`: up to 1000 monitors, 100 heartbeats, 10 notification channels, 50 members). For a single company that is all you need: add monitors there and invite colleagues under **Members → Invite someone** (an invitation link works while registration is off; see [invitations](runbooks/invitations.md)). Self-service registration (`config.registrationEnabled: true`) is only for letting other people create separate organizations (plan `free`); there is no email verification, so leave it off unless you want that.
 
@@ -199,7 +199,7 @@ For a local trial (kind, minikube) you can skip the Gateway controller, but the 
 kubectl -n proreta port-forward svc/proreta-api 8080:8080     # the API
 kubectl -n proreta port-forward svc/proreta-web 8081:8080     # the web app, http://localhost:8081
 ```
-Over plain http the `Secure` session cookie is not kept, so for such a trial only, set `config.cookieSecure: false` (the cookie is then named `proreta_session` instead of `__Host-proreta_session`). Never do this in production. The web app expects `/api` on the same origin, so without a Gateway use the API directly with `curl`:
+Over plain http the `Secure` session cookie is not kept, so for such a trial only, set `config.cookieSecure: false` (with a `config.publicUrl` such as `http://localhost:8081`, which is accepted only for `localhost`, `127.0.0.1` and `[::1]` and then requires `cookieSecure: false`; the cookie is then named `proreta_session` instead of `__Host-proreta_session`). Never do this in production. The web app expects `/api` on the same origin, so without a Gateway use the API directly with `curl`:
 ```sh
 ADMIN_PASSWORD=$(kubectl -n proreta get secret proreta-admin-initial -o jsonpath='{.data.password}' | base64 -d)
 curl -s -c jar -H 'Content-Type: application/json' \

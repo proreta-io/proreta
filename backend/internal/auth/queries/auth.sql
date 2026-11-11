@@ -1,5 +1,5 @@
 -- name: GetUserByEmail :one
-SELECT id, email, password_hash, display_name, status, is_platform_admin, updated_at
+SELECT id, email, password_hash, display_name, status, is_platform_admin, updated_at, password_changed_at, configured_password_hash
 FROM users
 WHERE email = @email;
 
@@ -22,10 +22,38 @@ INSERT INTO users (id, email, password_hash, display_name)
 VALUES (@id, @email, @password_hash, @display_name)
 ON CONFLICT (email) DO NOTHING;
 
--- name: UpdateUserPasswordHash :execrows
+-- name: ApplyConfiguredPasswordHash :execrows
+-- The configured admin hash replaces the password and clears the in-app marker; it is also
+-- remembered, so that the next start can tell an unchanged Secret from a new one.
 UPDATE users
-SET password_hash = @password_hash, updated_at = now()
-WHERE id = @id AND password_hash IS DISTINCT FROM @password_hash;
+SET password_hash = @password_hash, password_changed_at = NULL, configured_password_hash = @password_hash,
+    updated_at = CASE WHEN password_hash IS DISTINCT FROM @password_hash THEN now() ELSE updated_at END
+WHERE id = @id;
+
+-- name: LockUserForPasswordChange :one
+-- The password change re-reads the credential it verified; FOR UPDATE makes concurrent changes
+-- and resets wait for each other.
+SELECT email, password_hash, status, updated_at
+FROM users
+WHERE id = @id
+FOR UPDATE;
+
+-- name: SetUserPassword :exec
+UPDATE users
+SET password_hash = @password_hash, password_changed_at = @changed_at, updated_at = @changed_at
+WHERE id = @id;
+
+-- name: LockLiveSession :one
+-- A password change acts only for a session that still exists.
+SELECT id
+FROM sessions
+WHERE id = @id AND expires_at > @now
+FOR UPDATE;
+
+-- name: GetUserCredential :one
+SELECT email, password_hash, display_name, status, is_platform_admin
+FROM users
+WHERE id = @id;
 
 -- name: UpsertMembership :exec
 INSERT INTO memberships (tenant_id, user_id, role)

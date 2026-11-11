@@ -297,7 +297,16 @@ func TestPublicURL(t *testing.T) {
 					t.Errorf("%q: got %q, %v", ok, got, err)
 				}
 			}
-			for _, bad := range []string{"", "http://proreta.example.com", "https://proreta.example.com/", "proreta.example.com",
+			e["PRORETA_COOKIE_SECURE"] = "false"
+			for _, ok := range []string{"http://localhost", "http://localhost:5173", "http://127.0.0.1:8080", "http://[::1]:5173"} {
+				e["PRORETA_PUBLIC_URL"] = ok
+				if got, err := load(env(e)); err != nil || got != ok {
+					t.Errorf("%q: got %q, %v", ok, got, err)
+				}
+			}
+			delete(e, "PRORETA_COOKIE_SECURE")
+			for _, bad := range []string{"", "http://proreta.example.com", "http://localhost.example.com", "http://127.0.0.2", "http://0.0.0.0:8080",
+				"http://localhost/", "http://user@localhost", "ftp://localhost", "https://proreta.example.com/", "proreta.example.com",
 				"https://user:pw@proreta.example.com", "https://proreta.example.com?x=1", "https://proreta.example.com#a",
 				"https://proreta.example.com/a|b", "https://proreta.example.com/<x>", "https://"} {
 				e["PRORETA_PUBLIC_URL"] = bad
@@ -487,5 +496,50 @@ func TestCookieInsecureOverHTTPS(t *testing.T) {
 		if got := CookieInsecureOverHTTPS(c.secure, c.url); got != c.want {
 			t.Errorf("CookieInsecureOverHTTPS(%v, %q) = %v, want %v", c.secure, c.url, got, c.want)
 		}
+	}
+}
+
+// Plain http is for local development only: it needs a loopback host and explicit non-Secure cookies.
+func TestHTTPPublicURLNeedsInsecureCookies(t *testing.T) {
+	e := apiEnv(t)
+	e["PRORETA_PUBLIC_URL"] = "http://localhost:5173"
+	if _, err := LoadAPI(env(e)); err == nil || !strings.Contains(err.Error(), "PRORETA_COOKIE_SECURE") {
+		t.Fatalf("api accepted http with secure cookies: %v", err)
+	}
+	e["PRORETA_COOKIE_SECURE"] = "false"
+	if cfg, err := LoadAPI(env(e)); err != nil || cfg.CookieSecure {
+		t.Fatalf("api: %v, secure=%v", err, cfg.CookieSecure)
+	}
+
+	key := base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+	s := map[string]string{
+		"PRORETA_DATABASE_URL":          "postgres://proreta_statuspage:pw@db:5432/proreta?sslmode=require",
+		"PRORETA_PUBLIC_URL":            "http://127.0.0.1:5173",
+		"PRORETA_STATUSPAGE_COOKIE_KEY": key,
+	}
+	if _, err := LoadStatuspage(env(s)); err == nil || !strings.Contains(err.Error(), "PRORETA_COOKIE_SECURE") {
+		t.Fatalf("statuspage accepted http with secure cookies: %v", err)
+	}
+	s["PRORETA_COOKIE_SECURE"] = "false"
+	if _, err := LoadStatuspage(env(s)); err != nil {
+		t.Fatal(err)
+	}
+
+	// jobs sets no cookies: only the URL rule applies.
+	j := apiEnv(t)
+	j["PRORETA_PUBLIC_URL"] = "http://localhost:5173"
+	if _, err := LoadJobs(env(j)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBootstrapSecretFile(t *testing.T) {
+	e := map[string]string{
+		"PRORETA_BOOTSTRAP_HOST": "127.0.0.1", "PRORETA_BOOTSTRAP_ADMIN_USER": "postgres", "PRORETA_BOOTSTRAP_ADMIN_PASSWORD": "pw",
+		"PRORETA_BOOTSTRAP_SECRET_FILE": "/tmp/db.secret",
+	}
+	cfg, err := LoadBootstrap(env(e))
+	if err != nil || cfg.SecretFile != "/tmp/db.secret" {
+		t.Fatalf("secret file = %q, %v", cfg.SecretFile, err)
 	}
 }

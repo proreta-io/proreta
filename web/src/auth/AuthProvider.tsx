@@ -22,6 +22,8 @@ export interface AuthValue {
     displayName?: string,
   ) => Promise<void>;
   logout: () => Promise<void>;
+  /** Changes the password; the other devices are signed out and this session is replaced. */
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   /** Moves the session to another organization; every cached answer of the old one is dropped. */
   switchOrganization: (organizationId: string) => Promise<void>;
   /** Joins an organization with an invitation; the session moves there. */
@@ -105,6 +107,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       register: async (email, password, inviteToken, displayName) => {
         const session = await api.register(email, password, inviteToken, displayName);
+        queryClient.setQueryData(queryKeys.me, session);
+        announce();
+      },
+      changePassword: async (currentPassword, newPassword) => {
+        const session = await api.changePassword(currentPassword, newPassword);
         queryClient.setQueryData(queryKeys.me, session);
         announce();
       },

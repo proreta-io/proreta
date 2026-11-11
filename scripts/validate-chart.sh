@@ -34,6 +34,7 @@ tar -xzf "$packaged/proreta-1.2.3.tgz" -C "$packaged"
 combos=(
   "defaults|$min"
   "defaults-url-port|$min --set config.publicUrl=https://Status.Example.org:8443/proreta"
+  "local-http|$min --set config.publicUrl=http://localhost:8081 --set config.cookieSecure=false"
   "defaults-hostnames|$min --set httpRoute.hostnames[0]=proreta.example.com --set httpRoute.hostnames[1]=status.example.com"
   "example|-f $example $tag"
   "example-bootstrap-force|-f $example $tag --set database.bootstrap.force=true"
@@ -140,6 +141,8 @@ expect_fail "External Secrets without a store name" --msg "externalSecrets.secre
 expect_fail "image tag with a leading v" --set image.tag=v1.2.3
 expect_fail "hostname with an inner wildcard" -f "$example" --set "httpRoute.hostnames[0]=a*b.example.com"
 expect_fail "http public URL" --set config.publicUrl=http://proreta.example.com
+expect_fail "http localhost public URL with Secure cookies" --msg "cookieSecure" --set config.publicUrl=http://localhost:8081
+expect_fail "http public URL on another host even without Secure cookies" --set config.publicUrl=http://localhost.example.com --set config.cookieSecure=false
 expect_fail "public URL with trailing slash" --set config.publicUrl=https://proreta.example.com/
 expect_fail "PreSync migration with bootstrap" -f "$example" --set database.bootstrap.enabled=true --set migration.hookPhase=PreSync
 expect_fail "session TTL that is not a duration" --msg "sessionTTL" --set config.sessionTTL=tomorrow
@@ -178,7 +181,7 @@ def route(name):
     r = [d for d in docs if d["kind"] == "HTTPRoute"]
     return r[0]["spec"] if r else None
 want = {"defaults": ["proreta.example.com"], "example": ["proreta.example.com"],
-        "defaults-url-port": ["status.example.org"],
+        "defaults-url-port": ["status.example.org"], "local-http": ["localhost"],
         "defaults-hostnames": ["proreta.example.com", "status.example.com"]}
 for name, hosts in want.items():
     got = route(name)["hostnames"]

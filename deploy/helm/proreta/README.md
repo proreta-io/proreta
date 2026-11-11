@@ -55,10 +55,10 @@ not contain `proreta` (`fullnameOverride` replaces it).
 | `image.tag` | `""` | `X.Y.Z` (no `v`) or `sha-<7 hex>`. Empty: the chart's `appVersion` (packaged chart only; required from a git checkout). |
 | `image.pullPolicy` | `IfNotPresent` | Pull policy of every container. |
 | `imagePullSecrets` | `[]` | Pull secrets for a private registry, `[{name: ...}]`. |
-| `config.publicUrl` | `""` | **Required.** The https URL users open, no trailing slash. Its host is the default of `httpRoute.hostnames`. |
+| `config.publicUrl` | `""` | **Required.** The https URL users open, no trailing slash. `http://` is accepted only for `localhost`, `127.0.0.1` and `[::1]` (local trial) and then needs `config.cookieSecure: false`. Its host is the default of `httpRoute.hostnames`. |
 | `config.logLevel` | `info` | `PRORETA_LOG_LEVEL`. |
 | `config.adminPort` | `9090` | Health and metrics port of the backend pods. |
-| `config.sessionTTL`, `config.cookieSecure` | `24h`, `true` | Session lifetime; `Secure` cookies (keep `true`). |
+| `config.sessionTTL`, `config.cookieSecure` | `24h`, `true` | Session lifetime; `Secure` cookies (keep `true`; `false` only with an `http://localhost` `config.publicUrl`, the api and statuspage refuse to start otherwise). |
 | `config.trustedProxyHops` | `0` | Trusted proxies in front of the api; `1` behind one Gateway. |
 | `config.registrationEnabled` | `false` | Self-service creation of organizations (no email verification). |
 | `config.passwordLoginEnabled` | `true` | `false`: password form for the platform admin only; needs an OAuth provider. |
@@ -133,7 +133,7 @@ helm lint --strict deploy/helm/proreta -f deploy/helm/proreta/values.example.yam
 helm template proreta deploy/helm/proreta -n proreta -f deploy/helm/proreta/values.example.yaml --set image.tag=sha-0000000
 ```
 
-`values.schema.json` rejects, among others, unknown keys, a `config.publicUrl` that is not https or ends with a slash,
+`values.schema.json` rejects, among others, unknown keys, a `config.publicUrl` that is not https (except `http://` on localhost, which needs `config.cookieSecure: false`) or ends with a slash,
 a `config.registrationEnabled` that is not a boolean, an admin login outside 3-254 of `[a-z0-9._@+-]`,
 `externalSecrets.enabled` without a store and a workload without `resources.requests` and `resources.limits`. The
 templates additionally fail with a message for a missing image tag, a missing `config.publicUrl`, a missing
@@ -210,7 +210,8 @@ Workloads always read `<fullname>-admin` (`login`, `password_hash`) and `<fullna
   in the cluster when it is absent and never overwrites it (an incomplete existing Secret fails the Job).
   - admin: login `secrets.admin.login` (default `admin`, stored under the key `login`), a random password whose
     argon2id hash goes to `<fullname>-admin`; the plaintext goes ONCE to `<fullname>-admin-initial`
-    (`login`, `password`). Read it, log in, delete `<fullname>-admin-initial`. It is never recreated.
+    (`login`, `password`). Read it, log in, change the password under Profile, delete `<fullname>-admin-initial`
+    (always safe, nothing reads it). It is never recreated.
   - crypto: one random 32-byte key with id `secrets.crypto.keyId` (default `k1`). It lives only in the cluster;
     deleting the namespace loses it (it only encrypts the Slack webhook URLs, which can then only be re-entered). Export it first: [docs/install.md](../../../docs/install.md#back-up-the-secrets).
 - `externalSecret`: an ExternalSecret (`externalSecrets.secretStoreRef`, wave -2) materialises it. Needs
@@ -234,7 +235,9 @@ The secrets Job (`<fullname>-secrets-bootstrap`, rendered when any source is `ge
 with an API token and a Role limited to `create` on secrets and `get,update,patch` on exactly `<fullname>-admin`,
 `<fullname>-admin-initial`, `<fullname>-crypto` (and `<fullname>-statuspage`). It has no database credentials, so
 unlike the database bootstrap it stays enabled. Admin password reset: delete `<fullname>-admin` (and
-`<fullname>-admin-initial` if still there), run the upgrade again and restart the api.
+`<fullname>-admin-initial` if still there), run the upgrade again and restart the api. The api applies the hash of
+`<fullname>-admin` only when the admin never changed its password in the app, or when the hash is a new one; a restart
+with the same hash keeps a password chosen in the app.
 
 ### The database Secret
 
