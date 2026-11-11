@@ -40,6 +40,7 @@ export const session = {
   csrfToken: "csrf-1",
   expiresAt: "2030-01-01T00:00:00Z",
   features: [] as string[],
+  mustChangePassword: false,
 };
 
 export const signedIn = { "GET /api/v1/auth/me": () => json(session) };

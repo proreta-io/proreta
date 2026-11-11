@@ -21,6 +21,8 @@ export const ALREADY_MEMBER_PROBLEM_TYPE = "urn:proreta:problem:already-member";
 /** Changing the password: the user has none (provider sign-in only), or password sign-in is off. */
 export const NO_PASSWORD_PROBLEM_TYPE = "urn:proreta:problem:no-password";
 export const PASSWORD_LOGIN_DISABLED_PROBLEM_TYPE = "urn:proreta:problem:password-login-disabled";
+/** The password was issued by somebody else: only the session basics and the change work. */
+export const PASSWORD_CHANGE_REQUIRED_PROBLEM_TYPE = "urn:proreta:problem:password-change-required";
 const LOGIN_PATH = "/api/v1/auth/login";
 /** A wrong password for an existing account when joining through an invitation is a 401 too. */
 const REGISTER_PATH = "/api/v1/auth/register";
@@ -43,6 +45,16 @@ export function setUnauthorizedHandler(handler: () => void): () => void {
   unauthorizedHandler = handler;
   return () => {
     if (unauthorizedHandler === handler) unauthorizedHandler = null;
+  };
+}
+
+let passwordChangeHandler: (() => void) | null = null;
+
+/** Registers the function called when the server asks for a password change first. */
+export function setPasswordChangeHandler(handler: () => void): () => void {
+  passwordChangeHandler = handler;
+  return () => {
+    if (passwordChangeHandler === handler) passwordChangeHandler = null;
   };
 }
 
@@ -174,6 +186,21 @@ export async function apiFetch(request: Request): Promise<Response> {
   const path = new URL(request.url).pathname;
   if (response.status === 401 && path !== LOGIN_PATH && path !== REGISTER_PATH) {
     unauthorizedHandler?.();
+  }
+  if (response.status === 403 && passwordChangeHandler) {
+    // The session was flagged after the page loaded it: ask the server again, the shell then
+    // shows the password screen. The body is read from a copy, the caller still gets its own.
+    const problem: unknown = await response
+      .clone()
+      .json()
+      .catch(() => null);
+    if (
+      typeof problem === "object" &&
+      problem !== null &&
+      (problem as { type?: unknown }).type === PASSWORD_CHANGE_REQUIRED_PROBLEM_TYPE
+    ) {
+      passwordChangeHandler();
+    }
   }
   return response;
 }

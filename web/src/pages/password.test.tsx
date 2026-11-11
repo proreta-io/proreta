@@ -132,3 +132,106 @@ describe("change password on the profile page", () => {
     );
   });
 });
+
+describe("first sign-in: a password issued by somebody else", () => {
+  const flagged = { ...session, mustChangePassword: true };
+  const flaggedMe = { "GET /api/v1/auth/me": () => json(flagged) };
+
+  it("shows only the set-a-new-password screen, on any address", async () => {
+    mockApi({ ...flaggedMe, "GET /api/v1/monitors": () => json({ items: [] }) });
+    renderApp("/settings");
+    expect(await screen.findByRole("heading", { name: "Set a new password" })).toBeInTheDocument();
+    expect(
+      screen.getByText("This is your first sign-in. Choose a new password to continue."),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Current password")).toHaveFocus();
+    // No navigation of the app, no way around it.
+    expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Monitors|Profile/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+  });
+
+  it("sends an invitation visit and the login page to the same screen", async () => {
+    mockApi({ ...flaggedMe, "GET /api/v1/auth/providers": () => json({ providers: [] }) });
+    renderApp("/login");
+    expect(await screen.findByRole("heading", { name: "Set a new password" })).toBeInTheDocument();
+  });
+
+  it("changes the password and continues to the page that was asked for", async () => {
+    let body: unknown;
+    mockApi({
+      ...flaggedMe,
+      "POST /api/v1/auth/password": async (r) => {
+        body = await r.json();
+        return json({ ...session, csrfToken: "csrf-2" });
+      },
+      "GET /api/v1/auth/identities": () =>
+        json({ items: [], passwordSet: true, passwordLoginEnabled: true }),
+      "GET /api/v1/auth/providers": () =>
+        json({ providers: [], passwordLoginEnabled: true, registrationEnabled: false }),
+    });
+    renderApp("/profile");
+    await fill("one-time password", NEW);
+    await userEvent.click(screen.getByRole("button", { name: "Set new password" }));
+    expect(await screen.findByRole("heading", { name: "Profile" })).toBeInTheDocument();
+    expect(body).toEqual({ currentPassword: "one-time password", newPassword: NEW });
+    expect(screen.queryByRole("heading", { name: "Set a new password" })).not.toBeInTheDocument();
+  });
+
+  it("refuses the one-time password as the new one before sending anything", async () => {
+    const fetchMock = mockApi({ ...flaggedMe });
+    renderApp("/");
+    await fill("one-time password", "one-time password");
+    await userEvent.click(screen.getByRole("button", { name: "Set new password" }));
+    expect(
+      await screen.findByText("Choose a password different from the current one"),
+    ).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([r]) => (r as Request).url.endsWith("/auth/password"))).toBe(
+      false,
+    );
+  });
+
+  it("shows a wrong current password on its field", async () => {
+    mockApi({
+      ...flaggedMe,
+      "POST /api/v1/auth/password": () =>
+        problem(422, "Validation failed", {
+          type: "urn:proreta:problem:validation",
+          fieldErrors: [{ field: "currentPassword", message: "is not correct" }],
+        }),
+    });
+    renderApp("/");
+    await fill("wrong one", NEW);
+    await userEvent.click(screen.getByRole("button", { name: "Set new password" }));
+    expect(await screen.findByText("Current password is not correct")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Set a new password" })).toBeInTheDocument();
+  });
+
+  it("shows the screen when the server asks for the change after the page loaded", async () => {
+    let flag = false;
+    mockApi({
+      "GET /api/v1/auth/me": () => json({ ...session, mustChangePassword: flag }),
+      "GET /api/v1/monitors": () => {
+        flag = true;
+        return problem(403, "Password change required", {
+          type: "urn:proreta:problem:password-change-required",
+        });
+      },
+      "GET /api/v1/projects": () => json({ items: [] }),
+    });
+    renderApp("/");
+    expect(await screen.findByRole("heading", { name: "Set a new password" })).toBeInTheDocument();
+  });
+
+  it("signs out from the screen", async () => {
+    mockApi({
+      ...flaggedMe,
+      "POST /api/v1/auth/logout": () => new Response(null, { status: 204 }),
+    });
+    renderApp("/");
+    await userEvent.click(await screen.findByRole("button", { name: "Sign out" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: "Set a new password" })).toBeNull(),
+    );
+  });
+});
