@@ -1,16 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
-import { ApiError, errorMessage } from "../../api/client";
+import { useEffect, useState, type FormEvent } from "react";
+import { Link } from "react-router-dom";
+import { errorMessage } from "../../api/client";
 import {
-  addAdminMemberByEmail,
+  listAdminAllUsers,
   listAdminMembers,
   queryKeys,
   removeAdminMember,
+  resetAdminUserPassword,
   setAdminMember,
   type AdminMember,
   type AdminOrganization,
+  type AdminUserSummary,
   type MembershipRole,
 } from "../../api/endpoints";
+import TemporaryPasswordPanel from "../../components/TemporaryPasswordPanel";
 import { useToast } from "../../components/Toasts";
 import {
   Alert,
@@ -36,7 +40,11 @@ const ROLES: MembershipRole[] = ["owner", "admin", "member", "viewer"];
 
 type Pending =
   | { kind: "role"; member: AdminMember; role: MembershipRole }
-  | { kind: "remove"; member: AdminMember };
+  | { kind: "remove"; member: AdminMember }
+  | { kind: "reset"; member: AdminMember };
+
+/** How many matches the picker shows; the search narrows the rest. */
+const MATCHES_SHOWN = 8;
 
 /** Members of an organization as the platform admin manages them. */
 export default function AdminOrganizationMembers({
@@ -52,10 +60,24 @@ export default function AdminOrganizationMembers({
     queryFn: () => listAdminMembers(organization.id),
   });
   const [pending, setPending] = useState<Pending | null>(null);
-  const [email, setEmail] = useState("");
+  const [search, setSearch] = useState("");
+  const [term, setTerm] = useState("");
+  const [picked, setPicked] = useState<AdminUserSummary | null>(null);
   const [role, setRole] = useState<MembershipRole>("member");
   const [addError, setAddError] = useState<string | undefined>();
-  const [noAccount, setNoAccount] = useState(false);
+  // The temporary password lives only here: never in storage, gone when hidden or the page is
+  // left. The mutation keeps no copy: gcTime 0 and reset() right after copying it.
+  const [temporary, setTemporary] = useState<{ login: string; password: string } | null>(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => setTerm(search.trim()), 250);
+    return () => clearTimeout(t);
+  }, [search]);
+  const matches = useQuery({
+    queryKey: queryKeys.adminAllUsers(term, "", 0),
+    queryFn: () => listAdminAllUsers(term, "", 0),
+    enabled: term.length >= 2 && picked === null,
+  });
 
   function refresh() {
     void queryClient.invalidateQueries({ queryKey: queryKeys.adminMembers(organization.id) });
@@ -91,30 +113,37 @@ export default function AdminOrganizationMembers({
   });
 
   const add = useMutation({
-    mutationFn: () => addAdminMemberByEmail(organization.id, email.trim(), role),
+    mutationFn: (user: AdminUserSummary) => setAdminMember(organization.id, user.id, role),
     onSuccess: (added) => {
-      setEmail("");
+      setPicked(null);
+      setSearch("");
+      setTerm("");
       setAddError(undefined);
-      setNoAccount(false);
       refresh();
       toast(`${added.login} is ${ROLE_LABELS[added.role].toLowerCase()} now`);
     },
+    onError: (err) => setAddError(errorMessage(err)),
+  });
+
+  const reset = useMutation({
+    mutationFn: (member: AdminMember) => resetAdminUserPassword(member.userId),
+    gcTime: 0,
+    onSuccess: (res, member) => {
+      setPending(null);
+      setTemporary({ login: member.login, password: res.temporaryPassword });
+      reset.reset();
+    },
     onError: (err) => {
-      if (err instanceof ApiError && err.status === 404) {
-        setNoAccount(true);
-        setAddError(undefined);
-      } else {
-        setNoAccount(false);
-        setAddError(errorMessage(err));
-      }
+      setPending(null);
+      toast(errorMessage(err), "error");
     },
   });
 
   function onAdd(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!picked) return;
     setAddError(undefined);
-    setNoAccount(false);
-    add.mutate();
+    add.mutate(picked);
   }
 
   function onRoleChange(member: AdminMember, next: MembershipRole) {
@@ -129,6 +158,19 @@ export default function AdminOrganizationMembers({
       <h2 id="members-heading" className="text-lead font-semibold">
         Members
       </h2>
+      {temporary && (
+        <TemporaryPasswordPanel login={temporary.login} password={temporary.password}>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setTemporary(null);
+              reset.reset();
+            }}
+          >
+            I handed it over, hide it
+          </Button>
+        </TemporaryPasswordPanel>
+      )}
       {members.isPending && (
         <Loading label="Loading members…">
           <Skeleton className="w-1/2" />
@@ -150,6 +192,7 @@ export default function AdminOrganizationMembers({
             <tr>
               <Th>Login</Th>
               <Th>Role</Th>
+              <Th>Status</Th>
               <Th numeric>Joined</Th>
               <Th numeric>
                 <span className="sr-only">Actions</span>
@@ -161,9 +204,13 @@ export default function AdminOrganizationMembers({
               <Tr key={m.userId}>
                 <Td>
                   <span className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-[13px] break-all">{m.login}</span>
+                    <Link
+                      to={`/admin/users/${m.userId}`}
+                      className="font-mono text-[13px] break-all hover:underline"
+                    >
+                      {m.login}
+                    </Link>
                     {m.isPlatformAdmin && <Badge tone="inverse">System admin</Badge>}
-                    {m.status === "disabled" && <Badge tone="deleted">Disabled</Badge>}
                   </span>
                 </Td>
                 <Td>
@@ -185,17 +232,42 @@ export default function AdminOrganizationMembers({
                     </Select>
                   )}
                 </Td>
+                <Td className={m.status === "disabled" ? "text-subtle-foreground" : undefined}>
+                  {m.status}
+                </Td>
                 <Td numeric>{formatDate(m.joinedAt)}</Td>
                 <Td numeric>
-                  {!deleted && !m.isPlatformAdmin && (
+                  <span className="inline-flex flex-wrap items-center justify-end gap-2">
                     <Button
-                      variant="ghost-destructive"
+                      variant="secondary"
                       size="small"
-                      aria-label={`Remove ${m.login}`}
-                      onClick={() => setPending({ kind: "remove", member: m })}
+                      disabled={m.isPlatformAdmin}
+                      aria-label={`Reset password of ${m.login}`}
+                      aria-describedby={
+                        m.isPlatformAdmin ? `system-admin-note-${m.userId}` : undefined
+                      }
+                      onClick={() => setPending({ kind: "reset", member: m })}
                     >
-                      Remove
+                      Reset password
                     </Button>
+                    {!deleted && !m.isPlatformAdmin && (
+                      <Button
+                        variant="ghost-destructive"
+                        size="small"
+                        aria-label={`Remove ${m.login}`}
+                        onClick={() => setPending({ kind: "remove", member: m })}
+                      >
+                        Remove
+                      </Button>
+                    )}
+                  </span>
+                  {m.isPlatformAdmin && (
+                    <span
+                      id={`system-admin-note-${m.userId}`}
+                      className="mt-1 block font-sans text-caption text-muted-foreground"
+                    >
+                      Managed by the proreta-admin Secret, not here.
+                    </span>
                   )}
                 </Td>
               </Tr>
@@ -208,28 +280,49 @@ export default function AdminOrganizationMembers({
         <form onSubmit={onAdd} className="flex max-w-[640px] flex-col gap-3 pt-2">
           <h3 className="text-[15px] font-semibold">Add an existing user</h3>
           {addError && <Alert>{addError}</Alert>}
-          {noAccount && (
-            <Alert tone="neutral" title="No account with this email.">
-              Invite the person below instead; they create the account when they use the link.
-            </Alert>
+          {picked ? (
+            <p className="flex flex-wrap items-center gap-2">
+              <span className="font-mono text-[13px] break-all">{picked.login}</span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="small"
+                onClick={() => {
+                  setPicked(null);
+                  setAddError(undefined);
+                }}
+              >
+                Change
+              </Button>
+            </p>
+          ) : (
+            <>
+              <Field label="Find a user" hint="Type at least two letters of the email or the name.">
+                {(c) => (
+                  <Input
+                    {...c}
+                    type="search"
+                    autoComplete="off"
+                    maxLength={254}
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                )}
+              </Field>
+              <UserMatches
+                term={term}
+                loading={matches.isFetching}
+                error={matches.isError}
+                users={matches.data?.items}
+                exclude={new Set(members.data?.items.map((m) => m.userId))}
+                onPick={(u) => {
+                  setPicked(u);
+                  setAddError(undefined);
+                }}
+              />
+            </>
           )}
           <div className="flex flex-wrap items-end gap-2">
-            <Field label="Email of the account" className="min-w-[220px] flex-1">
-              {(c) => (
-                <Input
-                  {...c}
-                  type="email"
-                  autoComplete="off"
-                  maxLength={254}
-                  required
-                  value={email}
-                  onChange={(e) => {
-                    setEmail(e.target.value);
-                    setNoAccount(false);
-                  }}
-                />
-              )}
-            </Field>
             <Field label="Role">
               {(c) => (
                 <Select
@@ -246,7 +339,12 @@ export default function AdminOrganizationMembers({
                 </Select>
               )}
             </Field>
-            <Button type="submit" variant="secondary" busy={add.isPending} disabled={add.isPending}>
+            <Button
+              type="submit"
+              variant="secondary"
+              busy={add.isPending}
+              disabled={add.isPending || !picked}
+            >
               Add member
             </Button>
           </div>
@@ -274,6 +372,22 @@ export default function AdminOrganizationMembers({
           </p>
         </ConfirmDialog>
       )}
+      {pending?.kind === "reset" && (
+        <ConfirmDialog
+          title={`Reset the password of ${pending.member.login}?`}
+          confirmLabel="Reset password"
+          confirmVariant="primary"
+          busy={reset.isPending}
+          onCancel={() => setPending(null)}
+          onConfirm={() => reset.mutate(pending.member)}
+        >
+          <p>
+            The current password stops working and all of the user&apos;s sessions end. You get a
+            temporary password once, to hand over yourself; the user must choose a new password at
+            the next sign-in. Verify who asked for it first.
+          </p>
+        </ConfirmDialog>
+      )}
       {pending?.kind === "remove" && (
         <ConfirmDialog
           title={`Remove ${pending.member.login}?`}
@@ -289,5 +403,62 @@ export default function AdminOrganizationMembers({
         </ConfirmDialog>
       )}
     </section>
+  );
+}
+
+function UserMatches({
+  term,
+  loading,
+  error,
+  users,
+  exclude,
+  onPick,
+}: {
+  term: string;
+  loading: boolean;
+  error: boolean;
+  users: AdminUserSummary[] | undefined;
+  exclude: Set<string>;
+  onPick: (user: AdminUserSummary) => void;
+}) {
+  if (term.length < 2) return null;
+  if (error) return <p className="text-caption text-muted-foreground">Cannot search users.</p>;
+  if (!users)
+    return loading ? <p className="text-caption text-muted-foreground">Searching…</p> : null;
+  const shown = users.filter((u) => !u.isPlatformAdmin && !exclude.has(u.id));
+  if (shown.length === 0)
+    return (
+      <p className="text-caption text-muted-foreground">
+        No account matches “{term}”, or it is a member already. Invite the person below if they have
+        no account yet.
+      </p>
+    );
+  return (
+    <ul
+      aria-label="Matching users"
+      className="flex flex-col divide-y divide-border border border-border"
+    >
+      {shown.slice(0, MATCHES_SHOWN).map((u) => (
+        <li key={u.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+          <span className="flex min-w-0 flex-col">
+            <span className="font-mono text-[13px] break-all">{u.login}</span>
+            <span className="text-caption text-muted-foreground">
+              {[u.displayName, u.status === "disabled" ? "disabled" : ""]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+          </span>
+          <Button
+            type="button"
+            variant="secondary"
+            size="small"
+            aria-label={`Select ${u.login}`}
+            onClick={() => onPick(u)}
+          >
+            Select
+          </Button>
+        </li>
+      ))}
+    </ul>
   );
 }

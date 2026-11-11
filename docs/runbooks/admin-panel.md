@@ -15,7 +15,7 @@ The panel is the `/admin` area of the web app and the `/api/v1/admin/*` operatio
 | Change plan | organization details, plan selector | The organization's limits change at once (see "Plans and existing usage") | `admin.organization.plan_changed` with `from`, `to` |
 | Suspend / unsuspend | organization details | See "Suspension" | `admin.organization.suspended` / `admin.organization.unsuspended` |
 | Delete | organization details | Soft delete, see "Deletion" | `admin.organization.deleted` |
-| Reset a password | organization details, users table | New temporary password, all sessions of the user deleted. Independent of email: always available | `admin.user.password_reset` with the number of sessions deleted |
+| Reset a password | organization details, Members table | New temporary password, all sessions of the user deleted. Independent of email: always available | `admin.user.password_reset` with the number of sessions deleted |
 | List and search users | `/admin/users` | Every user of every organization, newest first; search by email or name, filter by status (active or disabled); 25 per page | none |
 | User details | `/admin/users/<id>` | The user's organizations with role, joined date and organization status, and the number of open sessions. Each organization links to its details | none |
 | Disable a user | user details | The user cannot sign in (password, OAuth or invitation) and all of the user's sessions in every organization are deleted at once. Memberships and data stay. Disabling a user who is already disabled does nothing | `admin.user.disabled` (`sessionsRevoked`) |
@@ -35,7 +35,7 @@ Guard rails (enforced in the database, not only in the UI): the `default` organi
 ## Add a person to an organization
 Use it when nobody in an organization can add people any more (the only owner left, an owner is unreachable) or when a customer asks you to.
 1. Open `/admin/organizations`, search for the organization and open it. **Members** lists everyone with their email, role and status.
-2. **Someone who already has an account:** under **Add an existing user** enter the account's email, choose the role and select **Add member**. If no account has that address the panel says so and nothing is written; use an invitation instead. A person who is already a member gets the new role (the same role again changes nothing and writes no audit row). A disabled account can be added, but it cannot sign in.
+2. **Someone who already has an account:** under **Add an existing user** type part of the email or the name, pick the account from the list, choose the role and select **Add member**. If nothing matches the panel says so and nothing is written; use an invitation instead. A person who is already a member gets the new role (the same role again changes nothing and writes no audit row). A disabled account can be added, but it cannot sign in.
 3. **Someone without an account:** under **Invitations** choose **Invite someone**, the role (`admin`, `member` or `viewer`; an owner is made by adding the account or promoting the person after they join) and, if outgoing email is on, optionally an address to send the link to. The link is shown once and never stored; hand it over as described in [members and invitations](invitations.md).
 4. To change a role use the selector in the member's row; to remove a person use **Remove**. Making someone an owner, or changing an owner, asks for confirmation. A role change applies on the member's next request; a removal signs the person out of that organization at once and leaves their account and other organizations alone.
 
@@ -46,7 +46,7 @@ Limits and refusals: the plan's member limit counts members plus open invitation
 On an installation without [outgoing email](email.md) (or with "Allow password reset" off) this is the only recovery path; with it on, users can also use **Forgot your password?** on the sign-in page, and this panel remains for the cases that need a person (an account without a mailbox, a suspected takeover).
 1. Verify the request through a channel you trust (the customer's known contact, not only an email that claims to be them). Registration proves nothing about who owns an address unless the user confirmed it with the email link (the users table does not show that yet).
 2. Open `/admin/organizations`, search for the customer's email, open the organization.
-3. In the users table choose **Reset password** for that user and confirm.
+3. In the Members table choose **Reset password** for that user and confirm.
 4. Copy the temporary password from the panel. It is shown once: the server keeps only its hash, and hiding the panel or leaving the page clears it from the page (the web app keeps no other copy). If it is lost, reset again.
 5. Hand it over through a trusted channel, never in a ticket or a shared chat. Tell the user that Proreta will ask for a new password at the next sign-in.
 6. The user's open sessions were deleted, and a login that was checking the old password at that moment is refused too; they log in with their email and the temporary password. A temporary password only opens the screen "Set a new password": until the user has chosen their own (different from the temporary one), every other request is refused with `password-change-required`. Until then the temporary password stays valid; reset again if it was lost.
