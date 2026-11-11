@@ -17,7 +17,7 @@ Operator and contributor documentation for Proreta.
 | [Platform admin panel](runbooks/admin-panel.md) | Plans, suspension, deletion, password resets, audit |
 | [Members, roles and invitations](runbooks/invitations.md) | Roles, invitation links, organization switcher, recovery |
 | [Sign-in with Google and GitHub](runbooks/oauth.md) | OAuth clients, redirect URIs, Workspace domains, OAuth-only mode |
-| [Outgoing email](runbooks/email.md) | Optional SMTP: settings, what is sent, delivery and troubleshooting |
+| [Outgoing email](runbooks/email.md) | Optional SMTP, set up in Admin → Email: settings, what is sent, delivery and troubleshooting |
 | [Public status page](runbooks/status-page.md) | Enabling the renderer, caching, protected pages, abuse |
 | [Heartbeats with Alertmanager](runbooks/heartbeat-alertmanager.md) | Watchdog heartbeats for Prometheus Alertmanager |
 | [Observability](runbooks/observability.md) | Metrics, logs and suggested alert rules |
