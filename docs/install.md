@@ -214,15 +214,11 @@ Writes (POST, PUT, PATCH, DELETE) need the `X-CSRF-Token` header; the login itse
 
 ## After installing
 
-**Turn the database bootstrap off.** While `database.bootstrap.enabled` is `true`, every `helm upgrade` runs the bootstrap Job again with the admin login. That is harmless (it is idempotent: a second run creates nothing and keeps all passwords), but it keeps the admin login in the namespace, and if you delete the admin Secret while the flag is still on, the bootstrap pod cannot start without it and the next upgrade fails once the Job's `activeDeadlineSeconds` (300 s by default) runs out. So, in this order:
+**Delete the admin login Secret (recommended).** `database.bootstrap.enabled` may stay `true`: on every later `helm upgrade` the bootstrap Job checks whether the database is already set up (the Secret `proreta-db` exists, `proreta_owner` connects with its password, and the migrations have started) and, if so, skips itself without reading the admin login. The Job treats the admin Secret as optional, so deleting it does not stop the pod. The admin login is the database server's admin account, so remove it from the namespace once it is no longer needed:
 ```sh
-# in my-values.yaml: database.bootstrap.enabled: false
-helm upgrade --install proreta deploy/helm/proreta -n proreta -f my-values.yaml --set image.tag="$TAG" --wait --timeout 10m
-# or, for the OCI chart (no image.tag):
-helm upgrade --install proreta oci://ghcr.io/proreta-io/charts/proreta --version "$VERSION" -n proreta -f my-values.yaml --wait --timeout 10m
 kubectl -n proreta delete secret proreta-db-admin-login
 ```
-The Secret `proreta-db` (the role passwords) stays; it is not managed by Helm. Turn the bootstrap on again only for a new database, a password rotation or a new role ([database bootstrap](runbooks/database-bootstrap.md)).
+The Secret `proreta-db` (the role passwords) stays; it is not managed by Helm. If a later run needs the login again (a new or empty database, a missing or outdated `proreta-db`), the Job fails with `the database is not ready and no database admin login is available`: create the admin Secret again (step 2) and rerun the upgrade. To rotate the role passwords or add a role on a working installation, set `database.bootstrap.force: true` together with the admin Secret, upgrade, then set it back to `false` ([database bootstrap](runbooks/database-bootstrap.md)). You can still set `database.bootstrap.enabled: false` after the first install if you prefer not to run the Job at all.
 
 **Back up the encryption key.** Do this now, once. The Secret `proreta-crypto` holds the keys that encrypt the Slack webhook URLs stored in the database. Without it the webhook URLs in the database (and in any backup of it) cannot be decrypted: they are lost and each Slack channel must be entered again. The Secret `proreta-statuspage` (the cookie signing key of the status page) is less critical: losing it only signs visitors of password-protected pages out, but it is cheap to keep with the other one. [Back up the secrets](#back-up-the-secrets) shows how.
 
@@ -311,7 +307,7 @@ Two replicas of `api` and `worker` keep the service up during node drains; the `
 ### Helm fails with `pre-install hooks failed` (or `pre-upgrade hooks failed`)
  One of the Jobs did not finish. The last line of the message tells how:
 - `job proreta-db-bootstrap failed: BackoffLimitExceeded` (or `proreta-secrets-bootstrap`, `proreta-migrate`): the container ran and exited with an error three times (`backoffLimit: 2`). The Job's logs say why.
-- `job ... failed: DeadlineExceeded`: the Job did not finish within `activeDeadlineSeconds` (300 s for the bootstrap Jobs, 600 s for the migration). Usually the pod never started: a missing Secret (for example the admin login Secret, shown as `CreateContainerConfigError`) or an image that cannot be pulled.
+- `job ... failed: DeadlineExceeded`: the Job did not finish within `activeDeadlineSeconds` (300 s for the bootstrap Jobs, 600 s for the migration). Usually the pod never started: a missing Secret the Job needs (the admin login Secret is optional, so it is not the usual cause) or an image that cannot be pulled.
 - `timed out waiting for the condition`: Helm's `--timeout` ran out first, for the same reasons. Use `--timeout 10m` so the Job's own limit decides.
 
 Find which Job and why:
@@ -342,7 +338,7 @@ The first pod to fail is usually `proreta-db-bootstrap`. `kubectl -n proreta des
 - `tls error: server refused TLS connection`: the server has no TLS; set `database.sslmode: disable` (only on a trusted network) or enable TLS on the server.
 - `no pg_hba.conf entry`, `i/o timeout`, `connection refused`, `no such host`: the pod cannot reach the server. Check `database.host` and `database.port`, DNS, security groups or firewall rules, `pg_hba.conf`, and any NetworkPolicy in the namespace.
 - `permission denied to create role` or `permission denied to create database`: the admin login lacks `CREATEROLE` or `CREATEDB`.
-- `CreateContainerConfigError` on the pod (`kubectl describe pod`): the Secret named in `database.bootstrap.adminSecret.existingSecret` does not exist in the namespace or lacks the keys `username` and `password` (or the names set in `usernameKey` / `passwordKey`).
+- `the database is not ready and no database admin login is available`: the database has to be set up (the log names why: `proreta-db` missing or outdated, `proreta_owner` cannot connect, or no migration table yet) and the admin Secret named in `database.bootstrap.adminSecret.existingSecret` does not exist in the namespace or lacks the keys `username` and `password` (or the names set in `usernameKey` / `passwordKey`). Create it (step 2) and rerun the upgrade.
 
 ### The migration or the bootstrap fails because of an extension
 - `extension "citext" is not available` or `not allow-listed` in the bootstrap log: install the contrib modules on a self-hosted server, or allow-list `CITEXT` (Azure: server parameter `azure.extensions`), then rerun.

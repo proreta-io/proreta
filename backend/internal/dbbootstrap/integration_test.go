@@ -342,3 +342,153 @@ func TestIntegrationBootstrapNonSuperuser(t *testing.T) {
 		t.Fatalf("PUBLIC connect=%v schema owner=%s citext owner=%s", publicConnect, schemaOwner, citextOwner)
 	}
 }
+
+func TestIntegrationEnsureSkipsWhenReady(t *testing.T) {
+	admin := pgtest.AdminConfig(t)
+	pgtest.Lock(t)
+	ctx := context.Background()
+	name := pgtest.DBName("bootstrap_skip")
+	adminConn, err := pgx.ConnectConfig(ctx, admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = adminConn.Close(ctx) }()
+	pgtest.MustExec(t, adminConn, "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)")
+
+	secrets := pgtest.NewFakeSecrets()
+	var logs bytes.Buffer
+	opts := func(withAdmin, force bool) dbbootstrap.Options {
+		o := dbbootstrap.Options{
+			Host: admin.Host, Port: int(admin.Port), DBName: name, SSLMode: pgtest.SSLMode(),
+			Namespace: "proreta", SecretName: "proreta-db", Secrets: secrets,
+			GeneratePassword: pgtest.Passwords(), Force: force,
+			Logger: slog.New(slog.NewTextHandler(&logs, nil)),
+		}
+		if withAdmin {
+			o.Admin = admin
+		}
+		return o
+	}
+
+	// No Secret and no admin login: a clear failure, nothing created.
+	if _, err := dbbootstrap.Ensure(ctx, opts(false, false)); !errors.Is(err, dbbootstrap.ErrAdminRequired) {
+		t.Fatalf("no admin login on an empty database: %v", err)
+	}
+	if secrets.Creates != 0 {
+		t.Fatal("a failed run must not create the Secret")
+	}
+
+	// First run bootstraps.
+	res, err := dbbootstrap.Ensure(ctx, opts(true, false))
+	if err != nil || res.Skipped || !res.DatabaseCreated || !res.SecretCreated {
+		t.Fatalf("first run: %+v, %v", res, err)
+	}
+
+	// The database exists but is not migrated yet: bootstrap is still needed.
+	if _, err := dbbootstrap.Ensure(ctx, opts(false, false)); !errors.Is(err, dbbootstrap.ErrAdminRequired) {
+		t.Fatalf("not migrated, no admin login: %v", err)
+	}
+	if res, err = dbbootstrap.Ensure(ctx, opts(true, false)); err != nil || res.Skipped {
+		t.Fatalf("not migrated, with admin login must run: %+v, %v", res, err)
+	}
+
+	data, _, _ := secrets.Get(ctx, "proreta", "proreta-db")
+	owner, err := pgx.Connect(ctx, string(data[dbbootstrap.KeyOwnerURL]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = owner.Close(ctx) }()
+	pgtest.MustExec(t, owner, "CREATE TABLE goose_db_version (id int)")
+
+	// Migrated: skips without the admin login, changes nothing.
+	updates := secrets.Updates
+	logs.Reset()
+	res, err = dbbootstrap.Ensure(ctx, opts(false, false))
+	if err != nil || !res.Skipped || res.DatabaseCreated || secrets.Creates != 1 || secrets.Updates != updates {
+		t.Fatalf("second run: %+v, %v", res, err)
+	}
+	// Skipping also holds with an admin login present.
+	if res, err = dbbootstrap.Ensure(ctx, opts(true, false)); err != nil || !res.Skipped {
+		t.Fatalf("skip with admin login: %+v, %v", res, err)
+	}
+
+	// Force reruns the bootstrap, and without an admin login it fails instead of skipping.
+	if res, err = dbbootstrap.Ensure(ctx, opts(true, true)); err != nil || res.Skipped || len(res.Roles) != 4 {
+		t.Fatalf("forced run: %+v, %v", res, err)
+	}
+	if _, err = dbbootstrap.Ensure(ctx, opts(false, true)); !errors.Is(err, dbbootstrap.ErrAdminRequired) {
+		t.Fatalf("forced run without admin login: %v", err)
+	}
+
+	// A stale URL in the Secret (host change) is not "ready": the run repairs it.
+	stale := map[string][]byte{}
+	for k, v := range data {
+		stale[k] = v
+	}
+	stale[dbbootstrap.KeyAPIURL] = []byte("postgres://proreta_api:x@old-host:5432/proreta?sslmode=disable")
+	secrets.Put("proreta", "proreta-db", stale)
+	if res, err = dbbootstrap.Ensure(ctx, opts(true, false)); err != nil || res.Skipped {
+		t.Fatalf("stale URL: %+v, %v", res, err)
+	}
+	fixed, _, _ := secrets.Get(ctx, "proreta", "proreta-db")
+	if string(fixed[dbbootstrap.KeyAPIURL]) != string(data[dbbootstrap.KeyAPIURL]) {
+		t.Fatal("stale URL not repaired")
+	}
+
+	for _, pw := range []string{pgtest.OwnerPassword, pgtest.APIPassword, pgtest.WorkerPassword, pgtest.StatuspagePassword} {
+		if strings.Contains(logs.String(), pw) {
+			t.Fatal("logs contain a password")
+		}
+	}
+}
+
+// A Secret that outlived its database must not make the bootstrap skip.
+func TestIntegrationEnsureStaleSecretNewDatabase(t *testing.T) {
+	admin := pgtest.AdminConfig(t)
+	pgtest.Lock(t)
+	ctx := context.Background()
+	name := pgtest.DBName("bootstrap_stale")
+	adminConn, err := pgx.ConnectConfig(ctx, admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = adminConn.Close(ctx) }()
+	pgtest.MustExec(t, adminConn, "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)")
+
+	secrets := pgtest.NewFakeSecrets()
+	o := dbbootstrap.Options{
+		Host: admin.Host, Port: int(admin.Port), DBName: name, SSLMode: pgtest.SSLMode(),
+		Namespace: "proreta", SecretName: "proreta-db", Secrets: secrets, GeneratePassword: pgtest.Passwords(),
+	}
+	o.Admin = admin
+	if _, err := dbbootstrap.Ensure(ctx, o); err != nil {
+		t.Fatal(err)
+	}
+	data, _, _ := secrets.Get(ctx, "proreta", "proreta-db")
+	owner, err := pgx.Connect(ctx, string(data[dbbootstrap.KeyOwnerURL]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pgtest.MustExec(t, owner, "CREATE TABLE goose_db_version (id int)")
+	_ = owner.Close(ctx)
+
+	o.Admin = nil
+	if res, err := dbbootstrap.Ensure(ctx, o); err != nil || !res.Skipped {
+		t.Fatalf("precondition: %+v, %v", res, err)
+	}
+
+	// The database is gone (new RDS instance, same roles): the owner cannot connect.
+	pgtest.MustExec(t, adminConn, "DROP DATABASE "+name+" WITH (FORCE)")
+	if _, err := dbbootstrap.Ensure(ctx, o); !errors.Is(err, dbbootstrap.ErrAdminRequired) {
+		t.Fatalf("dropped database must not skip: %v", err)
+	}
+	// Recreated empty by an admin (roles still exist): connects, but no migration table.
+	o.Admin = admin
+	if res, err := dbbootstrap.Ensure(ctx, o); err != nil || res.Skipped || !res.DatabaseCreated {
+		t.Fatalf("recreated database: %+v, %v", res, err)
+	}
+	o.Admin = nil
+	if _, err := dbbootstrap.Ensure(ctx, o); !errors.Is(err, dbbootstrap.ErrAdminRequired) {
+		t.Fatalf("empty database must not skip: %v", err)
+	}
+}
