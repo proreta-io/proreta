@@ -295,8 +295,12 @@ export const removeMember = (userId: string) =>
 export const listInvitations = () => unwrap(client.GET("/api/v1/invitations"));
 
 /** A new invitation; its link is in this answer only. */
-export const createInvitation = (role: InvitationRole, label: string) =>
-  unwrap(client.POST("/api/v1/invitations", { body: label ? { role, label } : { role } }));
+export const createInvitation = (role: InvitationRole, label: string, email = "") =>
+  unwrap(
+    client.POST("/api/v1/invitations", {
+      body: { role, ...(label ? { label } : {}), ...(email ? { email } : {}) },
+    }),
+  );
 
 export const revokeInvitation = (invitationId: string) =>
   unwrap(
