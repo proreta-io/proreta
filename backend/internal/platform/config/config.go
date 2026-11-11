@@ -471,9 +471,15 @@ func (l *loader) publicURL(name string) string {
 	return v
 }
 
-// IsLoopbackHost reports whether host (without port or brackets) is localhost, 127.0.0.1 or ::1.
+// IsLoopbackHost reports whether host is localhost or a loopback IP address (127.0.0.0/8, ::1);
+// surrounding brackets and letter case are ignored.
 func IsLoopbackHost(host string) bool {
-	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+	h := strings.ToLower(strings.Trim(host, "[]"))
+	if h == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
 }
 
 // cookieMatchesURL fails when the public URL is plain http but cookies are marked Secure: browsers

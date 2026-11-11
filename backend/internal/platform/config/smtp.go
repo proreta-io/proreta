@@ -85,16 +85,6 @@ func (l *loader) smtp(credentials bool) SMTP {
 	return s
 }
 
-// IsLoopbackHost reports whether host is localhost or a loopback IP address.
-func IsLoopbackHost(host string) bool {
-	h := strings.ToLower(strings.Trim(host, "[]"))
-	if h == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(h)
-	return ip != nil && ip.IsLoopback()
-}
-
 // String describes the server without credentials, for logs.
 func (s SMTP) String() string { return fmt.Sprintf("%s:%d (%s)", s.Host, s.Port, s.TLS) }
 
