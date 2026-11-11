@@ -23,7 +23,6 @@ trap 'rm -rf "$out"' EXIT
 eso_args=(--set externalSecrets.enabled=true --set externalSecrets.secretStoreRef.name=my-secret-store)
 eso="${eso_args[*]}"
 oauth_secret="--set secrets.oauth.existingSecret=proreta-oauth-clients"
-smtp="--set email.enabled=true --set email.smtp.host=smtp.example.com --set email.smtp.from=proreta@example.com"
 
 # A chart packaged like the release workflow does (appVersion from the tag), installed without image.tag.
 packaged=$out/packaged
@@ -60,10 +59,6 @@ combos=(
   "example-oauth-only|-f $example $tag $oauth_secret --set oauth.google.enabled=true --set config.passwordLoginEnabled=false"
   "example-all-optional|-f $example $tag --set statuspage.enabled=true --set serviceMonitor.enabled=true --set networkPolicy.enabled=true --set api.pdb.enabled=true --set topologySpread.enabled=true --set config.blockedCIDRs[0]=100.64.0.0/10 --set config.blockedCIDRs[1]=198.18.0.0/15 --set worker.location=eu-west"
   "example-oauth-existing-default-name|-f $example $tag --set secrets.oauth.existingSecret=proreta-oauth --set oauth.google.enabled=true"
-  "example-email-no-login|-f $example $tag $smtp"
-  "example-email-login|-f $example $tag $smtp --set email.smtp.username=mailer --set secrets.smtp.existingSecret=proreta-smtp"
-  "example-email-login-eso|-f $example $tag $eso $smtp --set email.smtp.username=mailer --set email.smtp.port=2525 --set email.smtp.tls=tls"
-  "example-email-localhost|-f $example $tag --set email.enabled=true --set email.smtp.host=localhost --set email.smtp.tls=none --set email.smtp.from=proreta@example.com"
   "example-presync|-f $example $tag --set database.bootstrap.enabled=false --set migration.hookPhase=PreSync"
   "example-no-section-name|-f $example $tag --set httpRoute.parentRef.sectionName="
   "packaged-no-tag|chart=$packaged/proreta -f $example"
@@ -143,12 +138,8 @@ expect_fail "admin source externalSecret without External Secrets" -f "$example"
 expect_fail "statuspage source externalSecret without External Secrets" -f "$example" --set secrets.statuspage.source=externalSecret
 expect_fail "External Secrets without a store" -f "$example" "${eso_args[@]}" --set externalSecrets.secretStoreRef=null
 expect_fail "External Secrets without a store name" --msg "externalSecrets.secretStoreRef.name" -f "$example" --set externalSecrets.enabled=true
-expect_fail "email without a host" --msg "email.smtp.host is required" --set email.enabled=true --set email.smtp.from=proreta@example.com
-expect_fail "email without a sender" --msg "email.smtp.from is required" --set email.enabled=true --set email.smtp.host=smtp.example.com
-expect_fail "email login without a password source" --msg "email.smtp.username needs the password" $smtp --set email.smtp.username=mailer
-expect_fail "email without TLS to a remote server" --msg "allowed only for localhost" $smtp --set email.smtp.tls=none
-expect_fail "email with an unknown TLS mode" $smtp --set email.smtp.tls=ssl
-expect_fail "typo in an email key" --msg "additional properties 'hots' not allowed" --set email.smtp.hots=smtp.example.com
+expect_fail "email settings are not chart values" --msg "additional properties 'email' not allowed" --set email.enabled=true
+expect_fail "SMTP Secret is not a chart value" --msg "additional properties 'smtp' not allowed" --set secrets.smtp.existingSecret=x
 expect_fail "image tag with a leading v" --set image.tag=v1.2.3
 expect_fail "hostname with an inner wildcard" -f "$example" --set "httpRoute.hostnames[0]=a*b.example.com"
 expect_fail "http public URL" --set config.publicUrl=http://proreta.example.com
