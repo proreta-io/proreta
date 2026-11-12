@@ -72,7 +72,7 @@ Edit every line marked `CHANGE`:
 | `config.publicUrl` | `https://proreta.example.com` | Required. https, no trailing slash. Its host is the host name of the HTTPRoute (set `httpRoute.hostnames` only to serve more names). |
 | `httpRoute.parentRef` | `gateway` / `gateway-system` / `https` | Name (required), namespace (empty: the Proreta namespace) and listener (`sectionName`) of your Gateway. There is no built-in Gateway name. |
 | `database.host` | `postgres.example.internal` | `port` (5432) and `sslmode` (`require`) next to it. |
-| `config.trustedProxyHops` | `1` | Already `1` in the example: one Gateway in front. `0` only without a proxy. |
+| `config.trustedProxyHops` | `1` | The default and the value in the example: one Gateway in front. `0` only without a proxy. |
 
 Leave `database.bootstrap.adminSecret.existingSecret: proreta-db-admin-login` (the Secret from step 2), `config.registrationEnabled: false` and `secrets.*.source: generate`. The chart validates the file against `values.schema.json` and fails with a message naming the key when something is missing, malformed or unknown (a typo such as `database.hots` is rejected, not ignored).
 
@@ -367,4 +367,4 @@ The provider shows `redirect_uri_mismatch` (Google) or "The redirect_uri is not 
 ### Other first-day problems
 - **The schema check rejects my values** (`values don't meet the specifications of the schema`): the line `at '/config/publicUrl'` (for example) names the key; its description is in `values.schema.json` and [values.yaml](../deploy/helm/proreta/values.yaml).
 - **Sign-in "works" but you are logged out at once:** the site is served over http. The session cookie is `Secure`; use the Gateway's HTTPS listener.
-- **Every visitor shares one rate limit:** `config.trustedProxyHops` is `0` behind a Gateway; set `1`.
+- **Every visitor shares one rate limit:** `config.trustedProxyHops` was set to `0` behind a Gateway (the chart default is `1`); set `1`.

@@ -206,7 +206,7 @@
         "trustedProxyHops": {
           "type": "integer",
           "title": "trusted proxy hops",
-          "description": "PRORETA_TRUSTED_PROXY_HOPS: number of trusted proxies in front of the api; 0 if none, 1 behind one Gateway",
+          "description": "PRORETA_TRUSTED_PROXY_HOPS: number of trusted proxies in front of the api; 1 behind one Gateway (the default), 0 if none",
           "minimum": 0,
           "maximum": 10
         },

@@ -59,7 +59,7 @@ not contain `proreta` (`fullnameOverride` replaces it).
 | `config.logLevel` | `info` | `PRORETA_LOG_LEVEL`. |
 | `config.adminPort` | `9090` | Health and metrics port of the backend pods. |
 | `config.sessionTTL`, `config.cookieSecure` | `24h`, `true` | Session lifetime; `Secure` cookies (keep `true`; `false` only with an `http://localhost` `config.publicUrl`, the api and statuspage refuse to start otherwise). |
-| `config.trustedProxyHops` | `0` | Trusted proxies in front of the api; `1` behind one Gateway. |
+| `config.trustedProxyHops` | `1` | Trusted proxies in front of the api: `1` for the Gateway of `httpRoute`, `0` only when nothing is in front. |
 | `config.registrationEnabled` | `false` | Self-service creation of organizations (addresses are verified by email only when the platform admin turns that on in Admin, Email, and nothing requires it). The platform admin can override it under Admin, Registration without a redeploy; this is then only the initial value and the fallback. |
 | `config.passwordLoginEnabled` | `true` | `false`: password form for the platform admin only; needs an OAuth provider. |
 | `config.blockedCIDRs` | `[]` | Extra ranges the SSRF guard refuses (cluster and VPC CIDRs). |
@@ -155,7 +155,7 @@ Source of truth: `backend/internal/platform/config/config.go`. Secret names belo
 | `PRORETA_ADMIN_ADDR`, `PRORETA_DATABASE_URL` (`api_url` / `worker_url`) | x | x | x | | |
 | `PRORETA_ENCRYPTION_KEYS`, `PRORETA_ENCRYPTION_ACTIVE_KEY_ID` (`proreta-crypto`) | x | **never** | x | | |
 | `PRORETA_ADMIN_LOGIN`, `PRORETA_ADMIN_PASSWORD_HASH` (`proreta-admin`) | x | **never** | **never** | | |
-| `PRORETA_HTTP_ADDR`, `PRORETA_SESSION_TTL`, `PRORETA_COOKIE_SECURE`, `PRORETA_TRUSTED_PROXY_HOPS` (`config.trustedProxyHops`: number of trusted proxies in front of the api, default `0`; set `1` behind one gateway) | x | | | | |
+| `PRORETA_HTTP_ADDR`, `PRORETA_SESSION_TTL`, `PRORETA_COOKIE_SECURE`, `PRORETA_TRUSTED_PROXY_HOPS` (`config.trustedProxyHops`: number of trusted proxies in front of the api, default `1` for the gateway; `0` only with nothing in front) | x | | | | |
 | `PRORETA_REGISTRATION_ENABLED` (`config.registrationEnabled`, chart default `false`; self-service creation of new organizations) | x | | | | |
 | `PRORETA_PASSWORD_LOGIN_ENABLED` (`config.passwordLoginEnabled`, default `true`, `false` keeps the password form for the platform admin only and needs an OAuth provider) | x | | | | |
 | `PRORETA_OAUTH_ALLOWED_DOMAINS` (`oauth.allowedDomains`, only rendered when non-empty; the Workspace domains organizations may claim) | x | | | | |
