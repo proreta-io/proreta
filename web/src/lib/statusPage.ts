@@ -6,7 +6,6 @@ import type { Schemas } from "../api/client";
  */
 export type PublicStatus = Schemas["PublicStatus"];
 export type PublicOverallStatus = Schemas["PublicOverallStatus"];
-export type PublicComponent = Schemas["PublicComponent"];
 
 /** Reserved slugs, the same list as internal/statuspages and the migration. */
 export const RESERVED_SLUGS = new Set([
