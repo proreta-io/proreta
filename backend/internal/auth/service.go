@@ -477,13 +477,16 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (LoginResult, error)
 	if ok, wait := s.ipLimit.Reserve(ipKey); !ok {
 		return LoginResult{}, s.loginRateLimited(ctx, wait)
 	}
-	if ok, wait := s.loginLimit.Reserve(loginKey); !ok {
+	// The login limit is per login and address: a limit on the login alone lets anyone lock a
+	// known account out (the break-glass admin included) with a few wrong passwords.
+	attemptKey := loginKey + "|" + ipKey
+	if ok, wait := s.loginLimit.Reserve(attemptKey); !ok {
 		s.ipLimit.Refund(ipKey)
 		return LoginResult{}, s.loginRateLimited(ctx, wait)
 	}
 	refund := func() {
 		s.ipLimit.Refund(ipKey)
-		s.loginLimit.Refund(loginKey)
+		s.loginLimit.Refund(attemptKey)
 	}
 
 	user, tenantID, cred, ok, err := s.checkPassword(ctx, loginKey, in.Password)
@@ -580,7 +583,7 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (LoginResult, error)
 		return LoginResult{}, fmt.Errorf("auth: login: %w", err)
 	}
 	s.ipLimit.Refund(ipKey)
-	s.loginLimit.Reset(loginKey)
+	s.loginLimit.Reset(attemptKey)
 	s.logins.WithLabelValues("succeeded").Inc()
 	return res, nil
 }
