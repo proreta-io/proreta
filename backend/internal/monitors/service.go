@@ -481,6 +481,7 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 				cfg.URL = v
 			}
 			if h := in.HTTP; h != nil {
+				oldURL := cfg.URL
 				checkFixed(&verr, fieldIntervalSeconds, h.IntervalSeconds, int(cur.IntervalSeconds))
 				checkFixed(&verr, fieldTimeoutSeconds, h.TimeoutSeconds, int(cur.TimeoutSeconds))
 				if h.URL != nil {
@@ -500,6 +501,7 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 					checkThreshold(&verr, *h.FailureThreshold)
 					changed, threshold = appendIf(changed, fieldFailureThreshold, *h.FailureThreshold != threshold), *h.FailureThreshold
 				}
+				hostMovedProblems(&verr, oldURL, cfg, h)
 				next, sec, dirty, reqChanged, perr := s.planRequest(&verr, cfg, a.TenantID, id, h)
 				if perr != nil {
 					return perr

@@ -3,6 +3,7 @@ package monitors
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"slices"
 	"strings"
 
@@ -113,6 +114,32 @@ func (s *Service) planRequest(verr *validation.Error, cur httpConfig, tenantID, 
 		}
 	}
 	return cfg, sec, dirty, changed, nil
+}
+
+// hostMovedProblems refuses to carry the stored header values and body to another host. They are
+// write-only, so an editor who cannot read them could otherwise point the monitor at their own
+// host and have the next check send them there. cfg is the config with the new URL; after a
+// move the values must be sent again (or removed with an empty list or body).
+func hostMovedProblems(verr *validation.Error, oldURL string, cfg httpConfig, h *HTTPSettings) {
+	from, err1 := url.Parse(oldURL)
+	to, err2 := url.Parse(cfg.URL)
+	if err1 != nil || err2 != nil || strings.EqualFold(from.Host, to.Host) {
+		return
+	}
+	const msg = "the host changed: send the value again, or remove it"
+	if h.Headers == nil && len(cfg.HeaderNames) > 0 {
+		verr.Add(fieldHeaders, msg)
+	}
+	if h.Headers != nil {
+		for i, in := range *h.Headers {
+			if in.Value == nil {
+				verr.Add(fmt.Sprintf("%s[%d].value", fieldHeaders, i), msg)
+			}
+		}
+	}
+	if h.Body == nil && cfg.BodySet {
+		verr.Add(fieldBody, msg)
+	}
 }
 
 // sealRequest stores sec sealed in cfg, or clears the sealed value when there is nothing to
