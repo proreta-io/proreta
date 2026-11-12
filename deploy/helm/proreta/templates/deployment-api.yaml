@@ -1,6 +1,7 @@
 {{- $env := join "\n" (list
   (include "proreta.env.common" (dict "ctx" . "dbKey" "api_url"))
   (include "proreta.env.encryption" .)
+  (include "proreta.env.request" .)
   (include "proreta.env.guard" .)
   (include "proreta.env.publicUrl" .)
   (include "proreta.env.api" .)) -}}

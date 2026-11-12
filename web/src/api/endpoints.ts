@@ -7,6 +7,7 @@ export type MonitorDetail = Schemas["MonitorDetail"];
 export type MonitorCreate = Schemas["MonitorCreate"];
 export type MonitorUpdate = Schemas["MonitorUpdate"];
 export type HttpMonitor = Schemas["HttpMonitor"];
+export type TcpMonitor = Schemas["TcpMonitor"];
 export type HeartbeatMonitor = Schemas["HeartbeatMonitor"];
 export type ErrorKind = Schemas["ErrorKind"];
 export type MonitorStats = Schemas["MonitorStats"];
@@ -14,11 +15,22 @@ export type StatsRange = Schemas["StatsRange"];
 export type LatencyPoint = Schemas["LatencyPoint"];
 export type Check = Schemas["Check"];
 export type Incident = Schemas["Incident"];
+export type Specula = Schemas["Specula"];
+export type SpeculaCreate = Schemas["SpeculaCreate"];
+export type SpeculaUpdate = Schemas["SpeculaUpdate"];
+export type SpeculaCreated = Schemas["SpeculaCreated"];
+export type SpeculaStatus = Schemas["SpeculaStatus"];
+export type MonitorLocation = Schemas["MonitorLocation"];
+export type MonitorLocationInput = Schemas["MonitorLocationInput"];
 export type Channel = Schemas["Channel"];
 export type ChannelCreate = Schemas["ChannelCreate"];
 export type ChannelUpdate = Schemas["ChannelUpdate"];
 export type ChannelEvent = Schemas["ChannelEvent"];
+export type ChannelTemplatePreviewRequest = Schemas["ChannelTemplatePreviewRequest"];
 export type Usage = Schemas["Usage"];
+export type PermissionsInfo = Schemas["PermissionsInfo"];
+export type ProjectPermissions = Schemas["ProjectPermissions"];
+export type PermissionDefinition = Schemas["PermissionDefinition"];
 export type PublicConfig = Schemas["PublicConfig"];
 export type AdminStats = Schemas["AdminStats"];
 export type AdminOrganization = Schemas["AdminOrganization"];
@@ -28,8 +40,15 @@ export type AdminEmailSettings = Schemas["AdminEmailSettings"];
 export type AdminEmailConnectionUpdate = Schemas["AdminEmailConnectionUpdate"];
 export type AdminEmailFeaturesUpdate = Schemas["AdminEmailFeaturesUpdate"];
 export type AdminEmailTestResult = Schemas["AdminEmailTestResult"];
+export type AdminRegistrationSettings = Schemas["AdminRegistrationSettings"];
 export type AdminUser = Schemas["AdminUser"];
+export type AdminProject = Schemas["AdminProject"];
 export type AdminUserList = Schemas["AdminUserList"];
+export type AdminUserSummary = Schemas["AdminUserSummary"];
+export type AdminUserSummaryList = Schemas["AdminUserSummaryList"];
+export type AdminUserDetail = Schemas["AdminUserDetail"];
+export type AdminUserMembership = Schemas["AdminUserMembership"];
+export type AdminMember = Schemas["AdminMember"];
 export type MembershipRole = Schemas["MembershipRole"];
 export type Organization = Schemas["Organization"];
 export type Member = Schemas["Member"];
@@ -68,11 +87,15 @@ export const queryKeys = {
   stats: (id: string, range: StatsRange) => ["monitors", id, "stats", range] as const,
   checks: (id: string) => ["monitors", id, "checks"] as const,
   incidents: (id: string) => ["monitors", id, "incidents"] as const,
+  specula: ["specula"] as const,
+  speculaFor: (projectId: string | undefined) => ["specula", "for", projectId ?? "all"] as const,
   channels: ["channels"] as const,
   channelsFor: (projectId: string | undefined) => ["channels", "for", projectId ?? "all"] as const,
   projects: ["projects"] as const,
   projectMembers: (id: string) => ["projects", id, "members"] as const,
+  projectInvitations: (id: string) => ["projects", id, "invitations"] as const,
   usage: ["usage"] as const,
+  permissions: ["permissions"] as const,
   statusPages: ["status-pages"] as const,
   statusPageComponents: (id: string) => ["status-pages", id, "components"] as const,
   statusPagePreview: (id: string) => ["status-pages", id, "preview"] as const,
@@ -82,10 +105,19 @@ export const queryKeys = {
   authDomains: ["auth-domains"] as const,
   adminStats: ["admin", "stats"] as const,
   adminEmail: ["admin", "email"] as const,
+  adminRegistration: ["admin", "registration"] as const,
   adminOrganizations: (query: string, offset: number, includeDeleted: boolean) =>
     ["admin", "organizations", { query, offset, includeDeleted }] as const,
   adminOrganization: (id: string) => ["admin", "organization", id] as const,
+  adminProjects: (id: string) => ["admin", "organization", id, "projects"] as const,
+  adminProjectMembers: (id: string, projectId: string) =>
+    ["admin", "organization", id, "projects", projectId, "members"] as const,
   adminUsers: (id: string) => ["admin", "organization", id, "users"] as const,
+  adminAllUsers: (query: string, status: string, offset: number) =>
+    ["admin", "all-users", { query, status, offset }] as const,
+  adminUser: (id: string) => ["admin", "user", id] as const,
+  adminMembers: (id: string) => ["admin", "organization", id, "members"] as const,
+  adminInvitations: (id: string) => ["admin", "organization", id, "invitations"] as const,
   organizations: ["organizations"] as const,
   members: ["members"] as const,
   invitations: ["invitations"] as const,
@@ -206,6 +238,30 @@ export const listChecks = (monitorId: string, limit = 20) =>
 export const listIncidents = (monitorId: string) =>
   unwrap(client.GET("/api/v1/monitors/{monitorId}/incidents", monitorPath(monitorId)));
 
+/** The Specula executors the user sees; with a project id, those a monitor of it may run at. */
+export const listSpecula = (projectId?: string, includeRevoked = false) =>
+  unwrap(
+    client.GET("/api/v1/specula", {
+      params: {
+        query: {
+          ...(projectId ? { projectId } : {}),
+          ...(includeRevoked ? { includeRevoked } : {}),
+        },
+      },
+    }),
+  );
+
+const speculaPath = (speculaId: string) => ({ params: { path: { speculaId } } });
+
+export const createSpecula = (body: SpeculaCreate) =>
+  unwrap(client.POST("/api/v1/specula", { body }));
+
+export const updateSpecula = (speculaId: string, body: SpeculaUpdate) =>
+  unwrap(client.PATCH("/api/v1/specula/{speculaId}", { ...speculaPath(speculaId), body }));
+
+export const revokeSpecula = (speculaId: string) =>
+  unwrap(client.DELETE("/api/v1/specula/{speculaId}", speculaPath(speculaId)));
+
 /** The channels the user sees; with a project id, those a monitor of that project may select. */
 export const listChannels = (projectId?: string) =>
   unwrap(client.GET("/api/v1/channels", { params: { query: projectId ? { projectId } : {} } }));
@@ -221,10 +277,15 @@ export const updateChannel = (channelId: string, body: ChannelUpdate) =>
 export const deleteChannel = (channelId: string) =>
   unwrap(client.DELETE("/api/v1/channels/{channelId}", channelPath(channelId)));
 
+export const previewChannelTemplate = (body: ChannelTemplatePreviewRequest) =>
+  unwrap(client.POST("/api/v1/channels/preview-template", { body }));
+
 export const testChannel = (channelId: string) =>
   unwrap(client.POST("/api/v1/channels/{channelId}/test", channelPath(channelId)));
 
 export const getUsage = () => unwrap(client.GET("/api/v1/usage"));
+
+export const getPermissions = () => unwrap(client.GET("/api/v1/permissions"));
 
 // Platform admin panel (experimental API). Every call answers 403 to anybody but the platform
 // admin.
@@ -266,6 +327,65 @@ export const listAdminOrganizationUsers = (organizationId: string) =>
     }),
   );
 
+export const listAdminMembers = (organizationId: string) =>
+  unwrap(
+    client.GET("/api/v1/admin/organizations/{organizationId}/members", {
+      params: { path: { organizationId } },
+    }),
+  );
+
+/** Adds an existing user to the organization or changes their role (any of the four roles). */
+export const setAdminMember = (
+  organizationId: string,
+  userId: string,
+  role: MembershipRole | null,
+) =>
+  unwrap(
+    client.PUT("/api/v1/admin/organizations/{organizationId}/members/{userId}", {
+      params: { path: { organizationId, userId } },
+      body: { role },
+    }),
+  );
+
+export const removeAdminMember = (organizationId: string, userId: string) =>
+  unwrap(
+    client.DELETE("/api/v1/admin/organizations/{organizationId}/members/{userId}", {
+      params: { path: { organizationId, userId } },
+    }),
+  );
+
+export const listAdminInvitations = (organizationId: string) =>
+  unwrap(
+    client.GET("/api/v1/admin/organizations/{organizationId}/invitations", {
+      params: { path: { organizationId } },
+    }),
+  );
+
+/** A new invitation; its link is in this answer only. */
+export const createAdminInvitation = (
+  organizationId: string,
+  role: InvitationRole,
+  label: string,
+  email = "",
+) =>
+  unwrap(
+    client.POST("/api/v1/admin/organizations/{organizationId}/invitations", {
+      params: { path: { organizationId } },
+      body: {
+        role,
+        ...(label ? { label } : {}),
+        ...(email ? { email, sendEmail: true } : {}),
+      },
+    }),
+  );
+
+export const revokeAdminInvitation = (organizationId: string, invitationId: string) =>
+  unwrap(
+    client.POST("/api/v1/admin/organizations/{organizationId}/invitations/{invitationId}/revoke", {
+      params: { path: { organizationId, invitationId } },
+    }),
+  );
+
 /** A new temporary password for the user, returned once; all of the user's sessions end. */
 export const resetAdminUserPassword = (userId: string) =>
   unwrap(
@@ -273,6 +393,47 @@ export const resetAdminUserPassword = (userId: string) =>
       params: { path: { userId } },
     }),
   );
+
+export type AdminUserStatusFilter = "active" | "disabled";
+
+export const listAdminAllUsers = (
+  query: string,
+  status: AdminUserStatusFilter | "",
+  offset: number,
+) =>
+  unwrap(
+    client.GET("/api/v1/admin/users", {
+      params: {
+        query: { query, offset, limit: ADMIN_PAGE_SIZE, ...(status ? { status } : {}) },
+      },
+    }),
+  );
+
+const userPath = (userId: string) => ({ params: { path: { userId } } });
+
+/** One user with every membership and the number of open sessions. */
+export const getAdminUser = (userId: string) =>
+  unwrap(client.GET("/api/v1/admin/users/{userId}", userPath(userId)));
+
+/** Refuses sign-in and deletes all of the user's sessions. */
+export const disableAdminUser = (userId: string) =>
+  unwrap(client.POST("/api/v1/admin/users/{userId}/disable", userPath(userId)));
+
+export const enableAdminUser = (userId: string) =>
+  unwrap(client.POST("/api/v1/admin/users/{userId}/enable", userPath(userId)));
+
+/** Grants or revokes the platform-admin flag; answers the user afterwards. */
+export const setAdminPlatformAdmin = (userId: string, enabled: boolean) =>
+  unwrap(
+    client.PUT("/api/v1/admin/users/{userId}/platform-admin", {
+      params: { path: { userId } },
+      body: { enabled },
+    }),
+  );
+
+/** Deletes all of the user's sessions; answers how many were open. */
+export const revokeAdminUserSessions = (userId: string) =>
+  unwrap(client.POST("/api/v1/admin/users/{userId}/sessions/revoke", userPath(userId)));
 
 export const getAdminEmailSettings = () => unwrap(client.GET("/api/v1/admin/email"));
 
@@ -284,6 +445,12 @@ export const deleteAdminEmailSettings = () => unwrap(client.DELETE("/api/v1/admi
 
 export const updateAdminEmailFeatures = (body: AdminEmailFeaturesUpdate) =>
   unwrap(client.PUT("/api/v1/admin/email/features", { body }));
+
+export const getAdminRegistration = () => unwrap(client.GET("/api/v1/admin/registration"));
+
+/** `true` or `false` is the platform admin's choice; `null` follows the installation setting again. */
+export const updateAdminRegistration = (enabled: boolean | null) =>
+  unwrap(client.PUT("/api/v1/admin/registration", { body: { enabled } }));
 
 /** Queues a real test message; poll getAdminEmailSettings for the result. */
 export const sendAdminTestEmail = (to: string) =>
@@ -306,22 +473,38 @@ export const listMembers = () => unwrap(client.GET("/api/v1/members"));
 
 const memberPath = (userId: string) => ({ params: { path: { userId } } });
 
-export const updateMember = (userId: string, role: MembershipRole) =>
+/** Gives a member another organization role; null leaves them with their projects only. */
+export const updateMember = (userId: string, role: MembershipRole | null) =>
   unwrap(client.PATCH("/api/v1/members/{userId}", { ...memberPath(userId), body: { role } }));
 
 export const removeMember = (userId: string) =>
   unwrap(client.DELETE("/api/v1/members/{userId}", memberPath(userId)));
 
-export const listInvitations = () => unwrap(client.GET("/api/v1/invitations"));
+/** The invitations the caller may see; with a project id only those into that project. */
+export const listInvitations = (projectId?: string) =>
+  unwrap(
+    client.GET("/api/v1/invitations", {
+      ...(projectId ? { params: { query: { projectId } } } : {}),
+    }),
+  );
 
-/** A new invitation; its link is in this answer only. */
-export const createInvitation = (role: InvitationRole, label: string, email = "") =>
+/**
+ * A new invitation; its link is in this answer only. With a project id it invites into that
+ * project and the role is the role there.
+ */
+export const createInvitation = (
+  role: InvitationRole,
+  label: string,
+  email = "",
+  projectId?: string,
+) =>
   unwrap(
     client.POST("/api/v1/invitations", {
       // An address is only sent when the box "Send by email" is checked, so it always asks for
       // the email explicitly.
       body: {
         role,
+        ...(projectId ? { projectId } : {}),
         ...(label ? { label } : {}),
         ...(email ? { email, sendEmail: true } : {}),
       },
@@ -392,12 +575,12 @@ export const deleteProject = (projectId: string) =>
 export const listProjectMembers = (projectId: string) =>
   unwrap(client.GET("/api/v1/projects/{projectId}/members", projectPath(projectId)));
 
-/** Adds a member to a project; "viewer" makes it read-only there, undefined keeps its role. */
-export const putProjectMember = (projectId: string, userId: string, role?: ProjectRole) =>
+/** Gives a member of the organization a direct role in a project (never lowers its inherited role). */
+export const putProjectMember = (projectId: string, userId: string, role: ProjectRole) =>
   unwrap(
     client.PUT("/api/v1/projects/{projectId}/members/{userId}", {
       params: { path: { projectId, userId } },
-      body: role ? { role } : {},
+      body: { role },
     }),
   );
 
@@ -408,7 +591,7 @@ export const removeProjectMember = (projectId: string, userId: string) =>
     }),
   );
 
-// Status page. Every role reads the settings; admins and owners change them.
+// Status page. Every role reads the settings; maintainers and owners change them.
 
 export const listStatusPages = () => unwrap(client.GET("/api/v1/status-pages"));
 
@@ -498,4 +681,73 @@ export const deleteAuthDomain = (domainId: string) =>
     client.DELETE("/api/v1/organization/auth-domains/{domainId}", {
       params: { path: { domainId } },
     }),
+  );
+
+const adminProjectPath = (organizationId: string, projectId: string) => ({
+  params: { path: { organizationId, projectId } },
+});
+
+export const listAdminProjects = (organizationId: string) =>
+  unwrap(
+    client.GET("/api/v1/admin/organizations/{organizationId}/projects", {
+      params: { path: { organizationId } },
+    }),
+  );
+
+export const createAdminProject = (organizationId: string, name: string) =>
+  unwrap(
+    client.POST("/api/v1/admin/organizations/{organizationId}/projects", {
+      params: { path: { organizationId } },
+      body: { name },
+    }),
+  );
+
+export const renameAdminProject = (organizationId: string, projectId: string, name: string) =>
+  unwrap(
+    client.PATCH("/api/v1/admin/organizations/{organizationId}/projects/{projectId}", {
+      ...adminProjectPath(organizationId, projectId),
+      body: { name },
+    }),
+  );
+
+export const deleteAdminProject = (organizationId: string, projectId: string) =>
+  unwrap(
+    client.DELETE(
+      "/api/v1/admin/organizations/{organizationId}/projects/{projectId}",
+      adminProjectPath(organizationId, projectId),
+    ),
+  );
+
+export const listAdminProjectMembers = (organizationId: string, projectId: string) =>
+  unwrap(
+    client.GET(
+      "/api/v1/admin/organizations/{organizationId}/projects/{projectId}/members",
+      adminProjectPath(organizationId, projectId),
+    ),
+  );
+
+/** Gives a member of the organization a direct role in a project. */
+export const putAdminProjectMember = (
+  organizationId: string,
+  projectId: string,
+  userId: string,
+  role: ProjectRole,
+) =>
+  unwrap(
+    client.PUT(
+      "/api/v1/admin/organizations/{organizationId}/projects/{projectId}/members/{userId}",
+      { params: { path: { organizationId, projectId, userId } }, body: { role } },
+    ),
+  );
+
+export const removeAdminProjectMember = (
+  organizationId: string,
+  projectId: string,
+  userId: string,
+) =>
+  unwrap(
+    client.DELETE(
+      "/api/v1/admin/organizations/{organizationId}/projects/{projectId}/members/{userId}",
+      { params: { path: { organizationId, projectId, userId } } },
+    ),
   );

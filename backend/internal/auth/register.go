@@ -298,7 +298,7 @@ func (s *Service) joinExistingAccount(ctx context.Context, row authdb.GetUserByE
 		if err := recheckCredential(ctx, q, row.ID, cred); err != nil {
 			return ErrInvalidCredentials
 		}
-		if row.IsPlatformAdmin {
+		if row.IsSystemAdmin {
 			// BootstrapAdmin refuses to start when the admin belongs to another tenant.
 			return ErrAlreadyMember
 		}

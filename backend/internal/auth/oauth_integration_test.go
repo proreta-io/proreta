@@ -11,6 +11,7 @@ import (
 
 	"github.com/proreta-io/proreta/backend/internal/auth"
 	"github.com/proreta-io/proreta/backend/internal/authz"
+	"github.com/proreta-io/proreta/backend/internal/plans"
 	"github.com/proreta-io/proreta/backend/internal/platform/clock"
 	"github.com/proreta-io/proreta/backend/internal/platform/crypto"
 	"github.com/proreta-io/proreta/backend/internal/platform/db"
@@ -239,6 +240,39 @@ func TestIntegrationOAuthInvitation(t *testing.T) {
 	}
 }
 
+func TestIntegrationOAuthDomainAutoClaim(t *testing.T) {
+	e := newOAuthEnv(t, "auth_oauth_autoclaim", auth.Options{AllowedDomains: []string{"acme.example"}})
+	first, err := e.login(auth.OAuthLoginInput{Identity: google("g-first", "ann@acme.example", "acme.example"), RegistrationEnabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Role != auth.RoleOwner {
+		t.Fatalf("first user: %+v", first.SessionInfo)
+	}
+	if n := e.count(`SELECT count(*) FROM org_auth_domains WHERE tenant_id = $1 AND domain = 'acme.example' AND enabled AND default_role = 'viewer'`, first.Tenant.ID); n != 1 {
+		t.Fatalf("domain claims after the first sign-in: %d", n)
+	}
+	if n := e.count(`SELECT count(*) FROM audit_log WHERE action = 'organization.auth_domain_changed' AND tenant_id = $1`, first.Tenant.ID); n != 1 {
+		t.Fatalf("claim audit rows: %d", n)
+	}
+	second, err := e.login(auth.OAuthLoginInput{Identity: google("g-second", "bob@acme.example", "acme.example"), RegistrationEnabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Tenant.ID != first.Tenant.ID || second.Role != auth.RoleViewer {
+		t.Fatalf("second user did not join: %+v", second.SessionInfo)
+	}
+
+	// A domain off the allow-list claims nothing.
+	other, err := e.login(auth.OAuthLoginInput{Identity: google("g-other", "cy@other.example", "other.example"), RegistrationEnabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := e.count(`SELECT count(*) FROM org_auth_domains WHERE tenant_id = $1`, other.Tenant.ID); n != 0 {
+		t.Fatalf("claim of a domain off the list: %d", n)
+	}
+}
+
 func TestIntegrationOAuthDomains(t *testing.T) {
 	e := newOAuthEnv(t, "auth_oauth_domains", auth.Options{AllowedDomains: []string{"example.com", "proof.example"}})
 	admin := e.adminLogin()
@@ -266,8 +300,8 @@ func TestIntegrationOAuthDomains(t *testing.T) {
 	if _, err := e.svc.CreateAuthDomain(e.ctx, owner, "not a domain", "", true); err == nil {
 		t.Fatal("invalid domain accepted")
 	}
-	if _, err := e.svc.CreateAuthDomain(e.ctx, owner, "example.com", auth.RoleAdmin, true); err == nil {
-		t.Fatal("a new claim with the admin role was accepted")
+	if _, err := e.svc.CreateAuthDomain(e.ctx, owner, "example.com", auth.RoleMaintainer, true); err == nil {
+		t.Fatal("a new claim with the maintainer role was accepted")
 	}
 	// A proof older than the window does not count; a new link or sign-in refreshes it.
 	pgtest.MustExec(t, e.admin, `UPDATE auth_identities SET last_login_at = now() - interval '11 minutes' WHERE subject = 'g-admin'`)
@@ -342,6 +376,13 @@ func TestIntegrationOAuthDomains(t *testing.T) {
 	m, err := e.login(auth.OAuthLoginInput{Identity: google("g-m", "m@example.com", "example.com")})
 	if err != nil || m.Role != auth.RoleMember {
 		t.Fatalf("member join: %v %+v", err, m.SessionInfo)
+	}
+	// A join through the domain needs a free place: the free plan holds 3 members and the
+	// organization has them now (admin, the two domain joiners).
+	pgtest.MustExec(t, e.admin, `UPDATE tenants SET plan_key = 'free' WHERE id = '`+admin.Tenant.ID.String()+`'`)
+	var full *plans.LimitError
+	if _, err := e.login(auth.OAuthLoginInput{Identity: google("g-full", "full@example.com", "example.com")}); !errors.As(err, &full) {
+		t.Fatalf("domain join into a full organization: %v", err)
 	}
 	// A stored claim stops joining once the operator removes the domain from the list.
 	if _, err := off0.OAuthLogin(e.ctx, auth.OAuthLoginInput{Identity: google("g-o", "o@example.com", "example.com"), IP: oauthIP}); !errors.Is(err, auth.ErrOAuthNotInvited) {

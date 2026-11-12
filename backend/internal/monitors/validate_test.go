@@ -182,3 +182,79 @@ func TestValidateExpectedStatus(t *testing.T) {
 		}
 	}
 }
+
+func TestValidatePrivateURL(t *testing.T) {
+	good := [][2]string{
+		{"http://orders.shop.svc.cluster.local:8080/health", "http://orders.shop.svc.cluster.local:8080/health"},
+		{"HTTP://Orders:8080", "http://orders:8080"},
+		{"https://10.1.2.3/ping", "https://10.1.2.3/ping"},
+		{"http://[fd00::1]:9000/", "http://[fd00::1]:9000/"},
+		{"http://localhost:3000", "http://localhost:3000"},
+		{"https://example.com/x?token=1", "https://example.com/x?token=1"},
+	}
+	for _, c := range good {
+		in, want := c[0], c[1]
+		if got, msg := ValidatePrivateURL(in); msg != "" || got != want {
+			t.Errorf("%s: got %q, %q; want %q", in, got, msg, want)
+		}
+	}
+	for in, want := range map[string]string{
+		"":                     "is required",
+		"ftp://svc":            "must use http or https",
+		"http://":              "must have a host",
+		"http://user:pw@svc/":  "must not contain a user name or password",
+		"http://svc:0/":        "has an invalid port",
+		"http://svc:70000/":    "has an invalid port",
+		"http://bad host/":     "is not a valid URL",
+		"http://2130706433/":   "IP addresses must be written as four decimal numbers (a.b.c.d)",
+		"http://0x7f.1/":       "IP addresses must be written as four decimal numbers (a.b.c.d)",
+		"http://[::1%25eth0]/": "host is not a valid IPv6 address",
+		"http://" + strings.Repeat("a", 64) + ".example.com/": "host is not a valid domain name",
+	} {
+		if _, msg := ValidatePrivateURL(in); msg != want {
+			t.Errorf("%q: message %q, want %q", in, msg, want)
+		}
+	}
+}
+
+func TestValidateHost(t *testing.T) {
+	for _, tc := range []struct {
+		in       string
+		specula  bool
+		want     string
+		wantFail bool
+	}{
+		{"DB.Example.com", false, "db.example.com", false},
+		{" 93.184.216.34 ", false, "93.184.216.34", false},
+		{"2606:4700::1111", false, "2606:4700::1111", false},
+		{"db.example.com.", false, "db.example.com.", false},
+		{"postgres", true, "postgres", false},
+		{"10.0.0.5", true, "10.0.0.5", false},
+		{"db.svc.cluster.local", true, "db.svc.cluster.local", false},
+		{"[fd00::1]", true, "fd00::1", false},
+		{"postgres", false, "", true},
+		{"10.0.0.5", false, "", true},
+		{"localhost", false, "", true},
+		{"::1", false, "", true},
+		{"", true, "", true},
+		{"db.example.com:5432", false, "", true},
+		{"https://db.example.com", false, "", true},
+		{"user@db.example.com", false, "", true},
+		{"db.example.com/x", true, "", true},
+		{"db example.com", true, "", true},
+		{"bücher.example", true, "", true},
+	} {
+		got, msg := ValidateHost(tc.in, tc.specula)
+		if (msg != "") != tc.wantFail || got != tc.want {
+			t.Errorf("ValidateHost(%q, %v) = %q, %q; want %q, fail=%v", tc.in, tc.specula, got, msg, tc.want, tc.wantFail)
+		}
+	}
+}
+
+func TestValidatePort(t *testing.T) {
+	for n, ok := range map[int]bool{0: false, -1: false, 1: true, 443: true, 65535: true, 65536: false} {
+		if (ValidatePort(n) == "") != ok {
+			t.Errorf("ValidatePort(%d) = %q", n, ValidatePort(n))
+		}
+	}
+}

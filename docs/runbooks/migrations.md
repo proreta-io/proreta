@@ -41,7 +41,7 @@ Every later change is a new file after it; the baseline itself is never edited o
 - `TestIntegrationSchemaSnapshot`: the migrated schema, read from the catalog with `pg_get_*def` (stable across Postgres major versions, unlike `pg_dump`), equals `testdata/schema.sql`. Regenerate it with `-update` after reviewing a schema change.
 - `TestIntegrationSeeds`: the seeded plans (limits and features) and the `default` probe location.
 - `TestIntegrationUpgradePath`: the template for upgrade-path tests (baseline, seed data, the next migration).
-- The other integration tests in `backend/migrations` check the behaviour of the final schema from the point of view of the runtime roles: grants and RLS of every table, the definer functions (claims, fencing, rollups and their catch-up, retention, heartbeats, reminders, invitations, OAuth domains, status pages, the platform admin functions and their SQLSTATEs `PRA01`..`PRA08`, `PRO01`/`PRO02`), the login tenant order and the start-up schema guard.
+- The other integration tests in `backend/migrations` check the behaviour of the final schema from the point of view of the runtime roles: grants and RLS of every table, the definer functions (claims, fencing, rollups and their catch-up, retention, heartbeats, reminders, invitations, OAuth domains, status pages, the platform admin functions and their SQLSTATEs `PRA01`..`PRA15`, `PRO01`/`PRO02`), the login tenant order and the start-up schema guard.
 
 ## How it runs in the cluster
 Helm chart with ArgoCD, sync order: bootstrap hook (wave -3, when enabled), migrate Job (wave -1), workloads (wave 0). A failed migration stops the sync; old pods keep running. Look at the Job logs: `kubectl --context <cluster-context> -n proreta logs job/proreta-migrate`.

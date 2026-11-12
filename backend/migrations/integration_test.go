@@ -30,8 +30,8 @@ func TestIntegrationMigrateFromScratchAndRerun(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "audit_log,auth_identities,check_results,email_settings,email_verifications,heartbeat_tokens,incident_monitors,incidents,invitations,mail_outbox,memberships,monitor_channels,monitor_location_state," +
-		"monitor_locations,monitor_state,monitors,notification_channels,notification_deliveries,org_auth_domains,password_resets,plans,probe_locations,project_members,projects,result_rollups_hourly,rollup_state,sessions," +
-		"status_page_components,status_page_released_slugs,status_page_snapshots,status_pages,tenants,users"
+		"monitor_locations,monitor_state,monitors,notification_channels,notification_deliveries,org_auth_domains,password_resets,plans,platform_settings,probe_locations,project_members,projects,result_rollups_hourly,rollup_state,sessions," +
+		"specula_agents,specula_projects,status_page_components,status_page_released_slugs,status_page_snapshots,status_pages,tenants,users"
 	if got := strings.Join(tables, ","); got != want {
 		t.Fatalf("tables = %s, want %s", got, want)
 	}
@@ -59,9 +59,27 @@ var definerAllowList = map[string][]string{
 	"admin_list_users":          {"proreta_api"},
 	"admin_reset_user_password": {"proreta_api"},
 	"admin_stats":               {"proreta_api"},
-	"ensure_partitions":         {"proreta_worker"},
-	"claim_due_monitors":        {"proreta_worker"},
-	"compute_rollups":           {"proreta_worker"},
+	// Users across organizations: list, detail, memberships, disable or enable, sign out.
+	"admin_list_all_users":        {"proreta_api"},
+	"admin_get_user":              {"proreta_api"},
+	"admin_list_user_memberships": {"proreta_api"},
+	"admin_set_user_status":       {"proreta_api"},
+	"admin_revoke_user_sessions":  {"proreta_api"},
+	"admin_set_platform_admin":    {"proreta_api"},
+	"ensure_partitions":           {"proreta_worker"},
+	"claim_due_monitors":          {"proreta_worker"},
+	// Specula, the executor in a customer's network: create and revoke by the api inside the
+	// tenant, token authentication and self-report by the gateway, the rename trigger.
+	"specula_create":               {"proreta_api"},
+	"specula_revoke":               {"proreta_api"},
+	"specula_authenticate":         {"proreta_worker"},
+	"specula_hello":                {"proreta_worker"},
+	"specula_agents_sync_location": {},
+	// Runs a monitor at the worker or at a Specula of its organization.
+	"monitor_set_location": {"proreta_api"},
+	// Marks the monitors of a revoked or silent Specula unknown.
+	"specula_mark_unreachable": {"proreta_worker"},
+	"compute_rollups":          {"proreta_worker"},
 	// Rollups from the watermark in rollup_state.
 	"compute_rollups_catch_up": {"proreta_worker"},
 	// Retention in three steps driven by jobs.
@@ -92,6 +110,10 @@ var definerAllowList = map[string][]string{
 	"admin_email_settings_clear":        {"proreta_api"},
 	"admin_email_settings_set_features": {"proreta_api"},
 	"admin_email_test_request":          {"proreta_api"},
+	// Self-service registration: the api reads the admin's choice, the platform admin changes it.
+	"platform_registration_override": {"proreta_api"},
+	"admin_registration_get":         {"proreta_api"},
+	"admin_registration_set":         {"proreta_api"},
 	// Pause, resume and URL change reset the schedule within the caller's tenant.
 	"reset_monitor_runtime": {"proreta_api"},
 	// The public heartbeat ping finds its heartbeat by token hash before the tenant is known, and
@@ -102,6 +124,9 @@ var definerAllowList = map[string][]string{
 	// the caller's tenant, and jobs queues reminders of open incidents across tenants.
 	"fail_deleted_channel_deliveries": {"proreta_api"},
 	"enqueue_incident_reminders":      {"proreta_worker"},
+	// jobs reads the monitor type and the names of its project and organization to render a
+	// webhook body.
+	"webhook_delivery_context": {"proreta_worker"},
 	// Members and invitations: an invitation token is looked up before the
 	// tenant is known, the organization switcher lists the user's own memberships, and an owner
 	// soft-deletes the organization of its own transaction.
@@ -149,7 +174,8 @@ var extraPolicies = map[string]struct {
 	"monitor_channels.owner_reminder_read":          {cmd: "r", roles: []string{"proreta_owner"}},
 	"notification_deliveries.owner_reminder_insert": {cmd: "a", roles: []string{"proreta_owner"}},
 	// auth_invitation_lookup.
-	"invitations.owner_invitation_lookup": {cmd: "r", roles: []string{"proreta_owner"}},
+	"invitations.owner_invitation_lookup":      {cmd: "r", roles: []string{"proreta_owner"}},
+	"projects.owner_invitation_project_lookup": {cmd: "r", roles: []string{"proreta_owner"}},
 	// status_page_published_pages and status_page_snapshot.
 	"status_pages.owner_statuspage_read":          {cmd: "r", roles: []string{"proreta_owner"}},
 	"status_page_snapshots.owner_statuspage_read": {cmd: "r", roles: []string{"proreta_owner"}},
@@ -157,6 +183,12 @@ var extraPolicies = map[string]struct {
 	"status_page_released_slugs.owner_slug_hold_read": {cmd: "r", roles: []string{"proreta_owner"}},
 	// auth_domain_lookup.
 	"org_auth_domains.owner_domain_lookup": {cmd: "r", roles: []string{"proreta_owner"}},
+	// specula_authenticate, specula_hello, specula_revoke and the claim's access check.
+	"specula_agents.owner_specula":        {cmd: "*", roles: []string{"proreta_owner"}},
+	"specula_projects.owner_specula_read": {cmd: "r", roles: []string{"proreta_owner"}},
+	// specula_mark_unreachable.
+	"monitor_state.owner_specula_unreachable_read":  {cmd: "r", roles: []string{"proreta_owner"}},
+	"monitor_state.owner_specula_unreachable_write": {cmd: "w", roles: []string{"proreta_owner"}},
 }
 
 var runtimeRoles = []string{"proreta_api", "proreta_statuspage", "proreta_worker"}

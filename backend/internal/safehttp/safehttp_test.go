@@ -14,6 +14,7 @@ import (
 	"go/build/constraint"
 	"go/parser"
 	"go/token"
+	"io"
 	"io/fs"
 	"math/big"
 	"net"
@@ -612,5 +613,132 @@ func TestLoopbackModeKeepsOtherRules(t *testing.T) {
 	}
 	if hits.Load() != before {
 		t.Fatal("normal client connected to the loopback server")
+	}
+}
+
+func TestSameHostRedirects(t *testing.T) {
+	var gotBody, gotKey string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/cross", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://other.test/final", http.StatusTemporaryRedirect)
+	})
+	mux.HandleFunc("/same", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://example.test/final", http.StatusTemporaryRedirect)
+	})
+	mux.HandleFunc("/final", func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody, gotKey = string(b), r.Header.Get("X-Api-Key")
+	})
+	post := func(t *testing.T, ctx context.Context, c *http.Client, path string) error {
+		t.Helper()
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://example.test"+path, strings.NewReader("secret-body"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("X-Api-Key", "secret-key")
+		resp, err := c.Do(req)
+		if err == nil {
+			_ = resp.Body.Close()
+		}
+		return err
+	}
+	newClient := func(t *testing.T) (*http.Client, *testServer) {
+		ts := newTestServer(t, mux)
+		return NewClient(ts.options(Options{Resolver: static("93.184.215.14"), MaxRedirects: 3})), ts
+	}
+
+	t.Run("cross host is refused before anything is sent", func(t *testing.T) {
+		gotBody, gotKey = "", ""
+		c, ts := newClient(t)
+		err := post(t, WithSameHostRedirects(context.Background()), c, "/cross")
+		if !errors.Is(err, ErrRedirectCrossHost) {
+			t.Fatalf("err = %v", err)
+		}
+		if len(ts.dialed()) != 1 || gotBody != "" || gotKey != "" {
+			t.Fatalf("dials %v, body %q, key %q", ts.dialed(), gotBody, gotKey)
+		}
+	})
+	t.Run("same host keeps body and header on 307", func(t *testing.T) {
+		c, _ := newClient(t)
+		if err := post(t, WithSameHostRedirects(context.Background()), c, "/same"); err != nil {
+			t.Fatal(err)
+		}
+		if gotBody != "secret-body" || gotKey != "secret-key" {
+			t.Fatalf("body %q, key %q", gotBody, gotKey)
+		}
+	})
+	t.Run("without the mark a cross host redirect is followed as before", func(t *testing.T) {
+		c, _ := newClient(t)
+		if err := post(t, context.Background(), c, "/cross"); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+// NewPrivateClient has no address guard: only the Specula executor may build one.
+func TestPrivateClientOnlyInSpecula(t *testing.T) {
+	root := filepath.Join("..", "..")
+	var offenders []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return err
+		}
+		slash := filepath.ToSlash(path)
+		if strings.HasSuffix(slash, "internal/safehttp/private.go") || strings.Contains(slash, "cmd/specula/") {
+			return nil
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(b), "NewPrivateClient") || strings.Contains(string(b), "NewPrivateDialer") {
+			offenders = append(offenders, slash)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(offenders) > 0 {
+		t.Fatalf("NewPrivateClient or NewPrivateDialer (no SSRF guard) is used outside cmd/specula: %v", offenders)
+	}
+}
+
+func TestPrivateClientReachesPrivateTargets(t *testing.T) {
+	var seen string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.Method + " " + r.Header.Get("X-Key")
+		if r.URL.Path == "/away" {
+			http.Redirect(w, r, "http://localhost:"+strings.Split(r.Host, ":")[1]+"/landed", http.StatusTemporaryRedirect)
+		}
+	}))
+	defer srv.Close()
+	c := NewPrivateClient(Options{MaxRedirects: 3})
+	// Loopback, plain http and a non-443 port: all refused by the guarded client, fine here.
+	req, _ := http.NewRequest(http.MethodPut, srv.URL+"/x", strings.NewReader("b"))
+	req.Header.Set("X-Key", "k")
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if seen != "PUT k" {
+		t.Fatalf("server saw %q", seen)
+	}
+	// A request with custom headers or a body does not follow a redirect to another host name.
+	req, _ = http.NewRequestWithContext(WithSameHostRedirects(context.Background()), http.MethodPut, srv.URL+"/away", strings.NewReader("b"))
+	req.Header.Set("X-Key", "k")
+	resp, err = c.Do(req)
+	if err == nil {
+		_ = resp.Body.Close()
+	}
+	if !errors.Is(err, ErrRedirectCrossHost) {
+		t.Fatalf("cross host redirect: %v", err)
+	}
+	// Plain GET follows it.
+	if resp, err := c.Get(srv.URL + "/away"); err != nil {
+		t.Fatalf("plain redirect: %v", err)
+	} else {
+		_ = resp.Body.Close()
 	}
 }

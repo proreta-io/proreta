@@ -2,8 +2,12 @@ import { ApiError, PLAN_LIMIT_PROBLEM_TYPE } from "../api/client";
 import {
   emptyMonitorForm,
   mapServerErrors,
+  toCreateRequest,
   toMonitorRequest,
+  validateHost,
+  validatePort,
   validateMonitorForm,
+  valuesFromMonitor,
   validateMonitorUrl,
   describeSetup,
   withHttps,
@@ -84,16 +88,129 @@ describe("validateMonitorForm", () => {
       toMonitorRequest({ ...valid, name: " Site ", expectedMode: "exact", expectedCode: "204" }),
     ).toEqual({
       name: "Site",
-      http: { url: "https://example.com", expectedStatus: "204", failureThreshold: 2 },
+      http: {
+        url: "https://example.com",
+        expectedStatus: "204",
+        failureThreshold: 2,
+        method: "GET",
+        headers: [],
+      },
       notificationsEnabled: true,
       channelIds: [],
+      location: { type: "cloud" },
     });
+  });
+
+  it("sends the location: always on edit, only for a Specula on create", () => {
+    const atSpecula = { ...valid, speculaId: "s1" };
+    expect(toMonitorRequest(atSpecula).location).toEqual({ type: "specula", speculaId: "s1" });
+    expect(toCreateRequest(atSpecula).location).toEqual({ type: "specula", speculaId: "s1" });
+    expect(toCreateRequest(valid)).not.toHaveProperty("location");
+    expect(toMonitorRequest({ ...valid, type: "heartbeat" })).not.toHaveProperty("location");
+  });
+
+  it("checks the URL with the rules of where the monitor runs", () => {
+    const private_ = { ...valid, url: "http://orders.shop.svc:8080/health" };
+    expect(validateMonitorForm(private_).url).toBe("Use an https:// URL.");
+    expect(validateMonitorForm({ ...private_, speculaId: "s1" }).url).toBeUndefined();
+    expect(validateMonitorUrl("https://example.com:8443/", true)).toBeUndefined();
+    expect(validateMonitorUrl("https://example.com:8443/")).toBe("Only port 443 is allowed.");
+    expect(validateMonitorUrl("ftp://svc/", true)).toBe("Use an http:// or https:// URL.");
+    expect(validateMonitorUrl("http://u:p@svc/", true)).toBe(
+      "Remove the user name and password from the URL.",
+    );
+  });
+
+  it("sends a stored header by name only and a body only when it was touched", () => {
+    const stored = { ...valid, method: "POST" as const, bodyStored: true };
+    const kept = toMonitorRequest({
+      ...stored,
+      headers: [
+        { name: "Authorization", value: "", stored: true },
+        { name: "X-New", value: "v", stored: false },
+        { name: "X-Replaced", value: "new", stored: true },
+      ],
+    });
+    expect(kept.http?.headers).toEqual([
+      { name: "Authorization" },
+      { name: "X-New", value: "v" },
+      { name: "X-Replaced", value: "new" },
+    ]);
+    expect(kept.http).not.toHaveProperty("body");
+    expect(toMonitorRequest({ ...stored, bodyDirty: true, body: "" }).http?.body).toBe("");
+    expect(toMonitorRequest({ ...valid, method: "POST", body: "x" }).http?.body).toBe("x");
+  });
+
+  it("checks the method, headers and body", () => {
+    const row = (name: string, value = "v") => ({ name, value, stored: false });
+    const errs = (over: Partial<MonitorFormValues>) => validateMonitorForm({ ...valid, ...over });
+    expect(errs({ method: "POST", headers: [row("Authorization")], body: "{}" })).toEqual({});
+    expect(errs({ body: "x" }).body).toMatch(/GET request cannot have a body/);
+    expect(errs({ method: "HEAD", bodyStored: true }).body).toMatch(/HEAD request/);
+    expect(
+      errs({ method: "HEAD", bodyStored: true, bodyDirty: true, body: "" }).body,
+    ).toBeUndefined();
+    expect(errs({ method: "POST", body: "a".repeat(64 * 1024 + 1) }).body).toBe(
+      "Use 64 KiB or less.",
+    );
+    expect(errs({ headers: [row("Bad Name")] }).headers).toMatch(/Header 1: enter a valid/);
+    expect(errs({ headers: [row("Host")] }).headers).toBe("Header 1: Host cannot be set.");
+    expect(errs({ headers: [row("proxy-authorization")] }).headers).toMatch(/cannot be set/);
+    expect(errs({ headers: [row("X-A"), row("x-a")] }).headers).toBe(
+      "Header 2: x-a is already set.",
+    );
+    expect(errs({ headers: [row("X-A", "a\nb")] }).headers).toMatch(/control characters/);
+    expect(errs({ headers: [row("X-A", "")] }).headers).toBe("Header 1: enter a value.");
+    expect(errs({ headers: [{ name: "X-A", value: "", stored: true }] }).headers).toBeUndefined();
+    expect(errs({ headers: Array.from({ length: 11 }, (_, i) => row(`X-${i}`)) }).headers).toBe(
+      "Use at most 10 headers.",
+    );
+  });
+
+  it("describes a non-GET method", () => {
+    const text = describeSetup({ ...valid, method: "POST" })
+      .map((p) => p.text)
+      .join("");
+    expect(text).toMatch(/^Sends POST to example\.com every minute/);
   });
 });
 
 describe("mapServerErrors", () => {
   const apiError = (status: number, fieldErrors: { field: string; message: string }[]) =>
     new ApiError({ type: "x", title: "Validation failed", status, fieldErrors });
+
+  it("maps header errors to the headers", () => {
+    const mapped = mapServerErrors(
+      new ApiError({
+        type: "x",
+        title: "Validation failed",
+        status: 422,
+        fieldErrors: [
+          { field: "http.headers[1].value", message: "must not contain control characters" },
+          { field: "http.body", message: "is not allowed with GET or HEAD" },
+        ],
+      }),
+    );
+    expect(mapped.fields.headers).toBe("Header 2: must not contain control characters");
+    expect(mapped.fields.body).toBe("Is not allowed with GET or HEAD");
+  });
+
+  it("maps a Specula error to the Run from field", () => {
+    const mapped = mapServerErrors(
+      new ApiError({
+        type: "x",
+        title: "Validation failed",
+        status: 422,
+        fieldErrors: [
+          {
+            field: "location.speculaId",
+            message: "does not exist or is not available to this project",
+          },
+        ],
+      }),
+    );
+    expect(mapped.fields.speculaId).toBe("Does not exist or is not available to this project");
+  });
 
   it("puts known field errors next to fields", () => {
     expect(
@@ -206,5 +323,102 @@ describe("describeSetup", () => {
     expect(sentence({ type: "heartbeat", expectedIntervalSeconds: "60", graceSeconds: "0" })).toBe(
       "Expects a ping every 1 min and alerts Slack the moment one is late.",
     );
+  });
+});
+
+describe("tcp monitors", () => {
+  const tcp = {
+    ...emptyMonitorForm,
+    type: "tcp" as const,
+    name: "DB",
+    host: "db.example.com",
+    port: "5432",
+  };
+
+  it.each([
+    ["db.example.com", undefined],
+    ["10.0.0.5", undefined],
+    ["::1", undefined],
+    ["", "Enter a host name or an IP address."],
+    ["https://db.example.com", "Enter only the host: no http://, path, user name or spaces."],
+    ["db.example.com/x", "Enter only the host: no http://, path, user name or spaces."],
+    ["user@db.example.com", "Enter only the host: no http://, path, user name or spaces."],
+    ["db example", "Enter only the host: no http://, path, user name or spaces."],
+    ["a".repeat(256), "Use 255 characters or fewer."],
+  ])("host %s -> %s", (host, expected) => {
+    expect(validateHost(host)).toBe(expected);
+  });
+
+  it.each([
+    ["5432", true],
+    ["1", true],
+    ["65535", true],
+    ["0", false],
+    ["65536", false],
+    ["", false],
+    ["54x", false],
+    ["-1", false],
+  ])("port %s", (port, ok) => {
+    expect(validatePort(port) === undefined).toBe(ok);
+  });
+
+  it("validates only the tcp fields and ignores the http ones", () => {
+    expect(validateMonitorForm(tcp)).toEqual({});
+    expect(validateMonitorForm({ ...tcp, host: "", port: "x", failureThreshold: 4 })).toEqual({
+      host: "Enter a host name or an IP address.",
+      port: "Enter a port from 1 to 65535.",
+      failureThreshold: "Choose 1, 2 or 3 failed checks.",
+    });
+  });
+
+  it("sends the tcp sub-object, and a location only for a Specula", () => {
+    expect(toCreateRequest(tcp)).toEqual({
+      type: "tcp",
+      name: "DB",
+      tcp: { host: "db.example.com", port: 5432, failureThreshold: 2 },
+      notificationsEnabled: true,
+      channelIds: [],
+    });
+    expect(toCreateRequest({ ...tcp, speculaId: "s1" })).toMatchObject({
+      location: { type: "specula", speculaId: "s1" },
+    });
+    // An edit always states the location, so a monitor can move back to Proreta's cloud.
+    expect(toMonitorRequest(tcp)).toMatchObject({
+      location: { type: "cloud" },
+      tcp: { port: 5432 },
+    });
+    expect(toMonitorRequest(tcp)).not.toHaveProperty("http");
+  });
+
+  it("fills the form from a stored monitor and maps server errors to its fields", () => {
+    const stored = {
+      type: "tcp",
+      name: "DB",
+      notificationsEnabled: true,
+      channelIds: [],
+      projectId: "p",
+      location: { type: "cloud" },
+      tcp: {
+        host: "db.example.com",
+        port: 5432,
+        intervalSeconds: 60,
+        timeoutSeconds: 10,
+        failureThreshold: 3,
+        lastResponseMs: null,
+      },
+    } as unknown as Parameters<typeof valuesFromMonitor>[0];
+    expect(valuesFromMonitor(stored)).toMatchObject({
+      type: "tcp",
+      host: "db.example.com",
+      port: "5432",
+      failureThreshold: 3,
+    });
+    const err = new ApiError({
+      type: "x",
+      title: "Validation failed",
+      status: 422,
+      fieldErrors: [{ field: "tcp.host", message: "host must be a public address" }],
+    });
+    expect(mapServerErrors(err).fields).toEqual({ host: "Host must be a public address" });
   });
 });

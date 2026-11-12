@@ -1,3 +1,4 @@
+import { usePermissions } from "../lib/permissions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -6,10 +7,12 @@ import {
   createMonitor,
   getMonitor,
   listChannels,
+  listSpecula,
   queryKeys,
   updateMonitor,
   type Channel,
   type MonitorDetail,
+  type Specula,
 } from "../api/endpoints";
 import HeartbeatUrlPanel from "../components/HeartbeatUrlPanel";
 import MonitorNotFound from "../components/MonitorNotFound";
@@ -30,15 +33,23 @@ import {
   Select,
   Skeleton,
   Loading,
+  Textarea,
+  WriteOnlyValue,
 } from "../components/ui";
 import { formatDuration } from "../lib/format";
 import { GRACE_MAX, INTERVAL_MAX, INTERVAL_MIN, INTERVAL_PRESETS } from "../lib/heartbeat";
 import {
+  BODY_MAX_BYTES,
+  BODY_METHODS,
   channelsForProject,
   describeSetup,
   emptyMonitorForm,
+  isSafeMethod,
   keepLiveChannels,
   mapServerErrors,
+  MAX_HEADERS,
+  METHODS,
+  HOST_MAX,
   NAME_MAX,
   toCreateRequest,
   toMonitorRequest,
@@ -48,12 +59,13 @@ import {
   withHttps,
   withoutHttps,
   type FormField,
+  type HeaderRow,
+  type Method,
   type MonitorFormErrors,
   type MonitorFormValues,
 } from "../lib/monitorForm";
 import { atHeartbeatLimit, atMonitorLimit, useUsage } from "../lib/usage";
-import { useAuth } from "../auth/AuthProvider";
-import { abilities, ROLE_HINTS } from "../lib/roles";
+import { ROLE_HINTS } from "../lib/roles";
 import { canEditIn, channelScopeLabel, defaultProjectFor, editableProjects } from "../lib/projects";
 import { useProjectScope } from "../lib/useProjectScope";
 import type { Project } from "../api/endpoints";
@@ -62,7 +74,8 @@ const title = "text-headline leading-[1.1] font-semibold tracking-[-0.02em] sm:t
 
 export default function MonitorForm({ mode }: { mode: "create" | "edit" }) {
   const { id = "" } = useParams();
-  const canEdit = abilities(useAuth().session).editMonitors;
+  const can = usePermissions();
+  const canEdit = can.anywhere(mode === "create" ? "monitor.create" : "monitor.update");
   const scope = useProjectScope();
   const monitor = useQuery({
     queryKey: queryKeys.monitor(id),
@@ -70,6 +83,13 @@ export default function MonitorForm({ mode }: { mode: "create" | "edit" }) {
     enabled: mode === "edit" && canEdit,
   });
 
+  if (!can.ready) {
+    return (
+      <Loading label="Loading…" className="pt-10">
+        <Skeleton className="h-8 w-64" />
+      </Loading>
+    );
+  }
   if (!canEdit) {
     // Viewers read only; the API would refuse the save.
     return (
@@ -98,7 +118,10 @@ export default function MonitorForm({ mode }: { mode: "create" | "edit" }) {
         <MonitorFormBody
           mode="create"
           projects={projects}
-          initial={{ ...emptyMonitorForm, projectId: defaultProjectFor(scope.choice, projects) }}
+          initial={{
+            ...emptyMonitorForm,
+            projectId: defaultProjectFor(can, scope.choice, projects),
+          }}
         />
       </Page>
     );
@@ -127,13 +150,14 @@ export default function MonitorForm({ mode }: { mode: "create" | "edit" }) {
   }
   const m = monitor.data;
   const ownProject = scope.projects.data?.items.find((p) => p.id === m.projectId);
-  if (scope.projects.data && !canEditIn(ownProject)) {
-    // A viewer override in this project: the API would refuse the save.
+  if (scope.projects.data && !canEditIn(can, ownProject)) {
+    // A viewer in this project: the API would refuse the save.
     return (
       <Page back={<Link to={`/monitors/${m.id}`}>← {m.name}</Link>} title={`Edit ${m.name}`}>
         <Alert tone="neutral" title="Read only.">
-          Your role in the project {ownProject?.name ?? ""} is viewer: you can see this monitor but
-          not change it. Ask an admin to change your role in the project.
+          Your role in the project {ownProject?.name ?? ""} is {ownProject?.role ?? "viewer"}: you
+          can see this monitor but not change it. Ask a maintainer to change your role in the
+          project.
         </Alert>
       </Page>
     );
@@ -144,7 +168,9 @@ export default function MonitorForm({ mode }: { mode: "create" | "edit" }) {
       title={`Edit ${m.name}`}
       note={
         <span className="flex flex-wrap items-center gap-2.5 text-caption text-muted-foreground">
-          <Badge tone="strong">{m.type === "heartbeat" ? "Watchdog" : "HTTP"}</Badge>
+          <Badge tone="strong">
+            {m.type === "heartbeat" ? "Watchdog" : m.type === "tcp" ? "TCP" : "HTTP"}
+          </Badge>
           The type cannot change after a monitor is created.
         </span>
       }
@@ -214,6 +240,21 @@ function MonitorFormBody({
     queryFn: () => listChannels(pickerProject),
   });
 
+  // The Specula executors a monitor of the chosen project may run at.
+  const speculaList = useQuery({
+    queryKey: queryKeys.speculaFor(pickerProject),
+    queryFn: () => listSpecula(pickerProject),
+  });
+  // After the project changes, a Specula the new project may not use is dropped (derived, not
+  // stored, so it comes back if the project is changed back).
+  const speculaId =
+    speculaList.data &&
+    values.speculaId &&
+    values.projectId !== initial.projectId &&
+    !speculaList.data.items.some((x) => x.id === values.speculaId)
+      ? ""
+      : values.speculaId;
+
   const save = useMutation({
     mutationFn: (v: MonitorFormValues) => {
       const saved = keepLiveChannels(v, channels.data?.items);
@@ -247,12 +288,19 @@ function MonitorFormBody({
     setValues((v) => ({ ...v, [key]: value }));
     const field: FormField =
       key === "expectedMode" || key === "expectedCode" ? "expectedStatus" : (key as FormField);
-    setErrors((e) => (e[field] ? { ...e, [field]: undefined } : e));
+    // The URL is checked with the rules of where the monitor runs, so a new location voids its error.
+    const stale: FormField[] = key === "speculaId" ? [field, "url"] : [field];
+    setErrors((e) =>
+      stale.some((f) => e[f])
+        ? { ...e, ...Object.fromEntries(stale.map((f) => [f, undefined])) }
+        : e,
+    );
   }
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const found = validateMonitorForm(values);
+    const current = { ...values, speculaId };
+    const found = validateMonitorForm(current);
     setErrors(found);
     setGeneral(undefined);
     if (Object.keys(found).length > 0) {
@@ -260,7 +308,11 @@ function MonitorFormBody({
       const first = (
         [
           "name",
+          "speculaId",
           "url",
+          "method",
+          "headers",
+          "body",
           "expectedStatus",
           "expectedIntervalSeconds",
           "graceSeconds",
@@ -272,7 +324,7 @@ function MonitorFormBody({
       if (first) document.querySelector<HTMLElement>(`[data-field="${first}"]`)?.focus();
       return;
     }
-    save.mutate(values);
+    save.mutate(current);
   }
 
   if (created?.heartbeat?.pingUrl) {
@@ -289,6 +341,7 @@ function MonitorFormBody({
   }
 
   const heartbeat = values.type === "heartbeat";
+  const tcp = values.type === "tcp";
   const hasErrors = Object.values(errors).some(Boolean);
   const cancelTo = mode === "edit" && id ? `/monitors/${id}` : "/";
   const scheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(withoutHttps(values.url));
@@ -319,7 +372,7 @@ function MonitorFormBody({
               name="name"
               autoComplete="off"
               maxLength={NAME_MAX * 2}
-              placeholder={heartbeat ? "Nightly backup" : "Checkout API"}
+              placeholder={heartbeat ? "Nightly backup" : tcp ? "Postgres" : "Checkout API"}
               value={values.name}
               onChange={(e) => update("name", e.target.value)}
             />
@@ -330,29 +383,54 @@ function MonitorFormBody({
           <HeartbeatFields values={values} update={update} errors={errors} />
         ) : (
           <>
-            <Field
-              label="URL"
-              hint="HTTPS only. Private and internal addresses are not allowed."
-              error={errors.url}
-            >
-              {(c) => (
-                <Input
-                  {...c}
-                  data-field="url"
-                  name="url"
-                  mono
-                  inputMode="url"
-                  spellCheck={false}
-                  autoCapitalize="off"
-                  autoComplete="off"
-                  maxLength={URL_MAX}
-                  placeholder="api.example.com/health"
-                  start={<span className={scheme ? "hidden" : undefined}>https://</span>}
-                  value={withoutHttps(values.url)}
-                  onChange={(e) => update("url", withHttps(e.target.value))}
-                />
-              )}
-            </Field>
+            <RunFrom
+              value={speculaId}
+              specula={speculaList.data?.items}
+              loading={speculaList.isPending}
+              error={errors.speculaId}
+              onChange={(id) => update("speculaId", id)}
+            />
+
+            {tcp ? (
+              <TcpFields
+                values={values}
+                update={update}
+                errors={errors}
+                specula={speculaId !== ""}
+              />
+            ) : (
+              <>
+                <Field
+                  label="URL"
+                  hint={
+                    speculaId
+                      ? "http or https, any port. Addresses inside your network are fine: the Specula checks from there."
+                      : "HTTPS only. Private and internal addresses are not allowed."
+                  }
+                  error={errors.url}
+                >
+                  {(c) => (
+                    <Input
+                      {...c}
+                      data-field="url"
+                      name="url"
+                      mono
+                      inputMode="url"
+                      spellCheck={false}
+                      autoCapitalize="off"
+                      autoComplete="off"
+                      maxLength={URL_MAX}
+                      placeholder="api.example.com/health"
+                      start={<span className={scheme ? "hidden" : undefined}>https://</span>}
+                      value={withoutHttps(values.url)}
+                      onChange={(e) => update("url", withHttps(e.target.value))}
+                    />
+                  )}
+                </Field>
+
+                <RequestFields values={values} update={update} errors={errors} />
+              </>
+            )}
 
             <div className="flex flex-col gap-1.5">
               <div className="grid grid-cols-2 gap-3">
@@ -362,7 +440,9 @@ function MonitorFormBody({
               <span className="text-caption text-muted-foreground">Fixed for now.</span>
             </div>
 
-            <ExpectedStatus values={values} update={update} error={errors.expectedStatus} />
+            {!tcp && (
+              <ExpectedStatus values={values} update={update} error={errors.expectedStatus} />
+            )}
 
             <div className="flex flex-col gap-1.5">
               <span className="text-caption font-medium">Alert after</span>
@@ -408,7 +488,9 @@ function MonitorFormBody({
           description={
             heartbeat
               ? "Slack gets a message when no ping arrives in time and when pings resume."
-              : "Slack gets a message when it goes down and when it recovers, and a warning when the TLS certificate expires in 14 days or less."
+              : tcp
+                ? "Slack gets a message when it goes down and when it recovers."
+                : "Slack gets a message when it goes down and when it recovers, and a warning when the TLS certificate expires in 14 days or less."
           }
           data-field="notificationsEnabled"
           error={errors.notificationsEnabled}
@@ -478,7 +560,7 @@ function ProjectField({
   error?: string;
   onChange: (projectId: string) => void;
 }) {
-  const choices = editableProjects(projects);
+  const choices = editableProjects(usePermissions(), projects);
   if (choices.length < 2) return null;
   return (
     <Field
@@ -617,6 +699,12 @@ function TypeChoice({
       full: httpFull ? "Your plan's HTTP monitor limit is reached." : undefined,
     },
     {
+      type: "tcp" as const,
+      title: "TCP port",
+      text: "Proreta connects to a host and a port every minute: a database, a mail server, any service that is not a web page.",
+      full: httpFull ? "Your plan's monitor limit is reached." : undefined,
+    },
+    {
       type: "heartbeat" as const,
       title: "Watchdog (heartbeat)",
       text: "Your job or Alertmanager's always-firing Watchdog alert pings a secret URL; Proreta alerts when the pings stop.",
@@ -626,7 +714,7 @@ function TypeChoice({
   return (
     <fieldset className="flex flex-col gap-2">
       <legend className="pb-2 text-caption font-medium">What to monitor</legend>
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="grid gap-2 sm:grid-cols-3">
         {options.map((o) => (
           <TypeCard
             key={o.type}
@@ -699,6 +787,284 @@ function TypeCard({
         )}
       </span>
     </div>
+  );
+}
+
+type Update = <K extends keyof MonitorFormValues>(key: K, value: MonitorFormValues[K]) => void;
+
+/** Method, custom headers and body of the request. Header values and the body are write-only. */
+function RequestFields({
+  values,
+  update,
+  errors,
+}: {
+  values: MonitorFormValues;
+  update: Update;
+  errors: MonitorFormErrors;
+}) {
+  const canHaveBody = BODY_METHODS.includes(values.method);
+  return (
+    <>
+      <Field
+        label="Method"
+        hint="GET is enough for most health checks."
+        error={errors.method}
+        className="sm:max-w-48"
+      >
+        {(c) => (
+          <Select
+            {...c}
+            data-field="method"
+            name="method"
+            value={values.method}
+            onChange={(e) => update("method", e.target.value as Method)}
+          >
+            {METHODS.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </Select>
+        )}
+      </Field>
+      {!isSafeMethod(values.method) && (
+        <Alert tone="neutral" title={`This check sends ${values.method} every minute.`}>
+          It acts on your system each time. Use it only against an endpoint that is safe to call
+          that often.
+        </Alert>
+      )}
+      <HeadersEditor
+        rows={values.headers}
+        error={errors.headers}
+        onChange={(rows) => update("headers", rows)}
+      />
+      {canHaveBody && <BodyField values={values} update={update} error={errors.body} />}
+      {!canHaveBody && errors.body && (
+        <span role="alert" data-field="body" tabIndex={-1} className="text-caption text-down">
+          {errors.body}
+        </span>
+      )}
+    </>
+  );
+}
+
+function HeadersEditor({
+  rows,
+  error,
+  onChange,
+}: {
+  rows: HeaderRow[];
+  error?: string;
+  onChange: (rows: HeaderRow[]) => void;
+}) {
+  const set = (i: number, patch: Partial<HeaderRow>) =>
+    // A renamed header is a new one: the stored value belonged to the old name.
+    onChange(
+      rows.map((r, j) =>
+        j === i ? { ...r, ...patch, ...(patch.name !== undefined ? { stored: false } : {}) } : r,
+      ),
+    );
+  return (
+    <fieldset className="flex flex-col gap-2" data-field="headers" tabIndex={-1}>
+      <legend className="pb-1 text-caption font-medium">Request headers</legend>
+      {rows.map((r, i) => (
+        <div key={i} className="grid grid-cols-[1fr_auto] gap-2 sm:grid-cols-[1fr_1fr_auto]">
+          <Input
+            aria-label={`Header ${i + 1} name`}
+            mono
+            spellCheck={false}
+            autoCapitalize="off"
+            autoComplete="off"
+            placeholder="Authorization"
+            value={r.name}
+            onChange={(e) => set(i, { name: e.target.value })}
+            className="col-span-2 sm:col-span-1"
+          />
+          <Input
+            aria-label={`Header ${i + 1} value`}
+            mono
+            secret
+            autoComplete="off"
+            placeholder={r.stored ? "Unchanged" : "Value"}
+            value={r.value}
+            onChange={(e) => set(i, { value: e.target.value })}
+          />
+          <Button
+            variant="secondary"
+            aria-label={`Remove header ${i + 1}`}
+            onClick={() => onChange(rows.filter((_, j) => j !== i))}
+          >
+            Remove
+          </Button>
+        </div>
+      ))}
+      <div>
+        <Button
+          variant="secondary"
+          disabled={rows.length >= MAX_HEADERS}
+          onClick={() => onChange([...rows, { name: "", value: "", stored: false }])}
+        >
+          Add header
+        </Button>
+      </div>
+      <span className="text-caption text-muted-foreground">
+        {error ??
+          "For tokens and content types. Values are stored encrypted and are never shown again; leave a saved value empty to keep it."}
+      </span>
+    </fieldset>
+  );
+}
+
+function BodyField({
+  values,
+  update,
+  error,
+}: {
+  values: MonitorFormValues;
+  update: Update;
+  error?: string;
+}) {
+  if (values.bodyStored && !values.bodyDirty) {
+    return (
+      <WriteOnlyValue
+        label="Request body"
+        hint="Stored encrypted; it cannot be shown. It is kept unless you replace it."
+        onReplace={() => update("bodyDirty", true)}
+      />
+    );
+  }
+  return (
+    <Field
+      label="Request body"
+      hint={`Text, up to ${BODY_MAX_BYTES / 1024} KiB, sent as is (JSON unless a Content-Type header says otherwise). Stored encrypted and never shown again.${
+        values.bodyStored ? " Leave it empty to remove the stored body." : ""
+      }`}
+      error={error}
+    >
+      {(c) => (
+        <Textarea
+          {...c}
+          data-field="body"
+          name="body"
+          rows={5}
+          spellCheck={false}
+          autoComplete="off"
+          className="font-mono sm:text-caption"
+          placeholder='{"check": true}'
+          value={values.body}
+          onChange={(e) => {
+            update("body", e.target.value);
+            update("bodyDirty", true);
+          }}
+        />
+      )}
+    </Field>
+  );
+}
+
+/** Where the check runs: Proreta's own worker, or a Specula inside your network. */
+/** The target of a tcp monitor: where to connect. */
+function TcpFields({
+  values,
+  update,
+  errors,
+  specula,
+}: {
+  values: MonitorFormValues;
+  update: Update;
+  errors: MonitorFormErrors;
+  specula: boolean;
+}) {
+  return (
+    <div className="grid gap-4 sm:grid-cols-[1fr_8rem]">
+      <Field
+        label="Host"
+        hint={
+          specula
+            ? "A name or an address in your network, such as postgres.prod.svc or 10.0.4.12."
+            : "A public host name or IP address, without http:// or a port."
+        }
+        error={errors.host}
+      >
+        {(c) => (
+          <Input
+            {...c}
+            data-field="host"
+            name="host"
+            mono
+            spellCheck={false}
+            autoCapitalize="off"
+            autoComplete="off"
+            maxLength={HOST_MAX}
+            placeholder="db.example.com"
+            value={values.host}
+            onChange={(e) => update("host", e.target.value)}
+          />
+        )}
+      </Field>
+      <Field label="Port" error={errors.port}>
+        {(c) => (
+          <Input
+            {...c}
+            data-field="port"
+            name="port"
+            mono
+            inputMode="numeric"
+            autoComplete="off"
+            maxLength={5}
+            placeholder="5432"
+            value={values.port}
+            onChange={(e) => update("port", e.target.value)}
+          />
+        )}
+      </Field>
+    </div>
+  );
+}
+
+function RunFrom({
+  value,
+  specula,
+  loading,
+  error,
+  onChange,
+}: {
+  value: string;
+  specula: Specula[] | undefined;
+  loading: boolean;
+  error?: string;
+  onChange: (speculaId: string) => void;
+}) {
+  const items = specula ?? [];
+  // Nothing to choose: stay quiet, unless the monitor already runs somewhere else.
+  if (!loading && items.length === 0 && !value) return null;
+  const known = items.some((x) => x.id === value);
+  return (
+    <Field
+      label="Run from"
+      hint="Proreta cloud checks public addresses. A Specula checks from inside your own network."
+      error={error}
+      className="sm:max-w-80"
+    >
+      {(c) => (
+        <Select
+          {...c}
+          data-field="speculaId"
+          name="speculaId"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          <option value="">Proreta cloud</option>
+          {value && !known && !loading && <option value={value}>Unavailable Specula</option>}
+          {items.map((x) => (
+            <option key={x.id} value={x.id}>
+              {x.name}
+              {x.status === "offline" ? " (offline)" : ""}
+            </option>
+          ))}
+        </Select>
+      )}
+    </Field>
   );
 }
 

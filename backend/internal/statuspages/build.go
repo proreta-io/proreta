@@ -146,6 +146,23 @@ func RefreshForMonitor(ctx context.Context, tx pgx.Tx, tenantID, monitorID uuid.
 	return nil
 }
 
+// DetachForeignComponents removes, in the caller's tenant transaction, the monitor from the pages of
+// every project other than the one it moves to, and refreshes those pages. Organization-level
+// pages keep it. monitors calls it while it holds the monitor's row lock. It returns the number of
+// components removed.
+func DetachForeignComponents(ctx context.Context, tx pgx.Tx, tenantID, monitorID, projectID uuid.UUID, now time.Time) (int, error) {
+	pages, err := statuspagesdb.New(tx).DetachForeignComponents(ctx, statuspagesdb.DetachForeignComponentsParams{TenantID: tenantID, MonitorID: monitorID, ProjectID: projectID})
+	if err != nil {
+		return 0, fmt.Errorf("statuspages: detach components: %w", err)
+	}
+	for _, id := range pages {
+		if _, err := Refresh(ctx, tx, tenantID, id, now); err != nil {
+			return 0, err
+		}
+	}
+	return len(pages), nil
+}
+
 // Refresh rebuilds and stores the snapshot of a page in the caller's tenant transaction, or
 // removes it when the page is not published (or gone). It returns whether a snapshot is stored.
 func Refresh(ctx context.Context, tx pgx.Tx, tenantID, pageID uuid.UUID, now time.Time) (bool, error) {

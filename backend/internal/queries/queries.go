@@ -67,11 +67,22 @@ type Incident struct {
 type Monitor struct {
 	ID        uuid.UUID
 	ProjectID uuid.UUID
-	// Type is "http" or "heartbeat".
-	Type                 string
-	Name                 string
-	URL                  string
-	ExpectedStatus       string
+	// Type is "http", "tcp" or "heartbeat".
+	Type           string
+	Name           string
+	URL            string
+	ExpectedStatus string
+	// Host and Port are the target of a tcp monitor.
+	Host string
+	Port int
+	// Method, HeaderNames and BodySet describe the request of an http monitor; values are
+	// sealed and never read here.
+	Method      string
+	HeaderNames []string
+	BodySet     bool
+	// SpeculaID and SpeculaName are set when an http monitor runs at a Specula.
+	SpeculaID            *uuid.UUID
+	SpeculaName          string
 	IntervalSeconds      int
 	TimeoutSeconds       int
 	FailureThreshold     int
@@ -114,15 +125,26 @@ type Summary struct {
 
 const monitorColumns = `
 SELECT m.id, m.project_id, m.type, m.name, COALESCE(m.config ->> 'url', ''), COALESCE(m.config ->> 'expectedStatus', '2xx'),
+       COALESCE(m.config ->> 'method', 'GET'), COALESCE(m.config -> 'headerNames', '[]'::jsonb), COALESCE((m.config ->> 'bodySet')::boolean, false),
        m.interval_seconds, m.timeout_seconds, m.failure_threshold, m.notifications_enabled, m.paused,
        m.created_at, m.updated_at,
        s.status, s.status_changed_at, s.last_error_kind, s.last_checked_at, s.tls_expires_at,
        i.id, i.started_at, COALESCE(i.reason, '` + unknownReason + `'),
        lr.latency_ms, h.last_ping_at,
-       CASE WHEN m.type = 'heartbeat' THEN (m.config ->> 'graceSeconds')::numeric::integer END
+       CASE WHEN m.type = 'heartbeat' THEN (m.config ->> 'graceSeconds')::numeric::integer END,
+       sp.id, sp.name,
+       COALESCE(m.config ->> 'host', ''), COALESCE((m.config ->> 'port')::integer, 0)
 FROM monitors AS m
 JOIN monitor_state AS s ON s.tenant_id = m.tenant_id AND s.monitor_id = m.id
 LEFT JOIN heartbeat_tokens AS h ON h.tenant_id = m.tenant_id AND h.monitor_id = m.id
+-- The Specula an http monitor runs at: the one whose location holds its schedule.
+LEFT JOIN LATERAL (
+    SELECT a.id, a.name
+    FROM monitor_location_state AS mls
+    JOIN specula_agents AS a ON a.tenant_id = mls.tenant_id AND a.location_id = mls.location_id
+    WHERE mls.tenant_id = m.tenant_id AND mls.monitor_id = m.id
+    LIMIT 1
+) AS sp ON true
 LEFT JOIN incidents AS i ON i.tenant_id = s.tenant_id AND i.id = s.current_incident_id AND i.resolved_at IS NULL
 -- The newest result through the primary key (monitor_id, checked_at); the lower bound lets the
 -- planner prune old monthly partitions.
@@ -143,13 +165,17 @@ func scanMonitor(row pgx.Row) (Monitor, error) {
 	var incStarted *time.Time
 	var incReason string
 	var latency, grace *int32
-	err := row.Scan(&m.ID, &m.ProjectID, &m.Type, &m.Name, &m.URL, &m.ExpectedStatus, &interval, &timeout, &threshold, &m.NotificationsEnabled, &m.Paused,
+	var speculaName *string
+	err := row.Scan(&m.ID, &m.ProjectID, &m.Type, &m.Name, &m.URL, &m.ExpectedStatus, &m.Method, &m.HeaderNames, &m.BodySet, &interval, &timeout, &threshold, &m.NotificationsEnabled, &m.Paused,
 		&m.CreatedAt, &m.UpdatedAt, &m.Status, &m.StatusSince, &m.LastErrorKind, &m.LastCheckedAt, &m.TLSExpiresAt,
-		&incID, &incStarted, &incReason, &latency, &m.LastPingAt, &grace)
+		&incID, &incStarted, &incReason, &latency, &m.LastPingAt, &grace, &m.SpeculaID, &speculaName, &m.Host, &m.Port)
 	if err != nil {
 		return Monitor{}, err
 	}
 	m.IntervalSeconds, m.TimeoutSeconds, m.FailureThreshold = int(interval), int(timeout), int(threshold)
+	if speculaName != nil {
+		m.SpeculaName = *speculaName
+	}
 	if m.Paused {
 		m.Status = StatusUnknown
 	}

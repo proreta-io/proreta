@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -14,18 +13,29 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/testsupport/pgtest"
 )
 
+// person is a signed-in user of a test organization.
+type person struct {
+	hdr map[string]string
+	id  string
+}
+
 // projectWorld is an organization with four projects and people in them:
-//   - Default (every member), alpha (member, viewer), beta (member with the viewer override),
-//     gamma (nobody but owners and admins);
-//   - one monitor per project, a heartbeat in gamma, one channel per project and an
-//     organization-wide channel.
+//   - four people with an organization role (owner, maintainer, member, viewer), who all see every
+//     project, and people without one (project-only) with direct roles: aOwner, aMaint, aMember and
+//     aViewer in alpha, bMember in beta, pmix (viewer in alpha, member in beta), raised (an
+//     organization viewer who is maintainer of alpha), mixOwner (an organization member who owns
+//     beta), tgt (in no project, the target of member changes) and none (in no project);
+//   - one monitor and one heartbeat per project, one channel per project (the Default one is
+//     c-default) and an organization-wide channel.
 type projectWorld struct {
 	c                         *client
 	env                       *pgtest.Env
 	sessions                  map[authz.Role]map[string]string
 	userIDs                   map[authz.Role]string
+	people                    map[string]person
 	def, alpha, beta, gamma   string
 	mDef, mAlpha, mBeta, mGam string
+	hbDef, hbAlpha, hbBeta    string
 	hbGamma                   string
 	chDef, chAlpha, chBeta    string
 	chGamma, chOrg            string
@@ -33,16 +43,25 @@ type projectWorld struct {
 	projectNames              map[string]string
 }
 
+// hdr returns the session of an organization role or of a named person.
+func (w *projectWorld) hdr(name string) map[string]string {
+	if p, ok := w.people[name]; ok {
+		return p.hdr
+	}
+	return w.sessions[authz.Role(name)]
+}
+
 func newProjectWorld(t *testing.T, name string) *projectWorld {
 	t.Helper()
 	env := pgtest.New(t, pgtest.DBName(name))
 	c := newRegistrationServer(t, env, membersOpts(), true, &lockedBuffer{})
 	w := &projectWorld{c: c, env: env, sessions: map[authz.Role]map[string]string{}, userIDs: map[authz.Role]string{},
+		people:      map[string]person{},
 		monitorName: map[string]string{}, channelName: map[string]string{}, projectNames: map[string]string{}}
 	owner := adminSession(c)
 	w.sessions[authz.Owner] = owner
 	w.userIDs[authz.Owner] = userIDOf(t, c, owner)
-	for _, role := range []authz.Role{authz.Admin, authz.Member, authz.Viewer} {
+	for _, role := range []authz.Role{authz.Maintainer, authz.Member, authz.Viewer} {
 		token, _ := invite(t, c, owner, string(role))
 		w.sessions[role], _ = joinByRegister(t, c, token, "p-"+string(role)+"@example.com")
 		w.userIDs[role] = userIDOf(t, c, w.sessions[role])
@@ -64,15 +83,43 @@ func newProjectWorld(t *testing.T, name string) *projectWorld {
 		return id
 	}
 	w.alpha, w.beta, w.gamma = mk("Alpha"), mk("Beta"), mk("Gamma")
-	put := func(project string, role authz.Role, body string) {
-		r := c.do(http.MethodPut, "/api/v1/projects/"+project+"/members/"+w.userIDs[role], body, owner)
+
+	// A person joins with an organization role; projectOnly then takes the role away.
+	join := func(name, orgRole string, projectOnly bool) {
+		token, _ := invite(t, c, owner, orgRole)
+		hdr, _ := joinByRegister(t, c, token, "p-"+strings.ToLower(name)+"@example.com")
+		p := person{hdr: hdr, id: userIDOf(t, c, hdr)}
+		if projectOnly {
+			if r := c.do(http.MethodPatch, "/api/v1/members/"+p.id, `{"role":null}`, owner); r.code != http.StatusOK || r.body["role"] != nil {
+				t.Fatalf("make %s project-only: %d %s", name, r.code, r.raw)
+			}
+		}
+		w.people[name] = p
+	}
+	put := func(project, who string, role string) {
+		id := w.people[who].id
+		if id == "" {
+			id = w.userIDs[authz.Role(who)]
+		}
+		r := c.do(http.MethodPut, "/api/v1/projects/"+project+"/members/"+id, `{"role":"`+role+`"}`, owner)
 		if r.code != http.StatusOK {
-			t.Fatalf("put %s in %s: %d %s", role, project, r.code, r.raw)
+			t.Fatalf("put %s in %s: %d %s", who, project, r.code, r.raw)
 		}
 	}
-	put(w.alpha, authz.Member, `{}`)
-	put(w.alpha, authz.Viewer, `{}`)
-	put(w.beta, authz.Member, `{"role":"viewer"}`)
+	for _, n := range []string{"aOwner", "aMaint", "aMember", "aViewer", "bMember", "pmix", "tgt", "none"} {
+		join(n, "viewer", true)
+	}
+	join("raised", "viewer", false)
+	join("mixOwner", "member", false)
+	put(w.alpha, "aOwner", "owner")
+	put(w.alpha, "aMaint", "maintainer")
+	put(w.alpha, "aMember", "member")
+	put(w.alpha, "aViewer", "viewer")
+	put(w.beta, "bMember", "member")
+	put(w.alpha, "pmix", "viewer")
+	put(w.beta, "pmix", "member")
+	put(w.alpha, "raised", "maintainer")
+	put(w.beta, "mixOwner", "owner")
 
 	monitor := func(project, name, extra string) string {
 		r := c.do(http.MethodPost, "/api/v1/monitors", `{"name":"`+name+`","projectId":"`+project+`"`+extra+`}`, owner)
@@ -87,6 +134,9 @@ func newProjectWorld(t *testing.T, name string) *projectWorld {
 	w.mAlpha = monitor(w.alpha, "m-alpha", `,"type":"http","http":{"url":"https://example.com/a"}`)
 	w.mBeta = monitor(w.beta, "m-beta", `,"type":"http","http":{"url":"https://example.com/b"}`)
 	w.mGam = monitor(w.gamma, "m-gamma", `,"type":"http","http":{"url":"https://example.com/g"}`)
+	w.hbDef = monitor(w.def, "hb-default", `,"type":"heartbeat","heartbeat":{}`)
+	w.hbAlpha = monitor(w.alpha, "hb-alpha", `,"type":"heartbeat","heartbeat":{}`)
+	w.hbBeta = monitor(w.beta, "hb-beta", `,"type":"heartbeat","heartbeat":{}`)
 	w.hbGamma = monitor(w.gamma, "hb-gamma", `,"type":"heartbeat","heartbeat":{}`)
 
 	channel := func(name, scope string) string {
@@ -126,173 +176,17 @@ func (w *projectWorld) names(t *testing.T, path string, hdr map[string]string, f
 	return strings.Join(out, ",")
 }
 
-// TestIntegrationProjectIsolation is the project isolation matrix: for every role, every endpoint
-// that touches project-scoped data shows only the projects the role sees, answers 404 for the
-// others (no IDOR inside one organization) and refuses changes where the role is read-only.
-func TestIntegrationProjectIsolation(t *testing.T) {
-	w := newProjectWorld(t, "projectiso")
-	c := w.c
-
-	// What each role sees in lists.
-	allMonitors := "hb-gamma,m-alpha,m-beta,m-default,m-gamma"
-	for role, want := range map[authz.Role][3]string{
-		authz.Owner:  {"Alpha,Beta,Default,Gamma", allMonitors, "c-alpha,c-beta,c-default,c-gamma,c-org"},
-		authz.Admin:  {"Alpha,Beta,Default,Gamma", allMonitors, "c-alpha,c-beta,c-default,c-gamma,c-org"},
-		authz.Member: {"Alpha,Beta,Default", "m-alpha,m-beta,m-default", "c-alpha,c-beta,c-default,c-org"},
-		authz.Viewer: {"Alpha,Default", "m-alpha,m-default", "c-alpha,c-default,c-org"},
-	} {
-		hdr := w.sessions[role]
-		if got := w.names(t, "/api/v1/projects", hdr, "id", w.projectNames); got != want[0] {
-			t.Errorf("%s projects = %s, want %s", role, got, want[0])
-		}
-		if got := w.names(t, "/api/v1/monitors", hdr, "id", w.monitorName); got != want[1] {
-			t.Errorf("%s monitors = %s, want %s", role, got, want[1])
-		}
-		if got := w.names(t, "/api/v1/channels", hdr, "id", w.channelName); got != want[2] {
-			t.Errorf("%s channels = %s, want %s", role, got, want[2])
-		}
-	}
-	// The monitor list summary counts only visible monitors.
-	if r := c.do(http.MethodGet, "/api/v1/monitors", "", w.sessions[authz.Viewer]); fmt.Sprint(r.body["summary"]) != "map[down:0 paused:0 unknown:2 up:0]" {
-		t.Errorf("viewer summary: %s", r.raw)
-	}
-	// Filters: a visible project narrows the list, an invisible one is 404 like an unknown one.
-	member := w.sessions[authz.Member]
-	if got := w.names(t, "/api/v1/monitors?projectId="+w.alpha, member, "id", w.monitorName); got != "m-alpha" {
-		t.Errorf("member filter alpha = %s", got)
-	}
-	if got := w.names(t, "/api/v1/channels?projectId="+w.alpha, member, "id", w.channelName); got != "c-alpha,c-org" {
-		t.Errorf("member channel picker for alpha = %s", got)
-	}
-	if got := w.names(t, "/api/v1/monitors?projectId="+w.gamma, w.sessions[authz.Admin], "id", w.monitorName); got != "hb-gamma,m-gamma" {
-		t.Errorf("admin filter gamma = %s", got)
-	}
-
-	// Every read and change by id of another project is 404 for a member and a viewer, exactly as
-	// for an id that does not exist; owners and admins reach it.
-	unknown := "0192b9c4-7c5e-7000-8000-0000000000ee"
-	byID := []struct{ method, path, body string }{
-		{http.MethodGet, "/api/v1/monitors?projectId={p}", ""},
-		{http.MethodGet, "/api/v1/channels?projectId={p}", ""},
-		{http.MethodGet, "/api/v1/projects/{p}", ""},
-		{http.MethodGet, "/api/v1/projects/{p}/members", ""},
-		{http.MethodGet, "/api/v1/monitors/{m}", ""},
-		{http.MethodGet, "/api/v1/monitors/{m}/stats", ""},
-		{http.MethodGet, "/api/v1/monitors/{m}/checks", ""},
-		{http.MethodGet, "/api/v1/monitors/{m}/incidents", ""},
-		{http.MethodGet, "/api/v1/channels/{c}", ""},
-	}
-	writes := []struct{ method, path, body string }{
-		{http.MethodPatch, "/api/v1/monitors/{m}", `{"name":"stolen"}`},
-		{http.MethodPost, "/api/v1/monitors/{m}/pause", ""},
-		{http.MethodPost, "/api/v1/monitors/{m}/resume", ""},
-		{http.MethodPost, "/api/v1/monitors/{hb}/heartbeat-token", ""},
-		{http.MethodDelete, "/api/v1/monitors/{m}", ""},
-	}
-	fill := func(path, p, m, hb, ch string) string {
-		return strings.NewReplacer("{p}", p, "{m}", m, "{hb}", hb, "{c}", ch).Replace(path)
-	}
-	for _, role := range []authz.Role{authz.Member, authz.Viewer} {
-		for _, call := range byID {
-			for _, ids := range [][4]string{{w.gamma, w.mGam, w.hbGamma, w.chGamma}, {unknown, unknown, unknown, unknown}} {
-				r := c.do(call.method, fill(call.path, ids[0], ids[1], ids[2], ids[3]), call.body, w.sessions[role])
-				if r.code != http.StatusNotFound || r.body["type"] != "urn:proreta:problem:not-found" {
-					t.Errorf("%s %s %s: %d %s, want 404", role, call.method, fill(call.path, ids[0], ids[1], ids[2], ids[3]), r.code, r.raw)
-				}
-			}
-		}
-	}
-	for _, call := range writes {
-		r := c.do(call.method, fill(call.path, w.gamma, w.mGam, w.hbGamma, w.chGamma), call.body, member)
-		if r.code != http.StatusNotFound {
-			t.Errorf("member %s %s on gamma: %d %s, want 404", call.method, call.path, r.code, r.raw)
-		}
-		// Beta is read-only for the member (viewer override): 403, nothing changed.
-		r = c.do(call.method, fill(call.path, w.beta, w.mBeta, w.mBeta, w.chBeta), call.body, member)
-		if call.path == "/api/v1/monitors/{hb}/heartbeat-token" {
-			continue
-		}
-		if r.code != http.StatusForbidden || r.body["type"] != "urn:proreta:problem:forbidden" {
-			t.Errorf("member %s %s on beta: %d %s, want 403", call.method, call.path, r.code, r.raw)
-		}
-	}
-	for _, role := range []authz.Role{authz.Owner, authz.Admin} {
-		for _, call := range byID {
-			r := c.do(call.method, fill(call.path, w.gamma, w.mGam, w.hbGamma, w.chGamma), call.body, w.sessions[role])
-			if r.code != http.StatusOK {
-				t.Errorf("%s %s on gamma: %d %s", role, call.path, r.code, r.raw)
-			}
-		}
-	}
-	if r := c.do(http.MethodGet, "/api/v1/monitors/"+w.mGam, "", w.sessions[authz.Owner]); r.body["name"] != "m-gamma" {
-		t.Fatalf("gamma monitor changed by a member: %s", r.raw)
-	}
-
-	// Creates: the member creates in alpha, gets 403 in beta and a field error for gamma (it does
-	// not see it); moving a monitor needs member rights in the target too.
-	create := func(project string) response {
-		return c.do(http.MethodPost, "/api/v1/monitors", `{"type":"http","name":"by member","http":{"url":"https://example.com/x"},"projectId":"`+project+`"}`, member)
-	}
-	if r := create(w.alpha); r.code != http.StatusCreated {
-		t.Errorf("member create in alpha: %d %s", r.code, r.raw)
-	}
-	if r := create(w.beta); r.code != http.StatusForbidden {
-		t.Errorf("member create in beta: %d %s", r.code, r.raw)
-	}
-	if r := create(w.gamma); r.code != http.StatusUnprocessableEntity || !strings.Contains(r.raw, "projectId") {
-		t.Errorf("member create in gamma: %d %s", r.code, r.raw)
-	}
-	if r := c.do(http.MethodPatch, "/api/v1/monitors/"+w.mAlpha, `{"projectId":"`+w.gamma+`"}`, member); r.code != http.StatusUnprocessableEntity {
-		t.Errorf("member moves into gamma: %d %s", r.code, r.raw)
-	}
-	if r := c.do(http.MethodPatch, "/api/v1/monitors/"+w.mAlpha, `{"projectId":"`+w.beta+`"}`, member); r.code != http.StatusForbidden {
-		t.Errorf("member moves into read-only beta: %d %s", r.code, r.raw)
-	}
-	// A member cannot select a channel of a project it does not see (it does not exist for it).
-	if r := c.do(http.MethodPatch, "/api/v1/monitors/"+w.mAlpha, `{"channelIds":["`+w.chGamma+`"]}`, member); r.code != http.StatusUnprocessableEntity {
-		t.Errorf("member selects gamma's channel: %d %s", r.code, r.raw)
-	}
-	if r := c.do(http.MethodPatch, "/api/v1/monitors/"+w.mAlpha, `{"channelIds":["`+w.chAlpha+`","`+w.chOrg+`"]}`, member); r.code != http.StatusOK {
-		t.Errorf("member selects alpha and org channels: %d %s", r.code, r.raw)
-	}
-
-	// Usage stays per organization (quotas are shared by all projects) and is shown to owners and
-	// admins only.
-	for role, hdr := range w.sessions {
-		r := c.do(http.MethodGet, "/api/v1/usage", "", hdr)
-		if !authz.Role(role).AtLeast(authz.Admin) {
-			if r.code != http.StatusForbidden {
-				t.Errorf("%s usage: %d %s, want 403", role, r.code, r.raw)
-			}
-			continue
-		}
-		u, _ := r.body["usage"].(map[string]any)
-		if r.code != http.StatusOK || u["monitors"] != float64(5) || u["heartbeats"] != float64(1) || u["projects"] != float64(4) {
-			t.Errorf("%s usage: %d %s", role, r.code, r.raw)
-		}
-	}
-
-	// Removing the member from alpha takes effect on its next request.
-	owner := w.sessions[authz.Owner]
-	if r := c.do(http.MethodDelete, "/api/v1/projects/"+w.alpha+"/members/"+w.userIDs[authz.Member], "", owner); r.code != http.StatusNoContent {
-		t.Fatalf("remove member from alpha: %d %s", r.code, r.raw)
-	}
-	if r := c.do(http.MethodGet, "/api/v1/monitors/"+w.mAlpha, "", member); r.code != http.StatusNotFound {
-		t.Errorf("removed member still reads alpha: %d %s", r.code, r.raw)
-	}
-}
-
 // TestIntegrationProjectsLifecycle covers projects CRUD, members, the project cap, and how
 // channels follow moves and deletes.
 func TestIntegrationProjectsLifecycle(t *testing.T) {
 	w := newProjectWorld(t, "projectlife")
 	c := w.c
 	owner := w.sessions[authz.Owner]
-	admin := w.sessions[authz.Admin]
+	admin := w.sessions[authz.Maintainer]
 
 	// Slugs: derived, suffixed when taken, explicit ones must be free.
 	r := c.do(http.MethodPost, "/api/v1/projects", `{"name":"  Alpha  "}`, admin)
-	if r.code != http.StatusCreated || r.body["slug"] != "alpha-2" || r.body["name"] != "Alpha" || r.body["role"] != "admin" {
+	if r.code != http.StatusCreated || r.body["slug"] != "alpha-2" || r.body["name"] != "Alpha" || r.body["role"] != "maintainer" {
 		t.Fatalf("second Alpha: %d %s", r.code, r.raw)
 	}
 	second := r.body["id"].(string)
@@ -313,7 +207,10 @@ func TestIntegrationProjectsLifecycle(t *testing.T) {
 	if r := c.do(http.MethodDelete, "/api/v1/projects/"+w.gamma, "", owner); r.code != http.StatusConflict || r.body["type"] != "urn:proreta:problem:project-not-empty" {
 		t.Fatalf("delete gamma: %d %s", r.code, r.raw)
 	}
-	if r := c.do(http.MethodDelete, "/api/v1/projects/"+second, "", admin); r.code != http.StatusNoContent {
+	if r := c.do(http.MethodDelete, "/api/v1/projects/"+second, "", admin); r.code != http.StatusForbidden {
+		t.Fatalf("maintainer deletes an empty project: %d %s", r.code, r.raw)
+	}
+	if r := c.do(http.MethodDelete, "/api/v1/projects/"+second, "", owner); r.code != http.StatusNoContent {
 		t.Fatalf("delete empty: %d %s", r.code, r.raw)
 	}
 	if r := c.do(http.MethodGet, "/api/v1/projects/"+second, "", owner); r.code != http.StatusNotFound {
@@ -323,31 +220,47 @@ func TestIntegrationProjectsLifecycle(t *testing.T) {
 		t.Fatalf("monitor into a deleted project: %d %s", r.code, r.raw)
 	}
 
-	// Members of a project: owners and admins (all projects), explicit members, overrides.
+	// Members of a project: everybody with an organization role (it applies to every project) and
+	// everybody with a direct role.
 	r = c.do(http.MethodGet, "/api/v1/projects/"+w.beta+"/members", "", owner)
-	got := []string{}
-	for _, it := range r.body["items"].([]any) {
-		m := it.(map[string]any)
-		got = append(got, fmt.Sprintf("%s:%s/%v/%s", m["organizationRole"], m["effectiveRole"], m["projectRole"], map[bool]string{true: "all", false: "listed"}[m["allProjects"] == true]))
-	}
-	slices.Sort(got)
-	if strings.Join(got, " ") != "admin:admin/<nil>/all member:viewer/viewer/listed owner:owner/<nil>/all" {
-		t.Fatalf("beta members: %v", got)
+	if items, _ := r.body["items"].([]any); r.code != http.StatusOK || len(items) != 8 {
+		t.Fatalf("beta members (6 with an organization role, 2 project-only): %d %s", r.code, r.raw)
 	}
 	r = c.do(http.MethodGet, "/api/v1/projects/"+w.def+"/members", "", w.sessions[authz.Viewer])
-	if items, _ := r.body["items"].([]any); r.code != http.StatusOK || len(items) != 4 {
-		t.Fatalf("Default members (all members): %d %s", r.code, r.raw)
+	if items, _ := r.body["items"].([]any); r.code != http.StatusOK || len(items) != 6 {
+		t.Fatalf("Default members (organization roles only): %d %s", r.code, r.raw)
 	}
-	if r := c.do(http.MethodPut, "/api/v1/projects/"+w.beta+"/members/0192b9c4-7c5e-7000-8000-0000000000ee", `{}`, owner); r.code != http.StatusNotFound {
+	if r := c.do(http.MethodPut, "/api/v1/projects/"+w.beta+"/members/0192b9c4-7c5e-7000-8000-0000000000ee", `{"role":"member"}`, owner); r.code != http.StatusNotFound {
 		t.Fatalf("non-member into a project: %d %s", r.code, r.raw)
 	}
-	// An override never raises: a viewer with "member" stays a viewer.
-	r = c.do(http.MethodPut, "/api/v1/projects/"+w.beta+"/members/"+w.userIDs[authz.Viewer], `{"role":"member"}`, owner)
-	if r.code != http.StatusOK || r.body["effectiveRole"] != "viewer" {
-		t.Fatalf("viewer with member override: %d %s", r.code, r.raw)
+	// A direct role raises the organization role inside the project only.
+	createIn := func(project string, hdr map[string]string) response {
+		r := c.do(http.MethodPost, "/api/v1/monitors", `{"type":"http","name":"x","http":{"url":"https://example.com/x"},"projectId":"`+project+`"}`, hdr)
+		if id, _ := r.body["id"].(string); id != "" {
+			c.do(http.MethodDelete, "/api/v1/monitors/"+id, "", owner)
+		}
+		return r
 	}
-	if r := c.do(http.MethodPost, "/api/v1/monitors", `{"type":"http","name":"x","http":{"url":"https://example.com/x"},"projectId":"`+w.beta+`"}`, w.sessions[authz.Viewer]); r.code != http.StatusForbidden {
+	if r := createIn(w.beta, w.sessions[authz.Viewer]); r.code != http.StatusForbidden {
 		t.Fatalf("viewer creates: %d %s", r.code, r.raw)
+	}
+	r = c.do(http.MethodPut, "/api/v1/projects/"+w.beta+"/members/"+w.userIDs[authz.Viewer], `{"role":"member"}`, owner)
+	if r.code != http.StatusOK || r.body["effectiveRole"] != "member" || r.body["organizationRole"] != "viewer" {
+		t.Fatalf("viewer with member role: %d %s", r.code, r.raw)
+	}
+	if r := createIn(w.beta, w.sessions[authz.Viewer]); r.code != http.StatusCreated {
+		t.Fatalf("viewer raised to member creates in beta: %d %s", r.code, r.raw)
+	}
+	if r := createIn(w.alpha, w.sessions[authz.Viewer]); r.code != http.StatusForbidden {
+		t.Fatalf("the raise stays in beta: %d %s", r.code, r.raw)
+	}
+	// ... and never lowers it.
+	r = c.do(http.MethodPut, "/api/v1/projects/"+w.beta+"/members/"+w.userIDs[authz.Member], `{"role":"viewer"}`, owner)
+	if r.code != http.StatusOK || r.body["effectiveRole"] != "member" || r.body["projectRole"] != "viewer" {
+		t.Fatalf("member with viewer role: %d %s", r.code, r.raw)
+	}
+	if r := createIn(w.beta, w.sessions[authz.Member]); r.code != http.StatusCreated {
+		t.Fatalf("a viewer role lowered an organization member: %d %s", r.code, r.raw)
 	}
 
 	// Channel moves and deletes keep selections inside the project. m-alpha selects c-alpha and

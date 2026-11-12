@@ -120,3 +120,15 @@ func TestRenderPasswordReset(t *testing.T) {
 		t.Fatalf("message = %+v", m)
 	}
 }
+
+func TestRenderProjectInvitation(t *testing.T) {
+	params := map[string]string{"token": "tok-123", "org": "Acme Corp", "project": "Shop <b>", "role": "maintainer", "inviter": "Grace", "expires": "7 days"}
+	m, err := Render(KindInvitation, "https://proreta.example.com", "bob@example.org", params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Subject != "Grace invited you to Shop <b> in Acme Corp on Proreta" || !strings.Contains(m.Text, "join the project Shop <b> in Acme Corp on Proreta as maintainer") ||
+		!strings.Contains(m.HTML, "the project <strong>Shop &lt;b&gt;</strong> in <strong>Acme Corp</strong>") {
+		t.Fatalf("message = %+v", m)
+	}
+}

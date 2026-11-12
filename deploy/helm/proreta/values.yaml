@@ -26,12 +26,15 @@ config:
   sessionTTL: 24h          # PRORETA_SESSION_TTL (api only)
   cookieSecure: true       # PRORETA_COOKIE_SECURE (api and statuspage)
   # PRORETA_TRUSTED_PROXY_HOPS (api and statuspage): number of trusted proxies in front of the api;
-  # 0 if none (X-Forwarded-For is then ignored). Behind one Gateway set 1.
-  trustedProxyHops: 0
+  # 0 if none (X-Forwarded-For is then ignored). 1 for the Gateway of `httpRoute` (the default
+  # route): with 0 behind a proxy every client would share one rate-limit bucket.
+  trustedProxyHops: 1
   # PRORETA_REGISTRATION_ENABLED (api only): self-service registration of new organizations. Off by
   # default: the platform admin owns the "default" organization and invites colleagues (invitations
   # work either way). Turn it on only to let others create their own organizations; an address is
-  # verified by email only when `email` is enabled, and nothing requires it.
+  # verified by email only when `email` is enabled, and nothing requires it. This is the value in
+  # use until the platform admin chooses one under Admin, Registration; that choice is stored in the
+  # database and wins, and "follow the installation's configuration" returns to this value.
   registrationEnabled: false
   # PRORETA_PASSWORD_LOGIN_ENABLED (api only): false turns the password form off for everyone but the
   # platform admin (`/login?admin`), for an OAuth-only installation. Needs at least one provider in
@@ -114,6 +117,16 @@ secrets:
     keyId: k1
     # externalSecret mode: JSON secret with properties keys (JSON string), active_key_id
     remoteKey: proreta/crypto
+  # Keyring that seals the header values and bodies of monitor requests, Secret `<fullname>-request`
+  # (keys, active_key_id). The api seals with it and the worker opens with it; the worker holds no
+  # other key. A generated key exists only in the cluster: losing it loses the stored header values
+  # and bodies (they can be entered again).
+  request:
+    source: generate
+    # Key id of the generated key (generate mode); PRORETA_REQUEST_ACTIVE_KEY_ID.
+    keyId: r1
+    # externalSecret mode: JSON secret with properties keys (JSON string), active_key_id
+    remoteKey: proreta/request
   # Key that signs the unlock cookies of password-protected status pages, Secret
   # `<fullname>-statuspage` (cookie_key). Only rendered and read with statuspage.enabled. Losing it
   # only signs visitors of protected pages out.
@@ -265,6 +278,23 @@ statuspage:
   service:
     port: 8080
 
+# Specula gateway: the endpoint of the Specula executors that customers run inside their own networks
+# (Deployment <fullname>-speculagw, routed at httpRoute.speculaPathPrefix). Off by default; turn it
+# on to let organizations register Specula (Specula in the app). It uses the worker database role and
+# the request keys (secrets.request) to hand decrypted monitor requests to an executor, and makes no
+# outbound calls. Executors reach it over HTTPS at the public URL, so the Gateway must be reachable
+# from their networks.
+speculagw:
+  enabled: false
+  replicas: 2
+  httpPort: 8080
+  resources:
+    requests: {cpu: 25m, memory: 64Mi}
+    limits: {cpu: 300m, memory: 192Mi}
+  env: []
+  service:
+    port: 8080
+
 # Frontend (React, nginx static). The web image tag defaults to image.tag (both images are
 # released together).
 web:
@@ -318,6 +348,9 @@ httpRoute:
   apiRequestTimeout: 60s
   # Routed to the statuspage Service when statuspage.enabled.
   statusPathPrefix: /status
+  # Where the Specula API is served (only with speculagw.enabled). The app's own page for managing
+  # Specula is /specula, so the API prefix is longer and does not shadow it.
+  speculaPathPrefix: /specula/v1
 
 # --- Optional resources, all disabled by default ---
 

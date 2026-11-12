@@ -84,9 +84,11 @@ oauth:
 
 Then an **owner** of the organization:
 1. Opens **Settings → Sign-in domains** and chooses **Sign in with Google again**, using a Google account of that domain. This proves control for 10 minutes. If another Google account is already linked to the owner, they first unlink it under **Sign-in methods** (`/profile`), or they use that account. The proof comes back to `/profile`; the Settings link there leads back to the domains section.
-2. Enters the domain and chooses **Claim domain**. A new domain starts with the role **viewer**; the owner can raise it to member or admin afterwards.
+2. Enters the domain and chooses **Claim domain**. A new domain starts with the role **viewer**; the owner can raise it to member or maintainer afterwards.
 
 From then on, a person whose verified Google account has `hd = example.com` joins that organization on their **first** Google sign-in. Existing accounts do not join. A domain belongs to one organization only.
+
+When the first person of an allowed Workspace domain signs in with Google and registration is open, the organization created for them claims the domain automatically (role viewer), so colleagues who sign in later join it instead of creating their own. Password and GitHub sign-ups never claim a domain.
 
 Why there is an allow-list: every employee of a Workspace has the same `hd`, so without it anyone could claim the company domain for an organization of their own. If a domain was claimed by the wrong organization, remove it from `oauth.allowedDomains` and deploy (auto-join stops at once). Then the owner of that organization releases it, or the platform admin deletes that organization. All changes are audited as `organization.auth_domain_changed`.
 

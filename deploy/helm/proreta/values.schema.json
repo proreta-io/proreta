@@ -206,7 +206,7 @@
         "trustedProxyHops": {
           "type": "integer",
           "title": "trusted proxy hops",
-          "description": "PRORETA_TRUSTED_PROXY_HOPS: number of trusted proxies in front of the api; 0 if none, 1 behind one Gateway",
+          "description": "PRORETA_TRUSTED_PROXY_HOPS: number of trusted proxies in front of the api; 1 behind one Gateway (the default), 0 if none",
           "minimum": 0,
           "maximum": 10
         },
@@ -534,6 +534,72 @@
             }
           ]
         },
+        "request": {
+          "type": "object",
+          "title": "request key Secret",
+          "description": "Secret <fullname>-request (keys, active_key_id): the keyring that seals the header values and bodies of monitor requests (api seals, worker opens)",
+          "additionalProperties": false,
+          "properties": {
+            "source": {
+              "type": "string",
+              "title": "source",
+              "description": "who creates the Secret: generate (the secrets bootstrap Job, default) or externalSecret (read from remoteKey through External Secrets; needs externalSecrets.enabled)",
+              "enum": [
+                "generate",
+                "externalSecret"
+              ]
+            },
+            "keyId": {
+              "type": "string",
+              "title": "key id",
+              "description": "id of the generated key (generate mode), PRORETA_REQUEST_ACTIVE_KEY_ID",
+              "pattern": "^[A-Za-z0-9_-]{1,32}$"
+            },
+            "remoteKey": {
+              "type": "string",
+              "title": "request remote key",
+              "description": "externalSecret mode: JSON secret with properties keys (JSON string), active_key_id"
+            }
+          },
+          "required": [
+            "source"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "source": {
+                    "const": "generate"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "keyId"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "source": {
+                    "const": "externalSecret"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "remoteKey"
+                ],
+                "properties": {
+                  "remoteKey": {
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          ]
+        },
         "statuspage": {
           "type": "object",
           "title": "status page cookie key Secret",
@@ -637,6 +703,7 @@
       "required": [
         "admin",
         "crypto",
+        "request",
         "statuspage",
         "oauth",
         "bootstrap"
@@ -1095,6 +1162,58 @@
         "service"
       ]
     },
+    "speculagw": {
+      "type": "object",
+      "title": "speculagw",
+      "description": "the Specula gateway, the endpoint of the executors that run in customer networks (Deployment <fullname>-speculagw), routed at httpRoute.speculaPathPrefix; needs secrets.request",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "Specula gateway enabled",
+          "description": "deploy the gateway and route httpRoute.speculaPathPrefix to it (default false)"
+        },
+        "replicas": {
+          "type": "integer",
+          "title": "speculagw replicas",
+          "description": "number of gateway pods; they share nothing and can be scaled freely",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "httpPort": {
+          "type": "integer",
+          "title": "speculagw HTTP port",
+          "description": "container port of the gateway (PRORETA_HTTP_ADDR)",
+          "minimum": 1024,
+          "maximum": 65535
+        },
+        "terminationGracePeriodSeconds": {
+          "$ref": "#/definitions/grace",
+          "title": "speculagw termination grace period",
+          "description": "terminationGracePeriodSeconds of the speculagw pods; default: the top-level terminationGracePeriodSeconds"
+        },
+        "resources": {
+          "$ref": "#/definitions/resources",
+          "title": "speculagw resources",
+          "description": "Kubernetes requests and limits of the speculagw container; requests.cpu, requests.memory and limits.memory are required"
+        },
+        "env": {
+          "$ref": "#/definitions/envList",
+          "title": "extra speculagw env",
+          "description": "extra environment variables of the speculagw container (a list of Kubernetes EnvVar objects, for example {name: FOO, value: bar}); appended after the chart's own"
+        },
+        "service": {
+          "$ref": "#/definitions/service"
+        }
+      },
+      "required": [
+        "enabled",
+        "replicas",
+        "httpPort",
+        "resources",
+        "service"
+      ]
+    },
     "web": {
       "type": "object",
       "title": "web",
@@ -1282,6 +1401,12 @@
           "title": "status path prefix",
           "description": "path prefix routed to the statuspage; fixed to /status (the renderer serves only that)",
           "const": "/status"
+        },
+        "speculaPathPrefix": {
+          "type": "string",
+          "title": "Specula API path prefix",
+          "description": "path prefix routed to the Specula gateway (only with speculagw.enabled); default /specula/v1, longer than the app's own /specula page",
+          "const": "/specula/v1"
         }
       },
       "required": [

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { ApiError, errorMessage } from "../api/client";
 import {
@@ -13,8 +13,11 @@ import {
   type Usage,
 } from "../api/endpoints";
 import { useAuth } from "../auth/AuthProvider";
+import SettingsSection from "../components/SettingsSection";
 import SignInDomains from "../components/SignInDomains";
-import { abilities, ROLE_HINTS } from "../lib/roles";
+import SettingsAreas from "./SettingsAreas";
+import { canManageChannelOf, usePermissions } from "../lib/permissions";
+import { ROLE_HINTS } from "../lib/roles";
 import { useToast } from "../components/Toasts";
 import {
   Alert,
@@ -39,9 +42,11 @@ import {
   Segmented,
   Select,
 } from "../components/ui";
+import WebhookFields from "./WebhookFields";
 import {
   CHANNEL_NAME_MAX,
   channelEvents,
+  channelTypeLabel,
   emptyChannelForm,
   ORGANIZATION_WIDE,
   eventsLabel,
@@ -62,6 +67,7 @@ import { countOf, useUsage } from "../lib/usage";
 
 export default function Settings() {
   const auth = useAuth();
+  const can = usePermissions();
   const { hash } = useLocation();
   // Links such as /settings#sign-in-domains-heading land on that section: scroll to its heading and
   // move the focus there, on the first render and on every hash change.
@@ -71,25 +77,19 @@ export default function Settings() {
     if (!target) return;
     target.scrollIntoView?.({ block: "start" });
     target.focus({ preventScroll: true });
-  }, [hash]);
+  }, [hash, can.ready]);
   return (
     <section className="flex max-w-[960px] flex-col">
       <h1 className="pt-6 pb-6 text-headline leading-[1.1] font-semibold tracking-[-0.02em] sm:pt-10 sm:pb-9 sm:text-display">
         Settings
       </h1>
-      {abilities(auth.session).seeUsage && (
+      <SettingsAreas />
+      {can.org("usage.read") && (
         <SettingsSection id="plan" title="Plan">
           <PlanUsage />
         </SettingsSection>
       )}
-      <SettingsSection
-        id="channels"
-        title="Notification channels"
-        description="Slack channels Proreta posts to through Incoming Webhooks. Each channel chooses its events, an optional mention for down alerts and an optional reminder while an incident stays open."
-      >
-        <NotificationChannels />
-      </SettingsSection>
-      {auth.session?.role === "owner" && (
+      {can.org("organization.domains.manage") && (
         <SettingsSection
           id="sign-in-domains"
           title="Sign-in domains"
@@ -114,35 +114,14 @@ export default function Settings() {
             </Link>{" "}
             lists the providers you sign in with.
           </p>
+          <p>
+            <Link to="/members" className="underline underline-offset-3">
+              Leave this organization
+            </Link>
+            .
+          </p>
         </div>
       </SettingsSection>
-    </section>
-  );
-}
-
-function SettingsSection({
-  id,
-  title,
-  description,
-  children,
-}: {
-  id: string;
-  title: string;
-  description?: string;
-  children: ReactNode;
-}) {
-  return (
-    <section
-      aria-labelledby={`${id}-heading`}
-      className="grid gap-4 border-t border-border pt-6 pb-7 sm:grid-cols-[220px_minmax(0,1fr)] sm:gap-12 sm:pt-8 sm:pb-10"
-    >
-      <div className="flex flex-col gap-1.5">
-        <h2 id={`${id}-heading`} tabIndex={-1} className="text-lead font-semibold">
-          {title}
-        </h2>
-        {description && <p className="text-[13px] text-muted-foreground">{description}</p>}
-      </div>
-      <div className="flex min-w-0 max-w-[560px] flex-col">{children}</div>
     </section>
   );
 }
@@ -206,8 +185,9 @@ type TestResult = { channel: Channel } & (
   { ok: true; at: number } | { ok: false; message: string }
 );
 
-function NotificationChannels() {
-  const canManage = abilities(useAuth().session).manageChannels;
+export function NotificationChannels() {
+  const can = usePermissions();
+  const canManage = can.anywhere("channel.manage");
   const queryClient = useQueryClient();
   const toast = useToast();
   const usage = useUsage();
@@ -274,12 +254,13 @@ function NotificationChannels() {
   return (
     <div className="flex flex-col gap-6">
       {items.length === 0 ? (
-        <EmptyNote>No notification channels yet. Slack notifications are off.</EmptyNote>
+        <EmptyNote>No notification channels yet. Notifications are off.</EmptyNote>
       ) : (
         <Table>
           <thead>
             <tr>
               <Th>Name</Th>
+              <Th>Type</Th>
               {multiProject && <Th>Project</Th>}
               <Th>Events</Th>
               <Th>Mention</Th>
@@ -298,16 +279,29 @@ function NotificationChannels() {
                 <Td>
                   <span className="font-medium break-words">{c.name}</span>
                 </Td>
+                <Td className="text-caption">{channelTypeLabel[c.type]}</Td>
                 {multiProject && (
                   <Td className="text-caption">{channelScopeLabel(c.projectId, projects)}</Td>
                 )}
-                <Td className="text-caption">{eventsLabel(c.events)}</Td>
-                <Td className="font-mono text-caption">
-                  {c.mention.length > 0 ? c.mention.join(" ") : "None"}
-                </Td>
-                <Td className="text-caption whitespace-nowrap">
-                  {reminderLabel(c.reminderMinutes)}
-                </Td>
+                {c.configHidden ? (
+                  <Td colSpan={3} className="text-caption text-muted-foreground">
+                    Settings are managed by the organization.
+                  </Td>
+                ) : (
+                  <>
+                    <Td className="text-caption">{eventsLabel(c.events)}</Td>
+                    <Td className="font-mono text-caption">
+                      {c.mention.length > 0
+                        ? c.mention.join(" ")
+                        : c.type === "webhook"
+                          ? "n/a"
+                          : "None"}
+                    </Td>
+                    <Td className="text-caption whitespace-nowrap">
+                      {reminderLabel(c.reminderMinutes)}
+                    </Td>
+                  </>
+                )}
                 <Td>
                   {c.status === "active" ? (
                     <Badge tone="success">Active</Badge>
@@ -320,32 +314,36 @@ function NotificationChannels() {
                 {canManage && (
                   <Td>
                     <div className="flex justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="small"
-                        aria-label={`Edit ${c.name}`}
-                        onClick={() => setEditing({ mode: "edit", channel: c })}
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="small"
-                        aria-label={`Send a test message to ${c.name}`}
-                        busy={test.isPending && test.variables?.id === c.id}
-                        disabled={test.isPending}
-                        onClick={() => test.mutate(c)}
-                      >
-                        Test
-                      </Button>
-                      <Button
-                        variant="ghost-destructive"
-                        size="small"
-                        aria-label={`Delete ${c.name}`}
-                        onClick={() => setDeleting(c)}
-                      >
-                        Delete
-                      </Button>
+                      {canManageChannelOf(can, c.projectId) && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="small"
+                            aria-label={`Edit ${c.name}`}
+                            onClick={() => setEditing({ mode: "edit", channel: c })}
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="small"
+                            aria-label={`Send a test message to ${c.name}`}
+                            busy={test.isPending && test.variables?.id === c.id}
+                            disabled={test.isPending}
+                            onClick={() => test.mutate(c)}
+                          >
+                            Test
+                          </Button>
+                          <Button
+                            variant="ghost-destructive"
+                            size="small"
+                            aria-label={`Delete ${c.name}`}
+                            onClick={() => setDeleting(c)}
+                          >
+                            Delete
+                          </Button>
+                        </>
+                      )}
                     </div>
                   </Td>
                 )}
@@ -357,16 +355,18 @@ function NotificationChannels() {
 
       {items.some((c) => c.status === "failed") && (
         <p className="text-caption text-down">
-          A failed channel&apos;s webhook was refused by Slack (probably removed there). Nothing is
-          sent to it until you edit it and store a new webhook URL.
+          A failed channel&apos;s webhook was refused by the service behind it (probably removed
+          there). Nothing is sent to it until you edit it and store a new webhook URL.
         </p>
       )}
 
       {result?.ok && (
         <span role="status" className="flex items-center gap-2 text-[13px]">
           <DotShape size="large" className="text-success" />
-          Test message sent to {result.channel.name} at {formatClock(result.at)}. Look for it in
-          your Slack channel.
+          Test message sent to {result.channel.name} at {formatClock(result.at)}.{" "}
+          {result.channel.type === "webhook"
+            ? "Check what your endpoint received."
+            : "Look for it in your Slack channel."}
         </span>
       )}
       {result && !result.ok && (
@@ -436,6 +436,7 @@ function ChannelForm({
   const queryClient = useQueryClient();
   const creating = channel === undefined;
   const scope = useProjectScope();
+  const can = usePermissions();
   const projects = scope.projects.data?.items;
   // A new channel starts in the project the shell is filtered to, or the Default project.
   const defaultProject = scope.projectId ?? projects?.find((p) => p.isDefault)?.id ?? "";
@@ -487,9 +488,19 @@ function ChannelForm({
   });
 
   function update<K extends keyof ChannelFormValues>(key: K, value: ChannelFormValues[K]) {
-    setValues((v) => ({ ...v, [key]: value }));
-    setErrors((e) => (e[key] ? { ...e, [key]: undefined } : e));
+    patch({ [key]: value } as Partial<ChannelFormValues>);
   }
+
+  function patch(changes: Partial<ChannelFormValues>) {
+    setValues((v) => ({ ...v, ...changes }));
+    setErrors((e) => {
+      const next = { ...e };
+      for (const key of Object.keys(changes) as (keyof ChannelFormValues)[]) delete next[key];
+      return next;
+    });
+  }
+
+  const webhook = values.type === "webhook";
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -511,9 +522,26 @@ function ChannelForm({
       </h3>
       {general && <Alert title="Could not save the channel.">{general}</Alert>}
       <fieldset disabled={save.isPending} className="flex min-w-0 flex-col gap-5">
+        {creating && (
+          <Segmented
+            label="Channel type"
+            name="type"
+            value={values.type}
+            onChange={(type) => patch({ type, webhookUrl: "" })}
+            options={[
+              { value: "slack_webhook", label: "Slack" },
+              { value: "webhook", label: "Webhook" },
+            ]}
+          />
+        )}
+
         <Field
           label="Name"
-          hint="Usually the Slack channel, such as #ops-alerts."
+          hint={
+            webhook
+              ? "A label for this endpoint, such as Incident tool."
+              : "Usually the Slack channel, such as #ops-alerts."
+          }
           error={errors.name}
         >
           {(c) => (
@@ -523,7 +551,7 @@ function ChannelForm({
               name="name"
               autoComplete="off"
               maxLength={CHANNEL_NAME_MAX * 2}
-              placeholder="#ops-alerts"
+              placeholder={webhook ? "Incident tool" : "#ops-alerts"}
               value={values.name}
               onChange={(e) => update("name", e.target.value)}
             />
@@ -532,11 +560,23 @@ function ChannelForm({
 
         {replacing ? (
           <Field
-            label={creating ? "Slack webhook URL" : "New Slack webhook URL"}
+            label={
+              webhook
+                ? creating
+                  ? "Webhook URL"
+                  : "New webhook URL"
+                : creating
+                  ? "Slack webhook URL"
+                  : "New Slack webhook URL"
+            }
             hint={
-              creating
-                ? "Create an Incoming Webhook in Slack and paste its URL. It is stored encrypted and never shown again after saving."
-                : "Replaces the stored webhook and reactivates a failed channel."
+              webhook
+                ? creating
+                  ? "An https URL on a public host (port 443). It is stored encrypted and never shown again after saving."
+                  : "Replaces the stored URL and reactivates a failed channel."
+                : creating
+                  ? "Create an Incoming Webhook in Slack and paste its URL. It is stored encrypted and never shown again after saving."
+                  : "Replaces the stored webhook and reactivates a failed channel."
             }
             error={errors.webhookUrl}
           >
@@ -551,7 +591,9 @@ function ChannelForm({
                 autoComplete="off"
                 spellCheck={false}
                 autoCapitalize="off"
-                placeholder="https://hooks.slack.com/services/…"
+                placeholder={
+                  webhook ? "https://example.com/hooks/…" : "https://hooks.slack.com/services/…"
+                }
                 value={values.webhookUrl}
                 onChange={(e) => update("webhookUrl", e.target.value)}
               />
@@ -564,6 +606,8 @@ function ChannelForm({
             onReplace={() => setReplacing(true)}
           />
         )}
+
+        {webhook && <WebhookFields values={values} errors={errors} onChange={patch} />}
 
         <fieldset className="flex flex-col gap-1">
           <legend className="pb-1.5 text-caption font-medium">Events</legend>
@@ -604,36 +648,42 @@ function ChannelForm({
                 value={values.project || defaultProject}
                 onChange={(e) => update("project", e.target.value)}
               >
-                {(projects ?? []).map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-                <option value={ORGANIZATION_WIDE}>Organization-wide</option>
+                {(projects ?? [])
+                  .filter((p) => canManageChannelOf(can, p.id))
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                {canManageChannelOf(can, null) && (
+                  <option value={ORGANIZATION_WIDE}>Organization-wide</option>
+                )}
               </Select>
             )}
           </Field>
         )}
 
-        <Field
-          label="Mention (optional)"
-          hint="Up to 3 of @here, @channel, <!subteam^ID> (a user group) or <@UID> (a user), separated by spaces. Used in down alerts and reminders only."
-          error={errors.mention}
-        >
-          {(c) => (
-            <Input
-              {...c}
-              name="mention"
-              mono
-              autoComplete="off"
-              spellCheck={false}
-              autoCapitalize="off"
-              placeholder="@here"
-              value={values.mention}
-              onChange={(e) => update("mention", e.target.value)}
-            />
-          )}
-        </Field>
+        {!webhook && (
+          <Field
+            label="Mention (optional)"
+            hint="Up to 3 of @here, @channel, <!subteam^ID> (a user group) or <@UID> (a user), separated by spaces. Used in down alerts and reminders only."
+            error={errors.mention}
+          >
+            {(c) => (
+              <Input
+                {...c}
+                name="mention"
+                mono
+                autoComplete="off"
+                spellCheck={false}
+                autoCapitalize="off"
+                placeholder="@here"
+                value={values.mention}
+                onChange={(e) => update("mention", e.target.value)}
+              />
+            )}
+          </Field>
+        )}
 
         <Field
           label="Reminder every (minutes)"

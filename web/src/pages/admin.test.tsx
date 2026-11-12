@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { AdminOrganization, AdminUser } from "../api/endpoints";
+import type { AdminMember, AdminOrganization, AdminUser } from "../api/endpoints";
 import { json, mockApi, problem, renderApp, session, signedIn } from "../test/utils";
 
 const adminSession = { ...session, user: { ...session.user, isPlatformAdmin: true } };
@@ -18,6 +18,18 @@ const organization = (over: Partial<AdminOrganization> = {}): AdminOrganization 
   users: 1,
   monitors: 2,
   heartbeats: 1,
+  ...over,
+});
+
+const member = (over: Partial<AdminMember> = {}): AdminMember => ({
+  userId: "u-1",
+  login: "alice@alpha.example",
+  displayName: "",
+  role: "owner",
+  status: "active",
+  joinedAt: "2026-10-01T00:00:00Z",
+  isPlatformAdmin: false,
+  isSystemAdmin: false,
   ...over,
 });
 
@@ -58,14 +70,10 @@ describe("admin area guard", () => {
     );
   });
 
-  it("shows the top-bar link and the overview to the platform admin", async () => {
+  it("shows the overview to the platform admin", async () => {
     mockApi({ ...asAdmin, "GET /api/v1/admin/stats": () => json(stats) });
     renderApp("/admin");
     expect(await screen.findByRole("heading", { name: "Admin" })).toBeInTheDocument();
-    expect(within(screen.getByRole("banner")).getByRole("link", { name: "Admin" })).toHaveAttribute(
-      "href",
-      "/admin",
-    );
     expect(await screen.findByText("3")).toBeInTheDocument();
     expect(screen.getByText("2 active · 1 suspended · 1 deleted")).toBeInTheDocument();
     const rows = within(screen.getByRole("table")).getAllByRole("row");
@@ -184,6 +192,19 @@ describe("admin organization details", () => {
           total: 2,
           limit: 100,
           offset: 0,
+        }),
+      "GET /api/v1/admin/organizations/t-1/members": () =>
+        json({
+          items: [
+            member(),
+            member({
+              userId: "u-admin",
+              login: "admin",
+              role: "maintainer",
+              isPlatformAdmin: true,
+              isSystemAdmin: true,
+            }),
+          ],
         }),
       "PATCH /api/v1/admin/organizations/t-1": async (r) => {
         const body = (await r.json()) as { planKey?: string; status?: "active" | "suspended" };
@@ -329,16 +350,18 @@ describe("admin organization details", () => {
         json({ items: [organization()], total: 1, limit: 25, offset: 0 }),
     });
     renderApp("/admin/organizations/t-1");
-    const rows = within(await screen.findByRole("table")).getAllByRole("row");
+    const rows = within((await screen.findAllByRole("table"))[0]!).getAllByRole("row");
     const adminRow = rows.find((r) => within(r).queryByText("admin"))!;
-    const adminReset = within(adminRow).getByRole("button", { name: "Reset password" });
+    const adminReset = within(adminRow).getByRole("button", { name: "Reset password of admin" });
     expect(adminReset).toBeDisabled();
     expect(adminReset).toHaveAccessibleDescription(
       "Managed by the proreta-admin Secret, not here.",
     );
 
     const aliceRow = rows.find((r) => within(r).queryByText("alice@alpha.example"))!;
-    await userEvent.click(within(aliceRow).getByRole("button", { name: "Reset password" }));
+    await userEvent.click(
+      within(aliceRow).getByRole("button", { name: "Reset password of alice@alpha.example" }),
+    );
     const dialog = screen.getByRole("dialog", {
       name: "Reset the password of alice@alpha.example?",
     });
@@ -359,7 +382,9 @@ describe("admin organization details", () => {
     expect(screen.queryByLabelText("Temporary password")).toBeNull();
 
     // Shown again after another reset, then gone after leaving the page.
-    await userEvent.click(within(aliceRow).getByRole("button", { name: "Reset password" }));
+    await userEvent.click(
+      within(aliceRow).getByRole("button", { name: "Reset password of alice@alpha.example" }),
+    );
     await userEvent.click(
       within(screen.getByRole("dialog")).getByRole("button", { name: "Reset password" }),
     );
@@ -388,9 +413,11 @@ describe("admin organization details", () => {
           .getAll()
           .map((m) => m.state),
       );
-    const rows = within(await screen.findByRole("table")).getAllByRole("row");
+    const rows = within((await screen.findAllByRole("table"))[0]!).getAllByRole("row");
     const aliceRow = rows.find((r) => within(r).queryByText("alice@alpha.example"))!;
-    await userEvent.click(within(aliceRow).getByRole("button", { name: "Reset password" }));
+    await userEvent.click(
+      within(aliceRow).getByRole("button", { name: "Reset password of alice@alpha.example" }),
+    );
     await userEvent.click(
       within(screen.getByRole("dialog")).getByRole("button", { name: "Reset password" }),
     );
@@ -415,9 +442,11 @@ describe("admin organization details", () => {
         }),
     });
     renderApp("/admin/organizations/t-1");
-    const rows = within(await screen.findByRole("table")).getAllByRole("row");
+    const rows = within((await screen.findAllByRole("table"))[0]!).getAllByRole("row");
     const aliceRow = rows.find((r) => within(r).queryByText("alice@alpha.example"))!;
-    await userEvent.click(within(aliceRow).getByRole("button", { name: "Reset password" }));
+    await userEvent.click(
+      within(aliceRow).getByRole("button", { name: "Reset password of alice@alpha.example" }),
+    );
     await userEvent.click(
       within(screen.getByRole("dialog")).getByRole("button", { name: "Reset password" }),
     );

@@ -40,6 +40,7 @@ const (
 	lockPurgeSessions    int64 = 0x7072_6f72_6574_0004
 	lockHeartbeats       int64 = 0x7072_6f72_6574_0005
 	lockReminders        int64 = 0x7072_6f72_6574_0006
+	lockSpeculaGone      int64 = 0x7072_6f72_6574_000b
 	lockStatusPages      int64 = 0x7072_6f72_6574_0007
 	lockPurgeMail        int64 = 0x7072_6f72_6574_0008
 	lockPurgeVerifs      int64 = 0x7072_6f72_6574_0009
@@ -84,6 +85,7 @@ func DefaultTasks(m *Metrics, log *slog.Logger, mon *monitors.Service) []Task {
 		{Name: "purge_mail_outbox", Every: time.Hour, LockKey: lockPurgeMail, Run: purgeMail},
 		{Name: "purge_email_verifications", Every: 24 * time.Hour, LockKey: lockPurgeVerifs, Run: scalar(`SELECT purge_email_verifications()`)},
 		{Name: "purge_password_resets", Every: 24 * time.Hour, LockKey: lockPurgeResets, Run: scalar(`SELECT purge_password_resets()`)},
+		{Name: "specula_mark_unreachable", Every: time.Minute, LockKey: lockSpeculaGone, Run: scalar(`SELECT specula_mark_unreachable()`)},
 		{Name: "enqueue_incident_reminders", Every: ReminderEvery, LockKey: lockReminders, Run: enqueueReminders},
 	}
 }
@@ -136,9 +138,22 @@ func enqueueReminders(ctx context.Context, tx pgx.Tx, _ time.Time) (int, error) 
 // RollupMaxHoursPerRun of them) and the lookback window; the function never rolls up the open
 // hour.
 func computeRollups(ctx context.Context, tx pgx.Tx, _ time.Time) (int, error) {
+	if err := allowLongStatement(ctx, tx); err != nil {
+		return 0, err
+	}
 	var n int32
 	err := tx.QueryRow(ctx, `SELECT compute_rollups_catch_up($1, $2)`, RollupMaxHoursPerRun, int(RollupLookback/time.Hour)).Scan(&n)
 	return int(n), err
+}
+
+// allowLongStatement lifts the runtime role's statement_timeout (30 s) for the rest of tx: the
+// rollup catch-up and the retention completeness check scan whole partitions and must not be
+// cancelled half way, which would keep them failing on every run. A statement_timeout set on the
+// SQL function does not help, because the timer of the calling statement is already armed. The
+// run's own context (Housekeeper.Timeout, 5 min) still bounds the work.
+func allowLongStatement(ctx context.Context, tx pgx.Tx) error {
+	_, err := tx.Exec(ctx, `SELECT set_config('statement_timeout', '5min', true)`)
+	return err
 }
 
 // Reasons retention keeps an expired partition (proreta_jobs_partitions_kept_total{reason}).
@@ -190,7 +205,12 @@ func (r retention) dropExpiredPartitions(ctx context.Context, pool *db.Pool, _ t
 	}
 	call := func(sql, name string) (bool, error) {
 		var ok bool
-		err := db.WithTx(ctx, pool, func(tx pgx.Tx) error { return tx.QueryRow(ctx, sql, name).Scan(&ok) })
+		err := db.WithTx(ctx, pool, func(tx pgx.Tx) error {
+			if err := allowLongStatement(ctx, tx); err != nil {
+				return err
+			}
+			return tx.QueryRow(ctx, sql, name).Scan(&ok)
+		})
 		return ok, err
 	}
 	dropped := 0

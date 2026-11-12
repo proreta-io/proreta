@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { errorMessage } from "../api/client";
 import { listOrganizations, queryKeys } from "../api/endpoints";
 import { useAuth } from "../auth/AuthProvider";
-import { ROLE_LABELS } from "../lib/roles";
+import { roleLabel } from "../lib/roles";
 import { useToast } from "./Toasts";
 import { cx, Select } from "./ui";
 
@@ -61,7 +61,7 @@ export default function OrganizationSwitcher({ className }: { className?: string
     >
       {items.map((o) => (
         <option key={o.id} value={o.id} disabled={o.status !== "active"}>
-          {o.name} · {ROLE_LABELS[o.role]}
+          {o.name} · {o.role ? roleLabel(o.role) : "Projects only"}
           {o.status !== "active" ? " (suspended)" : ""}
         </option>
       ))}

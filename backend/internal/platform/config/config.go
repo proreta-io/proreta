@@ -73,6 +73,15 @@ type Encryption struct {
 	EncryptionKeyID string
 }
 
+// RequestSeal holds the keys that seal the headers and bodies of monitor requests. It is a
+// separate keyring so the worker can open them without holding the installation's data keys. Both
+// settings are optional: without them monitors can still choose a method but cannot carry headers
+// or a body, and a worker cannot open sealed requests.
+type RequestSeal struct {
+	Keys  EncryptionKeys
+	KeyID string
+}
+
 // Guard is the SSRF guard configuration shared by every process that uses the guarded client.
 type Guard struct {
 	// BlockedCIDRs are blocked by the SSRF guard in addition to its built-in ranges
@@ -85,6 +94,8 @@ type API struct {
 	Server
 	Encryption
 	Guard
+	// Request seals the headers and bodies of monitor requests.
+	Request  RequestSeal
 	HTTPAddr string
 	// AdminLogin is the admin's login (PRORETA_ADMIN_LOGIN), lowercased.
 	AdminLogin        string
@@ -123,10 +134,13 @@ func (o OAuth) GoogleEnabled() bool { return o.GoogleClientID != "" }
 // GitHubEnabled reports whether GitHub sign-in is configured.
 func (o OAuth) GitHubEnabled() bool { return o.GitHubClientID != "" }
 
-// Worker is the configuration of cmd/worker. It has no encryption keys.
+// Worker is the configuration of cmd/worker. It has no data encryption keys, only the request keys.
 type Worker struct {
 	Server
 	Guard
+	// Request opens the sealed headers and bodies of monitor requests; the only key the worker
+	// holds.
+	Request RequestSeal
 	// ClaimBatch is the most (monitor, location) jobs one scheduler tick claims
 	// (PRORETA_WORKER_CLAIM_BATCH, default 100).
 	ClaimBatch int
@@ -139,6 +153,30 @@ type Worker struct {
 	// Location is the probe_locations code whose checks this worker runs
 	// (PRORETA_WORKER_LOCATION, default "default").
 	Location string
+}
+
+// SpeculaGateway is the configuration of cmd/speculagw, the endpoint of the executors that run in
+// customer networks. It uses the worker's database role.
+type SpeculaGateway struct {
+	Server
+	HTTPAddr string
+	// Request opens the sealed headers and bodies of monitor requests handed to an executor.
+	Request RequestSeal
+}
+
+// Specula is the configuration of cmd/specula, the executor that runs inside a customer's network.
+// It has no database and no encryption keys: it only calls Proreta over HTTPS.
+type Specula struct {
+	Base
+	AdminAddr string
+	// URL is PRORETA_URL, the address of Proreta (the Specula gateway), without a trailing slash.
+	URL string
+	// Token is PRORETA_SPECULA_TOKEN, created in the app when the Specula is registered.
+	Token Secret
+	// Concurrency caps checks in flight (PRORETA_SPECULA_CONCURRENCY, default 20).
+	Concurrency int
+	// PollInterval is how often it asks for work (PRORETA_SPECULA_POLL_INTERVAL, default 5s).
+	PollInterval time.Duration
 }
 
 // Jobs is the configuration of cmd/jobs.
@@ -202,6 +240,7 @@ func LoadAPI(lookup LookupFunc) (API, error) {
 	cfg := API{
 		Server:               l.server(10),
 		Encryption:           l.encryption(),
+		Request:              l.requestSeal(),
 		Guard:                l.guard(),
 		HTTPAddr:             l.addr("PRORETA_HTTP_ADDR", ":8080"),
 		AdminLogin:           l.login("PRORETA_ADMIN_LOGIN"),
@@ -277,11 +316,43 @@ func LoadWorker(lookup LookupFunc) (Worker, error) {
 	cfg := Worker{
 		Server:            l.server(5),
 		Guard:             l.guard(),
+		Request:           l.requestSeal(),
 		ClaimBatch:        l.integer("PRORETA_WORKER_CLAIM_BATCH", 100, 1, 1000),
 		Concurrency:       l.integer("PRORETA_WORKER_CONCURRENCY", 50, 1, 1000),
 		TenantConcurrency: l.integer("PRORETA_WORKER_TENANT_CONCURRENCY", 5, 1, 1000),
 		HostConcurrency:   l.integer("PRORETA_WORKER_HOST_CONCURRENCY", 2, 1, 1000),
 		Location:          l.dnsLabel("PRORETA_WORKER_LOCATION", "default"),
+	}
+	return cfg, l.err()
+}
+
+// LoadSpeculaGateway loads the Specula gateway configuration.
+func LoadSpeculaGateway(lookup LookupFunc) (SpeculaGateway, error) {
+	l := &loader{lookup: lookup}
+	cfg := SpeculaGateway{
+		Server:   l.server(10),
+		HTTPAddr: l.addr("PRORETA_HTTP_ADDR", ":8080"),
+		Request:  l.requestSeal(),
+	}
+	if cfg.HTTPAddr != "" && cfg.HTTPAddr == cfg.AdminAddr {
+		l.fail("PRORETA_HTTP_ADDR", "must differ from PRORETA_ADMIN_ADDR")
+	}
+	return cfg, l.err()
+}
+
+// LoadSpecula loads the Specula executor configuration.
+func LoadSpecula(lookup LookupFunc) (Specula, error) {
+	l := &loader{lookup: lookup}
+	cfg := Specula{
+		Base:         l.base(),
+		AdminAddr:    l.addr("PRORETA_ADMIN_ADDR", ":9090"),
+		URL:          l.publicURL("PRORETA_URL"),
+		Token:        Secret(l.required("PRORETA_SPECULA_TOKEN")),
+		Concurrency:  l.integer("PRORETA_SPECULA_CONCURRENCY", 20, 1, 500),
+		PollInterval: l.duration("PRORETA_SPECULA_POLL_INTERVAL", 5*time.Second, time.Second, time.Minute),
+	}
+	if t := cfg.Token.Value(); t != "" && !strings.HasPrefix(t, "spc_") {
+		l.fail("PRORETA_SPECULA_TOKEN", "must be a Specula token (it starts with spc_)")
 	}
 	return cfg, l.err()
 }
@@ -614,21 +685,39 @@ func (l *loader) dnsLabel(name, def string) string {
 }
 
 func (l *loader) encryptionKeys() (EncryptionKeys, string) {
-	raw := l.required("PRORETA_ENCRYPTION_KEYS")
-	active := l.required("PRORETA_ENCRYPTION_ACTIVE_KEY_ID")
+	return l.keyMap("PRORETA_ENCRYPTION_KEYS", "PRORETA_ENCRYPTION_ACTIVE_KEY_ID", l.required)
+}
+
+// requestSeal reads PRORETA_REQUEST_KEYS and PRORETA_REQUEST_ACTIVE_KEY_ID: both or neither.
+func (l *loader) requestSeal() RequestSeal {
+	const keysName, idName = "PRORETA_REQUEST_KEYS", "PRORETA_REQUEST_ACTIVE_KEY_ID"
+	switch haveKeys, haveID := l.optional(keysName) != "", l.optional(idName) != ""; {
+	case !haveKeys && !haveID:
+		return RequestSeal{}
+	case haveKeys != haveID:
+		l.fail(keysName, "and "+idName+" must be set together")
+		return RequestSeal{}
+	}
+	keys, id := l.keyMap(keysName, idName, l.required)
+	return RequestSeal{Keys: keys, KeyID: id}
+}
+
+func (l *loader) keyMap(keysName, idName string, get func(string) string) (EncryptionKeys, string) {
+	raw := get(keysName)
+	active := get(idName)
 	if raw == "" {
 		return nil, active
 	}
 	var encoded map[string]string
 	if err := json.Unmarshal([]byte(raw), &encoded); err != nil {
-		l.fail("PRORETA_ENCRYPTION_KEYS", `must be a JSON object {"<keyId>":"<base64 32 bytes>"}`)
+		l.fail(keysName, `must be a JSON object {"<keyId>":"<base64 32 bytes>"}`)
 		return nil, active
 	}
 	keys := make(EncryptionKeys, len(encoded))
 	for id, b64 := range encoded {
 		key, err := base64.StdEncoding.DecodeString(b64)
 		if err != nil || len(key) != 32 {
-			l.fail("PRORETA_ENCRYPTION_KEYS", fmt.Sprintf("key %q must be standard base64 of 32 bytes", id))
+			l.fail(keysName, fmt.Sprintf("key %q must be standard base64 of 32 bytes", id))
 			continue
 		}
 		keys[id] = key
@@ -636,7 +725,7 @@ func (l *loader) encryptionKeys() (EncryptionKeys, string) {
 	if active != "" && len(keys) == len(encoded) {
 		// NewKeyring checks key ids and that the active key exists.
 		if _, err := crypto.NewKeyring(keys, active); err != nil {
-			l.fail("PRORETA_ENCRYPTION_KEYS", err.Error())
+			l.fail(keysName, err.Error())
 		}
 	}
 	return keys, active

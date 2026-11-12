@@ -11,8 +11,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,6 +34,8 @@ const (
 	ReasonDeleted   = "deleted"
 	// ReasonURLChanged ends an incident when the monitor's URL changes.
 	ReasonURLChanged = "url_changed"
+	// ReasonLocationChanged ends an incident when the monitor moves to another location.
+	ReasonLocationChanged = "location_changed"
 )
 
 // ErrMonitorNotFound means the monitor or its state row does not exist in the tenant.
@@ -312,10 +316,16 @@ type payload struct {
 
 func displayURL(config []byte) string {
 	var c struct {
-		URL string `json:"url"`
+		URL  string `json:"url"`
+		Host string `json:"host"`
+		Port int    `json:"port"`
 	}
 	if json.Unmarshal(config, &c) != nil {
 		return ""
+	}
+	if c.Host != "" {
+		// A tcp monitor has no URL; this is how its target reads in a message.
+		return "tcp://" + net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
 	}
 	u, err := url.Parse(c.URL)
 	if err != nil {

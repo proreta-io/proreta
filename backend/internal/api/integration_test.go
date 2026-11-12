@@ -22,6 +22,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/projects"
 	"github.com/proreta-io/proreta/backend/internal/queries"
 	"github.com/proreta-io/proreta/backend/internal/scheduler"
+	"github.com/proreta-io/proreta/backend/internal/specula"
 	"github.com/proreta-io/proreta/backend/internal/testsupport/pgtest"
 )
 
@@ -82,6 +83,12 @@ func sessionCookie(t *testing.T, r response) *http.Cookie {
 
 func newServer(t *testing.T, env *pgtest.Env, opts auth.Options) *client {
 	t.Helper()
+	return newServerKeys(t, env, opts, nil)
+}
+
+// newServerKeys is newServer with a request keyring on the monitors service.
+func newServerKeys(t *testing.T, env *pgtest.Env, opts auth.Options, requestKeys *crypto.Keyring) *client {
+	t.Helper()
 	ctx := context.Background()
 	pool := env.Pool(t, env.APIURL, 4)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -100,8 +107,8 @@ func newServer(t *testing.T, env *pgtest.Env, opts auth.Options) *client {
 	pgtest.MustExec(t, env.AdminConn(t), `UPDATE users SET password_must_change = false WHERE email = '`+adminLogin+`'`)
 	sched := scheduler.New()
 	h, err := api.NewHandler(api.Config{Version: "test", Commit: "test", CookieSecure: true, TrustedProxyHops: 1},
-		api.Deps{Auth: svc, Monitors: monitors.NewService(pool, sched, incidents.NewService(sched)), Queries: queries.New(pool, nil),
-			Plans: plans.NewService(pool), Projects: projects.NewService(pool), Logger: log})
+		api.Deps{Auth: svc, Monitors: monitors.NewService(pool, sched, incidents.NewService(sched)).WithRequestKeys(requestKeys), Queries: queries.New(pool, nil),
+			Plans: plans.NewService(pool), Projects: projects.NewService(pool), Specula: specula.NewService(pool), Logger: log})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -21,6 +21,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/plans"
 	"github.com/proreta-io/proreta/backend/internal/platform/crypto"
 	"github.com/proreta-io/proreta/backend/internal/platform/logging"
+	"github.com/proreta-io/proreta/backend/internal/platformsettings"
 	"github.com/proreta-io/proreta/backend/internal/projects"
 	"github.com/proreta-io/proreta/backend/internal/queries"
 	"github.com/proreta-io/proreta/backend/internal/scheduler"
@@ -45,14 +46,15 @@ func newAdminServer(t *testing.T, env *pgtest.Env, logs *lockedBuffer) *client {
 		t.Fatal(err)
 	}
 	pgtest.MustExec(t, env.AdminConn(t), `UPDATE users SET password_must_change = false WHERE email = '`+adminLogin+`'`)
-	adminSvc, err := admin.NewService(pool, svc, admin.Options{Logger: log, Registerer: prometheus.NewRegistry()})
+	registration := platformsettings.NewRegistration(pool, true, log)
+	adminSvc, err := admin.NewService(pool, svc, admin.Options{Logger: log, Registerer: prometheus.NewRegistry(), Registration: registration, Projects: projects.NewService(pool)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	sched := scheduler.New()
 	h, err := api.NewHandler(api.Config{Version: "test", Commit: "test", CookieSecure: true, TrustedProxyHops: 1, RegistrationEnabled: true, PublicURL: heartbeatPublicURL},
 		api.Deps{Auth: svc, Monitors: monitors.NewService(pool, sched, incidents.NewService(sched)), Queries: queries.New(pool, nil),
-			Plans: plans.NewService(pool), Projects: projects.NewService(pool), Admin: adminSvc, Logger: log, Pings: api.NewPingMetrics(prometheus.NewRegistry())})
+			Plans: plans.NewService(pool), Projects: projects.NewService(pool), Admin: adminSvc, Registration: registration, Logger: log, Pings: api.NewPingMetrics(prometheus.NewRegistry())})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,19 +78,36 @@ func adminCalls(t *testing.T, tenantID, userID string) []struct{ method, path, b
 		for method := range spec.Paths.Value(path).Operations() {
 			body := ""
 			switch {
+			case strings.Contains(path, "/projects"):
+				switch method {
+				case http.MethodPost, http.MethodPatch:
+					body = `{"name":"Payments"}`
+				case http.MethodPut:
+					body = `{"role":"member"}`
+				}
 			case method == http.MethodPatch:
 				body = `{"status":"suspended"}`
 			case method == http.MethodPut && strings.HasSuffix(path, "/email"):
 				body = `{"host":"smtp.example.com","port":587,"tls":"starttls","from":"proreta@example.com"}`
 			case method == http.MethodPut && strings.HasSuffix(path, "/features"):
 				body = `{"sendInvitations":false,"sendEmailVerification":false,"allowPasswordReset":false}`
+			case method == http.MethodPut && strings.HasSuffix(path, "/registration"):
+				body = `{"enabled":false}`
+			case method == http.MethodPut && strings.HasSuffix(path, "/platform-admin"):
+				body = `{"enabled":true}`
+			case method == http.MethodPut && strings.Contains(path, "/members/"):
+				body = `{"role":"member"}`
+			case method == http.MethodPost && strings.HasSuffix(path, "/members"):
+				body = `{"email":"someone@example.com","role":"member"}`
+			case method == http.MethodPost && strings.HasSuffix(path, "/invitations"):
+				body = `{"role":"member"}`
 			}
 			out = append(out, struct{ method, path, body string }{method,
-				strings.NewReplacer("{tenantId}", tenantID, "{userId}", userID).Replace(path), body})
+				strings.NewReplacer("{tenantId}", tenantID, "{organizationId}", tenantID, "{userId}", userID, "{invitationId}", userID, "{projectId}", userID).Replace(path), body})
 		}
 	}
-	if len(out) != 12 {
-		t.Fatalf("%d admin operations in the spec, want 12", len(out))
+	if len(out) != 34 {
+		t.Fatalf("%d admin operations in the spec, want 34", len(out))
 	}
 	return out
 }
@@ -136,6 +155,61 @@ func TestIntegrationAdminOperationsRefuseNonAdmins(t *testing.T) {
 	}
 	if r := c.do(http.MethodGet, "/api/v1/admin/stats", "", withCSRF(adminCookie, adminCSRF)); r.code != http.StatusOK {
 		t.Fatalf("admin stats: %d %s", r.code, r.raw)
+	}
+}
+
+// The platform admin turns self-service registration on and off without a restart; the choice
+// wins over the environment value and can be removed again. Invitations are not affected.
+func TestIntegrationAdminRegistrationSwitch(t *testing.T) {
+	env := pgtest.New(t, pgtest.DBName("apiadminregistration"))
+	c := newAdminServer(t, env, &lockedBuffer{})
+	adminCookie, adminCSRF := c.login()
+	ah := withCSRF(adminCookie, adminCSRF)
+	const path = "/api/v1/admin/registration"
+
+	r := c.do(http.MethodGet, path, "", ah)
+	if r.code != http.StatusOK || r.body["effective"] != true || r.body["source"] != "environment" || r.body["environmentValue"] != true || r.body["updatedAt"] != nil {
+		t.Fatalf("initial: %d %s", r.code, r.raw)
+	}
+	publicOpen := func() bool {
+		return c.do(http.MethodGet, "/api/v1/public/config", "", nil).body["registrationEnabled"] == true
+	}
+	if !publicOpen() {
+		t.Fatal("registration must follow the environment value at first")
+	}
+
+	r = c.do(http.MethodPut, path, `{"enabled":false}`, ah)
+	if r.code != http.StatusOK || r.body["effective"] != false || r.body["source"] != "database" || r.body["environmentValue"] != true || r.body["updatedAt"] == nil {
+		t.Fatalf("turn off: %d %s", r.code, r.raw)
+	}
+	if publicOpen() {
+		t.Fatal("public config still offers registration")
+	}
+	if r := c.do(http.MethodPost, "/api/v1/auth/register", registerBody("late@tenant.example", ownerPassword), map[string]string{"X-Forwarded-For": "198.51.100.21"}); r.code != http.StatusForbidden ||
+		r.body["type"] != "urn:proreta:problem:registration-disabled" {
+		t.Fatalf("register while off: %d %s", r.code, r.raw)
+	}
+	// Unchanged value: nothing is written, nothing is audited.
+	c.do(http.MethodPut, path, `{"enabled":false}`, ah)
+
+	if r := c.do(http.MethodPut, path, `{}`, ah); r.code != http.StatusBadRequest {
+		t.Fatalf("missing enabled: %d %s", r.code, r.raw)
+	}
+
+	r = c.do(http.MethodPut, path, `{"enabled":null}`, ah)
+	if r.code != http.StatusOK || r.body["effective"] != true || r.body["source"] != "environment" {
+		t.Fatalf("follow the environment: %d %s", r.code, r.raw)
+	}
+	if !publicOpen() {
+		t.Fatal("registration did not reopen")
+	}
+	if r := c.do(http.MethodPost, "/api/v1/auth/register", registerBody("again@tenant.example", ownerPassword), map[string]string{"X-Forwarded-For": "198.51.100.22"}); r.code != http.StatusCreated {
+		t.Fatalf("register while on: %d %s", r.code, r.raw)
+	}
+
+	// Two changes, two audit rows (the repeated value wrote none).
+	if n := countRows(t, env, `SELECT count(*) FROM audit_log WHERE action = 'admin.registration_settings.updated'`); n != 2 {
+		t.Fatalf("audit rows = %d, want 2 (environment to disabled, disabled to environment)", n)
 	}
 }
 

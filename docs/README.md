@@ -9,18 +9,26 @@ Operator and contributor documentation for Proreta.
 - [Running locally](development.md): throwaway database in Docker, all processes with `go run`, no Kubernetes
 - [Contributing](../CONTRIBUTING.md): development setup, conventions, tests, migrations
 
+## Using Proreta
+- [Monitor requests](monitor-requests.md): method, headers and body of an HTTP check, what is stored and what is never shown
+- [TCP monitors](tcp-monitors.md): checking that a host accepts connections on a port, from Proreta's cloud or inside your network
+
 ## Runbooks
 | Runbook | Covers |
 |---|---|
 | [Database bootstrap](runbooks/database-bootstrap.md) | Creating the database and roles, the bootstrap Job, manual fallback |
 | [Database migrations](runbooks/migrations.md) | Writing migrations, what the tests enforce, rollouts and rollbacks |
-| [Platform admin panel](runbooks/admin-panel.md) | Plans, suspension, deletion, password resets, audit |
+| [Platform admin panel](runbooks/admin-panel.md) | Plans, suspension, deletion, users, members, projects, registration switch, password resets, audit |
 | [Members, roles and invitations](runbooks/invitations.md) | Roles, invitation links, organization switcher, recovery |
 | [Sign-in with Google and GitHub](runbooks/oauth.md) | OAuth clients, redirect URIs, Workspace domains, OAuth-only mode |
 | [Outgoing email](runbooks/email.md) | Optional SMTP, set up in Admin → Email: settings, what is sent, delivery and troubleshooting |
+| [Webhook alert channels](runbooks/alerts-webhook.md) | What a webhook channel sends, message templates and placeholders, JSON escaping, SSRF limits, retries |
+| [Specula executors](runbooks/specula.md) | Checking services inside your own network: registering, running the executor, sharing with projects, revoking |
 | [Public status page](runbooks/status-page.md) | Enabling the renderer, caching, protected pages, abuse |
 | [Heartbeats with Alertmanager](runbooks/heartbeat-alertmanager.md) | Watchdog heartbeats for Prometheus Alertmanager |
 | [Observability](runbooks/observability.md) | Metrics, logs and suggested alert rules |
 
 ## API
+What each role may do is listed in [Roles and permissions](roles.md), generated from the code.
+
 The API contract is [api/openapi.yaml](../api/openapi.yaml) (OpenAPI 3.0). The Go server and the web client are generated from it.

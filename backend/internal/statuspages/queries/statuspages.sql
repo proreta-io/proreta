@@ -2,11 +2,11 @@
 -- status_page_snapshots; the builder reads monitors, their state, rollups and incidents.
 
 -- name: InsertPage :exec
-INSERT INTO status_pages (id, tenant_id, slug, title, description, logo_url, accent_color)
-VALUES (@id, @tenant_id, @slug, @title, @description, sqlc.narg(logo_url), sqlc.narg(accent_color));
+INSERT INTO status_pages (id, tenant_id, project_id, slug, title, description, logo_url, accent_color)
+VALUES (@id, @tenant_id, sqlc.narg(project_id), @slug, @title, @description, sqlc.narg(logo_url), sqlc.narg(accent_color));
 
 -- name: ListPages :many
-SELECT p.id, p.slug, p.title, p.description, p.logo_url, p.accent_color, (p.password_hash IS NOT NULL)::boolean AS protected,
+SELECT p.id, p.project_id, p.slug, p.title, p.description, p.logo_url, p.accent_color, (p.password_hash IS NOT NULL)::boolean AS protected,
        p.published, p.created_at, p.updated_at,
        (SELECT count(*) FROM status_page_components AS c
         JOIN monitors AS m ON m.tenant_id = c.tenant_id AND m.id = c.monitor_id AND m.deleted_at IS NULL
@@ -16,7 +16,7 @@ WHERE p.tenant_id = @tenant_id AND p.deleted_at IS NULL
 ORDER BY p.created_at, p.id;
 
 -- name: LockPage :one
-SELECT id, slug, title, description, logo_url, accent_color, password_hash, published
+SELECT id, project_id, slug, title, description, logo_url, accent_color, password_hash, published
 FROM status_pages
 WHERE tenant_id = @tenant_id AND id = @id AND deleted_at IS NULL
 FOR UPDATE;
@@ -65,8 +65,8 @@ INSERT INTO status_page_components (id, tenant_id, page_id, monitor_id, public_n
 VALUES (@id, @tenant_id, @page_id, @monitor_id, @public_name, sqlc.narg(group_name), @position);
 
 -- name: LiveMonitorsOf :many
--- The live monitors among the ids, locked against a concurrent delete (any project).
-SELECT id
+-- The live monitors among the ids with their project, locked against a concurrent delete or move.
+SELECT id, project_id
 FROM monitors
 WHERE tenant_id = @tenant_id AND id = ANY(@ids::uuid[]) AND deleted_at IS NULL
 FOR KEY SHARE;
@@ -75,6 +75,16 @@ FOR KEY SHARE;
 DELETE FROM status_page_components AS c
 USING monitors AS m
 WHERE c.tenant_id = @tenant_id AND m.tenant_id = c.tenant_id AND m.id = c.monitor_id AND m.deleted_at IS NOT NULL;
+
+-- name: DetachForeignComponents :many
+-- A monitor moved to another project leaves the pages of its old project; organization-level
+-- pages keep it. Returns the pages that lost a component.
+DELETE FROM status_page_components AS c
+USING status_pages AS p
+WHERE c.tenant_id = @tenant_id AND c.monitor_id = @monitor_id
+  AND p.tenant_id = c.tenant_id AND p.id = c.page_id
+  AND p.project_id IS NOT NULL AND p.project_id <> @project_id::uuid
+RETURNING c.page_id;
 
 -- name: DailyCounts :many
 -- Checks per UTC day of the given monitors from the hourly rollups (all locations together).

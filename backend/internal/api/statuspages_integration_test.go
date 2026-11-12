@@ -43,7 +43,7 @@ func TestIntegrationStatusPageAdmin(t *testing.T) {
 			t.Fatalf("create as %s: %d %s", role, r.code, r.raw)
 		}
 	}
-	r = c.do(http.MethodPost, "/api/v1/status-pages", `{"slug":"acme-status","title":"Acme","logoUrl":"https://cdn.example.com/logo.png","accentColor":"#1F6FEB"}`, w.sessions[authz.Admin])
+	r = c.do(http.MethodPost, "/api/v1/status-pages", `{"slug":"acme-status","title":"Acme","logoUrl":"https://cdn.example.com/logo.png","accentColor":"#1F6FEB"}`, w.sessions[authz.Maintainer])
 	if r.code != http.StatusCreated || r.body["published"] != false || r.body["accentColor"] != "#1f6feb" ||
 		r.body["publicUrl"] != "https://proreta.example.com/status/acme-status" || r.body["passwordProtected"] != false {
 		t.Fatalf("create: %d %s", r.code, r.raw)
@@ -71,7 +71,7 @@ func TestIntegrationStatusPageAdmin(t *testing.T) {
 		t.Fatalf("foreign publish: %d %s", r.code, r.raw)
 	}
 
-	// Every role reads the settings; only admins see the components.
+	// Every role reads the settings; only maintainers see the components.
 	for _, role := range []authz.Role{authz.Viewer, authz.Member} {
 		if r := c.do(http.MethodGet, "/api/v1/status-pages", "", w.sessions[role]); r.code != http.StatusOK || !strings.Contains(r.raw, "acme-status") {
 			t.Fatalf("list as %s: %d %s", role, r.code, r.raw)

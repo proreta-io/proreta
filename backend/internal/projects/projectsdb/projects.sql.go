@@ -16,7 +16,9 @@ const countProjectContents = `-- name: CountProjectContents :one
 SELECT (SELECT count(*) FROM monitors AS m
         WHERE m.tenant_id = $1 AND m.project_id = $2::uuid AND m.deleted_at IS NULL)::bigint AS monitors,
        (SELECT count(*) FROM notification_channels AS c
-        WHERE c.tenant_id = $1 AND c.project_id = $2 AND c.deleted_at IS NULL)::bigint AS channels
+        WHERE c.tenant_id = $1 AND c.project_id = $2 AND c.deleted_at IS NULL)::bigint AS channels,
+       (SELECT count(*) FROM status_pages AS s
+        WHERE s.tenant_id = $1 AND s.project_id = $2 AND s.deleted_at IS NULL)::bigint AS status_pages
 `
 
 type CountProjectContentsParams struct {
@@ -25,14 +27,15 @@ type CountProjectContentsParams struct {
 }
 
 type CountProjectContentsRow struct {
-	Monitors int64
-	Channels int64
+	Monitors    int64
+	Channels    int64
+	StatusPages int64
 }
 
 func (q *Queries) CountProjectContents(ctx context.Context, arg CountProjectContentsParams) (CountProjectContentsRow, error) {
 	row := q.db.QueryRow(ctx, countProjectContents, arg.TenantID, arg.ProjectID)
 	var i CountProjectContentsRow
-	err := row.Scan(&i.Monitors, &i.Channels)
+	err := row.Scan(&i.Monitors, &i.Channels, &i.StatusPages)
 	return i, err
 }
 
@@ -73,22 +76,32 @@ func (q *Queries) DeleteProjectMembers(ctx context.Context, arg DeleteProjectMem
 	return result.RowsAffected(), nil
 }
 
-const getOrganizationRole = `-- name: GetOrganizationRole :one
-SELECT role
-FROM memberships
-WHERE tenant_id = $1 AND user_id = $2
+const getMemberRoles = `-- name: GetMemberRoles :one
+SELECT coalesce(m.role, '')::text AS organization_role, pm.role AS project_role
+FROM memberships AS m
+LEFT JOIN project_members AS pm
+       ON pm.tenant_id = m.tenant_id AND pm.project_id = $1 AND pm.user_id = m.user_id
+WHERE m.tenant_id = $2 AND m.user_id = $3
 `
 
-type GetOrganizationRoleParams struct {
-	TenantID uuid.UUID
-	UserID   uuid.UUID
+type GetMemberRolesParams struct {
+	ProjectID uuid.UUID
+	TenantID  uuid.UUID
+	UserID    uuid.UUID
 }
 
-func (q *Queries) GetOrganizationRole(ctx context.Context, arg GetOrganizationRoleParams) (string, error) {
-	row := q.db.QueryRow(ctx, getOrganizationRole, arg.TenantID, arg.UserID)
-	var role string
-	err := row.Scan(&role)
-	return role, err
+type GetMemberRolesRow struct {
+	OrganizationRole string
+	ProjectRole      *string
+}
+
+// The organization role (empty for none) and the direct role in one project (NULL for none) of
+// a member of the organization.
+func (q *Queries) GetMemberRoles(ctx context.Context, arg GetMemberRolesParams) (GetMemberRolesRow, error) {
+	row := q.db.QueryRow(ctx, getMemberRoles, arg.ProjectID, arg.TenantID, arg.UserID)
+	var i GetMemberRolesRow
+	err := row.Scan(&i.OrganizationRole, &i.ProjectRole)
+	return i, err
 }
 
 const insertProject = `-- name: InsertProject :exec
@@ -114,21 +127,20 @@ func (q *Queries) InsertProject(ctx context.Context, arg InsertProjectParams) er
 }
 
 const listProjectMembers = `-- name: ListProjectMembers :many
-SELECT m.user_id, u.email::text AS login, u.display_name, m.role AS organization_role,
-       pm.role AS project_role, (pm.user_id IS NOT NULL)::boolean AS explicit
+SELECT m.user_id, u.email::text AS login, u.display_name, coalesce(m.role, '')::text AS organization_role,
+       pm.role AS project_role
 FROM memberships AS m
 JOIN users AS u ON u.id = m.user_id
 LEFT JOIN project_members AS pm
        ON pm.tenant_id = m.tenant_id AND pm.project_id = $1 AND pm.user_id = m.user_id
 WHERE m.tenant_id = $2
-  AND ($3::boolean OR pm.user_id IS NOT NULL OR m.role IN ('owner', 'admin'))
+  AND (m.role IS NOT NULL OR pm.user_id IS NOT NULL)
 ORDER BY m.created_at, m.user_id
 `
 
 type ListProjectMembersParams struct {
-	ProjectID  uuid.UUID
-	TenantID   uuid.UUID
-	AllMembers bool
+	ProjectID uuid.UUID
+	TenantID  uuid.UUID
 }
 
 type ListProjectMembersRow struct {
@@ -137,13 +149,12 @@ type ListProjectMembersRow struct {
 	DisplayName      string
 	OrganizationRole string
 	ProjectRole      *string
-	Explicit         bool
 }
 
-// Owners and admins (they see every project), the listed members, and for an all_members project
-// every member of the organization. Reads memberships and users (owned by auth) read-only.
+// Everyone with a role in the project: the people with an organization role (it applies to every
+// project) and the people with a direct role. Reads memberships and users (owned by auth) read-only.
 func (q *Queries) ListProjectMembers(ctx context.Context, arg ListProjectMembersParams) ([]ListProjectMembersRow, error) {
-	rows, err := q.db.Query(ctx, listProjectMembers, arg.ProjectID, arg.TenantID, arg.AllMembers)
+	rows, err := q.db.Query(ctx, listProjectMembers, arg.ProjectID, arg.TenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +168,6 @@ func (q *Queries) ListProjectMembers(ctx context.Context, arg ListProjectMembers
 			&i.DisplayName,
 			&i.OrganizationRole,
 			&i.ProjectRole,
-			&i.Explicit,
 		); err != nil {
 			return nil, err
 		}
@@ -225,28 +235,26 @@ func (q *Queries) ListProjects(ctx context.Context, tenantID uuid.UUID) ([]ListP
 }
 
 const listUserProjects = `-- name: ListUserProjects :many
-SELECT p.id, pm.role
-FROM projects AS p
-LEFT JOIN project_members AS pm
-       ON pm.tenant_id = p.tenant_id AND pm.project_id = p.id AND pm.user_id = $1
-WHERE p.tenant_id = $2 AND p.deleted_at IS NULL
-  AND (p.all_members OR pm.user_id IS NOT NULL)
+SELECT pm.project_id AS id, pm.role
+FROM project_members AS pm
+JOIN projects AS p ON p.tenant_id = pm.tenant_id AND p.id = pm.project_id
+WHERE pm.tenant_id = $1 AND pm.user_id = $2 AND p.deleted_at IS NULL
 `
 
 type ListUserProjectsParams struct {
-	UserID   uuid.UUID
 	TenantID uuid.UUID
+	UserID   uuid.UUID
 }
 
 type ListUserProjectsRow struct {
 	ID   uuid.UUID
-	Role *string
+	Role string
 }
 
-// The projects a member or viewer belongs to, with its override: every project with
-// all_members, and the projects that list the user.
+// The direct roles of a user in the live projects of the tenant. The organization role is not
+// part of it: it applies to every project and the api combines the two.
 func (q *Queries) ListUserProjects(ctx context.Context, arg ListUserProjectsParams) ([]ListUserProjectsRow, error) {
-	rows, err := q.db.Query(ctx, listUserProjects, arg.UserID, arg.TenantID)
+	rows, err := q.db.Query(ctx, listUserProjects, arg.TenantID, arg.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +288,7 @@ func (q *Queries) LockDefaultProject(ctx context.Context, tenantID uuid.UUID) (u
 }
 
 const lockProject = `-- name: LockProject :one
-SELECT id, name, slug, is_default, all_members
+SELECT id, name, slug, is_default
 FROM projects
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
 FOR UPDATE
@@ -292,11 +300,10 @@ type LockProjectParams struct {
 }
 
 type LockProjectRow struct {
-	ID         uuid.UUID
-	Name       string
-	Slug       string
-	IsDefault  bool
-	AllMembers bool
+	ID        uuid.UUID
+	Name      string
+	Slug      string
+	IsDefault bool
 }
 
 // Serialises changes of one project (rename, delete, members) and deletes against new monitors
@@ -309,7 +316,6 @@ func (q *Queries) LockProject(ctx context.Context, arg LockProjectParams) (LockP
 		&i.Name,
 		&i.Slug,
 		&i.IsDefault,
-		&i.AllMembers,
 	)
 	return i, err
 }
@@ -396,7 +402,7 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) er
 
 const upsertProjectMember = `-- name: UpsertProjectMember :exec
 INSERT INTO project_members (tenant_id, project_id, user_id, role)
-VALUES ($1, $2, $3, $4)
+VALUES ($1, $2, $3, $4::text)
 ON CONFLICT (tenant_id, project_id, user_id) DO UPDATE SET role = EXCLUDED.role, updated_at = now()
 `
 
@@ -404,7 +410,7 @@ type UpsertProjectMemberParams struct {
 	TenantID  uuid.UUID
 	ProjectID uuid.UUID
 	UserID    uuid.UUID
-	Role      *string
+	Role      string
 }
 
 func (q *Queries) UpsertProjectMember(ctx context.Context, arg UpsertProjectMemberParams) error {

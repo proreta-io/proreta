@@ -72,7 +72,7 @@ Edit every line marked `CHANGE`:
 | `config.publicUrl` | `https://proreta.example.com` | Required. https, no trailing slash. Its host is the host name of the HTTPRoute (set `httpRoute.hostnames` only to serve more names). |
 | `httpRoute.parentRef` | `gateway` / `gateway-system` / `https` | Name (required), namespace (empty: the Proreta namespace) and listener (`sectionName`) of your Gateway. There is no built-in Gateway name. |
 | `database.host` | `postgres.example.internal` | `port` (5432) and `sslmode` (`require`) next to it. |
-| `config.trustedProxyHops` | `1` | Already `1` in the example: one Gateway in front. `0` only without a proxy. |
+| `config.trustedProxyHops` | `1` | The default and the value in the example: one Gateway in front. `0` only without a proxy. |
 
 Leave `database.bootstrap.adminSecret.existingSecret: proreta-db-admin-login` (the Secret from step 2), `config.registrationEnabled: false` and `secrets.*.source: generate`. The chart validates the file against `values.schema.json` and fails with a message naming the key when something is missing, malformed or unknown (a typo such as `database.hots` is rejected, not ignored).
 
@@ -119,7 +119,7 @@ kubectl -n proreta delete secret proreta-admin-initial
 ```
 A password you chose in the app is kept: the api compares the hash in the Secret `proreta-admin` with the one it saw at its previous start and only applies it when it is a new one. If you lose the password, reset it: delete the Secrets `proreta-admin` and `proreta-admin-initial`, run the same `helm upgrade` again (a new one-time password is generated), restart the api (`kubectl -n proreta rollout restart deploy/proreta-api`) and sign in with the new one-time password, which replaces the one you chose, ends the admin's sessions and asks for a new password again ([admin panel runbook](runbooks/admin-panel.md)).
 
-**7. Start using it.** The admin is the owner of the organization **Default** (slug `default`; plan `internal`: up to 1000 monitors, 100 heartbeats, 10 notification channels, 50 members). For a single company that is all you need: add monitors there and invite colleagues under **Members → Invite someone** (an invitation link works while registration is off; see [invitations](runbooks/invitations.md)). Self-service registration (`config.registrationEnabled: true`) is only for letting other people create separate organizations (plan `free`); an address is confirmed only if you turn on [outgoing email](runbooks/email.md) (Admin → Email) and the user opens the link, and nothing requires it, so leave it off unless you want that.
+**7. Start using it.** The admin is the owner of the organization **Default** (slug `default`; plan `internal`: up to 1000 monitors, 100 heartbeats, 10 notification channels, 50 members). For a single company that is all you need: add monitors there and invite colleagues under **Members → Invite someone** (an invitation link works while registration is off; see [invitations](runbooks/invitations.md)). Self-service registration (`config.registrationEnabled: true`, or **Admin → Registration** after the install, which needs no redeploy and wins over the chart value) is only for letting other people create separate organizations (plan `free`); an address is confirmed only if you turn on [outgoing email](runbooks/email.md) (Admin → Email) and the user opens the link, and nothing requires it, so leave it off unless you want that.
 
 ### Installing from the OCI registry
 Steps 1, 3 and 4 change; everything else is the same. Do not copy `values.example.yaml` from a checkout and do not set `image.tag`: the packaged chart uses its own release as the image tag.
@@ -220,22 +220,25 @@ kubectl -n proreta delete secret proreta-db-admin-login
 ```
 The Secret `proreta-db` (the role passwords) stays; it is not managed by Helm. If a later run needs the login again (a new or empty database, a missing or outdated `proreta-db`), the Job fails with `the database is not ready and no database admin login is available`: create the admin Secret again (step 2) and rerun the upgrade. To rotate the role passwords or add a role on a working installation, set `database.bootstrap.force: true` together with the admin Secret, upgrade, then set it back to `false` ([database bootstrap](runbooks/database-bootstrap.md)). You can still set `database.bootstrap.enabled: false` after the first install if you prefer not to run the Job at all.
 
-**Back up the encryption key.** Do this now, once. The Secret `proreta-crypto` holds the keys that encrypt the Slack webhook URLs stored in the database. Without it the webhook URLs in the database (and in any backup of it) cannot be decrypted: they are lost and each Slack channel must be entered again. The Secret `proreta-statuspage` (the cookie signing key of the status page) is less critical: losing it only signs visitors of password-protected pages out, but it is cheap to keep with the other one. [Back up the secrets](#back-up-the-secrets) shows how.
+**Back up the encryption key.** Do this now, once. The Secret `proreta-crypto` holds the keys that encrypt the Slack and webhook URLs stored in the database. Without it the webhook URLs in the database (and in any backup of it) cannot be decrypted: they are lost and each channel must be entered again. The Secret `proreta-statuspage` (the cookie signing key of the status page) is less critical: losing it only signs visitors of password-protected pages out, but it is cheap to keep with the other one. [Back up the secrets](#back-up-the-secrets) shows how.
 
-**Optional next steps:** Slack channels in the app, [outgoing email](runbooks/email.md) (configured after your first sign-in under **Admin → Email**: an SMTP server, a test message and three switches; everything is off by default, and nothing is emailed until you turn it on), [sign-in with Google or GitHub](runbooks/oauth.md), [status pages](runbooks/status-page.md), [Alertmanager watchdog](runbooks/heartbeat-alertmanager.md), [metrics and alerts](runbooks/observability.md). Add the CIDRs of your cluster and VPC to `config.blockedCIDRs` so monitors cannot probe internal addresses ([chart README](../deploy/helm/proreta/README.md)).
+**Optional next steps:** Slack and [webhook](runbooks/alerts-webhook.md) channels in the app, [outgoing email](runbooks/email.md) (configured after your first sign-in under **Admin → Email**: an SMTP server, a test message and three switches; everything is off by default, and nothing is emailed until you turn it on), [sign-in with Google or GitHub](runbooks/oauth.md), [status pages](runbooks/status-page.md), [Alertmanager watchdog](runbooks/heartbeat-alertmanager.md), [metrics and alerts](runbooks/observability.md). Add the CIDRs of your cluster and VPC to `config.blockedCIDRs` so monitors cannot probe internal addresses ([chart README](../deploy/helm/proreta/README.md)).
 
 ## Back up the secrets
-The database backup alone is not enough to restore an installation. Two Secrets are generated in the cluster and exist nowhere else (with `secrets.*.source: externalSecret` your secret store is the copy, and you can skip this):
+The database backup alone is not enough to restore an installation. Three Secrets are generated in the cluster and exist nowhere else (with `secrets.*.source: externalSecret` your secret store is the copy, and you can skip this):
 
 | Secret (release `proreta`) | Keys | What it protects | If it is lost |
 |---|---|---|---|
-| `proreta-crypto` | `keys` (JSON `{"<keyId>":"<base64 of 32 bytes>"}`, for example `{"k1":"..."}`), `active_key_id` | AES-256-GCM encryption of the Slack webhook URLs in the database (each stored value names the key id that sealed it) | The stored webhook URLs cannot be decrypted and are lost. Monitors, incidents and users are unaffected; Slack channels must be created again. |
+| `proreta-crypto` | `keys` (JSON `{"<keyId>":"<base64 of 32 bytes>"}`, for example `{"k1":"..."}`), `active_key_id` | AES-256-GCM encryption of the Slack and webhook URLs in the database (each stored value names the key id that sealed it) | The stored webhook URLs cannot be decrypted and are lost. Monitors, incidents and users are unaffected; Slack and webhook channels must be created again. |
+| `proreta-request` | `keys` (JSON, like `proreta-crypto`; for example `{"r1":"..."}`), `active_key_id` | AES-256-GCM encryption of the header values and bodies of monitor requests; the worker holds only this key | The stored header values and bodies cannot be decrypted and are lost; monitors with them fail their checks until the values are entered again. Nothing else is affected. |
 | `proreta-statuspage` | `cookie_key` | Signature of the cookie that records a visitor's password unlock on a protected status page | Visitors of protected pages enter the password again. Nothing is lost. |
 
 **Export.** Print the data of each Secret without the cluster-specific metadata (name, namespace, uid, resource version) and store the output in a password manager or an external secret store, never in Git or in the same place as the database backup:
 ```sh
 kubectl -n proreta get secret proreta-crypto -o yaml \
   | yq 'del(.metadata) | .metadata.name = "proreta-crypto"'
+kubectl -n proreta get secret proreta-request -o yaml \
+  | yq 'del(.metadata) | .metadata.name = "proreta-request"'
 kubectl -n proreta get secret proreta-statuspage -o yaml \
   | yq 'del(.metadata) | .metadata.name = "proreta-statuspage"'
 ```
@@ -244,9 +247,9 @@ Without `yq`, copy the two `data` entries: `kubectl -n proreta get secret proret
 **Restore.** On a new cluster or after `kubectl delete namespace`, create the Secrets before the first `helm upgrade --install` (the secrets bootstrap Job creates a Secret only when it is absent and never overwrites it):
 ```sh
 kubectl create namespace proreta
-kubectl -n proreta apply -f proreta-crypto.yaml -f proreta-statuspage.yaml   # the saved files, with metadata.name and no namespace or uid
+kubectl -n proreta apply -f proreta-crypto.yaml -f proreta-request.yaml -f proreta-statuspage.yaml   # the saved files, with metadata.name and no namespace or uid
 ```
-Then install with the same `secrets.crypto.keyId`, restore the database, and check that a Slack channel can send a test message. If the Secrets already exist with other content, apply the saved files over them and restart `api` and `jobs` (`kubectl -n proreta rollout restart deploy/proreta-api deploy/proreta-jobs`) and the `statuspage` Deployment, which read the Secrets only at start.
+Then install with the same `secrets.crypto.keyId`, restore the database, and check that a channel can send a test message. If the Secrets already exist with other content, apply the saved files over them and restart `api`, `worker` and `jobs` (`kubectl -n proreta rollout restart deploy/proreta-api deploy/proreta-worker deploy/proreta-jobs`) and the `statuspage` Deployment, which read the Secrets only at start.
 
 **Rotation.** Add a second entry to `keys` and point `active_key_id` at it; never remove an old entry while stored webhook URLs may still be sealed with it, because there is no re-encryption tool and a webhook URL is re-sealed only when its channel is saved again:
 ```sh
@@ -279,8 +282,8 @@ This removes the Deployments, Services, HTTPRoute and ServiceAccounts. It leaves
 
 To remove everything for good:
 ```sh
-# export proreta-crypto and proreta-statuspage first: see "Back up the secrets"
-kubectl -n proreta delete secret proreta-db proreta-admin proreta-admin-initial proreta-crypto proreta-statuspage --ignore-not-found
+# export proreta-crypto, proreta-request and proreta-statuspage first: see "Back up the secrets"
+kubectl -n proreta delete secret proreta-db proreta-admin proreta-admin-initial proreta-crypto proreta-request proreta-statuspage --ignore-not-found
 kubectl delete namespace proreta
 ```
 If you keep the namespace, also remove hook objects that a failed install left behind (after a successful run Helm deletes them itself; all chart objects carry the label `app.kubernetes.io/instance=<release>`):
@@ -296,7 +299,7 @@ The defaults fit a single-company installation with a few hundred monitors on a 
 |---|---|---|---|
 | `api` | 2 | 50m / 96Mi | Stateless; add replicas for load. Login and status page rate limits are counted per replica. |
 | `worker` | 2 | 50m / 96Mi | Runs the checks. Replicas share the due checks through database leases (`FOR UPDATE SKIP LOCKED`), so more replicas add capacity; also see `worker.concurrency`. |
-| `jobs` | 1 | 25m / 64Mi | Slack delivery and housekeeping. The chart allows only 0 or 1; keep 1 (0 stops alerts). |
+| `jobs` | 1 | 25m / 64Mi | Slack and webhook delivery and housekeeping. The chart allows only 0 or 1; keep 1 (0 stops alerts). |
 | `statuspage` | 1 | 10m / 48Mi | Caches per replica; more replicas multiply the per-replica rate limits. |
 | `web` | 2 | 10m / 32Mi | Static files served by nginx. |
 
@@ -364,4 +367,4 @@ The provider shows `redirect_uri_mismatch` (Google) or "The redirect_uri is not 
 ### Other first-day problems
 - **The schema check rejects my values** (`values don't meet the specifications of the schema`): the line `at '/config/publicUrl'` (for example) names the key; its description is in `values.schema.json` and [values.yaml](../deploy/helm/proreta/values.yaml).
 - **Sign-in "works" but you are logged out at once:** the site is served over http. The session cookie is `Secure`; use the Gateway's HTTPS listener.
-- **Every visitor shares one rate limit:** `config.trustedProxyHops` is `0` behind a Gateway; set `1`.
+- **Every visitor shares one rate limit:** `config.trustedProxyHops` was set to `0` behind a Gateway (the chart default is `1`); set `1`.

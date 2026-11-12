@@ -115,14 +115,24 @@ function Invalid({
 }
 
 function Offer({ preview }: { preview: InvitationPreview }) {
+  const role = ROLE_LABELS[preview.role].toLowerCase();
   return (
     <p className="text-muted-foreground">
-      You are invited as{" "}
-      <strong className="font-medium text-foreground">
-        {ROLE_LABELS[preview.role].toLowerCase()}
-      </strong>
-      : {ROLE_DESCRIPTIONS[preview.role].toLowerCase()} The link works until{" "}
-      {formatDateTime(preview.expiresAt)}.
+      {preview.projectName ? (
+        <>
+          You are invited to the project{" "}
+          <strong className="font-medium text-foreground">{preview.projectName}</strong> as{" "}
+          <strong className="font-medium text-foreground">{role}</strong>. The role applies in this
+          project only; it gives you no role in the rest of {preview.organizationName} and changes
+          none you already have.
+        </>
+      ) : (
+        <>
+          You are invited as <strong className="font-medium text-foreground">{role}</strong>:{" "}
+          {ROLE_DESCRIPTIONS[preview.role].toLowerCase()}
+        </>
+      )}{" "}
+      The link works until {formatDateTime(preview.expiresAt)}.
     </p>
   );
 }

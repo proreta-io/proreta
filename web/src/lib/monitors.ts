@@ -4,6 +4,7 @@ import type {
   MonitorDetail,
   MonitorList,
   MonitorListItem,
+  TcpMonitor,
 } from "../api/endpoints";
 import {
   describeErrorKind,
@@ -88,22 +89,34 @@ export function quietState(list: MonitorList): { title: string; detail: string }
   };
 }
 
-/** Case-insensitive match on name or URL (http monitors); an empty query keeps everything. */
-export function filterMonitors<T extends Pick<MonitorListItem, "name" | "http">>(
+/** The checked target as the list and the details show it: a URL without https://, or host:port. */
+export function targetText(m: Pick<MonitorListItem, "http" | "tcp">): string {
+  if (m.tcp) return `${m.tcp.host}:${m.tcp.port}`;
+  return (m.http?.url ?? "").replace(/^https:\/\//i, "");
+}
+
+/** Case-insensitive match on name or target (URL or host:port); an empty query keeps everything. */
+export function filterMonitors<T extends Pick<MonitorListItem, "name" | "http" | "tcp">>(
   items: T[],
   query: string,
 ): T[] {
   const q = query.trim().toLowerCase();
   if (!q) return items;
   return items.filter(
-    (m) => m.name.toLowerCase().includes(q) || (m.http?.url.toLowerCase().includes(q) ?? false),
+    (m) =>
+      m.name.toLowerCase().includes(q) ||
+      (m.http?.url.toLowerCase().includes(q) ?? false) ||
+      (m.tcp ? `${m.tcp.host}:${m.tcp.port}`.includes(q) : false),
   );
 }
 
 /** Why a monitor is down, in words: "Timed out after 10 s", "DNS lookup failed". */
-export function downReason(monitor: Pick<MonitorListItem, "lastErrorKind" | "http">): string {
-  if (monitor.lastErrorKind === "timeout" && monitor.http) {
-    return `Timed out after ${monitor.http.timeoutSeconds} s`;
+export function downReason(
+  monitor: Pick<MonitorListItem, "lastErrorKind" | "http" | "tcp">,
+): string {
+  const timeout = monitor.http?.timeoutSeconds ?? monitor.tcp?.timeoutSeconds;
+  if (monitor.lastErrorKind === "timeout" && timeout !== undefined) {
+    return `Timed out after ${timeout} s`;
   }
   return describeErrorKind(monitor.lastErrorKind);
 }
@@ -142,6 +155,31 @@ export function failureStreak(checks: Check[]): {
 }
 
 /** "every 60 s · 10 s timeout · expects 2xx · alerts after 2 failed checks". */
+/**
+ * What an http monitor sends besides the URL, for the details page: the method when it is not
+ * GET, the header names and whether a body is stored. Values are never known to the client.
+ */
+export function requestSummary(
+  m: Pick<HttpMonitor, "method" | "headerNames" | "bodySet">,
+): string | undefined {
+  const parts = [
+    m.method !== "GET" ? m.method : "",
+    m.headerNames.length > 0 ? `headers: ${m.headerNames.join(", ")}` : "",
+    m.bodySet ? "body set (hidden)" : "",
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : undefined;
+}
+
+export function tcpCheckSettings(
+  m: Pick<TcpMonitor, "intervalSeconds" | "timeoutSeconds" | "failureThreshold">,
+): string {
+  const after =
+    m.failureThreshold === 1
+      ? "alerts on the first failure"
+      : `alerts after ${m.failureThreshold} failed checks`;
+  return `every ${m.intervalSeconds} s · ${m.timeoutSeconds} s timeout · ${after}`;
+}
+
 export function checkSettings(
   m: Pick<
     HttpMonitor,

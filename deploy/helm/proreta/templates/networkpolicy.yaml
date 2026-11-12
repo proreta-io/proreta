@@ -28,6 +28,9 @@ spec:
         {{- if and .Values.statuspage.enabled (ne (int .Values.statuspage.httpPort) (int .Values.api.httpPort)) }}
         - {protocol: TCP, port: {{ .Values.statuspage.httpPort }}}
         {{- end }}
+        {{- if and .Values.speculagw.enabled (ne (int .Values.speculagw.httpPort) (int .Values.api.httpPort)) }}
+        - {protocol: TCP, port: {{ .Values.speculagw.httpPort }}}
+        {{- end }}
     # Metrics scraping of the admin port
     - from:
         - namespaceSelector:

@@ -1,0 +1,234 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Proreta Specula values",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "nameOverride": {
+      "type": "string",
+      "pattern": "^([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)?$",
+      "description": "overrides the chart name in resource names (a DNS label)"
+    },
+    "fullnameOverride": {
+      "type": "string",
+      "pattern": "^([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)?$",
+      "description": "overrides the full resource name (a DNS label)"
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the backend image; it contains /app/specula"
+        },
+        "tag": {
+          "type": "string",
+          "pattern": "^([0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?|sha-[0-9a-f]{7})?$",
+          "description": "a release version without a leading v, or sha-<7 hex>; empty: the chart's appVersion"
+        },
+        "pullPolicy": {
+          "type": "string",
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        }
+      },
+      "required": [
+        "repository",
+        "tag",
+        "pullPolicy"
+      ]
+    },
+    "imagePullSecrets": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "description": "pull secrets for a private registry or mirror"
+    },
+    "proreta": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string",
+          "pattern": "^(https://[^/\\s]+(/[^\\s]*[^/\\s])?|http://(localhost|127\\.0\\.0\\.1|\\[::1\\])(:[0-9]+)?)?$",
+          "description": "PRORETA_URL: your Proreta address, https, no trailing slash (http only for localhost)"
+        }
+      },
+      "required": [
+        "url"
+      ]
+    },
+    "token": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "existingSecret": {
+          "type": "string",
+          "description": "the Secret that holds the Specula token; required"
+        },
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "the key of the token in that Secret"
+        }
+      },
+      "required": [
+        "existingSecret",
+        "key"
+      ]
+    },
+    "replicas": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 20,
+      "description": "number of executor pods; they share the same token"
+    },
+    "specula": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "concurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "description": "PRORETA_SPECULA_CONCURRENCY"
+        },
+        "pollInterval": {
+          "type": "string",
+          "pattern": "^[0-9]+(ms|s|m)$",
+          "description": "PRORETA_SPECULA_POLL_INTERVAL, 1s to 1m"
+        },
+        "logLevel": {
+          "type": "string",
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ]
+        },
+        "adminPort": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "health and metrics port"
+        }
+      },
+      "required": [
+        "concurrency",
+        "pollInterval",
+        "logLevel",
+        "adminPort"
+      ]
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requests": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cpu": {
+              "type": [
+                "string",
+                "number"
+              ]
+            },
+            "memory": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "cpu",
+            "memory"
+          ]
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cpu": {
+              "type": [
+                "string",
+                "number"
+              ]
+            },
+            "memory": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "memory"
+          ]
+        }
+      },
+      "required": [
+        "requests",
+        "limits"
+      ]
+    },
+    "terminationGracePeriodSeconds": {
+      "type": "integer",
+      "minimum": 30,
+      "maximum": 600,
+      "description": "at least 30: the executor drains running checks for up to 15 s"
+    },
+    "podAnnotations": {
+      "type": "object"
+    },
+    "podLabels": {
+      "type": "object"
+    },
+    "nodeSelector": {
+      "type": "object"
+    },
+    "tolerations": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "affinity": {
+      "type": "object"
+    },
+    "env": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "not": {
+              "pattern": "^PRORETA_"
+            }
+          }
+        }
+      },
+      "description": "extra environment variables; PRORETA_* names are set by the chart"
+    },
+    "podSecurityContext": {
+      "type": "object"
+    },
+    "securityContext": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "image",
+    "proreta",
+    "token",
+    "replicas",
+    "specula",
+    "resources"
+  ]
+}

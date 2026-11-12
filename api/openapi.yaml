@@ -41,19 +41,24 @@ info:
     - Operations marked `x-experimental: true` (the platform admin API) may change in any
       release.
 
-    Roles: every operation that needs a session has a minimum role of the session's
-    membership in its organization. `viewer` reads; `member` also creates, edits,
-    pauses and deletes monitors; `admin` also manages notification channels, members,
-    invitations, projects and the status page; `owner` also deletes the organization, manages its sign-in domains and grants or revokes `owner`. A role below
-    the minimum gets 403 `urn:proreta:problem:forbidden`. A role change applies on the next request.
+    Roles: the same four roles exist at two levels. A role on the organization applies to every
+    project of it; a direct role on a project applies to that project only; the effective role in
+    a project is the higher of the two. A person may have no organization role and belong to the
+    organization only through projects (`role` null). `viewer` reads; `member` also creates, edits,
+    pauses and deletes monitors; `maintainer` also manages the notification channels, the people and
+    the settings of a project and, on the organization, members, invitations, projects and the
+    status page; `owner` also deletes projects and the organization, manages its sign-in domains and
+    grants or revokes `owner`. Every operation needs a permission (`docs/roles.md` lists them); one
+    that names a project is judged with the effective role there, one that does not is judged on the
+    organization role. A missing permission gets 403 `urn:proreta:problem:forbidden`; a project the
+    caller has no role in is 404. A role change applies on the next request.
 
     Projects: monitors (heartbeats included) and notification channels belong to
     a project of the organization; a channel may instead be organization-wide (`projectId` null).
-    Owners and admins see every project. Members and viewers see the projects they belong to (the
-    Default project includes every member) and only their monitors, checks, statistics,
-    incidents and channels, plus organization-wide channels; anything else is answered 404 as if it
-    did not exist. Inside a project a member may have a `viewer` override, which makes it
-    read-only there (403 on changes).
+    A person with an organization role sees every project. A person without one sees the projects
+    they belong to and only their monitors, checks, statistics, incidents and channels, plus
+    organization-wide channels; anything else is answered 404 as if it did not exist. A direct
+    project role can raise the organization role inside that project and never lowers it.
   contact:
     name: Proreta maintainers
     url: https://github.com/proreta-io/proreta
@@ -76,12 +81,20 @@ tags:
   - name: members
     description: |
       Members of the organization, their roles and invitations. Roles are `owner`,
-      `admin`, `member` and `viewer`; every operation has a minimum role, and a session whose role
+      `maintainer`, `member` and `viewer`; every operation has a minimum role, and a session whose role
       is below it gets 403 `urn:proreta:problem:forbidden`.
   - name: projects
     description: |
       Projects of the organization and their members. Every organization has a
-      Default project that includes all its members. Owners and admins manage projects.
+      Default project that cannot be deleted. Organization owners and maintainers create projects;
+      project owners and maintainers manage the people and settings of their project.
+  - name: specula
+    description: |
+      Specula executors: programs that run inside your own network and check services that are
+      not reachable from outside. A Specula belongs to the organization and is shared with all
+      of its projects or with chosen ones; a monitor can run at one of them (see `location` of a
+      monitor). Owners and maintainers register, share and revoke them; every role that sees a
+      project reads the ones it may use. The token is shown once, when the Specula is created.
   - name: monitors
     description: HTTPS and heartbeat (watchdog) monitors, their status, statistics, checks and incidents
   - name: heartbeat
@@ -91,15 +104,15 @@ tags:
   - name: status-page
     description: |
       The organization's public status page: configuration, components, password and
-      a preview. Owners and admins change it; every role reads the page settings and its link.
+      a preview. Organization owners and maintainers change it; every organization role reads the page settings and its link.
       The public page itself is served by the separate statuspage process under `/status/<slug>`.
   - name: plan
     description: The organization's plan, its limits and the current usage
   - name: admin
     description: |
-      Platform administration across organizations. Only the platform admin (the system
-      admin configured by `PRORETA_ADMIN_LOGIN`, `isPlatformAdmin` in the user object) may call
-      these operations; any other session gets 403 `urn:proreta:problem:forbidden`. Every
+      Platform administration across organizations. Only a platform admin (`isPlatformAdmin` in
+      the user object: the system admin configured by `PRORETA_ADMIN_LOGIN`, and users granted
+      the flag with `PUT /api/v1/admin/users/{userId}/platform-admin`) may call these operations; any other session gets 403 `urn:proreta:problem:forbidden`. Every
       operation of this tag is experimental (`x-experimental: true`): it serves the bundled admin
       panel and may change in any release without notice.
 security:
@@ -330,7 +343,7 @@ paths:
       summary: Email a link to reset a forgotten password
       description: |
         Public (no session). Sends a one-time link to the address when it belongs to an account that
-        can be reset (active, with a password, not the platform admin) and answers 202 either way, so
+        can be reset (active, with a password, not the system admin) and answers 202 either way, so
         the answer says nothing about which addresses are registered. The link is
         `PRORETA_PUBLIC_URL/reset-password#<token>`; it works once and for one hour, and only the
         newest link of an account works. A malformed address is 422 (that says nothing about
@@ -790,7 +803,7 @@ paths:
       summary: List monitors with their current status
       description: |
         The monitors of the organization that are not deleted and that the caller sees (the projects it
-        belongs to; every project for owners and admins), with the current status and summary
+        belongs to; every project for owners and maintainers), with the current status and summary
         counts. `projectId` limits the list to one project (404 when the caller does not see it).
         Answered from the state tables and rollups, never by scanning raw results.
       tags: [monitors]
@@ -815,11 +828,16 @@ paths:
       operationId: createMonitor
       summary: Create a monitor
       description: |
-        Creates an HTTPS monitor (`type` `http`) or a heartbeat monitor (`type` `heartbeat`).
-        The settings of the type go in the sub-object of the same name, which is required: `http`
-        for an HTTPS monitor, `heartbeat` for a heartbeat. Sending the other sub-object, or none,
-        is 422 with a field error on `http` or `heartbeat`; errors inside a sub-object point at
-        its field, for example `http.url`. A future monitor type adds its own sub-object.
+        Creates an HTTPS monitor (`type` `http`), a TCP monitor (`type` `tcp`) or a heartbeat
+        monitor (`type` `heartbeat`). The settings of the type go in the sub-object of the same
+        name, which is required: `http` for an HTTPS monitor, `tcp` for a TCP monitor, `heartbeat`
+        for a heartbeat. Sending another sub-object, or none, is 422 with a field error on `http`,
+        `tcp` or `heartbeat`; errors inside a sub-object point at its field, for example
+        `http.url` or `tcp.port`. A future monitor type adds its own sub-object.
+
+        A TCP monitor needs `tcp.host` and `tcp.port`; it connects every minute with a 10 second
+        deadline and is up when the handshake completes. It counts toward the monitor quota like
+        an HTTPS monitor and can run from Proreta or at a Specula (`location`).
 
         An HTTPS monitor needs `http.url`; it starts with status `unknown` and is first checked
         within about 30 seconds. A heartbeat expects a ping every `heartbeat.expectedIntervalSeconds`
@@ -829,7 +847,7 @@ paths:
         its first ping (then `up`) or until its first deadline passes (then `down`).
 
         `projectId` is the monitor's project (the Default project when omitted); the caller needs
-        the `member` role in it (403 with a viewer override, 422 for a project it does not see).
+        the `member` role in it (403 with the `viewer` role there, 422 for a project it does not see).
         `channelIds` selects the notification channels of the monitor (at most 10, each a channel
         of the monitor's project or an organization-wide one, 422 otherwise); with no selection,
         `notificationsEnabled` sends to the active channels of the monitor's own project only
@@ -861,6 +879,18 @@ paths:
                     url: https://example.com/health
                     expectedStatus: 2xx
                     failureThreshold: 2
+              httpPost:
+                summary: An HTTPS monitor that posts JSON with a token (headers and body are write-only)
+                value:
+                  type: http
+                  name: Orders API
+                  http:
+                    url: https://example.com/api/ping
+                    method: POST
+                    headers:
+                      - name: Authorization
+                        value: Bearer example-token
+                    body: '{"check":true}'
               heartbeat:
                 summary: A heartbeat that expects a ping every 5 minutes
                 value:
@@ -898,6 +928,9 @@ paths:
                     http:
                       url: https://example.com/health
                       expectedStatus: 2xx
+                      method: GET
+                      headerNames: []
+                      bodySet: false
                       intervalSeconds: 60
                       timeoutSeconds: 10
                       failureThreshold: 2
@@ -969,7 +1002,7 @@ paths:
       description: |
         Merge semantics: only the fields that are sent change, also inside the type's sub-object
         (`{"http": {"url": "..."}}` changes the URL and keeps the expected status). The type of a
-        monitor cannot change; sending the sub-object of the other type is 422 on `http` or
+        monitor cannot change; sending the sub-object of another type is 422 on `http`, `tcp` or
         `heartbeat`. `http.intervalSeconds` and `http.timeoutSeconds` are fixed (60 and 10):
         sending them with a different value fails with 422. A new `http.url` restarts the
         monitor like a resume (status `unknown`, an open incident is resolved without a
@@ -1277,7 +1310,7 @@ paths:
       summary: Plan, limits and usage
       description: |
         The organization's plan, its effective limits (the plan's limits with per-organization
-        overrides applied) and the current usage. Deleted monitors do not count. Owner and admin
+        overrides applied) and the current usage. Deleted monitors do not count. Owner and maintainer
         only: members and viewers get 403 and learn about a reached limit from the 409
         `urn:proreta:problem:plan-limit-reached` problem of the create that hits it.
       tags: [plan]
@@ -1294,13 +1327,36 @@ paths:
           $ref: "#/components/responses/Forbidden"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/permissions:
+    get:
+      operationId: getPermissions
+      summary: Permissions of the current person
+      description: |
+        What the signed-in person may do in the organization of the session, and the catalogue of
+        roles and permissions. `organization` lists the permissions held through the organization role, which for a
+        project permission means in every project (only `account.use` for a person who belongs
+        through projects only); `projects` lists every project the person sees with the permissions
+        held there (the higher of the organization role and the direct project role). Any role,
+        including a person without an organization role.
+      tags: [members]
+      responses:
+        "200":
+          description: Permissions of the person and the catalogue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PermissionsInfo"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/channels:
     get:
       operationId: listChannels
       summary: List notification channels
       description: |
         The organization's notification channels that are not deleted and that the caller sees (the
-        channels of its projects and the organization-wide ones; all for owners and admins),
+        channels of its projects and the organization-wide ones; all for owners and maintainers),
         oldest first. With `projectId`, the channels a monitor of that project may select: the
         project's channels and the organization-wide ones (404 when the caller does not see the
         project). The webhook URL is a secret and is never returned.
@@ -1326,8 +1382,14 @@ paths:
       operationId: createChannel
       summary: Create a notification channel
       description: |
-        Creates a Slack channel. `webhookUrl` must match `https://hooks.slack.com/services/...`
-        and is stored encrypted; it is write-only. `events` defaults to every event. `mention`
+        Creates a channel of `type` `slack_webhook` (the default) or `webhook`. For Slack,
+        `webhookUrl` must match `https://hooks.slack.com/services/...`; for `webhook` it is an
+        `https` URL of a public host on port 443 (private, loopback and other internal addresses
+        are 422). It is stored encrypted and is write-only. A `webhook` channel also has a
+        `contentType` (`json`, the default, or `text`) and a `bodyTemplate` (a default for the
+        content type when omitted; 422 with a field error on `bodyTemplate` for an unknown
+        placeholder or, with `json`, a template that does not render to valid JSON); it has no
+        `mention`. `events` defaults to every event. `mention`
         holds at most three of `@here`, `@channel`, `<!subteam^ID>` (a user group) and `<@UID>` (a
         user), case-sensitive, and is used only in `down` and reminder messages.
         `reminderMinutes` is 0 (no reminders, the default) or 5 to 1440: while an incident stays
@@ -1463,7 +1525,7 @@ paths:
     post:
       operationId: testChannel
       summary: Send a test message to a channel
-      description: Sends a test message to the channel's webhook. Fails with 404 for an unknown channel, 429 when the organization tested a channel within the last 5 seconds or when Slack rate-limits the webhook (both with Retry-After), and 502 `urn:proreta:problem:channel-delivery-failed` when Slack does not accept the message (Slack's answer is never returned). A removed or revoked webhook (Slack answers 404 or 410) marks the channel `failed`.
+      description: Sends a test message to the channel's webhook (for a `webhook` channel, its template rendered with sample data and event `test`). Fails with 404 for an unknown channel, 429 when the organization tested a channel within the last 5 seconds or when Slack rate-limits the webhook (both with Retry-After), and 502 `urn:proreta:problem:channel-delivery-failed` when Slack does not accept the message (Slack's answer is never returned). A removed or revoked webhook (Slack answers 404 or 410) marks the channel `failed`.
       tags: [channels]
       security:
         - cookieAuth: []
@@ -1491,11 +1553,49 @@ paths:
                 $ref: "#/components/schemas/Problem"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/channels/preview-template:
+    post:
+      operationId: previewChannelTemplate
+      summary: Preview a webhook message template
+      description: |
+        Renders a template with sample data and returns the body, without sending anything and
+        without touching the network. 422 with `fieldErrors` on `contentType` or `bodyTemplate`
+        when the template is not acceptable (unknown placeholder, invalid JSON). Needs the
+        permission to manage channels.
+      tags: [channels]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChannelTemplatePreviewRequest"
+      responses:
+        "200":
+          description: The rendered sample
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelTemplatePreview"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/projects:
     get:
       operationId: listProjects
       summary: Projects of the organization
-      description: The projects the caller sees (every project for owners and admins), Default first, then by name.
+      description: The projects the caller sees (every project for owners and maintainers), Default first, then by name.
       tags: [projects]
       responses:
         "200":
@@ -1642,10 +1742,9 @@ paths:
       operationId: listProjectMembers
       summary: Members of a project
       description: |
-        The people with access to the project: owners and admins (they see every project,
-        `allProjects` true), the explicit members with their optional role override, and for a
-        project with `allMembers` (the Default project) every other member of the organization.
-        404 when the caller does not see the project.
+        The people with a role in the project: everyone with an organization role (`allProjects`
+        true, the role applies here) and everyone with a direct role (`explicit` true), with the
+        higher of the two as `effectiveRole`. 404 when the caller has no role in the project.
       tags: [projects]
       responses:
         "200":
@@ -1668,12 +1767,14 @@ paths:
       - $ref: "#/components/parameters/MemberUserId"
     put:
       operationId: putProjectMember
-      summary: Add a member to a project or change its override
+      summary: Give a person a direct role in a project
       description: |
-        Admin or owner. Makes a member of the organization a member of the project. `role`
-        `viewer` makes it read-only in this project; omitted (or `member`) keeps its organization
-        role. An override never raises the organization role: a viewer stays a viewer. In a project
-        with `allMembers` the row only carries the override. Audited as `project.member_changed`.
+        Project owner or maintainer, or an organization owner or maintainer. The person must
+        already belong to the organization (with or without an organization role). `role` is the
+        direct role in this project: it raises the organization role there and never lowers it.
+        Nobody grants a role above their own and a maintainer does not change an owner (403). A
+        project has no last-owner rule: organization owners always control every project. Audited
+        as `project.member_changed`.
       tags: [projects]
       security:
         - cookieAuth: []
@@ -1705,10 +1806,11 @@ paths:
           $ref: "#/components/responses/Error"
     delete:
       operationId: removeProjectMember
-      summary: Remove a member from a project
+      summary: Remove a person's direct role from a project
       description: |
-        Admin or owner. The member loses access to the project at its next request (in a project
-        with `allMembers` only the override is removed). Audited as `project.member_changed`.
+        Project owner or maintainer, or an organization owner or maintainer, under the rules of the
+        role change. The person keeps any organization role, and loses access to the project at its
+        next request when it has none. Audited as `project.member_changed`.
       tags: [projects]
       security:
         - cookieAuth: []
@@ -1728,14 +1830,176 @@ paths:
           $ref: "#/components/responses/NotFound"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/specula:
+    get:
+      operationId: listSpecula
+      summary: List Specula executors
+      description: |
+        Owners and maintainers get every Specula of the organization that is not revoked (revoked
+        ones with `includeRevoked`), newest first, with the projects each is shared with. Other
+        roles get the ones their projects may use, without `projectIds`. With `projectId`, only
+        the Specula that project may use (404 when the caller does not see the project).
+      tags: [specula]
+      parameters:
+        - $ref: "#/components/parameters/ProjectFilter"
+        - name: includeRevoked
+          in: query
+          required: false
+          description: Include revoked Specula (owners and maintainers only; ignored for other roles)
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: The Specula executors
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpeculaList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createSpecula
+      summary: Register a Specula
+      description: |
+        Registers an executor and returns its token once; it is stored only as a hash and cannot be
+        read again. Run the executor with `PRORETA_SPECULA_TOKEN` set to it. `allProjects` defaults
+        to true; with false, `projectIds` lists the projects that may use it (at least one).
+        Business-rule failures are 422 with `fieldErrors`.
+      tags: [specula]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SpeculaCreate"
+      responses:
+        "201":
+          description: The registered Specula with its token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpeculaCreated"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/specula/{speculaId}:
+    parameters:
+      - $ref: "#/components/parameters/SpeculaId"
+    get:
+      operationId: getSpecula
+      summary: One Specula
+      description: |
+        Owners and maintainers read any Specula of the organization; other roles only one their
+        projects may use (404 otherwise).
+      tags: [specula]
+      responses:
+        "200":
+          description: The Specula
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Specula"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+    patch:
+      operationId: updateSpecula
+      summary: Rename a Specula or change who may use it
+      description: |
+        Changes the given fields. `projectIds` replaces the list; it is kept while `allProjects` is
+        true and applies again when it is set back to false. Monitors that run at the Specula
+        keep running even if their project loses access, but are not handed out by it any more:
+        move them first. A revoked Specula is 404.
+      tags: [specula]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SpeculaUpdate"
+      responses:
+        "200":
+          description: The updated Specula
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Specula"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: revokeSpecula
+      summary: Revoke a Specula
+      description: |
+        Revokes the token at once: the executor is refused from its next call and the location
+        hands out no more checks. A revoked Specula cannot be restored; register a new one.
+      tags: [specula]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Revoked
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/members:
     get:
       operationId: listMembers
       summary: Members of the organization
       description: |
         Every member with display name, role and when they joined, oldest first. Any role; the
-        login (an email address) is shown to owners and admins only and is null for members and
-        viewers.
+        login (an email address) is shown to owners and maintainers only and is null for members and
+        viewers. A person without an organization role (a member of projects only) gets only the
+        people they share a project with: everyone who has an organization role and everyone with a
+        role in one of their projects, never the rest of the directory, and never logins.
       tags: [members]
       responses:
         "200":
@@ -1755,9 +2019,11 @@ paths:
       operationId: updateMember
       summary: Change a member's role
       description: |
-        Admin or owner. An admin may change only admins, members and viewers and may not grant
-        `owner` (403 `urn:proreta:problem:forbidden`). The organization always keeps an active
-        owner: demoting the last one is 409 `urn:proreta:problem:last-owner`. The platform admin's
+        Maintainer or owner. A maintainer may change only maintainers, members, viewers and people
+        without an organization role, and may not grant `owner` (403 `urn:proreta:problem:forbidden`).
+        `role` null takes the organization role away: the person then belongs to the organization
+        only through projects. The organization always keeps an active owner: demoting the last
+        one, or taking its role away, is 409 `urn:proreta:problem:last-owner`. The system admin's
         role in the default organization cannot be changed (409 `urn:proreta:problem:system-admin`).
         Audited as `member.role_changed`. The new role applies on the member's next request.
       tags: [members]
@@ -1795,8 +2061,8 @@ paths:
       operationId: removeMember
       summary: Remove a member
       description: |
-        Admin or owner, with the rules of the role change (an admin cannot remove an owner, the
-        last owner cannot be removed, nor the platform admin). The member's sessions in this
+        Maintainer or owner, with the rules of the role change (a maintainer cannot remove an owner, the
+        last owner cannot be removed, nor the system admin). The member's sessions in this
         organization end at once; the user and its other memberships stay. Audited as
         `member.removed`. To leave the organization yourself, use `POST /api/v1/organization/leave`.
       tags: [members]
@@ -1824,8 +2090,20 @@ paths:
     get:
       operationId: listInvitations
       summary: Invitations of the organization
-      description: The newest 200 invitations with their state (open, accepted, revoked or expired). The link of an invitation is never shown again. Admin or owner.
+      description: |
+        The newest 200 invitations with their state (open, accepted, revoked or expired). The link
+        of an invitation is never shown again. Organization owners and maintainers see all of them;
+        an owner or maintainer of a project sees only the invitations into their projects. An
+        invitation into a deleted project reads as revoked. `projectId` narrows the list to one
+        project (404 when the caller has no role there).
       tags: [members]
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
           description: The invitations
@@ -1843,15 +2121,21 @@ paths:
       operationId: createInvitation
       summary: Invite someone
       description: |
-        Creates a single-use invitation with the role `admin`, `member` or `viewer` (`owner` is
-        granted by changing a member's role). It expires after 7 days. The answer carries `inviteUrl` with
+        Creates a single-use invitation. Without `projectId` it invites into the organization with the
+        role `maintainer`, `member` or `viewer` (`owner` is granted by changing a member's role);
+        organization owners and maintainers only. With `projectId` it invites into that project: `role`
+        is the role in the project (any of the four, never above the caller's own there), the person
+        gets no organization role, and an owner or maintainer of the project may do it (404 when the
+        caller has no role in the project, 403 when the role does not allow it). An existing member
+        who accepts only gets the project role, unless they already hold an equal or higher one there.
+        It expires after 7 days. The answer carries `inviteUrl` with
         the secret token in the URL fragment; it is shown only here (only its SHA-256 is stored)
         and must be handed over like a password. With `email` (and `sendEmail` not false) the same
         link is also emailed to that address (see below); the link is shown either way. Open invitations count
         toward the member limit of the plan: 409 `urn:proreta:problem:plan-limit-reached` (`limit`
         is `members`) when members plus open invitations already reach it. Audited as
         `member.invited` (without the token or the address; `emailed` says whether a message
-        was queued). Admin or owner.
+        was queued; `projectId` for a project invitation).
 
         **Email.** Sending is possible only when the installation has a tested mail server
         (`emailEnabled` in `GET /api/v1/auth/providers`); otherwise a request that asks for it is
@@ -1861,8 +2145,8 @@ paths:
         client whether to pre-check the option. The message is queued in the same
         transaction as the invitation, so it exists exactly when the invitation does, and is
         delivered a moment later by the background jobs process (`emailQueued` only means it was
-        queued, not that the mailbox accepted it). It names this organization, the role and the
-        inviter's display name, nothing else. The address is not stored and the invitation is
+        queued, not that the mailbox accepted it). It names this organization, the project when
+        there is one, the role and the inviter's display name, nothing else. The address is not stored and the invitation is
         not bound to it: whoever holds the link can use it, with any email address, exactly as
         without email. When `label` is empty and the address is at most 80 characters, the
         address becomes the label. Limited to 30 invitation emails per organization per hour and
@@ -1910,7 +2194,8 @@ paths:
         The link stops working at once and the place it reserved is freed. Revoking a revoked or
         expired invitation changes nothing (204); an accepted one is 409
         `urn:proreta:problem:invitation-accepted` (remove the member instead). Audited as
-        `invitation.revoked`. Admin or owner.
+        `invitation.revoked`. Follows the scope of the list: an invitation the caller cannot see is
+        404, and an invitation into a project with a role above the caller's own there is 403.
       tags: [members]
       security:
         - cookieAuth: []
@@ -1937,8 +2222,8 @@ paths:
       operationId: lookupInvitation
       summary: What an invitation link offers
       description: |
-        Public (no session): the organization name, role and expiry of an open invitation, for the
-        invitation page. The token travels in the body, never in a URL, so proxies do not log it.
+        Public (no session): the organization name, the project name when the invitation is into a
+        project, the role and the expiry of an open invitation, for the invitation page. The token travels in the body, never in a URL, so proxies do not log it.
         Unknown, expired, used and revoked tokens get the same 404
         `urn:proreta:problem:invitation-invalid`. Each 404 counts against a per-client-IP limit
         (429 with Retry-After).
@@ -1970,12 +2255,14 @@ paths:
       operationId: acceptInvitation
       summary: Accept an invitation as the logged-in user
       description: |
-        The logged-in user joins the inviting organization with the invited role, the invitation
-        is used up, and the session switches to that organization (new cookie and CSRF token, the
+        The logged-in user joins the inviting organization with the invited role (an organization
+        invitation) or, for a project invitation, gets the invited role in the project and no
+        organization role; a user who is already a member of the organization is accepted into the
+        project and keeps their organization role. The invitation is used up, and the session switches to that organization (new cookie and CSRF token, the
         old session is deleted). 404 `urn:proreta:problem:invitation-invalid` for an unknown,
         expired, used or revoked token (counted against the per-client-IP limit, 429); 409
-        `urn:proreta:problem:already-member` when the user is already a member, or when the user is
-        the platform admin (who belongs to the default organization only); 409
+        `urn:proreta:problem:already-member` when the user is already a member (organization invitations
+        only), or when the user is the system admin (who belongs to the default organization only); 409
         `urn:proreta:problem:plan-limit-reached` when the organization's member limit was lowered
         below its members. Audited as `member.joined`. Any role.
       tags: [members]
@@ -2210,11 +2497,15 @@ paths:
   /api/v1/status-pages:
     get:
       operationId: listStatusPages
-      summary: Status pages of the organization
+      summary: Status pages the caller sees
       description: |
-        Every role may read the organization's status pages (members see the public
-        link). The password itself is never returned, only `passwordProtected`.
+        The pages of the projects the caller can read and, with an organization role, the
+        organization-level pages (members see the public link). With `projectId`, only the pages
+        of that project (404 when the caller does not see the project). The password itself is
+        never returned, only `passwordProtected`.
       tags: [status-page]
+      parameters:
+        - $ref: "#/components/parameters/ProjectFilter"
       responses:
         "200":
           description: The status pages
@@ -2222,15 +2513,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StatusPageList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
         default:
           $ref: "#/components/responses/Error"
     post:
       operationId: createStatusPage
       summary: Create the status page
       description: |
-        Admin or owner. The page starts unpublished and without components. `slug` is global
+        Needs the status page permission in `projectId` (owners and maintainers of the project, or of
+        the organization) or, without `projectId`, an organization owner or maintainer. A page of a
+        project may show only monitors of that project; an organization-level page may show
+        monitors of every project. A project the caller does not see is 422 on `projectId`. The page starts unpublished and without components. `slug` is global
         (shared by every organization) and public; a slug in use is 409
         `urn:proreta:problem:slug-taken`, a reserved word is 422. The plan allows one page per
         organization: 409 `urn:proreta:problem:plan-limit-reached` (`limit` is `statusPages`).
@@ -2293,7 +2591,9 @@ paths:
       operationId: updateStatusPage
       summary: Change, publish or unpublish the status page
       description: |
-        Admin or owner. Only the given fields change; an empty `logoUrl` or `accentColor` removes
+        Owners and maintainers of the page's project (or of the organization); for an
+        organization-level page, organization owners and maintainers. A page of a project the
+        caller cannot see is 404. Only the given fields change; an empty `logoUrl` or `accentColor` removes
         it. `published` publishes or unpublishes the page: the public view is rebuilt in the same
         request and served within about 15 seconds. Audited as `status_page.updated` (field names
         only), `status_page.published` and `status_page.unpublished`.
@@ -2697,6 +2997,229 @@ paths:
           $ref: "#/components/responses/NotFound"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/admin/users:
+    get:
+      operationId: adminListAllUsers
+      x-experimental: true
+      summary: Users of all organizations
+      description: |
+        Every user of the installation, newest first. `query` matches the email or the display
+        name; `status` keeps only `active` or `disabled` users. `organizationCount` is the number
+        of memberships, deleted organizations included. Platform admins only.
+      tags: [admin]
+      parameters:
+        - $ref: "#/components/parameters/AdminQuery"
+        - name: status
+          in: query
+          required: false
+          description: Only users with this status; omit for all
+          schema:
+            type: string
+            enum: [active, disabled]
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: One page of users
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserSummaryList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/users/{userId}:
+    parameters:
+      - $ref: "#/components/parameters/AdminUserId"
+    get:
+      operationId: adminGetUser
+      x-experimental: true
+      summary: One user with every membership
+      description: |
+        The user, every organization the user belongs to (deleted ones included, with their
+        status) and the number of open sessions in all organizations. Platform admins only.
+      tags: [admin]
+      responses:
+        "200":
+          description: The user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/users/{userId}/disable:
+    parameters:
+      - $ref: "#/components/parameters/AdminUserId"
+    post:
+      operationId: adminDisableUser
+      x-experimental: true
+      summary: Disable a user
+      description: |
+        The user can no longer sign in (password, OAuth or invitation) and all of the user's
+        sessions in every organization are deleted. Memberships stay. The system admin cannot be
+        disabled (409 `urn:proreta:problem:system-admin`). Disabling a user who is already
+        disabled changes nothing and writes no audit row. Audited as `admin.user.disabled`
+        (`sessionsRevoked`), in the user's last used organization. Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: The user after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/users/{userId}/enable:
+    parameters:
+      - $ref: "#/components/parameters/AdminUserId"
+    post:
+      operationId: adminEnableUser
+      x-experimental: true
+      summary: Enable a user
+      description: |
+        Lets a disabled user sign in again; the sessions that were deleted when the user was
+        disabled stay deleted. Enabling a user who is already active changes nothing and writes no
+        audit row. Audited as `admin.user.enabled`, in the user's last used organization.
+        Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: The user after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/users/{userId}/platform-admin:
+    parameters:
+      - $ref: "#/components/parameters/AdminUserId"
+    put:
+      operationId: adminSetPlatformAdmin
+      x-experimental: true
+      summary: Grant or revoke the platform-admin flag
+      description: |
+        `enabled` `true` makes an active user a platform admin with full control of the instance;
+        `false` removes the flag. The user keeps all sessions, memberships and organizations; the
+        flag is read on every request, so a revoked admin loses admin access at once. A request
+        that changes nothing does nothing and writes no audit row. The system admin cannot be
+        revoked (409 `urn:proreta:problem:system-admin`) and the last active platform admin
+        cannot be revoked (409 `urn:proreta:problem:last-platform-admin`). Only an active user can
+        be granted (422). Audited as `admin.user.platform_admin_granted` or
+        `admin.user.platform_admin_revoked`, in the user's last used organization. Platform admins
+        only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminPlatformAdminUpdate"
+      responses:
+        "200":
+          description: The user after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/users/{userId}/sessions/revoke:
+    parameters:
+      - $ref: "#/components/parameters/AdminUserId"
+    post:
+      operationId: adminRevokeUserSessions
+      x-experimental: true
+      summary: Sign a user out everywhere
+      description: |
+        Deletes all of the user's sessions in every organization. `sessionsRevoked` is the number
+        of open sessions that were deleted. Audited as `admin.user.sessions_revoked`
+        (`sessionsRevoked`) only when that number is above zero. Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "200":
+          description: The number of sessions deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserSessionsRevoked"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/admin/users/{userId}/reset-password:
     parameters:
       - name: userId
@@ -2742,6 +3265,582 @@ paths:
           $ref: "#/components/responses/Conflict"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/registration:
+    get:
+      operationId: adminGetRegistration
+      x-experimental: true
+      summary: Self-service registration switch
+      description: |
+        Whether people can create a new organization of their own (`POST /api/v1/auth/register`
+        and the sign-up of an OAuth sign-in). `effective` is what applies now. When the platform
+        admin has chosen a value (`source` `database`) it wins; otherwise the installation's
+        `PRORETA_REGISTRATION_ENABLED` setting applies (`source` `environment`, shown as
+        `environmentValue`). Invitation links, claimed Workspace domains and existing users are
+        not affected. Platform admins only.
+      tags: [admin]
+      responses:
+        "200":
+          description: The setting
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminRegistrationSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: adminUpdateRegistration
+      x-experimental: true
+      summary: Turn self-service registration on or off
+      description: |
+        `enabled` `true` or `false` is the platform admin's choice and wins over the environment;
+        `null` removes the choice, so the environment setting applies again. The change applies
+        at once in the api replica that served it and within a few seconds in the others; no
+        restart is needed. A request that changes nothing does nothing. Audited as
+        `admin.registration_settings.updated` (`from`, `to`: `enabled`, `disabled` or
+        `environment`). Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminRegistrationUpdate"
+      responses:
+        "200":
+          description: The setting after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminRegistrationSettings"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/organizations/{organizationId}/members:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      operationId: adminListOrganizationMembers
+      x-experimental: true
+      summary: Members of an organization
+      description: |
+        Every member of the organization (a deleted organization included), oldest first, with
+        login, display name, role, when they joined and whether the account is active or disabled.
+        Unlike `GET /api/v1/members` the logins are always shown. Platform admins only.
+      tags: [admin]
+      responses:
+        "200":
+          description: The members
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMemberList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: adminAddOrganizationMember
+      x-experimental: true
+      summary: Add an existing account to an organization by email
+      description: |
+        Finds the account with this email address and makes it a member with the role, or changes
+        its role when it already is one (same rules as `PUT .../members/{userId}`). When no account
+        has that address the answer is 404 and nothing is written: invite the person instead
+        (`POST .../invitations`). Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminMemberAdd"
+      responses:
+        "200":
+          description: The member after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMember"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/organizations/{organizationId}/members/{userId}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/MemberUserId"
+    put:
+      operationId: adminSetOrganizationMember
+      x-experimental: true
+      summary: Add a user to an organization or change their role
+      description: |
+        Makes an existing account a member with the role (any of `owner`, `maintainer`, `member`,
+        `viewer`), or changes the role of a member; setting the role a member already has changes
+        nothing and writes no audit row. An unknown user is 404. Adding respects the plan's member
+        limit (409 `urn:proreta:problem:plan-limit-reached`; raise the plan first). The organization
+        always keeps an active owner (409 `urn:proreta:problem:last-owner`). The system admin's
+        membership of the default organization cannot be changed and the system admin cannot be
+        added to another organization (409 `urn:proreta:problem:system-admin`). A deleted
+        organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). A disabled
+        account can be added but cannot sign in. A new role applies on the member's next request.
+        Audited in the organization as `admin.member.added` or `admin.member.role_changed`.
+        Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemberUpdate"
+      responses:
+        "200":
+          description: The member after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminMember"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: adminRemoveOrganizationMember
+      x-experimental: true
+      summary: Remove a member from an organization
+      description: |
+        Ends the membership and the user's sessions in this organization at once; the user and
+        their other memberships stay. The last active owner and the system admin cannot be
+        removed (409 `urn:proreta:problem:last-owner`, `urn:proreta:problem:system-admin`); a deleted
+        organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited as
+        `admin.member.removed`. Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Removed
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/organizations/{organizationId}/invitations:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      operationId: adminListOrganizationInvitations
+      x-experimental: true
+      summary: Invitations of an organization
+      description: The newest 200 invitations of the organization (a deleted organization included) with their state. The link of an invitation is never shown again. Platform admins only.
+      tags: [admin]
+      responses:
+        "200":
+          description: The invitations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitationList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: adminCreateOrganizationInvitation
+      x-experimental: true
+      summary: Invite someone to an organization
+      description: |
+        For a person without an account. Same rules and the same email option as
+        `POST /api/v1/invitations` (roles `maintainer`, `member`, `viewer`; the link is in the answer
+        only and is never logged or audited; `email` is sent only when the installation has a tested
+        mail server and the invitations switch is on). Open invitations count toward the plan's
+        member limit (409 `urn:proreta:problem:plan-limit-reached`). A deleted organization
+        cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in the
+        organization as `admin.invitation.created` (role and whether an email was queued, never
+        the address or the link). Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InvitationCreate"
+      responses:
+        "201":
+          description: The invitation and its link, shown once
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitationCreated"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/PlanLimitReached"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/organizations/{organizationId}/invitations/{invitationId}/revoke:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/InvitationId"
+    post:
+      operationId: adminRevokeOrganizationInvitation
+      x-experimental: true
+      summary: Revoke an invitation of an organization
+      description: |
+        The link stops working at once. Revoking a revoked or expired invitation changes nothing
+        (204); an accepted one is 409 `urn:proreta:problem:invitation-accepted`. Audited as
+        `admin.invitation.revoked`. Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Revoked
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/organizations/{organizationId}/projects:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      operationId: adminListOrganizationProjects
+      x-experimental: true
+      summary: Projects of an organization
+      description: Every project of the organization (deleted organizations included), Default first, then by name, with member, monitor and channel counts. Platform admins only.
+      tags: [admin]
+      responses:
+        "200":
+          description: The projects
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminProjectList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: adminCreateOrganizationProject
+      x-experimental: true
+      summary: Create a project in an organization
+      description: |
+        Same rules as `POST /api/v1/projects`: `slug` is derived from `name` when omitted, a slug in
+        use is 409 `urn:proreta:problem:slug-taken`, and at most 50 projects per organization (409
+        `urn:proreta:problem:plan-limit-reached`). A deleted organization cannot be changed (409
+        `urn:proreta:problem:organization-deleted`). Audited in the organization as
+        `admin.project.created`. Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectCreate"
+      responses:
+        "201":
+          description: The created project
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminProject"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/organizations/{organizationId}/projects/{projectId}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ProjectId"
+    patch:
+      operationId: adminUpdateOrganizationProject
+      x-experimental: true
+      summary: Rename a project of an organization
+      description: |
+        Changes `name` and/or `slug` (409 `urn:proreta:problem:slug-taken`). A deleted organization
+        cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in the organization
+        as `admin.project.updated` (`changed`: the names of the changed fields); nothing is written
+        when nothing changes. Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectUpdate"
+      responses:
+        "200":
+          description: The project after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminProject"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: adminDeleteOrganizationProject
+      x-experimental: true
+      summary: Delete a project of an organization
+      description: |
+        Only an empty project can be deleted: one with monitors or channels that are not deleted is
+        409 `urn:proreta:problem:project-not-empty`; the Default project is 409
+        `urn:proreta:problem:default-project`. Soft delete; its member list is removed. A deleted
+        organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in
+        the organization as `admin.project.deleted`. Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/organizations/{organizationId}/projects/{projectId}/members:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      operationId: adminListOrganizationProjectMembers
+      x-experimental: true
+      summary: Members of a project of an organization
+      description: Same list as `GET /api/v1/projects/{projectId}/members`, with logins. Platform admins only.
+      tags: [admin]
+      responses:
+        "200":
+          description: The members
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectMemberList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/organizations/{organizationId}/projects/{projectId}/members/{userId}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/MemberUserId"
+    put:
+      operationId: adminPutOrganizationProjectMember
+      x-experimental: true
+      summary: Give a person a direct role in a project
+      description: |
+        Gives a member of the organization (with or without an organization role) a direct `role`
+        in the project. A user who is not a member of the organization is 422 on `userId`. A
+        deleted organization cannot be changed (409 `urn:proreta:problem:organization-deleted`).
+        Audited in the organization as `admin.project_member.added`, or
+        `admin.project_member.updated` (`from`, `to`) when the role changes; saving the same role
+        again writes nothing. Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectMemberPut"
+      responses:
+        "200":
+          description: The member after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectMember"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: adminRemoveOrganizationProjectMember
+      x-experimental: true
+      summary: Remove a member from a project
+      description: |
+        The direct role is removed; the person loses access to the project at its next request
+        unless it has an organization role. 404 when the user has no direct role in the project. A deleted
+        organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in the
+        organization as `admin.project_member.removed`. Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Removed
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         default:
           $ref: "#/components/responses/Error"
   /api/v1/admin/email:
@@ -2950,6 +4049,14 @@ components:
       schema:
         type: string
         format: uuid
+    SpeculaId:
+      name: speculaId
+      in: path
+      required: true
+      description: Specula id; a value that is not a UUID is answered with 400
+      schema:
+        type: string
+        format: uuid
     ChannelId:
       name: channelId
       in: path
@@ -3006,6 +4113,14 @@ components:
       schema:
         type: string
         maxLength: 200
+    AdminUserId:
+      name: userId
+      in: path
+      required: true
+      description: User id; a value that is not a UUID is answered with 400
+      schema:
+        type: string
+        format: uuid
     Limit:
       name: limit
       in: query
@@ -3237,12 +4352,15 @@ components:
         organization:
           $ref: "#/components/schemas/OrganizationRef"
         role:
-          $ref: "#/components/schemas/MembershipRole"
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs to the organization only through projects
         emailInvitations:
           type: boolean
           description: |
             Whether the invite dialog pre-checks "send by email": the platform admin turned
-            "Send invitation links by email" on and the role of the session may invite (`admin`
+            "Send invitation links by email" on and the role of the session may invite (`maintainer`
             or `owner`). False for everyone else and on an installation without email; an
             invitation can still be emailed whenever `emailEnabled` is true.
         csrfToken:
@@ -3277,8 +4395,14 @@ components:
         isPlatformAdmin:
           type: boolean
           description: |
-            Whether the user is the platform admin (only the system admin configured by
-            `PRORETA_ADMIN_LOGIN`; no API grants it).
+            Whether the user is a platform admin: the system admin configured by
+            `PRORETA_ADMIN_LOGIN`, or a user granted the flag in the admin panel.
+        isSystemAdmin:
+          type: boolean
+          description: |
+            Whether the user is the system admin configured by `PRORETA_ADMIN_LOGIN`: its login is
+            a credential, not a mailbox, and its membership of the default organization comes from
+            configuration. Absent in answers of an earlier release.
         emailVerified:
           type: boolean
           description: |
@@ -3302,7 +4426,7 @@ components:
           type: string
     MembershipRole:
       type: string
-      enum: [owner, admin, member, viewer]
+      enum: [owner, maintainer, member, viewer]
     MonitorStatus:
       type: string
       description: Aggregated status. `unknown` until the first check after creation, resume or a URL change (for a heartbeat, until the first ping or the first missed deadline), and while the monitor is paused (`paused` is then true).
@@ -3310,10 +4434,11 @@ components:
     MonitorType:
       type: string
       description: |
-        `http`: an HTTPS check every minute. `heartbeat`: a watchdog that expects pings on its
+        `http`: an HTTPS check every minute. `tcp`: a TCP connection to a host and a port every
+        minute, up when the handshake completes. `heartbeat`: a watchdog that expects pings on its
         secret URL. New types may be added, each with its own settings sub-object (for example
-        `tcp` or `dns`); clients must tolerate a type they do not know.
-      enum: [http, heartbeat]
+        `dns`); clients must tolerate a type they do not know.
+      enum: [http, tcp, heartbeat]
     HeartbeatToken:
       type: object
       additionalProperties: false
@@ -3331,6 +4456,44 @@ components:
         are rejected.
       pattern: "^(2xx|2[0-9]{2}|[45][0-9]{2})$"
       example: 2xx
+    HttpMethod:
+      type: string
+      description: |
+        The HTTP method of the check. `POST`, `PUT`, `PATCH` and `DELETE` act on the target
+        system once a minute; use them only against endpoints that are safe to call that often.
+        Defaults to `GET`; omitted on update keeps the current method.
+      enum: [GET, HEAD, POST, PUT, PATCH, DELETE]
+      example: GET
+    HttpHeaderInput:
+      type: object
+      additionalProperties: false
+      description: |
+        A custom request header. The value is write-only: it is stored encrypted and never
+        returned. On update, a header whose `value` is omitted keeps the value stored for the same
+        name (422 when there is none); on create `value` is required.
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: |
+            A header name. `Host`, `Content-Length`, `Transfer-Encoding`, `Connection`, `Upgrade`,
+            `TE`, `Trailer`, `Expect` and `Proxy-*` are refused; `User-Agent` replaces ours.
+          example: Authorization
+        value:
+          type: string
+          maxLength: 2048
+          description: The value, without control characters
+          writeOnly: true
+    HttpBody:
+      type: string
+      maxLength: 65536
+      writeOnly: true
+      description: |
+        A text request body of at most 64 KiB, sent as is. Only for `POST`, `PUT`, `PATCH` and
+        `DELETE`; `Content-Type` defaults to `application/json` when no such header is set.
+        Write-only: stored encrypted and never returned. On update an empty string removes the body.
     HttpSettings:
       type: object
       additionalProperties: false
@@ -3345,6 +4508,16 @@ components:
           example: https://example.com/health
         expectedStatus:
           $ref: "#/components/schemas/ExpectedStatus"
+        method:
+          $ref: "#/components/schemas/HttpMethod"
+        headers:
+          type: array
+          description: Custom request headers, at most 10; a name may appear once
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/HttpHeaderInput"
+        body:
+          $ref: "#/components/schemas/HttpBody"
         intervalSeconds:
           type: integer
           description: Check interval in seconds; 60 is the only accepted value (422 otherwise)
@@ -3359,6 +4532,46 @@ components:
           minimum: 1
           maximum: 3
           default: 2
+    TcpSettings:
+      type: object
+      additionalProperties: false
+      description: The settings of a TCP monitor in a create request
+      required: [host, port]
+      properties:
+        host:
+          type: string
+          description: A host name or an IP address, without scheme, port or path. From Proreta's own worker it must be public (private addresses and internal names are rejected with 422, and the connection is checked again when made); at a Specula any host name or address is accepted.
+          minLength: 1
+          maxLength: 255
+          example: db.example.com
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          example: 5432
+        failureThreshold:
+          type: integer
+          description: Consecutive failed checks before the monitor is down
+          minimum: 1
+          maximum: 3
+          default: 2
+    TcpSettingsUpdate:
+      type: object
+      additionalProperties: false
+      description: Changes of a TCP monitor's settings; only the given fields change. A new host or port restarts the monitor.
+      properties:
+        host:
+          type: string
+          minLength: 1
+          maxLength: 255
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        failureThreshold:
+          type: integer
+          minimum: 1
+          maximum: 3
     HttpSettingsUpdate:
       type: object
       additionalProperties: false
@@ -3371,6 +4584,16 @@ components:
           maxLength: 2048
         expectedStatus:
           $ref: "#/components/schemas/ExpectedStatus"
+        method:
+          $ref: "#/components/schemas/HttpMethod"
+        headers:
+          type: array
+          description: Replaces the custom headers; omit to keep them, send `[]` to remove them all
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/HttpHeaderInput"
+        body:
+          $ref: "#/components/schemas/HttpBody"
         intervalSeconds:
           type: integer
           description: Accepted only with the current value (60)
@@ -3404,7 +4627,7 @@ components:
       additionalProperties: false
       description: |
         A new monitor. `type` selects the sub-object that carries the type's settings: `http`
-        for `http`, `heartbeat` for `heartbeat`. Exactly that sub-object must be sent (422
+        for `http`, `tcp` for `tcp`, `heartbeat` for `heartbeat`. Exactly that sub-object must be sent (422
         otherwise).
       required: [type, name]
       properties:
@@ -3430,8 +4653,12 @@ components:
           items:
             type: string
             format: uuid
+        location:
+          $ref: "#/components/schemas/MonitorLocationInput"
         http:
           $ref: "#/components/schemas/HttpSettings"
+        tcp:
+          $ref: "#/components/schemas/TcpSettings"
         heartbeat:
           $ref: "#/components/schemas/HeartbeatSettings"
     MonitorUpdate:
@@ -3439,7 +4666,7 @@ components:
       additionalProperties: false
       description: |
         Only the given fields change, also inside the sub-object. The sub-object must match the
-        monitor's type (422 on `http` or `heartbeat` otherwise).
+        monitor's type (422 on `http`, `tcp` or `heartbeat` otherwise).
       properties:
         name:
           type: string
@@ -3458,15 +4685,19 @@ components:
           items:
             type: string
             format: uuid
+        location:
+          $ref: "#/components/schemas/MonitorLocationInput"
         http:
           $ref: "#/components/schemas/HttpSettingsUpdate"
+        tcp:
+          $ref: "#/components/schemas/TcpSettingsUpdate"
         heartbeat:
           $ref: "#/components/schemas/HeartbeatSettings"
     ErrorKind:
       type: string
       description: |
         Why a check failed or a monitor went down. Known values: `dns` (the name did not resolve),
-        `connect` (no TCP connection), `tls` (handshake or certificate failure), `timeout` (no
+        `connect` (no TCP connection; for a tcp monitor, refused or unreachable), `tls` (handshake or certificate failure), `timeout` (no
         answer within the timeout), `blocked_address` (the target resolved to a blocked, for
         example private, address), `bad_port` (a connection or redirect to a port other than 443),
         `redirect` (too many redirects or a redirect to a non-HTTPS URL), `unexpected_status`
@@ -3512,7 +4743,7 @@ components:
       type: object
       additionalProperties: false
       description: |
-        A monitor in the list. The type's sub-object (`http` or `heartbeat`) is always present
+        A monitor in the list. The type's sub-object (`http`, `tcp` or `heartbeat`) is always present
         and the other one is omitted; a client must ignore a sub-object it does not know.
       required: [id, projectId, type, name, notificationsEnabled, paused, status, statusSince, lastErrorKind, lastCheckedAt, ongoingIncident, uptime24h]
       properties:
@@ -3556,21 +4787,35 @@ components:
           minimum: 0
           maximum: 100
           description: Percentage of successful checks in the last 24 h; null when no check ran
+        location:
+          $ref: "#/components/schemas/MonitorLocation"
         http:
           $ref: "#/components/schemas/HttpMonitor"
+        tcp:
+          $ref: "#/components/schemas/TcpMonitor"
         heartbeat:
           $ref: "#/components/schemas/HeartbeatMonitor"
     HttpMonitor:
       type: object
       additionalProperties: false
       description: The settings and HTTP-specific state of an HTTPS monitor
-      required: [url, expectedStatus, intervalSeconds, timeoutSeconds, failureThreshold, tlsExpiresAt, lastResponseMs]
+      required: [url, expectedStatus, method, headerNames, bodySet, intervalSeconds, timeoutSeconds, failureThreshold, tlsExpiresAt, lastResponseMs]
       properties:
         url:
           type: string
           description: The checked URL
         expectedStatus:
           $ref: "#/components/schemas/ExpectedStatus"
+        method:
+          $ref: "#/components/schemas/HttpMethod"
+        headerNames:
+          type: array
+          description: The names of the custom headers; their values are never returned
+          items:
+            type: string
+        bodySet:
+          type: boolean
+          description: Whether the monitor sends a body; the body itself is never returned
         intervalSeconds:
           type: integer
           description: Check interval in seconds
@@ -3589,6 +4834,29 @@ components:
           type: integer
           nullable: true
           description: Response time of the last check in milliseconds; null when no check ran or it got no response
+    TcpMonitor:
+      type: object
+      additionalProperties: false
+      description: The settings and state of a TCP monitor. A check has no status code; its response time is the time to complete the connection.
+      required: [host, port, intervalSeconds, timeoutSeconds, failureThreshold, lastResponseMs]
+      properties:
+        host:
+          type: string
+        port:
+          type: integer
+        intervalSeconds:
+          type: integer
+          description: Check interval in seconds
+        timeoutSeconds:
+          type: integer
+          description: Connection deadline in seconds
+        failureThreshold:
+          type: integer
+          description: Consecutive failed checks before the monitor is down
+        lastResponseMs:
+          type: integer
+          nullable: true
+          description: Time to connect of the last check in milliseconds; null when no check ran or it did not connect
     HeartbeatMonitor:
       type: object
       additionalProperties: false
@@ -3657,7 +4925,7 @@ components:
       type: object
       additionalProperties: false
       description: |
-        One monitor. The type's sub-object (`http` or `heartbeat`) is always present and the
+        One monitor. The type's sub-object (`http`, `tcp` or `heartbeat`) is always present and the
         other one is omitted; a client must ignore a sub-object it does not know.
       required: [id, projectId, type, name, notificationsEnabled, paused, status, statusSince, lastErrorKind, lastCheckedAt, ongoingIncident, uptime, channelIds, createdAt, updatedAt]
       properties:
@@ -3708,8 +4976,12 @@ components:
         updatedAt:
           type: string
           format: date-time
+        location:
+          $ref: "#/components/schemas/MonitorLocation"
         http:
           $ref: "#/components/schemas/HttpMonitor"
+        tcp:
+          $ref: "#/components/schemas/TcpMonitor"
         heartbeat:
           $ref: "#/components/schemas/HeartbeatMonitor"
     StatsRange:
@@ -3801,8 +5073,8 @@ components:
             $ref: "#/components/schemas/Incident"
     ChannelType:
       type: string
-      description: "`slack_webhook`: a Slack Incoming Webhook"
-      enum: [slack_webhook]
+      description: "`slack_webhook`: a Slack Incoming Webhook; `webhook`: any https endpoint, which receives the channel's message template as a POST"
+      enum: [slack_webhook, webhook]
     ChannelEvent:
       type: string
       description: "`down`: a monitor went down (and reminders while it stays down); `recovered`: it is back up; `tls_expiring`: its TLS certificate expires within 14 days"
@@ -3816,7 +5088,7 @@ components:
         $ref: "#/components/schemas/ChannelEvent"
     ChannelMention:
       type: array
-      description: Slack mentions put in front of `down` and reminder messages; each is `@here`, `@channel`, `<!subteam^ID>` or `<@UID>` (400 otherwise)
+      description: Slack mentions put in front of `down` and reminder messages (Slack channels only; a `webhook` channel must have none); each is `@here`, `@channel`, `<!subteam^ID>` or `<@UID>` (400 otherwise)
       maxItems: 3
       items:
         type: string
@@ -3831,8 +5103,8 @@ components:
     Channel:
       type: object
       additionalProperties: false
-      required: [id, projectId, name, type, events, mention, reminderMinutes, status, createdAt, updatedAt]
-      description: A notification channel. Its webhook URL is a secret and is never returned.
+      required: [id, projectId, name, type, configHidden, events, mention, reminderMinutes, status, createdAt, updatedAt]
+      description: "A notification channel. Its webhook URL is a secret and is never returned. For an organization-wide channel the callers without the organization role get no settings: `configHidden` is true, `events` and `mention` are empty and `reminderMinutes` is 0."
       properties:
         id:
           type: string
@@ -3847,22 +5119,200 @@ components:
           example: "#ops-alerts"
         type:
           $ref: "#/components/schemas/ChannelType"
+        configHidden:
+          type: boolean
+          description: True when the settings of an organization-wide channel are withheld because the caller has no organization role
         events:
           $ref: "#/components/schemas/ChannelEvents"
         mention:
           $ref: "#/components/schemas/ChannelMention"
         reminderMinutes:
           $ref: "#/components/schemas/ReminderMinutes"
+        contentType:
+          type: string
+          enum: [json, text]
+          description: Of a `webhook` channel; absent for Slack channels and when `configHidden` is true
+        bodyTemplate:
+          type: string
+          description: The message template of a `webhook` channel (not a secret); absent for Slack channels and when `configHidden` is true
         status:
           type: string
           enum: [active, failed]
-          description: "`failed` means Slack answered 404 or 410 (the webhook was revoked); nothing is sent until a new webhook URL is stored."
+          description: "`failed` means the endpoint answered 404 or 410 (a Slack webhook was revoked); nothing is sent until a new webhook URL is stored."
         createdAt:
           type: string
           format: date-time
         updatedAt:
           type: string
           format: date-time
+    WebhookContentType:
+      type: string
+      description: "`json`: the body is `application/json` and every placeholder value is JSON-string-escaped; `text`: the body is `text/plain` and values are inserted verbatim"
+      enum: [json, text]
+    WebhookBodyTemplate:
+      type: string
+      description: |
+        The body of the message a `webhook` channel sends, with placeholders written `{{name}}`.
+        Known names: `event` (`opened`, `resolved`, `reminder`, `tls_expiring`, `test`), `status`
+        (`down` or `up`), `monitor.id`, `monitor.name`, `monitor.url`, `monitor.type`,
+        `project.name`, `organization.name`, `incident.id`, `incident.startedAt` and
+        `incident.resolvedAt` (RFC 3339, UTC), `incident.duration` (for example `5m`),
+        `error.kind`, `tls.expiresAt`, `tls.daysLeft` and `link` (the monitor in the dashboard). A
+        value that does not exist for the event is empty. An unknown name is 422. With `json` the
+        template rendered with sample data must be one valid JSON document.
+      maxLength: 8192
+    ChannelTemplatePreviewRequest:
+      type: object
+      additionalProperties: false
+      required: [contentType, bodyTemplate]
+      properties:
+        contentType:
+          $ref: "#/components/schemas/WebhookContentType"
+        bodyTemplate:
+          $ref: "#/components/schemas/WebhookBodyTemplate"
+    ChannelTemplatePreview:
+      type: object
+      additionalProperties: false
+      required: [body]
+      properties:
+        body:
+          type: string
+          description: The template rendered with sample data
+    SpeculaStatus:
+      type: string
+      description: |
+        `pending`: registered, never connected. `online`: heard from in the last 90 seconds.
+        `offline`: connected before but silent for longer. `revoked`: the token no longer works.
+      enum: [pending, online, offline, revoked]
+    Specula:
+      type: object
+      additionalProperties: false
+      required: [id, name, allProjects, projectIds, status, version, hostname, lastSeenAt, createdAt, revokedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 80
+        allProjects:
+          type: boolean
+          description: Every project of the organization may use it
+        projectIds:
+          type: array
+          description: The projects that may use it when `allProjects` is false; empty for roles that cannot manage Specula
+          items:
+            type: string
+            format: uuid
+        status:
+          $ref: "#/components/schemas/SpeculaStatus"
+        version:
+          type: string
+          description: What the executor reported; empty before its first call
+        hostname:
+          type: string
+          description: The host the executor reported; empty before its first call
+        lastSeenAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        revokedAt:
+          type: string
+          format: date-time
+          nullable: true
+    SpeculaCreated:
+      type: object
+      additionalProperties: false
+      description: A new Specula and its token, shown once
+      required: [specula, token]
+      properties:
+        specula:
+          $ref: "#/components/schemas/Specula"
+        token:
+          type: string
+          description: Starts with `spc_`. Store it now; it cannot be read again.
+          example: spc_n0t-a-real-token
+    SpeculaList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Specula"
+    SpeculaCreate:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: Unique among the organization's Specula that are not revoked, ignoring case
+          example: Production cluster
+        allProjects:
+          type: boolean
+          default: true
+        projectIds:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            format: uuid
+    SpeculaUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        allProjects:
+          type: boolean
+        projectIds:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            format: uuid
+    MonitorLocationType:
+      type: string
+      enum: [cloud, specula]
+    MonitorLocation:
+      type: object
+      additionalProperties: false
+      description: Where an http or tcp monitor runs
+      required: [type]
+      properties:
+        type:
+          $ref: "#/components/schemas/MonitorLocationType"
+        speculaId:
+          type: string
+          format: uuid
+          description: The Specula, when `type` is `specula`
+        speculaName:
+          type: string
+          description: Its name, when `type` is `specula`
+    MonitorLocationInput:
+      type: object
+      additionalProperties: false
+      description: |
+        `cloud` runs the monitor from Proreta (public HTTPS targets, or public hosts for tcp). `specula` runs it at a
+        Specula of the organization that the monitor's project may use (`speculaId` is required);
+        its target may be http or https (tcp: any host), on any port, at an internal address or name.
+        Moving a monitor ends an open incident and starts its history over.
+      required: [type]
+      properties:
+        type:
+          $ref: "#/components/schemas/MonitorLocationType"
+        speculaId:
+          type: string
+          format: uuid
     ChannelList:
       type: object
       additionalProperties: false
@@ -3894,9 +5344,13 @@ components:
         webhookUrl:
           type: string
           format: password
-          description: Slack Incoming Webhook URL, `https://hooks.slack.com/services/...`; write-only
+          description: Slack Incoming Webhook URL, `https://hooks.slack.com/services/...`, or for a `webhook` channel an `https` URL of a public host (port 443); write-only
           minLength: 1
           maxLength: 2048
+        contentType:
+          $ref: "#/components/schemas/WebhookContentType"
+        bodyTemplate:
+          $ref: "#/components/schemas/WebhookBodyTemplate"
         events:
           $ref: "#/components/schemas/ChannelEvents"
         mention:
@@ -3922,15 +5376,79 @@ components:
         webhookUrl:
           type: string
           format: password
-          description: A new Slack Incoming Webhook URL; write-only
+          description: A new Slack Incoming Webhook URL, or for a `webhook` channel a new `https` URL; write-only
           minLength: 1
           maxLength: 2048
+        contentType:
+          $ref: "#/components/schemas/WebhookContentType"
+        bodyTemplate:
+          $ref: "#/components/schemas/WebhookBodyTemplate"
         events:
           $ref: "#/components/schemas/ChannelEvents"
         mention:
           $ref: "#/components/schemas/ChannelMention"
         reminderMinutes:
           $ref: "#/components/schemas/ReminderMinutes"
+    PermissionsInfo:
+      type: object
+      additionalProperties: false
+      required: [organizationRole, organization, projects, catalogue]
+      properties:
+        organizationRole:
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs through projects only
+        organization:
+          type: array
+          items:
+            type: string
+          description: Permissions held through the organization role (every project permission of the role applies in every project), plus the account permissions of anybody who belongs
+          example: [account.use, organization.members.read]
+        projects:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectPermissions"
+        catalogue:
+          type: array
+          description: Every permission in the order of the role documentation, with the roles that hold it
+          items:
+            $ref: "#/components/schemas/PermissionDefinition"
+    ProjectPermissions:
+      type: object
+      additionalProperties: false
+      required: [projectId, name, role, permissions]
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        role:
+          $ref: "#/components/schemas/MembershipRole"
+        permissions:
+          type: array
+          items:
+            type: string
+          description: Project permissions held in this project
+    PermissionDefinition:
+      type: object
+      additionalProperties: false
+      required: [name, level, description, roles]
+      properties:
+        name:
+          type: string
+          example: channel.manage
+        level:
+          type: string
+          enum: [account, organization, project]
+        description:
+          type: string
+        roles:
+          type: array
+          items:
+            $ref: "#/components/schemas/MembershipRole"
+          description: The roles that hold the permission, highest first
     Usage:
       type: object
       additionalProperties: false
@@ -4072,13 +5590,111 @@ components:
           type: string
           enum: [active, disabled]
         role:
-          $ref: "#/components/schemas/MembershipRole"
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs to the organization only through projects
         createdAt:
           type: string
           format: date-time
         isPlatformAdmin:
           type: boolean
-          description: The system admin; its password is managed by its Secret and cannot be reset here
+          description: A platform admin; the password of a platform admin cannot be reset here
+    AdminUserSummary:
+      type: object
+      additionalProperties: false
+      required: [id, login, displayName, status, isPlatformAdmin, isSystemAdmin, emailVerified, mustChangePassword, createdAt, organizationCount]
+      properties:
+        id:
+          type: string
+          format: uuid
+        login:
+          type: string
+          description: The email address (the system admin's login is not an address)
+        displayName:
+          type: string
+        status:
+          type: string
+          enum: [active, disabled]
+        isPlatformAdmin:
+          type: boolean
+        isSystemAdmin:
+          type: boolean
+          description: The configured system admin, which cannot be revoked or disabled
+        emailVerified:
+          type: boolean
+          description: Whether an identity provider or an emailed link confirmed the address
+        mustChangePassword:
+          type: boolean
+          description: The password was issued by someone else and has to be replaced at the next sign-in
+        createdAt:
+          type: string
+          format: date-time
+        organizationCount:
+          type: integer
+          minimum: 0
+    AdminUserSummaryList:
+      type: object
+      additionalProperties: false
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminUserSummary"
+        total:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+        offset:
+          type: integer
+    AdminUserMembership:
+      type: object
+      additionalProperties: false
+      required: [organizationId, organizationName, organizationSlug, organizationStatus, role, joinedAt]
+      properties:
+        organizationId:
+          type: string
+          format: uuid
+        organizationName:
+          type: string
+        organizationSlug:
+          type: string
+        organizationStatus:
+          type: string
+          enum: [active, suspended, deleted]
+        role:
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs to the organization only through projects
+        joinedAt:
+          type: string
+          format: date-time
+    AdminUserDetail:
+      type: object
+      additionalProperties: false
+      required: [user, memberships, openSessions]
+      properties:
+        user:
+          $ref: "#/components/schemas/AdminUserSummary"
+        memberships:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminUserMembership"
+        openSessions:
+          type: integer
+          minimum: 0
+          description: Sessions that have not expired, in all organizations
+    AdminUserSessionsRevoked:
+      type: object
+      additionalProperties: false
+      required: [sessionsRevoked]
+      properties:
+        sessionsRevoked:
+          type: integer
+          minimum: 0
     AdminUserList:
       type: object
       additionalProperties: false
@@ -4237,6 +5853,142 @@ components:
           type: boolean
         allowPasswordReset:
           type: boolean
+    AdminRegistrationSettings:
+      type: object
+      additionalProperties: false
+      required: [effective, source, environmentValue, updatedAt]
+      properties:
+        effective:
+          type: boolean
+          description: Whether registration is open now
+        source:
+          type: string
+          enum: [database, environment]
+          description: "`database` when the platform admin chose a value, else `environment`"
+        environmentValue:
+          type: boolean
+          description: The installation's `PRORETA_REGISTRATION_ENABLED`, used when no choice is stored
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the choice was last changed in the panel; null when it never was
+    AdminRegistrationUpdate:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+          nullable: true
+          description: "`true` or `false` is the choice; `null` follows the environment again"
+    AdminPlatformAdminUpdate:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+          description: "`true` grants the platform-admin flag, `false` revokes it"
+    AdminMember:
+      type: object
+      additionalProperties: false
+      required: [userId, login, displayName, role, status, joinedAt, isPlatformAdmin, isSystemAdmin]
+      properties:
+        userId:
+          type: string
+          format: uuid
+        login:
+          type: string
+          description: The member's login (email address)
+        displayName:
+          type: string
+        role:
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs to the organization only through projects
+        status:
+          type: string
+          enum: [active, disabled]
+          description: A disabled account cannot sign in
+        joinedAt:
+          type: string
+          format: date-time
+        isPlatformAdmin:
+          type: boolean
+          description: A platform admin
+        isSystemAdmin:
+          type: boolean
+          description: The system admin; its membership cannot be changed or removed
+    AdminMemberList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminMember"
+    AdminMemberAdd:
+      type: object
+      additionalProperties: false
+      required: [email, role]
+      properties:
+        email:
+          type: string
+          maxLength: 254
+          description: Email address of an existing account
+        role:
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs to the organization only through projects
+    AdminProject:
+      type: object
+      additionalProperties: false
+      required: [id, name, slug, isDefault, allMembers, memberCount, monitorCount, channelCount, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        slug:
+          type: string
+        isDefault:
+          type: boolean
+          description: The Default project of the organization; it cannot be deleted
+        allMembers:
+          type: boolean
+          description: Marks the Default project; it no longer changes who has access, because an organization role covers every project
+        memberCount:
+          type: integer
+          minimum: 0
+          description: People with access to the project, as listed by its members operation
+        monitorCount:
+          type: integer
+          minimum: 0
+          description: Monitors and heartbeats that are not deleted
+        channelCount:
+          type: integer
+          minimum: 0
+          description: Notification channels of the project that are not deleted
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    AdminProjectList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminProject"
     AdminEmailTestRequest:
       type: object
       additionalProperties: false
@@ -4291,7 +6043,10 @@ components:
         name:
           type: string
         role:
-          $ref: "#/components/schemas/MembershipRole"
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs to the organization only through projects
         status:
           $ref: "#/components/schemas/OrganizationStatus"
         current:
@@ -4317,7 +6072,7 @@ components:
     Member:
       type: object
       additionalProperties: false
-      required: [userId, login, displayName, role, joinedAt, isPlatformAdmin]
+      required: [userId, login, displayName, role, joinedAt, isPlatformAdmin, isSystemAdmin]
       properties:
         userId:
           type: string
@@ -4325,15 +6080,21 @@ components:
         login:
           type: string
           nullable: true
-          description: The member's login (email address); null unless the caller is an owner or admin
+          description: The member's login (email address); null unless the caller is an owner or maintainer
         displayName:
           type: string
         role:
-          $ref: "#/components/schemas/MembershipRole"
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs to the organization only through projects
         joinedAt:
           type: string
           format: date-time
         isPlatformAdmin:
+          type: boolean
+          description: A platform admin
+        isSystemAdmin:
           type: boolean
           description: The system admin; its role cannot be changed and it cannot be removed
     MemberList:
@@ -4351,26 +6112,38 @@ components:
       required: [role]
       properties:
         role:
-          $ref: "#/components/schemas/MembershipRole"
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs to the organization only through projects
     InvitationRole:
       type: string
-      enum: [admin, member, viewer]
+      description: The organization role of an organization invitation (never `owner`), or the role in the project of a project invitation
+      enum: [owner, maintainer, member, viewer]
     InvitationStatus:
       type: string
       enum: [open, accepted, revoked, expired]
     Invitation:
       type: object
       additionalProperties: false
-      required: [id, role, label, status, createdAt, expiresAt, createdBy, acceptedBy, acceptedAt, revokedAt]
+      required: [id, role, projectId, projectName, label, status, createdAt, expiresAt, createdBy, acceptedBy, acceptedAt, revokedAt]
       properties:
         id:
           type: string
           format: uuid
         role:
           $ref: "#/components/schemas/InvitationRole"
+        projectId:
+          type: string
+          format: uuid
+          nullable: true
+          description: The project of a project invitation, null for an organization invitation
+        projectName:
+          type: string
+          nullable: true
         label:
           type: string
-          description: The admin's own note about whom the link is for; empty when none
+          description: The maintainer's own note about whom the link is for; empty when none
         status:
           $ref: "#/components/schemas/InvitationStatus"
         createdAt:
@@ -4410,6 +6183,10 @@ components:
       properties:
         role:
           $ref: "#/components/schemas/InvitationRole"
+        projectId:
+          type: string
+          format: uuid
+          description: Invite into this project; `role` is then the role in the project and no organization role is granted
         label:
           type: string
           maxLength: 80
@@ -4484,10 +6261,14 @@ components:
     InvitationPreview:
       type: object
       additionalProperties: false
-      required: [organizationName, role, expiresAt]
+      required: [organizationName, projectName, role, expiresAt]
       properties:
         organizationName:
           type: string
+        projectName:
+          type: string
+          nullable: true
+          description: The project of a project invitation, null for an organization invitation
         role:
           $ref: "#/components/schemas/InvitationRole"
         expiresAt:
@@ -4495,8 +6276,8 @@ components:
           format: date-time
     ProjectRole:
       type: string
-      description: A project role override; `viewer` makes a member read-only in the project
-      enum: [member, viewer]
+      description: A direct role in one project; the same four roles as in the organization
+      enum: [owner, maintainer, member, viewer]
     Project:
       type: object
       additionalProperties: false
@@ -4516,7 +6297,7 @@ components:
           description: The Default project of the organization; it cannot be deleted
         allMembers:
           type: boolean
-          description: Every member of the organization belongs to it without being listed (the Default project)
+          description: Marks the Default project; it no longer changes who has access, because an organization role covers every project
         role:
           $ref: "#/components/schemas/MembershipRole"
         monitorCount:
@@ -4578,24 +6359,27 @@ components:
         login:
           type: string
           nullable: true
-          description: The member's login (email address); null unless the caller is an owner or admin
+          description: The member's login (email address); null unless the caller is an owner or maintainer
         displayName:
           type: string
         organizationRole:
-          $ref: "#/components/schemas/MembershipRole"
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role, which applies to every project; null for a person who belongs only through projects
         projectRole:
           allOf:
             - $ref: "#/components/schemas/ProjectRole"
           nullable: true
-          description: The override in this project; null keeps the organization role
+          description: The direct role in this project; null when the person is here only through the organization role
         effectiveRole:
           $ref: "#/components/schemas/MembershipRole"
         explicit:
           type: boolean
-          description: Listed as a member of the project (false for owners, admins and members through `allMembers`)
+          description: Has a direct role in the project
         allProjects:
           type: boolean
-          description: An owner or admin, who sees every project
+          description: Has an organization role, which gives a role in every project
     ProjectMemberList:
       type: object
       additionalProperties: false
@@ -4608,17 +6392,23 @@ components:
     ProjectMemberPut:
       type: object
       additionalProperties: false
+      required: [role]
       properties:
         role:
           $ref: "#/components/schemas/ProjectRole"
     StatusPage:
       type: object
       additionalProperties: false
-      required: [id, slug, title, description, logoUrl, accentColor, published, passwordProtected, publicUrl, componentCount, createdAt, updatedAt]
+      required: [id, projectId, slug, title, description, logoUrl, accentColor, published, passwordProtected, publicUrl, componentCount, createdAt, updatedAt]
       properties:
         id:
           type: string
           format: uuid
+        projectId:
+          type: string
+          format: uuid
+          nullable: true
+          description: The project the page belongs to; null for an organization-level page, which may show monitors of several projects
         slug:
           type: string
           example: acme
@@ -4666,6 +6456,11 @@ components:
       additionalProperties: false
       required: [slug, title]
       properties:
+        projectId:
+          type: string
+          format: uuid
+          nullable: true
+          description: The project of the page; absent or null creates an organization-level page
         slug:
           type: string
           description: Lowercase letters, digits and hyphens (3-63), unique across Proreta; reserved words such as `api`, `admin` or `status` are refused
@@ -4995,7 +6790,7 @@ components:
           description: Whether this user may sign in with the password (always true for the platform admin)
     AuthDomainRole:
       type: string
-      enum: [admin, member, viewer]
+      enum: [maintainer, member, viewer]
     AuthDomain:
       type: object
       additionalProperties: false
@@ -5091,7 +6886,8 @@ components:
         | `urn:proreta:problem:plan-limit-reached` | 409 | The plan allows no more of a resource; carries `limit` and `max` |
         | `urn:proreta:problem:protected-organization` | 409 | The default organization, or the admin's own, cannot be suspended or deleted |
         | `urn:proreta:problem:organization-deleted` | 409 | A deleted organization cannot be changed |
-        | `urn:proreta:problem:system-admin` | 409 | The platform admin's membership cannot be changed through the API, nor its password reset by another admin |
+        | `urn:proreta:problem:system-admin` | 409 | The system admin's membership cannot be changed through the API, nor can it be disabled or revoked; the password of a platform admin cannot be reset by another admin |
+        | `urn:proreta:problem:last-platform-admin` | 409 | The platform-admin flag of the last active platform admin cannot be revoked |
         | `urn:proreta:problem:invitation-accepted` | 409 | The invitation was already used |
         | `urn:proreta:problem:already-member` | 409 | The user is already a member of the organization |
         | `urn:proreta:problem:last-owner` | 409 | The organization would be left without an owner |

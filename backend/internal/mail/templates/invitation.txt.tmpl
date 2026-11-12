@@ -1,4 +1,4 @@
-{{if .Params.inviter}}{{.Params.inviter}} invited you{{else}}You are invited{{end}} to join {{.Params.org}} on Proreta as {{.Params.role}}.
+{{if .Params.inviter}}{{.Params.inviter}} invited you{{else}}You are invited{{end}} to join {{if .Params.project}}the project {{.Params.project}} in {{end}}{{.Params.org}} on Proreta as {{.Params.role}}.
 
 Proreta watches websites and services from outside and tells the team when one goes down.
 

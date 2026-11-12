@@ -24,7 +24,7 @@ No metric is labelled per organization, monitor, incident, user, channel, URL, h
 | `proreta_auth_password_changes_total` | counter | `result` (`succeeded`, `invalid`, `wrong_password`, `rate_limited`) | Password changes by signed-in users (`invalid` breaks the password policy, `wrong_password` is a wrong current password); a burst of `wrong_password` from one session is someone guessing the password of an open session |
 | `proreta_auth_oauth_logins_total` | counter | `provider` (`google`, `github`), `result` (`succeeded`, `linked`, `error`, or the error code of the callback redirect such as `state_invalid`, `not_invited`, `account_exists`, `email_unverified`, `failed`) | OAuth sign-ins and links; many `state_invalid` or `failed` point at forged callbacks or a misconfigured client (redirect URI, secret) |
 | `proreta_heartbeat_pings_total` | counter | `result` (`accepted`, `ignored`, `unknown`, `rate_limited`, `error`) | Pings of the public heartbeat endpoint; `ignored` is a known token of a paused or deleted heartbeat, `unknown` a token nobody has |
-| `proreta_admin_actions_total` | counter | `action` (`admin.organization.plan_changed`, `admin.organization.suspended`, `admin.organization.unsuspended`, `admin.organization.deleted`, `admin.user.password_reset`) | Changes made in the platform admin panel; each also has an audit row in the target organization. Any increase outside planned admin work deserves a look at the audit log |
+| `proreta_admin_actions_total` | counter | `action` (`admin.organization.plan_changed`, `admin.organization.suspended`, `admin.organization.unsuspended`, `admin.organization.deleted`, `admin.user.password_reset`, `admin.user.disabled`, `admin.user.enabled`, `admin.user.sessions_revoked`, `admin.user.platform_admin_granted`, `admin.user.platform_admin_revoked`, `admin.member.added`, `admin.member.role_changed`, `admin.member.removed`, `admin.invitation.created`, `admin.invitation.revoked`, `admin.project.created`, `admin.project.updated`, `admin.project.deleted`, `admin.project_member.added`, `admin.project_member.updated`, `admin.project_member.removed`, `admin.email_settings.updated`, `admin.email_test.sent`, `admin.registration_settings.updated`) | Changes made in the platform admin panel; each also has an audit row in the target organization. Any increase outside planned admin work deserves a look at the audit log |
 
 ### worker
 | Metric | Type | Labels | Meaning |
@@ -45,7 +45,7 @@ No metric is labelled per organization, monitor, incident, user, channel, URL, h
 ### jobs
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
-| `proreta_jobs_deliveries_total` | counter | `channel_type` (`slack_webhook`, or `unknown` when the channel could not be read), `result` (`sent`, `retry`, `failed`) | Delivery outcomes recorded by `finish_delivery` |
+| `proreta_jobs_deliveries_total` | counter | `channel_type` (`slack_webhook`, `webhook`, or `unknown` when the channel could not be read), `result` (`sent`, `retry`, `failed`) | Delivery outcomes recorded by `finish_delivery` |
 | `proreta_jobs_delivery_duration_seconds` | histogram | `channel_type` | One send to a notification channel |
 | `proreta_jobs_outbox_pending` | gauge | | Outbox rows waiting (including retries), all organizations; refreshed every 15 s |
 | `proreta_jobs_claim_errors_total` | counter | | Failed `claim_deliveries` calls |
@@ -85,7 +85,7 @@ Request log (api, `msg="http request"`, one per request):
 
 Other lines of a request carry the same `request_id` and `tenant_id`. The worker and jobs log ids (`tenant_id`, `monitor_id`, `location_id`, `delivery_id`, `channel_id`) and error kinds.
 
-Never logged, by design and by test (`TestIntegrationRequestLogsCarryNoSecrets` in `internal/api`, the log assertions of `internal/e2e` and of the worker and jobs tests): passwords, session tokens, CSRF tokens, monitor URLs (they can carry credentials in the query), Slack webhook URLs (rejected values included), raw paths and query strings, request and response bodies, and raw errors of the SSRF guard (they contain resolved addresses and the URL; only error kinds such as `blocked_address` or `timeout` are logged and stored).
+Never logged, by design and by test (`TestIntegrationRequestLogsCarryNoSecrets` in `internal/api`, the log assertions of `internal/e2e` and of the worker and jobs tests): passwords, session tokens, CSRF tokens, monitor URLs (they can carry credentials in the query), Slack and webhook URLs (rejected values included), raw paths and query strings, request and response bodies, and raw errors of the SSRF guard (they contain resolved addresses and the URL; only error kinds such as `blocked_address` or `timeout` are logged and stored).
 
 ## Suggested alert rules (not deployed)
 Written in PromQL for any Prometheus-compatible stack with Alertmanager; thresholds are first guesses.

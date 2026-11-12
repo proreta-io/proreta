@@ -103,6 +103,43 @@ func (q *Queries) DeleteSnapshot(ctx context.Context, arg DeleteSnapshotParams) 
 	return err
 }
 
+const detachForeignComponents = `-- name: DetachForeignComponents :many
+DELETE FROM status_page_components AS c
+USING status_pages AS p
+WHERE c.tenant_id = $1 AND c.monitor_id = $2
+  AND p.tenant_id = c.tenant_id AND p.id = c.page_id
+  AND p.project_id IS NOT NULL AND p.project_id <> $3::uuid
+RETURNING c.page_id
+`
+
+type DetachForeignComponentsParams struct {
+	TenantID  uuid.UUID
+	MonitorID uuid.UUID
+	ProjectID uuid.UUID
+}
+
+// A monitor moved to another project leaves the pages of its old project; organization-level
+// pages keep it. Returns the pages that lost a component.
+func (q *Queries) DetachForeignComponents(ctx context.Context, arg DetachForeignComponentsParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, detachForeignComponents, arg.TenantID, arg.MonitorID, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var page_id uuid.UUID
+		if err := rows.Scan(&page_id); err != nil {
+			return nil, err
+		}
+		items = append(items, page_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getPageForBuild = `-- name: GetPageForBuild :one
 SELECT id, slug, title, description, logo_url, accent_color, published
 FROM status_pages
@@ -169,13 +206,14 @@ func (q *Queries) InsertComponent(ctx context.Context, arg InsertComponentParams
 
 const insertPage = `-- name: InsertPage :exec
 
-INSERT INTO status_pages (id, tenant_id, slug, title, description, logo_url, accent_color)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO status_pages (id, tenant_id, project_id, slug, title, description, logo_url, accent_color)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 `
 
 type InsertPageParams struct {
 	ID          uuid.UUID
 	TenantID    uuid.UUID
+	ProjectID   *uuid.UUID
 	Slug        string
 	Title       string
 	Description string
@@ -189,6 +227,7 @@ func (q *Queries) InsertPage(ctx context.Context, arg InsertPageParams) error {
 	_, err := q.db.Exec(ctx, insertPage,
 		arg.ID,
 		arg.TenantID,
+		arg.ProjectID,
 		arg.Slug,
 		arg.Title,
 		arg.Description,
@@ -267,7 +306,7 @@ func (q *Queries) ListComponents(ctx context.Context, arg ListComponentsParams) 
 }
 
 const listPages = `-- name: ListPages :many
-SELECT p.id, p.slug, p.title, p.description, p.logo_url, p.accent_color, (p.password_hash IS NOT NULL)::boolean AS protected,
+SELECT p.id, p.project_id, p.slug, p.title, p.description, p.logo_url, p.accent_color, (p.password_hash IS NOT NULL)::boolean AS protected,
        p.published, p.created_at, p.updated_at,
        (SELECT count(*) FROM status_page_components AS c
         JOIN monitors AS m ON m.tenant_id = c.tenant_id AND m.id = c.monitor_id AND m.deleted_at IS NULL
@@ -279,6 +318,7 @@ ORDER BY p.created_at, p.id
 
 type ListPagesRow struct {
 	ID             uuid.UUID
+	ProjectID      *uuid.UUID
 	Slug           string
 	Title          string
 	Description    string
@@ -302,6 +342,7 @@ func (q *Queries) ListPages(ctx context.Context, tenantID uuid.UUID) ([]ListPage
 		var i ListPagesRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.ProjectID,
 			&i.Slug,
 			&i.Title,
 			&i.Description,
@@ -324,7 +365,7 @@ func (q *Queries) ListPages(ctx context.Context, tenantID uuid.UUID) ([]ListPage
 }
 
 const liveMonitorsOf = `-- name: LiveMonitorsOf :many
-SELECT id
+SELECT id, project_id
 FROM monitors
 WHERE tenant_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL
 FOR KEY SHARE
@@ -335,20 +376,25 @@ type LiveMonitorsOfParams struct {
 	Ids      []uuid.UUID
 }
 
-// The live monitors among the ids, locked against a concurrent delete (any project).
-func (q *Queries) LiveMonitorsOf(ctx context.Context, arg LiveMonitorsOfParams) ([]uuid.UUID, error) {
+type LiveMonitorsOfRow struct {
+	ID        uuid.UUID
+	ProjectID uuid.UUID
+}
+
+// The live monitors among the ids with their project, locked against a concurrent delete or move.
+func (q *Queries) LiveMonitorsOf(ctx context.Context, arg LiveMonitorsOfParams) ([]LiveMonitorsOfRow, error) {
 	rows, err := q.db.Query(ctx, liveMonitorsOf, arg.TenantID, arg.Ids)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []uuid.UUID
+	var items []LiveMonitorsOfRow
 	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err != nil {
+		var i LiveMonitorsOfRow
+		if err := rows.Scan(&i.ID, &i.ProjectID); err != nil {
 			return nil, err
 		}
-		items = append(items, id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -357,7 +403,7 @@ func (q *Queries) LiveMonitorsOf(ctx context.Context, arg LiveMonitorsOfParams) 
 }
 
 const lockPage = `-- name: LockPage :one
-SELECT id, slug, title, description, logo_url, accent_color, password_hash, published
+SELECT id, project_id, slug, title, description, logo_url, accent_color, password_hash, published
 FROM status_pages
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
 FOR UPDATE
@@ -370,6 +416,7 @@ type LockPageParams struct {
 
 type LockPageRow struct {
 	ID           uuid.UUID
+	ProjectID    *uuid.UUID
 	Slug         string
 	Title        string
 	Description  string
@@ -384,6 +431,7 @@ func (q *Queries) LockPage(ctx context.Context, arg LockPageParams) (LockPageRow
 	var i LockPageRow
 	err := row.Scan(
 		&i.ID,
+		&i.ProjectID,
 		&i.Slug,
 		&i.Title,
 		&i.Description,

@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -50,13 +51,13 @@ func TestPageNormalized(t *testing.T) {
 func TestMapError(t *testing.T) {
 	for code, want := range map[string]error{
 		"PRA01": ErrForbidden, "PRA02": ErrNotFound, "PRA05": ErrProtectedTenant,
-		"PRA06": ErrOwnTenant, "PRA07": ErrSystemAdmin, "PRA08": ErrTenantDeleted,
+		"PRA06": ErrOwnTenant, "PRA07": ErrSystemAdmin, "PRA08": ErrTenantDeleted, "PRA14": ErrLastPlatformAdmin,
 	} {
 		if got := mapError("op", &pgconn.PgError{Code: code}); !errors.Is(got, want) {
 			t.Errorf("%s: %v, want %v", code, got, want)
 		}
 	}
-	for code, field := range map[string]string{"PRA03": "planKey", "PRA04": "status"} {
+	for code, field := range map[string]string{"PRA03": "planKey", "PRA04": "status", "PRA15": "enabled"} {
 		var verr *validation.Error
 		if got := mapError("op", &pgconn.PgError{Code: code}); !errors.As(got, &verr) || verr.Fields[0].Field != field {
 			t.Errorf("%s: %v, want a validation error on %s", code, got, field)
@@ -65,5 +66,13 @@ func TestMapError(t *testing.T) {
 	other := errors.New("boom")
 	if got := mapError("op", other); !errors.Is(got, other) || !strings.Contains(got.Error(), "admin: op") {
 		t.Errorf("other error: %v", got)
+	}
+}
+
+func TestListAccountsRejectsUnknownStatus(t *testing.T) {
+	var verr *validation.Error
+	_, err := (&Service{}).ListAccounts(context.Background(), Actor{}, Page{}, "paused")
+	if !errors.As(err, &verr) || verr.Fields[0].Field != "status" {
+		t.Fatalf("err = %v, want a validation error on status", err)
 	}
 }

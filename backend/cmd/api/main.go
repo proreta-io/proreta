@@ -25,9 +25,11 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/platform/httpx"
 	"github.com/proreta-io/proreta/backend/internal/platform/logging"
 	"github.com/proreta-io/proreta/backend/internal/platform/metrics"
+	"github.com/proreta-io/proreta/backend/internal/platformsettings"
 	"github.com/proreta-io/proreta/backend/internal/projects"
 	"github.com/proreta-io/proreta/backend/internal/queries"
 	"github.com/proreta-io/proreta/backend/internal/scheduler"
+	"github.com/proreta-io/proreta/backend/internal/specula"
 	"github.com/proreta-io/proreta/backend/internal/statuspages"
 	"github.com/proreta-io/proreta/backend/migrations"
 )
@@ -96,7 +98,11 @@ func run() error {
 	}
 	log.Info("admin bootstrap done")
 
-	adminSvc, err := admin.NewService(pool, authSvc, admin.Options{Logger: log, Registerer: reg, Mail: mailQueue, Settings: mailSettings})
+	// The platform admin can open or close registration in the panel; PRORETA_REGISTRATION_ENABLED
+	// is the value until a choice is stored.
+	registration := platformsettings.NewRegistration(pool, cfg.RegistrationEnabled, log)
+	projectsSvc := projects.NewService(pool)
+	adminSvc, err := admin.NewService(pool, authSvc, admin.Options{Logger: log, Registerer: reg, Mail: mailQueue, Settings: mailSettings, Registration: registration, Projects: projectsSvc})
 	if err != nil {
 		return err
 	}
@@ -113,9 +119,18 @@ func run() error {
 		log.Info("oauth sign-in enabled", "providers", names, "password_login_enabled", cfg.PasswordLoginEnabled)
 	}
 
-	slack := notify.NewSlackNotifier(notify.NewSlackClient(cfg.BlockedCIDRs))
+	notifyClient := notify.NewSlackClient(cfg.BlockedCIDRs)
+	slack := notify.NewSlackNotifier(notifyClient)
 
 	sched := scheduler.New()
+	monitorSvc := monitors.NewService(pool, sched, incidents.NewService(sched))
+	if len(cfg.Request.Keys) > 0 {
+		requestKeys, err := crypto.NewKeyring(cfg.Request.Keys, cfg.Request.KeyID)
+		if err != nil {
+			return err
+		}
+		monitorSvc.WithRequestKeys(requestKeys)
+	}
 	handler, err := api.NewHandler(api.Config{
 		Version:              version,
 		Commit:               commit,
@@ -126,12 +141,14 @@ func run() error {
 		PasswordLoginEnabled: cfg.PasswordLoginEnabled,
 	}, api.Deps{
 		Auth:     authSvc,
-		Monitors: monitors.NewService(pool, sched, incidents.NewService(sched)),
+		Monitors: monitorSvc,
+		Specula:  specula.NewService(pool),
 		Queries:  queries.New(pool, nil),
-		Channels: notify.NewService(pool, keys, slack, cfg.PublicURL),
-		Plans:    plans.NewService(pool), Projects: projects.NewService(pool),
+		Channels: notify.NewService(pool, keys, slack, cfg.PublicURL).WithWebhook(notify.NewWebhookNotifier(notifyClient)),
+		Plans:    plans.NewService(pool), Projects: projectsSvc,
 		StatusPages:  statuspages.NewService(pool, statuspages.Options{Logger: log}),
 		Admin:        adminSvc,
+		Registration: registration,
 		OAuth:        flow,
 		Entitlements: entitlements.NewService(pool),
 		Logger:       log,

@@ -1,0 +1,7 @@
+The Specula executor is running in namespace {{ .Release.Namespace }} as {{ include "proreta-specula.fullname" . }}.
+In Proreta, open Specula: it shows as Online within a minute of the pods starting. Then choose it under
+"Run from" when you add a monitor. If it stays "Waiting", check the logs:
+
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "proreta-specula.fullname" . }}
+
+A "token was rejected" line means the token is wrong or the Specula was revoked.

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { ApiError, errorMessage } from "../api/client";
 import {
   createInvitation,
@@ -42,20 +42,38 @@ import {
 } from "../components/ui";
 import { formatDate, formatDateTime } from "../lib/format";
 import {
-  abilities,
   assignableRoles,
   canManageMember,
   ROLE_DESCRIPTIONS,
   ROLE_HINTS,
+  NO_ROLE_LABEL,
   ROLE_LABELS,
+  roleLabel,
 } from "../lib/roles";
+import { absoluteLink } from "../lib/inviteLink";
 import { memberLabel } from "../lib/members";
+import { usePermissions } from "../lib/permissions";
 
 /** Members, roles and invitations of the organization. */
 export default function Members() {
   const auth = useAuth();
-  const can = abilities(auth.session);
+  const can = usePermissions();
+  const role = can.organizationRole;
   const org = auth.session?.organization.name ?? "this organization";
+  if (!can.ready) return null;
+  if (!can.org("organization.members.read")) {
+    return (
+      <section className="flex max-w-[960px] flex-col">
+        <h1 className="pt-6 pb-2 text-headline leading-[1.1] font-semibold tracking-[-0.02em] sm:pt-10 sm:text-display">
+          Members
+        </h1>
+        <p className="pb-6 text-muted-foreground sm:pb-9">{ROLE_HINTS.organizationLevel}</p>
+        <Section id="leave" title="Leave">
+          <LeaveOrDelete />
+        </Section>
+      </section>
+    );
+  }
   return (
     <section className="flex max-w-[960px] flex-col">
       <h1 className="pt-6 pb-2 text-headline leading-[1.1] font-semibold tracking-[-0.02em] sm:pt-10 sm:text-display">
@@ -63,8 +81,12 @@ export default function Members() {
       </h1>
       <p className="pb-6 text-muted-foreground sm:pb-9">
         People in <strong className="font-medium text-foreground">{org}</strong>. You are{" "}
-        {can.role ? `${article(can.role)} ${ROLE_LABELS[can.role].toLowerCase()}` : "a member"}:{" "}
-        {can.role ? ROLE_DESCRIPTIONS[can.role].toLowerCase() : ""}
+        {role ? `${article(role)} ${ROLE_LABELS[role].toLowerCase()}` : "a member"}:{" "}
+        {role ? ROLE_DESCRIPTIONS[role].toLowerCase() : ""} A role here applies to every project; a
+        role in a project can only raise it there.{" "}
+        <Link to="/help/roles" className="underline underline-offset-3">
+          What each role may do
+        </Link>
       </p>
       <Section id="members" title="People">
         <MemberList />
@@ -74,7 +96,7 @@ export default function Members() {
         title="Invitations"
         description="A link joins one person with the role you choose. It works once and for 7 days. No email is sent: hand it over yourself."
       >
-        {can.manageMembers ? (
+        {can.org("organization.members.manage") ? (
           <Invitations />
         ) : (
           <p className="text-muted-foreground">{ROLE_HINTS.manageMembers}</p>
@@ -87,8 +109,10 @@ export default function Members() {
   );
 }
 
+const NONE = "none";
+
 function article(role: MembershipRole) {
-  return role === "owner" || role === "admin" ? "an" : "a";
+  return role === "owner" ? "an" : "a";
 }
 
 function Section({
@@ -128,12 +152,17 @@ function MemberList() {
   const [removing, setRemoving] = useState<Member | null>(null);
 
   const change = useMutation({
-    mutationFn: ({ member, role }: { member: Member; role: MembershipRole }) =>
+    mutationFn: ({ member, role }: { member: Member; role: MembershipRole | null }) =>
       updateMember(member.userId, role),
     onSuccess: (updated) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.members });
       if (updated.userId === me) void queryClient.invalidateQueries({ queryKey: queryKeys.me });
-      toast(`${memberLabel(updated)} is now ${ROLE_LABELS[updated.role].toLowerCase()}`);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.permissions });
+      toast(
+        updated.role
+          ? `${memberLabel(updated)} is now ${ROLE_LABELS[updated.role].toLowerCase()}`
+          : `${memberLabel(updated)} now belongs through projects only`,
+      );
     },
     onError: (err) => toast(errorMessage(err), "error"),
   });
@@ -185,10 +214,10 @@ function MemberList() {
         </thead>
         <tbody>
           {members.data.items.map((m) => {
-            const manageable = canManageMember(actor, m.role) && !m.isPlatformAdmin;
+            const manageable = canManageMember(actor, m.role) && !m.isSystemAdmin;
             const noteId = `member-note-${m.userId}`;
-            const note = m.isPlatformAdmin
-              ? "The platform administrator; set by the deployment."
+            const note = m.isSystemAdmin
+              ? "The system administrator; set by the deployment."
               : actor && canManageMember(actor, "viewer") && !canManageMember(actor, m.role)
                 ? "Only an owner can change an owner."
                 : undefined;
@@ -208,13 +237,17 @@ function MemberList() {
                   {manageable ? (
                     <Select
                       aria-label={`Role of ${memberLabel(m)}`}
-                      className="w-[130px]"
-                      value={m.role}
+                      className="w-[250px] max-w-full"
+                      value={m.role ?? NONE}
                       disabled={change.isPending}
                       onChange={(e) =>
-                        change.mutate({ member: m, role: e.target.value as MembershipRole })
+                        change.mutate({
+                          member: m,
+                          role: e.target.value === NONE ? null : (e.target.value as MembershipRole),
+                        })
                       }
                     >
+                      <option value={NONE}>{NO_ROLE_LABEL}</option>
                       {roles.map((r) => (
                         <option key={r} value={r}>
                           {ROLE_LABELS[r]}
@@ -222,7 +255,7 @@ function MemberList() {
                       ))}
                     </Select>
                   ) : (
-                    <span aria-describedby={note ? noteId : undefined}>{ROLE_LABELS[m.role]}</span>
+                    <span aria-describedby={note ? noteId : undefined}>{roleLabel(m.role)}</span>
                   )}
                   {note && (
                     <span id={noteId} className="mt-1 block text-caption text-muted-foreground">
@@ -276,16 +309,14 @@ interface CreatedLink {
   emailedTo?: string;
 }
 
-function absoluteLink(url: string) {
-  // The api builds it from PRORETA_PUBLIC_URL; without one it is a path on this origin.
-  return url.startsWith("/") ? `${globalThis.location.origin}${url}` : url;
-}
-
 function Invitations() {
   const auth = useAuth();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const invitations = useQuery({ queryKey: queryKeys.invitations, queryFn: listInvitations });
+  const invitations = useQuery({
+    queryKey: queryKeys.invitations,
+    queryFn: () => listInvitations(),
+  });
   const [dialog, setDialog] = useState(false);
   const [role, setRole] = useState<InvitationRole>("member");
   const [label, setLabel] = useState("");
@@ -425,7 +456,14 @@ function Invitations() {
                     {inv.acceptedBy ? ` · joined: ${inv.acceptedBy}` : ""}
                   </span>
                 </Td>
-                <Td>{ROLE_LABELS[inv.role]}</Td>
+                <Td>
+                  {ROLE_LABELS[inv.role]}
+                  {inv.projectName && (
+                    <span className="block text-caption text-muted-foreground">
+                      in {inv.projectName}
+                    </span>
+                  )}
+                </Td>
                 <Td>
                   <Badge tone={STATUS_TONES[inv.status]}>{inv.status}</Badge>
                 </Td>
@@ -545,7 +583,7 @@ function LeaveOrDelete() {
   const auth = useAuth();
   const navigate = useNavigate();
   const toast = useToast();
-  const can = abilities(auth.session);
+  const can = usePermissions();
   const org = auth.session?.organization;
   const [confirm, setConfirm] = useState<"leave" | "delete" | null>(null);
 
@@ -588,7 +626,7 @@ function LeaveOrDelete() {
           </Button>
         </div>
       </div>
-      {can.deleteOrganization && !isDefault && (
+      {can.org("organization.delete") && !isDefault && (
         <div className="flex flex-col gap-2 border-t border-border-faint pt-4">
           <p className="text-muted-foreground">
             Deleting stops every monitor and alert of {org.name} and signs every member out of it.
@@ -601,7 +639,7 @@ function LeaveOrDelete() {
           </div>
         </div>
       )}
-      {can.deleteOrganization && isDefault && (
+      {can.org("organization.delete") && isDefault && (
         <p className="text-caption text-muted-foreground">
           This is the platform&apos;s own organization: it cannot be deleted.
         </p>

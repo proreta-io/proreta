@@ -1,0 +1,170 @@
+openapi: 3.0.3
+info:
+  title: Proreta Specula API
+  version: 1.0.0
+  description: |
+    The API that a Specula executor calls. A Specula runs inside a customer's network, where the
+    services it checks cannot be reached from outside, and only makes outbound HTTPS calls to
+    this API (served by the gateway at the same address as Proreta under `/specula/v1`).
+
+    Every call carries the Specula's token as `Authorization: Bearer spc_...`. The token is created
+    when the Specula is registered, shown once, and can be revoked at any time (401 from then on).
+    A token belongs to one organization and one Specula; what a call can reach is decided by the
+    token, never by the request.
+
+    The flow: `hello` at start and every minute, `claim` every few seconds for due checks (each
+    comes with a 30 second lease), run them, report with `results`. A result for a lease that has
+    expired or was already completed answers `stale` and must not be sent again.
+paths:
+  /specula/v1/hello:
+    post:
+      operationId: speculaHello
+      summary: Report the executor's version and host name
+      security: [{bearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/HelloRequest"}
+      responses:
+        "200":
+          description: Accepted; the server's clock is returned to notice a large skew
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/HelloResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /specula/v1/claim:
+    post:
+      operationId: speculaClaim
+      summary: Lease up to `max` due checks of this Specula's location
+      security: [{bearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ClaimRequest"}
+      responses:
+        "200":
+          description: The leased jobs, possibly none
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ClaimResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+  /specula/v1/results:
+    post:
+      operationId: speculaResults
+      summary: Report finished checks
+      security: [{bearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ResultsRequest"}
+      responses:
+        "200":
+          description: One outcome per result, in request order
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ResultsResponse"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "503":
+          description: Busy; nothing was written, send the same batch again after `Retry-After` seconds
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+  responses:
+    Unauthorized:
+      description: The token is missing, unknown or revoked, or the organization is not active
+    BadRequest:
+      description: The body is not valid for this call
+  schemas:
+    HelloRequest:
+      type: object
+      additionalProperties: false
+      required: [version, hostname]
+      properties:
+        version: {type: string, maxLength: 64}
+        hostname: {type: string, maxLength: 253}
+    HelloResponse:
+      type: object
+      required: [serverTime]
+      properties:
+        serverTime: {type: string, format: date-time}
+    ClaimRequest:
+      type: object
+      additionalProperties: false
+      required: [max]
+      properties:
+        max: {type: integer, minimum: 1, maximum: 50}
+    Header:
+      type: object
+      required: [name, value]
+      properties:
+        name: {type: string}
+        value: {type: string, description: "A secret of the monitor; do not log it"}
+    Job:
+      type: object
+      required: [monitorId, leaseToken, leaseUntil, url, method, expectedStatus, timeoutSeconds]
+      properties:
+        monitorId: {type: string, format: uuid}
+        leaseToken: {type: string, format: uuid, description: "Send it back with the result"}
+        leaseUntil: {type: string, format: date-time}
+        type:
+          type: string
+          enum: [http, tcp]
+          description: "The kind of check; absent means `http`. A `tcp` job connects to `host`:`port` and is up when the handshake completes: `url`, `method` and `expectedStatus` are then unused (empty, GET and 2xx) and the result has no status code. An executor that does not know a type must not run the job."
+        url: {type: string}
+        host: {type: string, description: "Only for a `tcp` job"}
+        port: {type: integer, minimum: 1, maximum: 65535, description: "Only for a `tcp` job"}
+        method: {type: string, enum: [GET, HEAD, POST, PUT, PATCH, DELETE]}
+        headers: {type: array, items: {$ref: "#/components/schemas/Header"}}
+        body: {type: string, description: "A secret of the monitor; do not log it"}
+        expectedStatus: {type: string, description: "`2xx` or an exact status code"}
+        timeoutSeconds: {type: integer}
+    ClaimResponse:
+      type: object
+      required: [jobs]
+      properties:
+        jobs: {type: array, items: {$ref: "#/components/schemas/Job"}}
+    Result:
+      type: object
+      additionalProperties: false
+      required: [monitorId, leaseToken, checkedAt, ok]
+      properties:
+        monitorId: {type: string, format: uuid}
+        leaseToken: {type: string, format: uuid}
+        checkedAt: {type: string, format: date-time, description: "Within the last 10 minutes and not in the future"}
+        ok: {type: boolean}
+        statusCode: {type: integer, minimum: 100, maximum: 599}
+        latencyMs: {type: integer, minimum: 0}
+        errorKind:
+          type: string
+          description: Empty exactly when `ok` is true
+          enum: [dns, connect, tls, timeout, blocked_address, bad_port, redirect, unexpected_status, other]
+        tlsNotAfter: {type: string, format: date-time}
+    ResultsRequest:
+      type: object
+      additionalProperties: false
+      required: [results]
+      properties:
+        results: {type: array, minItems: 1, maxItems: 100, items: {$ref: "#/components/schemas/Result"}}
+    ResultOutcome:
+      type: object
+      required: [monitorId, outcome]
+      properties:
+        monitorId: {type: string, format: uuid}
+        outcome:
+          type: string
+          description: |
+            `recorded`: stored and applied. `stale`: the lease expired or was completed, or this is a
+            repeat; discard it. `rejected`: malformed; discard it.
+          enum: [recorded, stale, rejected]
+    ResultsResponse:
+      type: object
+      required: [outcomes]
+      properties:
+        outcomes: {type: array, items: {$ref: "#/components/schemas/ResultOutcome"}}

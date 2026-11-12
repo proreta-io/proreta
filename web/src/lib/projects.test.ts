@@ -12,6 +12,8 @@ import {
   saveProjectChoice,
 } from "./projects";
 import { channelsForProject } from "./monitorForm";
+import { permissionsFrom } from "./permissions";
+import { permissionsBody } from "../test/utils";
 
 const project = (over: Partial<Project>): Project => ({
   id: "p",
@@ -30,6 +32,7 @@ const project = (over: Partial<Project>): Project => ({
 const def = project({ id: "d", name: "Default", isDefault: true, allMembers: true });
 const web = project({ id: "w", name: "Web" });
 const ro = project({ id: "r", name: "Read only", role: "viewer" });
+const can = permissionsFrom(permissionsBody(null, [def, web, ro]));
 
 describe("project choice", () => {
   afterEach(() => localStorage.clear());
@@ -53,23 +56,25 @@ describe("project choice", () => {
   });
 
   it("labels the whole scope by role", () => {
-    expect(allProjectsLabel("admin")).toBe("All projects");
-    expect(allProjectsLabel("member")).toBe("All my projects");
+    expect(allProjectsLabel("maintainer")).toBe("All projects");
+    expect(allProjectsLabel("member")).toBe("All projects");
+    expect(allProjectsLabel(null)).toBe("All my projects");
   });
 });
 
 describe("project rights", () => {
   it("lets members change monitors only where their role is member or more", () => {
-    expect(canEditIn(web)).toBe(true);
-    expect(canEditIn(ro)).toBe(false);
-    expect(editableProjects([def, web, ro]).map((p) => p.id)).toEqual(["d", "w"]);
+    expect(canEditIn(can, web)).toBe(true);
+    expect(canEditIn(can, ro)).toBe(false);
+    expect(canEditIn(can, undefined)).toBe(false);
+    expect(editableProjects(can, [def, web, ro]).map((p) => p.id)).toEqual(["d", "w"]);
   });
 
   it("starts a new monitor in the shell's project when allowed, else the Default one", () => {
-    expect(defaultProjectFor("w", [def, web, ro])).toBe("w");
-    expect(defaultProjectFor("r", [def, web, ro])).toBe("d");
-    expect(defaultProjectFor(ALL_PROJECTS, [def, web])).toBe("d");
-    expect(defaultProjectFor(ALL_PROJECTS, undefined)).toBe("");
+    expect(defaultProjectFor(can, "w", [def, web, ro])).toBe("w");
+    expect(defaultProjectFor(can, "r", [def, web, ro])).toBe("d");
+    expect(defaultProjectFor(can, ALL_PROJECTS, [def, web])).toBe("d");
+    expect(defaultProjectFor(can, ALL_PROJECTS, undefined)).toBe("");
   });
 
   it("names a channel's scope", () => {
@@ -84,6 +89,7 @@ describe("project rights", () => {
       projectId,
       name: id,
       type: "slack_webhook" as const,
+      configHidden: false,
       events: ["down" as const],
       mention: [],
       reminderMinutes: 0,

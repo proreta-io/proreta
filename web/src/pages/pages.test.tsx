@@ -1,19 +1,23 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {
+  Specula,
   Channel,
   HeartbeatMonitor,
   HttpMonitor,
   MonitorDetail,
   MonitorListItem,
 } from "../api/endpoints";
-import { json, mockApi, problem, renderApp, signedIn } from "../test/utils";
+import { json, mockApi, problem, renderApp, session, signedIn } from "../test/utils";
 
 const httpOf = (over: Partial<HttpMonitor> = {}): HttpMonitor => ({
   url: "https://example.com/",
   intervalSeconds: 60,
   timeoutSeconds: 10,
   expectedStatus: "2xx",
+  method: "GET",
+  headerNames: [],
+  bodySet: false,
   failureThreshold: 2,
   tlsExpiresAt: null,
   lastResponseMs: 230,
@@ -58,11 +62,26 @@ const detail = (over: Partial<MonitorDetail> = {}): MonitorDetail => {
   };
 };
 
+const speculaOf = (over: Partial<Specula> = {}): Specula => ({
+  id: "s1",
+  name: "Prod cluster",
+  allProjects: true,
+  projectIds: [],
+  status: "online",
+  version: "0.1.0",
+  hostname: "pod-1",
+  lastSeenAt: "2026-11-12T10:00:00Z",
+  createdAt: "2026-11-01T00:00:00Z",
+  revokedAt: null,
+  ...over,
+});
+
 const channel = (over: Partial<Channel> = {}): Channel => ({
   id: "c1",
   projectId: "p-default",
   name: "#ops",
   type: "slack_webhook",
+  configHidden: false,
   events: ["down", "recovered", "tls_expiring"],
   mention: [],
   reminderMinutes: 0,
@@ -317,11 +336,216 @@ describe("monitor form", () => {
     expect(body).toEqual({
       type: "http",
       name: "Website",
-      http: { url: "https://example.com/", expectedStatus: "204", failureThreshold: 3 },
+      http: {
+        url: "https://example.com/",
+        expectedStatus: "204",
+        failureThreshold: 3,
+        method: "GET",
+        headers: [],
+      },
       notificationsEnabled: false,
       channelIds: [],
     });
     expect(screen.getByRole("status")).toHaveTextContent("Monitor created");
+  });
+
+  it("creates a TCP monitor from a host and a port, without the HTTP fields", async () => {
+    let body: unknown;
+    const created = detail({
+      id: "tcp1",
+      name: "Postgres",
+      type: "tcp",
+      status: "unknown",
+      http: undefined,
+      tcp: {
+        host: "db.example.com",
+        port: 5432,
+        intervalSeconds: 60,
+        timeoutSeconds: 10,
+        failureThreshold: 2,
+        lastResponseMs: null,
+      },
+    });
+    mockApi({
+      ...signedIn,
+      "POST /api/v1/monitors": async (req) => {
+        body = await req.json();
+        return json(created, 201);
+      },
+      "GET /api/v1/monitors/tcp1": () => json(created),
+    });
+    renderApp("/monitors/new");
+    await userEvent.click(await screen.findByRole("radio", { name: /TCP port/ }));
+    expect(screen.queryByLabelText("URL")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Exact code")).not.toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Name"), "Postgres");
+    await userEvent.type(screen.getByLabelText("Host"), "db.example.com");
+    await userEvent.type(screen.getByLabelText("Port"), "5432");
+    expect(
+      screen.getByText(
+        (_, el) =>
+          el?.tagName === "P" &&
+          el.textContent ===
+            "Connects to db.example.com:5432 every minute and alerts Slack after 2 failures in a row.",
+      ),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Create monitor" }));
+
+    expect(await screen.findByRole("heading", { name: "Postgres", level: 1 })).toBeInTheDocument();
+    expect(body).toEqual({
+      type: "tcp",
+      name: "Postgres",
+      tcp: { host: "db.example.com", port: 5432, failureThreshold: 2 },
+      notificationsEnabled: true,
+      channelIds: [],
+    });
+    expect(screen.getByText("db.example.com:5432")).toBeInTheDocument();
+    expect(screen.getByText("TCP")).toBeInTheDocument();
+  });
+
+  it("validates a TCP monitor's host and port on the client", async () => {
+    const fetchMock = mockApi({ ...signedIn });
+    renderApp("/monitors/new");
+    await userEvent.click(await screen.findByRole("radio", { name: /TCP port/ }));
+    await userEvent.type(screen.getByLabelText("Host"), "https://db.example.com");
+    await userEvent.type(screen.getByLabelText("Port"), "70000");
+    await userEvent.click(screen.getByRole("button", { name: "Create monitor" }));
+    expect(screen.getByLabelText("Host")).toHaveAccessibleDescription(
+      "Enter only the host: no http://, path, user name or spaces.",
+    );
+    expect(screen.getByLabelText("Port")).toHaveAccessibleDescription(
+      "Enter a port from 1 to 65535.",
+    );
+    expect(fetchMock.mock.calls.some(([r]) => (r as Request).method === "POST")).toBe(false);
+  });
+
+  it("sends a method, headers and a body, and warns for a non-safe method", async () => {
+    let body: unknown;
+    const created = detail({ id: "new2", name: "Orders" });
+    mockApi({
+      ...signedIn,
+      "POST /api/v1/monitors": async (req) => {
+        body = await req.json();
+        return json(created, 201);
+      },
+      "GET /api/v1/monitors/new2": () => json(created),
+    });
+    renderApp("/monitors/new");
+    await userEvent.type(await screen.findByLabelText("Name"), "Orders");
+    await userEvent.type(screen.getByLabelText("URL"), "https://example.com/ping");
+    // GET has no body field and no warning.
+    expect(screen.queryByLabelText("Request body")).not.toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("Method"), "POST");
+    expect(screen.getByText("This check sends POST every minute.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Add header" }));
+    await userEvent.type(screen.getByLabelText("Header 1 name"), "Authorization");
+    await userEvent.type(screen.getByLabelText("Header 1 value"), "Bearer s3cret");
+    await userEvent.click(screen.getByLabelText("Request body"));
+    await userEvent.paste('{"check":true}');
+    await userEvent.click(screen.getByRole("button", { name: "Create monitor" }));
+
+    expect(await screen.findByRole("heading", { name: "Orders", level: 1 })).toBeInTheDocument();
+    expect(body).toMatchObject({
+      http: {
+        method: "POST",
+        headers: [{ name: "Authorization", value: "Bearer s3cret" }],
+        body: '{"check":true}',
+      },
+    });
+  });
+
+  it("keeps stored header values and the body unless they are replaced", async () => {
+    let body: unknown;
+    const current = detail({
+      id: "m8",
+      name: "Orders",
+      http: httpOf({ method: "POST", headerNames: ["Authorization"], bodySet: true }),
+    });
+    mockApi({
+      ...signedIn,
+      "GET /api/v1/monitors/m8": () => json(current),
+      "PATCH /api/v1/monitors/m8": async (req) => {
+        body = await req.json();
+        return json(current);
+      },
+    });
+    renderApp("/monitors/m8/edit");
+    // The stored value is hidden; the body is a write-only value, not a text box.
+    expect(await screen.findByLabelText("Header 1 name")).toHaveValue("Authorization");
+    expect(screen.getByLabelText("Header 1 value")).toHaveValue("");
+    expect(screen.getByLabelText("Header 1 value")).toHaveAttribute("placeholder", "Unchanged");
+    expect(screen.queryByLabelText("Request body")).not.toBeInTheDocument();
+    expect(screen.getByText("Configured, hidden")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(body).toBeDefined());
+    // The name alone keeps the value; no body key keeps the body.
+    expect((body as { http: Record<string, unknown> }).http).toMatchObject({
+      method: "POST",
+      headers: [{ name: "Authorization" }],
+    });
+    expect((body as { http: Record<string, unknown> }).http).not.toHaveProperty("body");
+    expect(JSON.stringify(body)).not.toContain('"value"');
+  });
+
+  it("runs a monitor at a Specula and accepts a target inside the network", async () => {
+    let body: unknown;
+    const created = detail({ id: "new3", name: "Orders" });
+    mockApi({
+      ...signedIn,
+      "GET /api/v1/specula": () =>
+        json({
+          items: [
+            { ...speculaOf(), id: "s1", name: "Prod cluster" },
+            { ...speculaOf(), id: "s2", name: "Lab", status: "offline" },
+          ],
+        }),
+      "POST /api/v1/monitors": async (req) => {
+        body = await req.json();
+        return json(created, 201);
+      },
+      "GET /api/v1/monitors/new3": () => json(created),
+    });
+    renderApp("/monitors/new");
+    await userEvent.type(await screen.findByLabelText("Name"), "Orders");
+    await userEvent.type(screen.getByLabelText("URL"), "http://orders.shop.svc:8080/health");
+    // From Proreta's own worker the private http target is refused on the client.
+    await userEvent.click(screen.getByRole("button", { name: "Create monitor" }));
+    expect(await screen.findByText("Use an https:// URL.")).toBeInTheDocument();
+    const select = screen.getByLabelText("Run from");
+    expect(within(select).getByRole("option", { name: "Lab (offline)" })).toBeInTheDocument();
+    await userEvent.selectOptions(select, "s1");
+    expect(screen.getByText(/http or https, any port/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Create monitor" }));
+    expect(await screen.findByRole("heading", { name: "Orders", level: 1 })).toBeInTheDocument();
+    expect(body).toMatchObject({
+      location: { type: "specula", speculaId: "s1" },
+      http: { url: "http://orders.shop.svc:8080/health" },
+    });
+  });
+
+  it("hides Run from when no Specula can be used", async () => {
+    mockApi({ ...signedIn, "GET /api/v1/specula": () => json({ items: [] }) });
+    renderApp("/monitors/new");
+    await screen.findByLabelText("Name");
+    await waitFor(() => expect(screen.queryByLabelText("Run from")).not.toBeInTheDocument());
+  });
+
+  it("shows a server error about a header next to the headers", async () => {
+    mockApi({
+      ...signedIn,
+      "POST /api/v1/monitors": () =>
+        problem(422, "Validation failed", {
+          fieldErrors: [{ field: "http.headers[0].name", message: "cannot be set" }],
+        }),
+    });
+    renderApp("/monitors/new");
+    await userEvent.type(await screen.findByLabelText("Name"), "Site");
+    await userEvent.type(screen.getByLabelText("URL"), "example.com");
+    await userEvent.click(screen.getByRole("button", { name: "Add header" }));
+    await userEvent.type(screen.getByLabelText("Header 1 name"), "X-Api-Key");
+    await userEvent.type(screen.getByLabelText("Header 1 value"), "k");
+    await userEvent.click(screen.getByRole("button", { name: "Create monitor" }));
+    expect(await screen.findByText("Header 1: cannot be set")).toBeInTheDocument();
   });
 
   it("shows a server error about Slack under the Notify Slack choice", async () => {
@@ -760,7 +984,10 @@ describe("settings", () => {
     mockApi({ ...signedIn, "GET /api/v1/channels": () => json({ items: [] }) });
     renderApp("/settings");
     expect(await screen.findByText("Cannot load plan and usage")).toBeInTheDocument();
-    expect(screen.getByText(/No notification channels yet/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Notification channels" })).toHaveAttribute(
+      "href",
+      "/channels",
+    );
     expect(screen.getByText(/Signed in as/)).toHaveTextContent(
       "Signed in as admin. The password is managed outside the app.",
     );
@@ -784,13 +1011,54 @@ describe("settings", () => {
           ],
         }),
     });
-    renderApp("/settings");
+    renderApp("/channels");
     const oncall = await screen.findByRole("row", { name: /#on-call/ });
-    expect(oncall).toHaveTextContent("#on-callDown@hereEvery 1 hFailed");
+    expect(oncall).toHaveTextContent("#on-callSlackDown@hereEvery 1 hFailed");
     expect(screen.getByRole("row", { name: /#ops/ })).toHaveTextContent(
-      "#opsDown, Recovered, TLS certificate expiringNoneOffActive",
+      "#opsSlackDown, Recovered, TLS certificate expiringNoneOffActive",
     );
-    expect(screen.getByText(/refused by Slack/)).toBeInTheDocument();
+    expect(screen.getByText(/was refused by/)).toBeInTheDocument();
+  });
+
+  it("shows project-only maintainers an organization-wide channel without settings or actions", async () => {
+    mockApi({
+      "GET /api/v1/auth/me": () => json({ ...session, role: null }),
+      "GET /api/v1/projects": () =>
+        json({
+          items: [
+            {
+              id: "p-web",
+              name: "Web",
+              slug: "web",
+              isDefault: false,
+              allMembers: false,
+              role: "maintainer",
+              monitorCount: 0,
+              channelCount: 1,
+              createdAt: "2026-10-01T00:00:00Z",
+              updatedAt: "2026-10-01T00:00:00Z",
+            },
+          ],
+        }),
+      "GET /api/v1/channels": () =>
+        json({
+          items: [
+            channel({
+              id: "c-org",
+              projectId: null,
+              name: "#all-hands",
+              configHidden: true,
+              events: [],
+            }),
+            channel({ id: "c-web", projectId: "p-web", name: "#web" }),
+          ],
+        }),
+    });
+    renderApp("/channels");
+    const org = await screen.findByRole("row", { name: /#all-hands/ });
+    expect(org).toHaveTextContent("Settings are managed by the organization.");
+    expect(within(org).queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit #web" })).toBeInTheDocument();
   });
 
   it("adds a channel without showing the webhook again", async () => {
@@ -805,7 +1073,7 @@ describe("settings", () => {
         return json(items[0], 201);
       },
     });
-    renderApp("/settings");
+    renderApp("/channels");
     await userEvent.click(await screen.findByRole("button", { name: "Add channel" }));
     const url = screen.getByLabelText("Slack webhook URL");
     expect(url).toHaveAttribute("type", "text");
@@ -835,7 +1103,7 @@ describe("settings", () => {
 
   it("checks the form before sending it", async () => {
     const fetchMock = mockApi({ ...signedIn, "GET /api/v1/channels": () => json({ items: [] }) });
-    renderApp("/settings");
+    renderApp("/channels");
     await userEvent.click(await screen.findByRole("button", { name: "Add channel" }));
     await userEvent.type(screen.getByLabelText("Name"), "x");
     await userEvent.type(screen.getByLabelText("Slack webhook URL"), "https://example.com");
@@ -863,7 +1131,7 @@ describe("settings", () => {
           max: 1,
         }),
     });
-    const { queryClient } = renderApp("/settings");
+    const { queryClient } = renderApp("/channels");
     expect(await screen.findByRole("button", { name: "Add channel" })).toBeDisabled();
     expect(screen.getByText(/limit is reached/)).toBeInTheDocument();
 
@@ -896,7 +1164,7 @@ describe("settings", () => {
         return json(channel({ name: "#ops2" }));
       },
     });
-    renderApp("/settings");
+    renderApp("/channels");
     await userEvent.click(await screen.findByRole("button", { name: "Edit #ops" }));
     expect(screen.queryByLabelText(/webhook URL/)).not.toBeInTheDocument();
     expect(screen.getByText("Configured, hidden")).toBeInTheDocument();
@@ -922,7 +1190,7 @@ describe("settings", () => {
         return json(channel());
       },
     });
-    renderApp("/settings");
+    renderApp("/channels");
     await userEvent.click(await screen.findByRole("button", { name: "Edit #ops" }));
     await userEvent.click(screen.getByRole("button", { name: "Replace" }));
     const url = screen.getByLabelText("New Slack webhook URL");
@@ -944,7 +1212,7 @@ describe("settings", () => {
           ? problem(429, "Too many attempts", { detail: "Try again later." })
           : new Response(null, { status: 204 }),
     });
-    renderApp("/settings");
+    renderApp("/channels");
     await userEvent.click(
       await screen.findByRole("button", { name: "Send a test message to #ops" }),
     );
@@ -964,7 +1232,7 @@ describe("settings", () => {
         return new Response(null, { status: 204 });
       },
     });
-    renderApp("/settings");
+    renderApp("/channels");
     await userEvent.click(await screen.findByRole("button", { name: "Delete #ops" }));
     const dialog = screen.getByRole("dialog", { name: "Delete #ops?" });
     expect(dialog).toHaveTextContent(/notify every active channel/);
@@ -1241,6 +1509,7 @@ describe("watchdogs", () => {
         }),
         notificationsEnabled: true,
         channelIds: [],
+        location: { type: "cloud" },
       });
       expect(sent.body).not.toHaveProperty("projectId");
     });

@@ -308,3 +308,63 @@ func TestClassify(t *testing.T) {
 
 // Compile-time check that the implementation satisfies the seam.
 var _ Prober = (*HTTPSProber)(nil)
+
+func TestProbeSendsMethodHeadersAndBody(t *testing.T) {
+	type seen struct {
+		method, body, contentType, key, ua string
+	}
+	var got seen
+	s := newTLSServer(t, "site.test", time.Now().Add(time.Hour), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		buf := make([]byte, 64)
+		n, _ := r.Body.Read(buf)
+		got = seen{r.Method, string(buf[:n]), r.Header.Get("Content-Type"), r.Header.Get("X-Api-Key"), r.Header.Get("User-Agent")}
+		w.WriteHeader(200)
+	}))
+	p := NewHTTPSProber(routingClient(t, map[string]*tlsServer{"site.test": s}))
+
+	const ua = "Proreta/1 (+uptime check)"
+	cases := []struct {
+		name string
+		req  Request
+		want seen
+	}{
+		{"default", Request{}, seen{http.MethodGet, "", "", "", ua}},
+		{"head", Request{Method: http.MethodHead}, seen{http.MethodHead, "", "", "", ua}},
+		{"post json default", Request{Method: http.MethodPost, Body: []byte(`{"a":1}`)}, seen{http.MethodPost, `{"a":1}`, "application/json", "", ua}},
+		{"put with headers", Request{Method: http.MethodPut, Body: []byte("x=1"), Header: http.Header{"Content-Type": {"text/plain"}, "X-Api-Key": {"k"}}},
+			seen{http.MethodPut, "x=1", "text/plain", "k", ua}},
+		{"user agent override", Request{Header: http.Header{"User-Agent": {"mine/1"}}}, seen{http.MethodGet, "", "", "", "mine/1"}},
+		{"denied header dropped", Request{Header: http.Header{"Connection": {"close"}, "X-Api-Key": {"k"}}}, seen{http.MethodGet, "", "", "k", ua}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got = seen{}
+			tc.req.URL = "https://site.test/"
+			if r := p.Probe(context.Background(), tc.req); !r.OK {
+				t.Fatalf("result %+v", r)
+			}
+			if got != tc.want {
+				t.Fatalf("server saw %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDeniedHeader(t *testing.T) {
+	for _, n := range []string{"Host", "content-length", "Transfer-Encoding", "CONNECTION", "Upgrade", "TE", "Trailer", "Expect", "Proxy-Authorization", "proxy-x"} {
+		if !DeniedHeader(n) {
+			t.Errorf("%s should be denied", n)
+		}
+	}
+	for _, n := range []string{"Authorization", "Content-Type", "X-Api-Key", "User-Agent", "Accept"} {
+		if DeniedHeader(n) {
+			t.Errorf("%s should be allowed", n)
+		}
+	}
+}
+
+func TestClassifyCrossHostRedirect(t *testing.T) {
+	if k := classify(context.Background(), safehttp.ErrRedirectCrossHost); k != KindRedirect {
+		t.Fatalf("kind = %s", k)
+	}
+}

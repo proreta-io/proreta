@@ -20,6 +20,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/platform/db"
 	"github.com/proreta-io/proreta/backend/internal/platform/uuidv7"
 	"github.com/proreta-io/proreta/backend/internal/platform/validation"
+	"github.com/proreta-io/proreta/backend/internal/projects"
 	"github.com/proreta-io/proreta/backend/internal/tenants"
 )
 
@@ -49,25 +50,40 @@ var (
 	ErrAlreadyMember = errors.New("auth: already a member")
 )
 
-// Invitation is an invitation as admins see it; the token is never part of it.
+// Invitation is an invitation as maintainers see it; the token is never part of it. For a
+// project invitation Role is the role in the project, otherwise the organization role.
 type Invitation struct {
-	ID         uuid.UUID
-	Role       string
-	Label      string
-	Status     string
-	CreatedAt  time.Time
-	ExpiresAt  time.Time
-	CreatedBy  string
-	AcceptedBy *string
-	AcceptedAt *time.Time
-	RevokedAt  *time.Time
+	ID          uuid.UUID
+	Role        string
+	ProjectID   *uuid.UUID
+	ProjectName *string
+	Label       string
+	Status      string
+	CreatedAt   time.Time
+	ExpiresAt   time.Time
+	CreatedBy   string
+	AcceptedBy  *string
+	AcceptedAt  *time.Time
+	RevokedAt   *time.Time
 }
 
 // InvitationPreview is what the link page shows before accepting.
 type InvitationPreview struct {
 	OrganizationName string
-	Role             string
-	ExpiresAt        time.Time
+	// Role is the role in the project for a project invitation, otherwise the organization role.
+	Role        string
+	ProjectName *string
+	ExpiresAt   time.Time
+}
+
+// invitationState is invitationStatus for a listed invitation: one into a project that was deleted
+// since cannot be accepted any more and reads as revoked.
+func invitationState(now, expires time.Time, accepted, revoked *time.Time, projectDeleted bool) string {
+	st := invitationStatus(now, expires, accepted, revoked)
+	if st == InvitationOpen && projectDeleted {
+		return InvitationRevoked
+	}
+	return st
 }
 
 func invitationStatus(now, expires time.Time, accepted, revoked *time.Time) string {
@@ -86,6 +102,9 @@ func invitationStatus(now, expires time.Time, accepted, revoked *time.Time) stri
 type InvitationInput struct {
 	Role  string
 	Label string
+	// ProjectID makes it a project invitation: Role is then the role in that project and the
+	// person gets no organization role.
+	ProjectID *uuid.UUID
 	// Email, when set, is the address the link is also sent to. It is not stored and the
 	// invitation is not bound to it: the link stays a bearer secret that anyone holding it can
 	// use. Needs a tested mail server (a validation error on email otherwise).
@@ -95,7 +114,7 @@ type InvitationInput struct {
 	SendEmail *bool
 }
 
-// Limits on invitation emails, per organization and per api replica: an admin must not be able
+// Limits on invitation emails, per organization and per api replica: a maintainer must not be able
 // to turn Proreta into a mailer for strangers. Open invitations are also capped by max_members.
 const (
 	invitationMailsPerHour      = 30
@@ -106,7 +125,7 @@ const (
 // installation without email.
 const invitationMailDisabledMessage = "this installation does not send email"
 
-// CreateInvitation creates an invitation (admin or owner, role admin, member or viewer) and
+// CreateInvitation creates an invitation (maintainer or owner, role maintainer, member or viewer) and
 // returns it with its token, which is shown once and never stored (only its SHA-256). Open
 // invitations count toward max_members, checked under the tenant row lock. No email is sent.
 func (s *Service) CreateInvitation(ctx context.Context, a Actor, role, label string) (Invitation, string, error) {
@@ -117,7 +136,7 @@ func (s *Service) CreateInvitation(ctx context.Context, a Actor, role, label str
 // CreateInvitationFor is CreateInvitation with an optional address to send the link to. The
 // email is queued in the transaction that creates the invitation, so it exists exactly when the
 // invitation does; emailed reports whether one was queued. The answer still carries the token,
-// so the admin can hand the link over as before. When the label is empty and the address is
+// so the maintainer can hand the link over as before. When the label is empty and the address is
 // short enough, the address becomes the label, so the invitations list says who was invited.
 func (s *Service) CreateInvitationFor(ctx context.Context, a Actor, in InvitationInput) (inv Invitation, token string, emailed bool, err error) {
 	label := strings.TrimSpace(in.Label)
@@ -141,6 +160,9 @@ func (s *Service) CreateInvitationFor(ctx context.Context, a Actor, in Invitatio
 			to = addr
 		}
 	}
+	if in.ProjectID != nil && !authz.Valid(authz.Role(in.Role)) {
+		verr.Add("role", `must be "owner", "maintainer", "member" or "viewer"`)
+	}
 	if err := verr.Err(); err != nil {
 		return Invitation{}, "", false, err
 	}
@@ -156,18 +178,34 @@ func (s *Service) CreateInvitationFor(ctx context.Context, a Actor, in Invitatio
 		}
 	}
 	now := s.clock.Now()
-	inv = Invitation{ID: uuidv7.New(), Role: in.Role, Label: label, Status: InvitationOpen, CreatedAt: now, ExpiresAt: now.Add(InvitationTTL)}
+	inv = Invitation{ID: uuidv7.New(), Role: in.Role, ProjectID: in.ProjectID, Label: label, Status: InvitationOpen, CreatedAt: now, ExpiresAt: now.Add(InvitationTTL)}
 	err = db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
 		// CheckCreate takes the tenant row lock first, like every member change.
 		if err := plans.CheckCreate(ctx, tx, a.TenantID, plans.ResourceMember); err != nil {
 			return err
 		}
 		q := authdb.New(tx)
-		role, err := q.GetMembershipRole(ctx, authdb.GetMembershipRoleParams{TenantID: a.TenantID, UserID: a.UserID})
-		if err != nil {
-			return ErrUnauthenticated
+		role := authz.Owner
+		if !a.platform {
+			r, err := q.GetMembershipRole(ctx, authdb.GetMembershipRoleParams{TenantID: a.TenantID, UserID: a.UserID})
+			if err != nil {
+				return ErrUnauthenticated
+			}
+			role = authz.Role(r)
 		}
-		if !authz.CanInvite(authz.Actor{UserID: a.UserID, Role: authz.Role(role)}, authz.Role(inv.Role)) {
+		who := authz.Actor{UserID: a.UserID, Role: role}
+		var projectName string
+		if in.ProjectID != nil {
+			if !a.platform {
+				if who.Projects, err = projects.AccessIn(ctx, tx, a.TenantID, a.UserID); err != nil {
+					return err
+				}
+			}
+			if projectName, err = projects.CheckInvite(ctx, tx, a.TenantID, *in.ProjectID, who, authz.Role(inv.Role)); err != nil {
+				return err
+			}
+			inv.ProjectName = &projectName
+		} else if !authz.CanInvite(who, authz.Role(inv.Role)) {
 			return authz.ErrForbidden
 		}
 		u, err := q.GetUserByID(ctx, a.UserID)
@@ -177,11 +215,14 @@ func (s *Service) CreateInvitationFor(ctx context.Context, a Actor, in Invitatio
 		inv.CreatedBy = u.Email
 		if err := q.InsertInvitation(ctx, authdb.InsertInvitationParams{
 			ID: inv.ID, TenantID: a.TenantID, Role: inv.Role, Label: inv.Label, TokenHash: hashToken(token),
-			CreatedBy: a.UserID, CreatedAt: inv.CreatedAt, ExpiresAt: inv.ExpiresAt,
+			CreatedBy: a.UserID, CreatedAt: inv.CreatedAt, ExpiresAt: inv.ExpiresAt, ProjectID: in.ProjectID,
 		}); err != nil {
 			return fmt.Errorf("insert invitation: %w", err)
 		}
 		meta := map[string]any{"role": inv.Role, "expiresAt": inv.ExpiresAt.UTC().Format(time.RFC3339)}
+		if in.ProjectID != nil {
+			meta["projectId"] = in.ProjectID.String()
+		}
 		if to != "" {
 			t, err := tenants.Get(ctx, tx, a.TenantID)
 			if err != nil {
@@ -189,16 +230,25 @@ func (s *Service) CreateInvitationFor(ctx context.Context, a Actor, in Invitatio
 			}
 			// Only this organization's name and the inviter's display name go into the message:
 			// the inviter's login is an address and is not shared with the invitee.
+			params := map[string]string{"token": token, "org": t.Name, "role": inv.Role, "inviter": u.DisplayName, "expires": "7 days"}
+			if in.ProjectID != nil {
+				params["project"] = projectName
+			}
 			if err := s.mail.Enqueue(ctx, tx, mail.Request{
-				Kind: mail.KindInvitation, To: to, ExpiresAt: inv.ExpiresAt,
-				Params: map[string]string{"token": token, "org": t.Name, "role": inv.Role, "inviter": u.DisplayName, "expires": "7 days"},
+				Kind: mail.KindInvitation, To: to, ExpiresAt: inv.ExpiresAt, Params: params,
 			}); err != nil {
 				return err
 			}
 			meta["emailed"] = true
 		}
+		if a.platform {
+			meta = map[string]any{"role": inv.Role, "emailed": to != ""}
+			if in.ProjectID != nil {
+				meta["projectId"] = in.ProjectID.String()
+			}
+		}
 		return audit.Record(ctx, tx, audit.Entry{
-			TenantID: a.TenantID, ActorUserID: &a.UserID, Action: ActionMemberInvited,
+			TenantID: a.TenantID, ActorUserID: &a.UserID, Action: a.action(ActionMemberInvited),
 			EntityType: "invitation", EntityID: inv.ID.String(), IP: a.IP, Metadata: meta,
 		})
 	})
@@ -207,7 +257,8 @@ func (s *Service) CreateInvitationFor(ctx context.Context, a Actor, in Invitatio
 			s.refundInvitationMail(a.TenantID, to)
 		}
 		var limit *plans.LimitError
-		if errors.As(err, &limit) || errors.Is(err, authz.ErrForbidden) || errors.Is(err, ErrUnauthenticated) {
+		if errors.As(err, &limit) || errors.Is(err, authz.ErrForbidden) ||
+			errors.Is(err, authz.ErrProjectForbidden) || errors.Is(err, projects.ErrNotFound) || errors.Is(err, ErrUnauthenticated) {
 			return Invitation{}, "", false, err
 		}
 		return Invitation{}, "", false, fmt.Errorf("auth: create invitation: %w", err)
@@ -243,10 +294,21 @@ func (s *Service) refundInvitationMail(tenantID uuid.UUID, to string) {
 
 // ListInvitations returns the newest 200 invitations of the organization.
 func (s *Service) ListInvitations(ctx context.Context, tenantID uuid.UUID) ([]Invitation, error) {
+	return s.ListInvitationsIn(ctx, tenantID, authz.Scope{All: true}, nil)
+}
+
+// ListInvitationsIn returns the newest 200 invitations the scope covers: an organization-level
+// invitation belongs to no project and is listed only for Scope.All. only narrows the list to one
+// project.
+func (s *Service) ListInvitationsIn(ctx context.Context, tenantID uuid.UUID, scope authz.Scope, only *uuid.UUID) ([]Invitation, error) {
 	now := s.clock.Now()
 	var out []Invitation
+	ids := scope.IDs
+	if ids == nil {
+		ids = []uuid.UUID{}
+	}
 	err := db.WithTenantTx(ctx, s.pool, tenantID, func(tx pgx.Tx) error {
-		rows, err := authdb.New(tx).ListInvitations(ctx, tenantID)
+		rows, err := authdb.New(tx).ListInvitations(ctx, authdb.ListInvitationsParams{TenantID: tenantID, AllProjects: scope.All, ProjectIds: ids, OnlyProject: only})
 		if err != nil {
 			return err
 		}
@@ -254,7 +316,8 @@ func (s *Service) ListInvitations(ctx context.Context, tenantID uuid.UUID) ([]In
 		for i, r := range rows {
 			out[i] = Invitation{ID: r.ID, Role: r.Role, Label: r.Label, CreatedAt: r.CreatedAt, ExpiresAt: r.ExpiresAt,
 				CreatedBy: r.CreatedByLogin, AcceptedBy: r.AcceptedByLogin, AcceptedAt: r.AcceptedAt, RevokedAt: r.RevokedAt,
-				Status: invitationStatus(now, r.ExpiresAt, r.AcceptedAt, r.RevokedAt)}
+				ProjectID: r.ProjectID, ProjectName: r.ProjectName,
+				Status: invitationState(now, r.ExpiresAt, r.AcceptedAt, r.RevokedAt, r.ProjectDeleted)}
 		}
 		return nil
 	})
@@ -267,8 +330,15 @@ func (s *Service) ListInvitations(ctx context.Context, tenantID uuid.UUID) ([]In
 // RevokeInvitation stops an open invitation. Revoked and expired ones are left as they are; an
 // accepted one is ErrInvitationAccepted.
 func (s *Service) RevokeInvitation(ctx context.Context, a Actor, id uuid.UUID) error {
+	_, err := s.revokeInvitation(ctx, a, id)
+	return err
+}
+
+// revokeInvitation is RevokeInvitation that also reports whether an open invitation was revoked
+// (an audit row was written).
+func (s *Service) revokeInvitation(ctx context.Context, a Actor, id uuid.UUID) (revoked bool, err error) {
 	now := s.clock.Now()
-	err := db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
+	err = db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
 		q := authdb.New(tx)
 		inv, err := q.LockInvitation(ctx, authdb.LockInvitationParams{TenantID: a.TenantID, ID: id})
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -276,6 +346,9 @@ func (s *Service) RevokeInvitation(ctx context.Context, a Actor, id uuid.UUID) e
 		}
 		if err != nil {
 			return fmt.Errorf("lock invitation: %w", err)
+		}
+		if err := s.canRevoke(ctx, tx, a, inv.ProjectID, inv.Role); err != nil {
+			return err
 		}
 		switch invitationStatus(now, inv.ExpiresAt, inv.AcceptedAt, inv.RevokedAt) {
 		case InvitationAccepted:
@@ -286,22 +359,73 @@ func (s *Service) RevokeInvitation(ctx context.Context, a Actor, id uuid.UUID) e
 		if _, err := q.RevokeInvitation(ctx, authdb.RevokeInvitationParams{TenantID: a.TenantID, ID: id, Now: &now}); err != nil {
 			return fmt.Errorf("revoke invitation: %w", err)
 		}
+		revoked = true
 		return audit.Record(ctx, tx, audit.Entry{
-			TenantID: a.TenantID, ActorUserID: &a.UserID, Action: ActionInvitationRevoked,
+			TenantID: a.TenantID, ActorUserID: &a.UserID, Action: a.action(ActionInvitationRevoked),
 			EntityType: "invitation", EntityID: id.String(), IP: a.IP,
-			Metadata: map[string]any{"role": inv.Role},
+			Metadata: invitationMeta(inv.Role, inv.ProjectID),
 		})
 	})
-	if err != nil && !errors.Is(err, ErrInvitationNotFound) && !errors.Is(err, ErrInvitationAccepted) {
-		return fmt.Errorf("auth: revoke invitation: %w", err)
+	if err != nil && !errors.Is(err, authz.ErrForbidden) && !errors.Is(err, ErrInvitationNotFound) && !errors.Is(err, ErrInvitationAccepted) {
+		return false, fmt.Errorf("auth: revoke invitation: %w", err)
 	}
-	return err
+	return revoked && err == nil, err
+}
+
+func invitationMeta(role string, project *uuid.UUID) map[string]any {
+	meta := map[string]any{"role": role}
+	if project != nil {
+		meta["projectId"] = project.String()
+	}
+	return meta
+}
+
+// canRevoke applies the scope of the people lists to one invitation: an organization-level
+// invitation is for organization owners and maintainers, a project one for those who manage the
+// project's people and hold at least the invited role there. An invitation outside the actor's
+// scope is ErrInvitationNotFound, like an unknown id.
+func (s *Service) canRevoke(ctx context.Context, tx pgx.Tx, a Actor, project *uuid.UUID, role string) error {
+	if a.platform {
+		return nil
+	}
+	who, err := lockActorRoleOnly(ctx, tx, a)
+	if err != nil {
+		return err
+	}
+	if project == nil {
+		if !who.Role.AtLeast(authz.Maintainer) {
+			return ErrInvitationNotFound
+		}
+		return nil
+	}
+	if who.Projects, err = projects.AccessIn(ctx, tx, a.TenantID, a.UserID); err != nil {
+		return err
+	}
+	if !who.CanIn(*project, "project.members.manage") {
+		return ErrInvitationNotFound
+	}
+	if !authz.CanManageIn(who, *project, "", authz.Role(role)) {
+		return authz.ErrForbidden
+	}
+	return nil
+}
+
+func lockActorRoleOnly(ctx context.Context, tx pgx.Tx, a Actor) (authz.Actor, error) {
+	role, err := authdb.New(tx).GetMembershipRole(ctx, authdb.GetMembershipRoleParams{TenantID: a.TenantID, UserID: a.UserID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return authz.Actor{}, ErrUnauthenticated
+	}
+	if err != nil {
+		return authz.Actor{}, fmt.Errorf("get actor role: %w", err)
+	}
+	return authz.Actor{UserID: a.UserID, Role: authz.Role(role)}, nil
 }
 
 // invitationTarget is an open invitation found by its token before the tenant is known.
 type invitationTarget struct {
 	invitationID uuid.UUID
 	tenantID     uuid.UUID
+	projectID    *uuid.UUID
 	preview      InvitationPreview
 }
 
@@ -319,8 +443,8 @@ func (s *Service) lookupInvitation(ctx context.Context, token string) (invitatio
 func (s *Service) lookupInvitationHash(ctx context.Context, tokenHash []byte) (invitationTarget, error) {
 	var t invitationTarget
 	err := db.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT invitation_id, tenant_id, tenant_name, role, expires_at FROM auth_invitation_lookup($1)`,
-			tokenHash).Scan(&t.invitationID, &t.tenantID, &t.preview.OrganizationName, &t.preview.Role, &t.preview.ExpiresAt)
+		return tx.QueryRow(ctx, `SELECT invitation_id, tenant_id, tenant_name, role, expires_at, project_id, project_name FROM auth_invitation_lookup($1)`,
+			tokenHash).Scan(&t.invitationID, &t.tenantID, &t.preview.OrganizationName, &t.preview.Role, &t.preview.ExpiresAt, &t.projectID, &t.preview.ProjectName)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return invitationTarget{}, ErrInvitationInvalid
@@ -368,9 +492,15 @@ func (s *Service) CheckInvitation(ctx context.Context, token string, ip netip.Ad
 
 // joinInvited adds userID to the invitation's organization inside tx (a transaction bound to
 // that tenant): tenant row lock, the invitation locked and re-checked, the member quota, the
-// membership, the invitation marked used and the audit row, all at once.
+// membership, the invitation marked used and the audit row, all at once. It returns the person's
+// organization role afterwards, empty for a person who belongs through projects only.
+//
+// An organization invitation gives the invited organization role and is refused for a person who
+// already belongs (ErrAlreadyMember). A project invitation gives no organization role: a new
+// person joins with none, a person who already belongs keeps what they have, and either gets the
+// invited role in the project unless they hold an equal or higher one there.
 func (s *Service) joinInvited(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID, tokenHash []byte, ip netip.Addr) (string, error) {
-	if err := plans.CheckJoin(ctx, tx, tenantID, plans.ResourceMember); err != nil {
+	if err := plans.Lock(ctx, tx, tenantID); err != nil {
 		if errors.Is(err, tenants.ErrNotFound) {
 			return "", ErrInvitationInvalid
 		}
@@ -394,25 +524,51 @@ func (s *Service) joinInvited(ctx context.Context, tx pgx.Tx, tenantID, userID u
 	if invitationStatus(now, inv.ExpiresAt, inv.AcceptedAt, inv.RevokedAt) != InvitationOpen {
 		return "", ErrInvitationInvalid
 	}
-	if _, err := q.GetMembershipRole(ctx, authdb.GetMembershipRoleParams{TenantID: tenantID, UserID: userID}); err == nil {
-		return "", ErrAlreadyMember
-	} else if !errors.Is(err, pgx.ErrNoRows) {
+	current, err := q.GetMembershipRole(ctx, authdb.GetMembershipRoleParams{TenantID: tenantID, UserID: userID})
+	member := err == nil
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return "", fmt.Errorf("get membership: %w", err)
 	}
-	if err := q.InsertMembership(ctx, authdb.InsertMembershipParams{TenantID: tenantID, UserID: userID, Role: inv.Role}); err != nil {
-		return "", fmt.Errorf("insert membership: %w", err)
+	if member && inv.ProjectID == nil {
+		return "", ErrAlreadyMember
+	}
+	// A person who already belongs takes no new place, whatever the plan limit says now.
+	if !member {
+		if err := plans.CheckJoin(ctx, tx, tenantID, plans.ResourceMember); err != nil {
+			return "", err
+		}
+		orgRole := inv.Role
+		if inv.ProjectID != nil {
+			orgRole = ""
+		}
+		if err := q.InsertMembership(ctx, authdb.InsertMembershipParams{TenantID: tenantID, UserID: userID, Role: orgRole}); err != nil {
+			return "", fmt.Errorf("insert membership: %w", err)
+		}
+		current = orgRole
+	}
+	meta := invitationMeta(inv.Role, inv.ProjectID)
+	meta["invitationId"] = inv.ID.String()
+	if inv.ProjectID != nil {
+		granted, err := projects.Join(ctx, tx, tenantID, *inv.ProjectID, userID, authz.Role(inv.Role))
+		if errors.Is(err, projects.ErrNotFound) {
+			return "", ErrInvitationInvalid
+		}
+		if err != nil {
+			return "", err
+		}
+		meta["existingMember"] = member
+		meta["granted"] = granted
 	}
 	if n, err := q.MarkInvitationAccepted(ctx, authdb.MarkInvitationAcceptedParams{TenantID: tenantID, ID: inv.ID, Now: &now, UserID: &userID}); err != nil || n != 1 {
 		return "", fmt.Errorf("mark invitation accepted (%d): %w", n, err)
 	}
 	if err := audit.Record(ctx, tx, audit.Entry{
 		TenantID: tenantID, ActorUserID: &userID, Action: ActionMemberJoined,
-		EntityType: "user", EntityID: userID.String(), IP: ip,
-		Metadata: map[string]any{"invitationId": inv.ID.String(), "role": inv.Role},
+		EntityType: "user", EntityID: userID.String(), IP: ip, Metadata: meta,
 	}); err != nil {
 		return "", err
 	}
-	return inv.Role, nil
+	return current, nil
 }
 
 // AcceptInvitation makes the logged-in user a member of the inviting organization and switches
@@ -434,7 +590,7 @@ func (s *Service) AcceptInvitation(ctx context.Context, p Principal, token strin
 		if err != nil || u.Status != userStatusActive {
 			return ErrUnauthenticated
 		}
-		if u.IsPlatformAdmin {
+		if u.IsSystemAdmin {
 			// BootstrapAdmin refuses to start when the admin belongs to another tenant.
 			return ErrAlreadyMember
 		}

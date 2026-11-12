@@ -1,5 +1,11 @@
 import { ApiError, errorMessage } from "../api/client";
-import type { Channel, MonitorCreate, MonitorDetail, MonitorUpdate } from "../api/endpoints";
+import type {
+  Channel,
+  MonitorCreate,
+  MonitorDetail,
+  MonitorLocationInput,
+  MonitorUpdate,
+} from "../api/endpoints";
 import { formatDuration } from "./format";
 import {
   DEFAULT_GRACE,
@@ -9,7 +15,29 @@ import {
   INTERVAL_MIN,
 } from "./heartbeat";
 
-export type MonitorKind = "http" | "heartbeat";
+export type MonitorKind = "http" | "tcp" | "heartbeat";
+
+export const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] as const;
+export type Method = (typeof METHODS)[number];
+/** Methods that may carry a body; the others are read-only by convention. */
+export const BODY_METHODS: readonly Method[] = ["POST", "PUT", "PATCH", "DELETE"];
+export const isSafeMethod = (m: Method) => m === "GET" || m === "HEAD";
+export const MAX_HEADERS = 10;
+export const BODY_MAX_BYTES = 64 * 1024;
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+const DENIED_HEADER =
+  /^(host|content-length|transfer-encoding|connection|upgrade|te|trailer|expect|proxy-.*)$/i;
+
+/**
+ * One custom header row. A stored header keeps its secret value on the server: its `value` stays
+ * empty unless the user types a new one.
+ */
+export interface HeaderRow {
+  name: string;
+  value: string;
+  /** The monitor already has a value stored for this header name. */
+  stored: boolean;
+}
 
 export interface MonitorFormValues {
   type: MonitorKind;
@@ -17,12 +45,24 @@ export interface MonitorFormValues {
   url: string;
   expectedMode: "2xx" | "exact";
   expectedCode: string;
+  method: Method;
+  headers: HeaderRow[];
+  /** The request body as typed; only sent when `bodyDirty`. */
+  body: string;
+  /** The monitor stores a body (hidden); it is kept unless `bodyDirty`. */
+  bodyStored: boolean;
+  bodyDirty: boolean;
   failureThreshold: number;
   notificationsEnabled: boolean;
   /** Selected notification channels; none means the active channels of the project. */
   channelIds: string[];
   /** The monitor's project; empty lets the server use the Default project. */
   projectId: string;
+  /** The Specula the monitor runs at; empty runs it from Proreta's own worker. */
+  speculaId: string;
+  /** TCP fields, as typed: the host (no scheme or port) and the port number. */
+  host: string;
+  port: string;
   /** Heartbeat fields, as typed (seconds). */
   expectedIntervalSeconds: string;
   graceSeconds: string;
@@ -33,10 +73,16 @@ export const formFields = [
   "name",
   "url",
   "expectedStatus",
+  "method",
+  "headers",
+  "body",
   "failureThreshold",
   "notificationsEnabled",
   "channelIds",
   "projectId",
+  "speculaId",
+  "host",
+  "port",
   "expectedIntervalSeconds",
   "graceSeconds",
 ] as const;
@@ -46,8 +92,15 @@ export type MonitorFormErrors = Partial<Record<FormField, string>>;
 /** The form field of a server field error; the type's settings are in `http` and `heartbeat`. */
 const serverFields: Record<string, FormField> = {
   "http.url": "url",
+  "location.speculaId": "speculaId",
   "http.expectedStatus": "expectedStatus",
+  "http.method": "method",
+  "http.headers": "headers",
+  "http.body": "body",
   "http.failureThreshold": "failureThreshold",
+  "tcp.host": "host",
+  "tcp.port": "port",
+  "tcp.failureThreshold": "failureThreshold",
   "heartbeat.expectedIntervalSeconds": "expectedIntervalSeconds",
   "heartbeat.graceSeconds": "graceSeconds",
 };
@@ -65,10 +118,18 @@ export const emptyMonitorForm: MonitorFormValues = {
   url: "",
   expectedMode: "2xx",
   expectedCode: "200",
+  method: "GET",
+  headers: [],
+  body: "",
+  bodyStored: false,
+  bodyDirty: false,
   failureThreshold: 2,
   notificationsEnabled: true,
   channelIds: [],
   projectId: "",
+  speculaId: "",
+  host: "",
+  port: "",
   expectedIntervalSeconds: String(DEFAULT_INTERVAL),
   graceSeconds: String(DEFAULT_GRACE),
 };
@@ -82,10 +143,19 @@ export function valuesFromMonitor(m: MonitorDetail): MonitorFormValues {
     url: m.http?.url ?? "",
     expectedMode: exact ? "exact" : "2xx",
     expectedCode: exact ? expected : "200",
-    failureThreshold: m.http?.failureThreshold ?? emptyMonitorForm.failureThreshold,
+    method: m.http?.method ?? "GET",
+    headers: (m.http?.headerNames ?? []).map((name) => ({ name, value: "", stored: true })),
+    body: "",
+    bodyStored: m.http?.bodySet ?? false,
+    bodyDirty: false,
+    failureThreshold:
+      m.http?.failureThreshold ?? m.tcp?.failureThreshold ?? emptyMonitorForm.failureThreshold,
     notificationsEnabled: m.notificationsEnabled,
     channelIds: m.channelIds,
     projectId: m.projectId,
+    speculaId: m.location?.speculaId ?? "",
+    host: m.tcp?.host ?? "",
+    port: m.tcp ? String(m.tcp.port) : "",
     expectedIntervalSeconds: String(m.heartbeat?.expectedIntervalSeconds ?? DEFAULT_INTERVAL),
     graceSeconds: String(m.heartbeat?.graceSeconds ?? DEFAULT_GRACE),
   };
@@ -112,8 +182,11 @@ function seconds(raw: string, min: number, max: number): number | undefined {
   return n >= min && n <= max ? n : undefined;
 }
 
-/** Mirrors the server's URL policy that can be checked without DNS: https, no credentials, port 443. */
-export function validateMonitorUrl(raw: string): string | undefined {
+/**
+ * Mirrors the server's URL policy that can be checked without DNS. From Proreta's own worker:
+ * https, no credentials, port 443. At a Specula, inside your network: http or https, any port.
+ */
+export function validateMonitorUrl(raw: string, specula = false): string | undefined {
   const value = raw.trim();
   if (!value) return "Enter a URL.";
   if (value.length > URL_MAX) return `Use ${URL_MAX} characters or fewer.`;
@@ -123,12 +196,32 @@ export function validateMonitorUrl(raw: string): string | undefined {
   } catch {
     return "Enter a full URL, such as https://example.com/health.";
   }
-  if (url.protocol !== "https:") return "Use an https:// URL.";
+  if (specula) {
+    if (url.protocol !== "https:" && url.protocol !== "http:")
+      return "Use an http:// or https:// URL.";
+  } else if (url.protocol !== "https:") return "Use an https:// URL.";
   if (!url.hostname) return "Enter a host name.";
   if (url.username || url.password) return "Remove the user name and password from the URL.";
   // URL drops the default port, so any remaining port is not 443.
-  if (url.port !== "") return "Only port 443 is allowed.";
+  if (!specula && url.port !== "") return "Only port 443 is allowed.";
   return undefined;
+}
+
+export const HOST_MAX = 255;
+
+/** A host name or IP address on its own; the server applies the rules of the location. */
+export function validateHost(raw: string): string | undefined {
+  const value = raw.trim();
+  if (!value) return "Enter a host name or an IP address.";
+  if (value.length > HOST_MAX) return `Use ${HOST_MAX} characters or fewer.`;
+  if (/[/?#@\s]/.test(value)) return "Enter only the host: no http://, path, user name or spaces.";
+  return undefined;
+}
+
+/** A whole port number from 1 to 65535. */
+export function validatePort(raw: string): string | undefined {
+  const n = /^[0-9]+$/.test(raw.trim()) ? Number(raw.trim()) : 0;
+  return n >= 1 && n <= 65535 ? undefined : "Enter a port from 1 to 65535.";
 }
 
 export function validateMonitorForm(v: MonitorFormValues): MonitorFormErrors {
@@ -145,7 +238,17 @@ export function validateMonitorForm(v: MonitorFormValues): MonitorFormErrors {
     }
     return errors;
   }
-  const urlError = validateMonitorUrl(v.url);
+  if (v.type === "tcp") {
+    const hostError = validateHost(v.host);
+    if (hostError) errors.host = hostError;
+    const portError = validatePort(v.port);
+    if (portError) errors.port = portError;
+    if (![1, 2, 3].includes(v.failureThreshold)) {
+      errors.failureThreshold = "Choose 1, 2 or 3 failed checks.";
+    }
+    return errors;
+  }
+  const urlError = validateMonitorUrl(v.url, v.speculaId !== "");
   if (urlError) errors.url = urlError;
   if (v.expectedMode === "exact" && !EXPECTED_STATUS_PATTERN.test(v.expectedCode.trim())) {
     errors.expectedStatus = EXPECTED_STATUS_MESSAGE;
@@ -153,13 +256,53 @@ export function validateMonitorForm(v: MonitorFormValues): MonitorFormErrors {
   if (![1, 2, 3].includes(v.failureThreshold)) {
     errors.failureThreshold = "Choose 1, 2 or 3 failed checks.";
   }
+  const headersError = validateHeaders(v.headers);
+  if (headersError) errors.headers = headersError;
+  const allowsBody = BODY_METHODS.includes(v.method);
+  if (!allowsBody && (v.bodyDirty ? v.body !== "" : v.bodyStored || v.body !== "")) {
+    errors.body = `A ${v.method} request cannot have a body. Choose another method or remove the body.`;
+  } else if (new TextEncoder().encode(v.body).length > BODY_MAX_BYTES) {
+    errors.body = "Use 64 KiB or less.";
+  }
   return errors;
+}
+
+/** Mirrors the server's header rules that can be checked without it. */
+export function validateHeaders(rows: HeaderRow[]): string | undefined {
+  if (rows.length > MAX_HEADERS) return `Use at most ${MAX_HEADERS} headers.`;
+  const seen = new Set<string>();
+  for (const [i, r] of rows.entries()) {
+    const name = r.name.trim();
+    const n = i + 1;
+    if (!name || name.length > 64 || !HEADER_NAME.test(name)) {
+      return `Header ${n}: enter a valid header name, such as Authorization.`;
+    }
+    if (DENIED_HEADER.test(name)) return `Header ${n}: ${name} cannot be set.`;
+    if (seen.has(name.toLowerCase())) return `Header ${n}: ${name} is already set.`;
+    seen.add(name.toLowerCase());
+    if (!r.stored && r.value === "") return `Header ${n}: enter a value.`;
+    if (r.value.length > 2048) return `Header ${n}: use 2048 characters or fewer for the value.`;
+    // eslint-disable-next-line no-control-regex -- the server refuses control characters in values.
+    if (/[\u0000-\u0008\u000a-\u001f\u007f]/.test(r.value)) {
+      return `Header ${n}: the value must not contain line breaks or control characters.`;
+    }
+  }
+  return undefined;
 }
 
 /** The settings sub-object of the form's type, as create and PATCH send it. */
 function settings(
   v: MonitorFormValues,
-): Pick<MonitorCreate, "http"> | Pick<MonitorCreate, "heartbeat"> {
+): Pick<MonitorCreate, "http"> | Pick<MonitorCreate, "tcp"> | Pick<MonitorCreate, "heartbeat"> {
+  if (v.type === "tcp") {
+    return {
+      tcp: {
+        host: v.host.trim(),
+        port: Number(v.port.trim()),
+        failureThreshold: v.failureThreshold,
+      },
+    };
+  }
   if (v.type === "heartbeat") {
     return {
       heartbeat: {
@@ -168,14 +311,27 @@ function settings(
       },
     };
   }
+  const send: Pick<NonNullable<MonitorCreate["http"]>, "method" | "headers" | "body"> = {
+    method: v.method,
+    headers: v.headers.map((h) => {
+      const name = h.name.trim();
+      // A stored header with no new value keeps what the server has.
+      return h.stored && h.value === "" ? { name } : { name, value: h.value };
+    }),
+  };
+  if (v.bodyDirty || (!v.bodyStored && v.body !== "")) send.body = v.body;
   return {
     http: {
       url: v.url.trim(),
       expectedStatus: v.expectedMode === "2xx" ? "2xx" : v.expectedCode.trim(),
       failureThreshold: v.failureThreshold,
+      ...send,
     },
   };
 }
+
+const locationOf = (v: MonitorFormValues): MonitorLocationInput =>
+  v.speculaId ? { type: "specula", speculaId: v.speculaId } : { type: "cloud" };
 
 /** The PATCH body: every field of the form, the settings in the sub-object of the type. */
 export function toMonitorRequest(v: MonitorFormValues): MonitorUpdate {
@@ -184,6 +340,8 @@ export function toMonitorRequest(v: MonitorFormValues): MonitorUpdate {
     notificationsEnabled: v.notificationsEnabled,
     channelIds: v.channelIds,
     ...(v.projectId ? { projectId: v.projectId } : {}),
+    // Heartbeats have no location.
+    ...(v.type !== "heartbeat" ? { location: locationOf(v) } : {}),
     ...settings(v),
   };
 }
@@ -212,6 +370,7 @@ export function toCreateRequest(v: MonitorFormValues): MonitorCreate {
     notificationsEnabled: v.notificationsEnabled,
     channelIds: v.channelIds,
     ...(v.projectId ? { projectId: v.projectId } : {}),
+    ...(v.type !== "heartbeat" && v.speculaId ? { location: locationOf(v) } : {}),
     ...settings(v),
   };
 }
@@ -228,6 +387,11 @@ export function mapServerErrors(err: unknown): {
   const fields: MonitorFormErrors = {};
   const other: string[] = [];
   for (const fe of err.fieldErrors) {
+    const header = /^http\.headers\[(\d+)\]\.(name|value)$/.exec(fe.field);
+    if (header) {
+      fields.headers ??= `Header ${Number(header[1]) + 1}: ${fe.message}`;
+      continue;
+    }
     const field = Object.hasOwn(serverFields, fe.field)
       ? serverFields[fe.field]
       : formFields.find((f) => f === fe.field);
@@ -275,10 +439,26 @@ export function describeSetup(v: MonitorFormValues): { text: string; blank?: boo
           ]),
     ];
   }
+  if (v.type === "tcp") {
+    const host = v.host.trim();
+    const port = v.port.trim();
+    return [
+      { text: "Connects to " },
+      host && port ? { text: `${host}:${port}` } : { text: "your host and port", blank: true },
+      { text: " every minute" },
+      { text: slack ? " and alerts Slack after " : " and marks it down after " },
+      {
+        text:
+          v.failureThreshold === 1
+            ? "the first failure."
+            : `${v.failureThreshold} failures in a row.`,
+      },
+    ];
+  }
   const host = withoutHttps(v.url.trim()).replace(/\/$/, "");
   const exact = v.expectedMode === "exact";
   return [
-    { text: "Checks " },
+    { text: v.method === "GET" ? "Checks " : `Sends ${v.method} to ` },
     host ? { text: host } : { text: "your URL", blank: true },
     { text: " every minute" },
     ...(exact

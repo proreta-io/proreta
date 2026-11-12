@@ -135,14 +135,25 @@ type Lease struct {
 // Job is a claimed check with what is needed to run it.
 type Job struct {
 	Lease
-	URL              string
-	ExpectedStatus   string
+	URL            string
+	ExpectedStatus string
+	// Method is the HTTP method (GET when the monitor sets none). Request is the sealed headers
+	// and body, empty when there are none; only a holder of the request keyring can open it.
+	Method  string
+	Request string
+	// Type is the monitor type; a tcp job has Host and Port and no URL.
+	Type             string
+	Host             string
+	Port             int
 	FailureThreshold int
 	Interval         time.Duration
 	Timeout          time.Duration
 	// NextRunAt is when the job was due; now minus NextRunAt is the scheduler lag.
 	NextRunAt time.Time
 }
+
+// TCP reports whether the job is a TCP check.
+func (j Job) TCP() bool { return j.Type == "tcp" }
 
 // Claim leases up to n due jobs of location (a probe_locations code) across all active tenants
 // through claim_due_monitors (a SECURITY DEFINER function, so it runs outside a tenant
@@ -151,7 +162,7 @@ func (s *Service) Claim(ctx context.Context, pool *db.Pool, n int, location stri
 	var jobs []Job
 	err := db.WithTx(ctx, pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT tenant_id, monitor_id, location_id, lease_token, lease_until, url, expected_status,
-			failure_threshold, interval_seconds, timeout_seconds, next_run_at FROM claim_due_monitors($1, $2)`, n, location)
+			failure_threshold, interval_seconds, timeout_seconds, next_run_at, method, request, monitor_type, host, port FROM claim_due_monitors($1, $2)`, n, location)
 		if err != nil {
 			return err
 		}
@@ -159,7 +170,7 @@ func (s *Service) Claim(ctx context.Context, pool *db.Pool, n int, location stri
 			var j Job
 			var interval, timeout int32
 			err := r.Scan(&j.TenantID, &j.MonitorID, &j.LocationID, &j.Token, &j.Until, &j.URL, &j.ExpectedStatus,
-				&j.FailureThreshold, &interval, &timeout, &j.NextRunAt)
+				&j.FailureThreshold, &interval, &timeout, &j.NextRunAt, &j.Method, &j.Request, &j.Type, &j.Host, &j.Port)
 			j.Interval, j.Timeout = time.Duration(interval)*time.Second, time.Duration(timeout)*time.Second
 			return j, err
 		})

@@ -113,3 +113,33 @@ func (s *server) AdminSendTestEmail(ctx context.Context, req gen.AdminSendTestEm
 	}
 	return gen.AdminSendTestEmail202JSONResponse(toAdminEmailSettings(e)), nil
 }
+
+func toAdminRegistration(r admin.RegistrationSettings) gen.AdminRegistrationSettings {
+	return gen.AdminRegistrationSettings{
+		Effective: r.Effective, Source: gen.AdminRegistrationSettingsSource(r.Source), EnvironmentValue: r.EnvironmentValue, UpdatedAt: r.UpdatedAt,
+	}
+}
+
+func (s *server) AdminGetRegistration(ctx context.Context, _ gen.AdminGetRegistrationRequestObject) (gen.AdminGetRegistrationResponseObject, error) {
+	a, err := s.adminActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	r, err := s.admin.Registration(ctx, a)
+	if err != nil {
+		return nil, err
+	}
+	return gen.AdminGetRegistration200JSONResponse(toAdminRegistration(r)), nil
+}
+
+func (s *server) AdminUpdateRegistration(ctx context.Context, req gen.AdminUpdateRegistrationRequestObject) (gen.AdminUpdateRegistrationResponseObject, error) {
+	a, err := s.adminActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	r, err := s.admin.SetRegistration(ctx, a, req.Body.Enabled)
+	if err != nil {
+		return nil, err
+	}
+	return gen.AdminUpdateRegistration200JSONResponse(toAdminRegistration(r)), nil
+}

@@ -18,6 +18,7 @@ import (
 var adminDefiners = []string{
 	"auth_sync_platform_admin", "admin_list_tenants", "admin_get_tenant", "admin_set_tenant_plan",
 	"admin_set_tenant_status", "admin_delete_tenant", "admin_list_users", "admin_reset_user_password", "admin_stats",
+	"admin_list_all_users", "admin_get_user", "admin_list_user_memberships", "admin_set_user_status", "admin_revoke_user_sessions", "admin_set_platform_admin",
 }
 
 const (
@@ -47,8 +48,8 @@ func seedPlatform(t *testing.T, admin *pgx.Conn) {
 			('`+tenantDef+`', 'default', 'Default', 'internal', now() - interval '3 days'),
 			('`+tenantA+`', 't-aaaa', 'Alpha Corp', 'free', now() - interval '2 days'),
 			('`+tenantB+`', 't-bbbb', 'Beta Ltd', 'free', now() - interval '1 day')`,
-		`INSERT INTO users (id, email, is_platform_admin) VALUES
-			('`+userPlatform+`', 'admin', true), ('`+userOwnerA+`', 'alice@alpha.example', false), ('`+userOwnerB+`', 'bob@beta.example', false)`,
+		`INSERT INTO users (id, email, is_platform_admin, is_system_admin) VALUES
+			('`+userPlatform+`', 'admin', true, true), ('`+userOwnerA+`', 'alice@alpha.example', false, false), ('`+userOwnerB+`', 'bob@beta.example', false, false)`,
 		`INSERT INTO memberships (tenant_id, user_id, role) VALUES
 			('`+tenantDef+`', '`+userPlatform+`', 'owner'), ('`+tenantA+`', '`+userOwnerA+`', 'owner'), ('`+tenantB+`', '`+userOwnerB+`', 'owner')`,
 		`INSERT INTO sessions (id, user_id, tenant_id, token_hash, csrf_token, expires_at)
@@ -68,12 +69,13 @@ func TestIntegrationPlatformAdminGrants(t *testing.T) {
 	admin := env.AdminConn(t)
 	api := env.Conn(t, env.APIURL)
 	seedPlatform(t, admin)
-	pgtest.MustExec(t, admin, `UPDATE users SET is_platform_admin = false`)
+	pgtest.MustExec(t, admin, `UPDATE users SET is_platform_admin = false, is_system_admin = false`)
 
 	for _, stmt := range []string{
 		`INSERT INTO users (id, email, is_platform_admin) VALUES (gen_random_uuid(), 'x@example.com', true)`,
 		`INSERT INTO users (id, email, status) VALUES (gen_random_uuid(), 'y@example.com', 'active')`,
 		`UPDATE users SET is_platform_admin = true WHERE id = '` + userOwnerA + `'`,
+		`UPDATE users SET is_system_admin = true WHERE id = '` + userOwnerA + `'`,
 	} {
 		if _, err := api.Exec(ctx, stmt); err == nil || !strings.Contains(err.Error(), "permission denied") {
 			t.Errorf("%s: err = %v, want permission denied", stmt, err)
@@ -141,6 +143,7 @@ func TestIntegrationPlatformAdminGrants(t *testing.T) {
 	// The internal helpers are not callable by the runtime roles at all.
 	for _, stmt := range []string{
 		`SELECT admin_require_platform_admin('` + userPlatform + `')`,
+		`SELECT admin_user_audit_tenant('` + userOwnerA + `')`,
 		`SELECT admin_audit('` + tenantA + `', NULL, gen_random_uuid(), 'x', 'x', NULL, '{}', NULL)`,
 	} {
 		for _, url := range []string{env.APIURL, env.WorkerURL} {

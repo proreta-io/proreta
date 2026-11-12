@@ -22,7 +22,8 @@ config:
   # Self-service registration of new organizations. Not needed when one organization is enough:
   # the platform admin owns the "default" organization and invites colleagues by link.
   registrationEnabled: false
-  # Number of trusted proxies in front of the api (the Gateway below is one); 0 without a proxy.
+  # Number of trusted proxies in front of the api (the Gateway below is one; this is the chart's
+  # default); 0 without a proxy.
   trustedProxyHops: 1
 
 httpRoute:

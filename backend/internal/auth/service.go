@@ -28,10 +28,10 @@ import (
 
 // Roles of a membership.
 const (
-	RoleOwner  = "owner"
-	RoleAdmin  = "admin"
-	RoleMember = "member"
-	RoleViewer = "viewer"
+	RoleOwner      = "owner"
+	RoleMaintainer = "maintainer"
+	RoleMember     = "member"
+	RoleViewer     = "viewer"
 )
 
 // Audit actions written by this module.
@@ -365,9 +365,9 @@ func revokeUserSessions(ctx context.Context, tx pgx.Tx, userID uuid.UUID) (int, 
 	return n, err
 }
 
-// syncPlatformAdmin makes the configured admin the only platform admin (auth_sync_platform_admin):
-// its flag is set at every start and cleared for everyone else, a retired previous
-// admin included. No API changes the flag.
+// syncPlatformAdmin makes the configured admin the system admin (auth_sync_platform_admin): its
+// flags are set at every start and cleared for a retired previous system admin. Platform admins
+// granted on the user page keep their flag.
 func (s *Service) syncPlatformAdmin(ctx context.Context, tx pgx.Tx, adminID uuid.UUID) error {
 	var n int
 	if err := tx.QueryRow(ctx, `SELECT auth_sync_platform_admin($1)`, adminID).Scan(&n); err != nil {
@@ -418,8 +418,11 @@ type User struct {
 	ID          uuid.UUID
 	Login       string
 	DisplayName string
-	// IsPlatformAdmin is set only for the configured system admin.
+	// IsPlatformAdmin is the flag users.is_platform_admin: the system admin and the users granted
+	// it on the user page of the admin panel. IsSystemAdmin is only the admin PRORETA_ADMIN_LOGIN
+	// configures.
 	IsPlatformAdmin bool
+	IsSystemAdmin   bool
 	// MustChangePassword is set while the password was issued by somebody else (the admin's
 	// Secret, a temporary password from the panel): the api refuses everything but changing it.
 	MustChangePassword bool
@@ -474,7 +477,8 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (LoginResult, error)
 	if ok, wait := s.ipLimit.Reserve(ipKey); !ok {
 		return LoginResult{}, s.loginRateLimited(ctx, wait)
 	}
-	// Per login and address: a counter on the login alone would let a stranger lock the owner out.
+	// The login limit is per login and address: a limit on the login alone lets anyone lock a
+	// known account out (the break-glass admin included) with a few wrong passwords.
 	attemptKey := loginKey + "|" + ipKey
 	if ok, wait := s.loginLimit.Reserve(attemptKey); !ok {
 		s.ipLimit.Refund(ipKey)
@@ -644,7 +648,7 @@ func (s *Service) checkPassword(ctx context.Context, login, password string) (*U
 	if row == nil {
 		return nil, uuid.Nil, credential{}, false, nil
 	}
-	u := &User{ID: row.ID, Login: row.Email, DisplayName: row.DisplayName, IsPlatformAdmin: row.IsPlatformAdmin, MustChangePassword: row.PasswordMustChange, EmailVerified: row.EmailVerifiedAt != nil}
+	u := &User{ID: row.ID, Login: row.Email, DisplayName: row.DisplayName, IsPlatformAdmin: row.IsPlatformAdmin, IsSystemAdmin: row.IsSystemAdmin, MustChangePassword: row.PasswordMustChange, EmailVerified: row.EmailVerifiedAt != nil}
 	ok := match && hash != s.dummy && row.Status == userStatusActive
 	var cred credential
 	if ok {
@@ -852,7 +856,7 @@ func (s *Service) Me(ctx context.Context, p Principal) (SessionInfo, error) {
 			return err
 		}
 		info = SessionInfo{
-			User:   User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, IsPlatformAdmin: u.IsPlatformAdmin, MustChangePassword: u.PasswordMustChange, EmailVerified: u.EmailVerifiedAt != nil},
+			User:   User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, IsPlatformAdmin: u.IsPlatformAdmin, IsSystemAdmin: u.IsSystemAdmin, MustChangePassword: u.PasswordMustChange, EmailVerified: u.EmailVerifiedAt != nil},
 			Tenant: t, Role: role, CSRFToken: p.CSRFToken, ExpiresAt: p.ExpiresAt,
 		}
 		return nil

@@ -42,7 +42,7 @@ func (q *Queries) CountLiveHeartbeats(ctx context.Context, tenantID uuid.UUID) (
 const countLiveMonitors = `-- name: CountLiveMonitors :one
 SELECT count(*)
 FROM monitors
-WHERE tenant_id = $1 AND deleted_at IS NULL AND type = 'http'
+WHERE tenant_id = $1 AND deleted_at IS NULL AND type <> 'heartbeat'
 `
 
 // Read-only count for the quota (monitors are owned by internal/monitors). Soft-deleted
@@ -57,12 +57,14 @@ func (q *Queries) CountLiveMonitors(ctx context.Context, tenantID uuid.UUID) (in
 const countMembers = `-- name: CountMembers :one
 SELECT ((SELECT count(*) FROM memberships AS m WHERE m.tenant_id = $1)
       + (SELECT count(*) FROM invitations AS i
-         WHERE i.tenant_id = $1 AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at > now()))::bigint AS n
+         WHERE i.tenant_id = $1 AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at > now()
+           AND (i.project_id IS NULL OR EXISTS (SELECT 1 FROM projects AS p
+                WHERE p.tenant_id = i.tenant_id AND p.id = i.project_id AND p.deleted_at IS NULL))))::bigint AS n
 `
 
 // Read-only count for the member quota (memberships and invitations are owned by internal/auth):
 // members plus open invitations, which reserve a place until they are accepted, revoked or
-// expire.
+// expire. An invitation into a deleted project is dead and reserves nothing.
 func (q *Queries) CountMembers(ctx context.Context, tenantID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countMembers, tenantID)
 	var n int64

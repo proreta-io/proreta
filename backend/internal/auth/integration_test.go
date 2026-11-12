@@ -308,6 +308,35 @@ func TestIntegrationLoginLimitHoldsUnderConcurrency(t *testing.T) {
 	}
 }
 
+// Wrong passwords from one address do not lock the account for everybody else.
+func TestIntegrationLoginLockoutIsPerAddress(t *testing.T) {
+	env := pgtest.New(t, pgtest.DBName("auth_lockout"))
+	ctx := context.Background()
+	hash, _ := crypto.HashPassword("pw", cheap)
+	const limit = 3
+	svc, err := auth.NewService(env.Pool(t, env.APIURL, 4), auth.Options{
+		SessionTTL:   time.Hour,
+		IPLimiter:    auth.NewLimiter(1000, 15*time.Minute, 1000, clock.System{}),
+		LoginLimiter: auth.NewLimiter(limit, 15*time.Minute, 1000, clock.System{}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.BootstrapAdmin(ctx, "admin", hash); err != nil {
+		t.Fatal(err)
+	}
+	attacker, owner := netip.MustParseAddr("203.0.113.9"), netip.MustParseAddr("198.51.100.7")
+	for range limit + 2 {
+		_, _ = svc.Login(ctx, auth.LoginInput{Login: "admin", Password: "wrong", IP: attacker})
+	}
+	if _, err := svc.Login(ctx, auth.LoginInput{Login: "admin", Password: "pw", IP: attacker}); !errors.Is(err, auth.ErrRateLimited) {
+		t.Fatalf("the attacking address is not limited: %v", err)
+	}
+	if _, err := svc.Login(ctx, auth.LoginInput{Login: "admin", Password: "pw", IP: owner}); err != nil {
+		t.Fatalf("the owner from another address is locked out: %v", err)
+	}
+}
+
 // A registered user logs in to their own tenant; a suspended or deleted tenant refuses the login
 // with the generic error, and a user without any membership cannot log in.
 func TestIntegrationRegisteredLoginBindsToOwnTenant(t *testing.T) {
@@ -473,9 +502,10 @@ func TestIntegrationBootstrapAdoptsDefaultOnlyUser(t *testing.T) {
 	}
 }
 
-// The platform-admin flag follows PRORETA_ADMIN_LOGIN: BootstrapAdmin sets it for
-// the configured admin at every start and clears it for a retired one; a registered user never
-// has it. Login and Me report it.
+// The system admin follows PRORETA_ADMIN_LOGIN: BootstrapAdmin sets both flags for the configured
+// admin at every start and clears them for a retired one; a registered user never has them from
+// registration, and a platform admin granted later keeps the flag across restarts and rotations.
+// Login and Me report both.
 func TestIntegrationPlatformAdminFlag(t *testing.T) {
 	env := pgtest.New(t, pgtest.DBName("auth_platform_admin"))
 	ctx := context.Background()
@@ -484,7 +514,7 @@ func TestIntegrationPlatformAdminFlag(t *testing.T) {
 	flags := func() string {
 		t.Helper()
 		var s string
-		if err := admin.QueryRow(ctx, `SELECT string_agg(email::text || '=' || is_platform_admin::text, ',' ORDER BY email) FROM users`).Scan(&s); err != nil {
+		if err := admin.QueryRow(ctx, `SELECT string_agg(email::text || '=' || is_platform_admin::text || '/' || is_system_admin::text, ',' ORDER BY email) FROM users`).Scan(&s); err != nil {
 			t.Fatal(err)
 		}
 		return s
@@ -492,7 +522,7 @@ func TestIntegrationPlatformAdminFlag(t *testing.T) {
 
 	svc := newBootstrapped(t, env, "admin", hash)
 	res, err := login(t, svc, "admin", "pw")
-	if err != nil || !res.User.IsPlatformAdmin {
+	if err != nil || !res.User.IsPlatformAdmin || !res.User.IsSystemAdmin {
 		t.Fatalf("admin login: %+v %v", res.User, err)
 	}
 	p, err := svc.Authenticate(ctx, res.Token)
@@ -513,20 +543,31 @@ func TestIntegrationPlatformAdminFlag(t *testing.T) {
 	if ok, err := svc.IsPlatformAdmin(ctx, reg.User.ID); err != nil || ok {
 		t.Fatalf("IsPlatformAdmin(registered) = %v, %v", ok, err)
 	}
-	if got := flags(); got != "admin=true,user@example.com=false" {
+	if got := flags(); got != "admin=true/true,user@example.com=false/false" {
 		t.Fatalf("flags = %s", got)
 	}
 
 	// A manual reset of the flag is repaired at the next start (idempotent otherwise).
-	pgtest.MustExec(t, admin, `UPDATE users SET is_platform_admin = false`)
+	pgtest.MustExec(t, admin, `UPDATE users SET is_platform_admin = false, is_system_admin = false`)
 	_ = newBootstrapped(t, env, "admin", hash)
-	if got := flags(); got != "admin=true,user@example.com=false" {
+	if got := flags(); got != "admin=true/true,user@example.com=false/false" {
 		t.Fatalf("flags after restart = %s", got)
 	}
 
-	// Rotating the login moves the flag; the retired admin loses it (and is disabled).
+	// A granted admin (the flag is data) survives a restart.
+	pgtest.MustExec(t, admin, `UPDATE users SET is_platform_admin = true WHERE email = 'user@example.com'`)
+	_ = newBootstrapped(t, env, "admin", hash)
+	if got := flags(); got != "admin=true/true,user@example.com=true/false" {
+		t.Fatalf("flags after a grant and a restart = %s", got)
+	}
+	if ok, err := svc.IsPlatformAdmin(ctx, reg.User.ID); err != nil || !ok {
+		t.Fatalf("IsPlatformAdmin(granted) = %v, %v", ok, err)
+	}
+
+	// Rotating the login moves the system admin; the retired admin loses both flags (and is
+	// disabled); the granted admin keeps its flag.
 	_ = newBootstrapped(t, env, "root", hash)
-	if got := flags(); got != "admin=false,root=true,user@example.com=false" {
+	if got := flags(); got != "admin=false/false,root=true/true,user@example.com=true/false" {
 		t.Fatalf("flags after rotation = %s", got)
 	}
 	if ok, err := svc.IsPlatformAdmin(ctx, p.UserID); err != nil || ok {

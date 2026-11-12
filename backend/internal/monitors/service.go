@@ -20,9 +20,11 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/audit"
 	"github.com/proreta-io/proreta/backend/internal/authz"
 	"github.com/proreta-io/proreta/backend/internal/incidents"
+	"github.com/proreta-io/proreta/backend/internal/monitorrequest"
 	"github.com/proreta-io/proreta/backend/internal/monitors/monitorsdb"
 	"github.com/proreta-io/proreta/backend/internal/notify"
 	"github.com/proreta-io/proreta/backend/internal/plans"
+	"github.com/proreta-io/proreta/backend/internal/platform/crypto"
 	"github.com/proreta-io/proreta/backend/internal/platform/db"
 	"github.com/proreta-io/proreta/backend/internal/platform/uuidv7"
 	"github.com/proreta-io/proreta/backend/internal/platform/validation"
@@ -52,6 +54,7 @@ const (
 // Monitor types (monitors.type).
 const (
 	TypeHTTP      = "http"
+	TypeTCP       = "tcp"
 	TypeHeartbeat = "heartbeat"
 )
 
@@ -73,7 +76,7 @@ type Actor struct {
 
 // checkAccess refuses a change of a monitor in project: ErrNotFound when the actor does not see
 // the project (so ids of other projects reveal nothing), authz.ErrProjectForbidden when its role
-// there is below member.
+// there is below member (a viewer).
 func (a Actor) checkAccess(project uuid.UUID) error {
 	if !a.Access.Sees(project) {
 		return ErrNotFound
@@ -93,6 +96,14 @@ type Monitor struct {
 	// URL and ExpectedStatus are empty for a heartbeat.
 	URL            string
 	ExpectedStatus string
+	// Method, HeaderNames and BodySet describe the request of an http monitor; header values and
+	// the body are write-only and never returned.
+	Method      string
+	HeaderNames []string
+	BodySet     bool
+	// Host and Port are the target of a tcp monitor.
+	Host string
+	Port int
 	// IntervalSeconds is the check interval, or a heartbeat's expected ping interval.
 	IntervalSeconds      int
 	TimeoutSeconds       int
@@ -121,21 +132,43 @@ type CreateInput struct {
 	Name                 string
 	NotificationsEnabled *bool
 	HTTP                 *HTTPSettings
+	TCP                  *TCPSettings
 	Heartbeat            *HeartbeatSettings
 	// ProjectID is the monitor's project; nil means the Default project.
 	ProjectID *uuid.UUID
 	// ChannelIDs selects notification channels of the project or organization-wide ones (none:
 	// the active channels of the project).
 	ChannelIDs *[]uuid.UUID
+	// SpeculaID runs the monitor at a Specula of the organization that the project may use; nil
+	// runs it from Proreta's own worker. Only for http and tcp monitors.
+	SpeculaID *uuid.UUID
+}
+
+// Location is where an http or tcp monitor runs: SpeculaID nil is Proreta's own worker.
+type Location struct {
+	SpeculaID *uuid.UUID
 }
 
 // HTTPSettings are the settings of an http monitor; nil fields take their defaults on create
 // and keep their value on update. URL is required on create.
 type HTTPSettings struct {
-	URL              *string
-	ExpectedStatus   *string
+	URL            *string
+	ExpectedStatus *string
+	// Method defaults to GET. Headers replaces the custom headers (nil keeps them). Body
+	// replaces the body: nil keeps it, an empty string removes it.
+	Method           *string
+	Headers          *[]HeaderInput
+	Body             *string
 	IntervalSeconds  *int
 	TimeoutSeconds   *int
+	FailureThreshold *int
+}
+
+// TCPSettings are the settings of a tcp monitor; nil fields take their defaults on create and
+// keep their value on update. Host and Port are required on create.
+type TCPSettings struct {
+	Host             *string
+	Port             *int
 	FailureThreshold *int
 }
 
@@ -151,17 +184,33 @@ type UpdateInput struct {
 	Name                 *string
 	NotificationsEnabled *bool
 	HTTP                 *HTTPSettings
+	TCP                  *TCPSettings
 	Heartbeat            *HeartbeatSettings
 	// ProjectID moves the monitor; selected channels of the old project are dropped.
 	ProjectID *uuid.UUID
 	// ChannelIDs replaces the channel selection.
 	ChannelIDs *[]uuid.UUID
+	// Location moves an http or tcp monitor; the target is checked again with the rules of the new
+	// location and an open incident ends.
+	Location *Location
 }
 
 // httpConfig is monitors.config for type http.
 type httpConfig struct {
 	URL            string `json:"url"`
 	ExpectedStatus string `json:"expectedStatus"`
+	// Method is omitted for GET. Request is the sealed headers and body (monitorrequest); the
+	// names and the flag are kept in the clear so reads never open it.
+	Method      string   `json:"method,omitempty"`
+	HeaderNames []string `json:"headerNames,omitempty"`
+	BodySet     bool     `json:"bodySet,omitempty"`
+	Request     string   `json:"request,omitempty"`
+}
+
+// tcpConfig is monitors.config for type tcp.
+type tcpConfig struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
 }
 
 // heartbeatConfig is monitors.config for type heartbeat.
@@ -171,8 +220,13 @@ type heartbeatConfig struct {
 
 // Field names of validation errors and audit records: the API's, with the sub-object prefix.
 const (
+	fieldSpeculaID               = "location.speculaId"
 	fieldHTTP                    = "http"
 	fieldHeartbeat               = "heartbeat"
+	fieldTCP                     = "tcp"
+	fieldHost                    = "tcp.host"
+	fieldPort                    = "tcp.port"
+	fieldTCPFailureThreshold     = "tcp.failureThreshold"
 	fieldURL                     = "http.url"
 	fieldExpectedStatus          = "http.expectedStatus"
 	fieldIntervalSeconds         = "http.intervalSeconds"
@@ -181,15 +235,18 @@ const (
 	fieldExpectedIntervalSeconds = "heartbeat.expectedIntervalSeconds"
 	fieldGraceSeconds            = "heartbeat.graceSeconds"
 
-	msgHTTPOnly      = "is only for http monitors"
+	msgHTTPOnly      = "is only for http and tcp monitors"
+	msgHTTPOnlyType  = "is only for http monitors"
+	msgTCPOnly       = "is only for tcp monitors"
 	msgHeartbeatOnly = "is only for heartbeat monitors"
 )
 
 // Service implements the monitor lifecycle.
 type Service struct {
-	pool      *db.Pool
-	sched     *scheduler.Service
-	incidents *incidents.Service
+	pool        *db.Pool
+	sched       *scheduler.Service
+	incidents   *incidents.Service
+	requestKeys *crypto.Keyring
 }
 
 // NewService returns a Service.
@@ -208,12 +265,18 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 	}
 	var row monitorsdb.InsertMonitorParams
 	var config any
+	var httpCfg httpConfig
+	var httpSec monitorrequest.Secrets
+	var isHTTP bool
 	resource := plans.ResourceMonitor
 	switch in.Type {
 	case "", TypeHTTP:
 		row.Type = TypeHTTP
 		if in.Heartbeat != nil {
 			verr.Add(fieldHeartbeat, msgHeartbeatOnly)
+		}
+		if in.TCP != nil {
+			verr.Add(fieldTCP, msgTCPOnly)
 		}
 		h := in.HTTP
 		if h == nil {
@@ -225,7 +288,7 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 			if in.HTTP != nil {
 				verr.Add(fieldURL, "is required")
 			}
-		} else if target, msg = ValidateURL(*h.URL); msg != "" {
+		} else if target, msg = validateTarget(*h.URL, in.SpeculaID != nil); msg != "" {
 			verr.Add(fieldURL, msg)
 		}
 		checkFixed(&verr, fieldIntervalSeconds, h.IntervalSeconds, IntervalSeconds)
@@ -235,13 +298,56 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 			verr.Add(fieldExpectedStatus, msg)
 		}
 		threshold := orDefault(h.FailureThreshold, DefaultFailureThreshold)
-		checkThreshold(&verr, threshold)
-		config = httpConfig{URL: target, ExpectedStatus: expected}
+		checkThreshold(&verr, fieldFailureThreshold, threshold)
+		httpCfg = httpConfig{URL: target, ExpectedStatus: expected}
+		var perr error
+		if httpCfg, httpSec, _, _, perr = s.planRequest(&verr, httpCfg, a.TenantID, uuid.Nil, h); perr != nil {
+			return Monitor{}, perr
+		}
+		isHTTP = true
+		row.IntervalSeconds, row.FailureThreshold = IntervalSeconds, int32(threshold) //nolint:gosec // validated 1..3
+	case TypeTCP:
+		row.Type = TypeTCP
+		if in.HTTP != nil {
+			verr.Add(fieldHTTP, msgHTTPOnlyType)
+		}
+		if in.Heartbeat != nil {
+			verr.Add(fieldHeartbeat, msgHeartbeatOnly)
+		}
+		t := in.TCP
+		if t == nil {
+			verr.Add(fieldTCP, "is required for tcp monitors")
+			t = &TCPSettings{}
+		}
+		var cfg tcpConfig
+		if t.Host == nil {
+			if in.TCP != nil {
+				verr.Add(fieldHost, "is required")
+			}
+		} else if cfg.Host, msg = ValidateHost(*t.Host, in.SpeculaID != nil); msg != "" {
+			verr.Add(fieldHost, msg)
+		}
+		if t.Port == nil {
+			if in.TCP != nil {
+				verr.Add(fieldPort, "is required")
+			}
+		} else if cfg.Port = *t.Port; ValidatePort(cfg.Port) != "" {
+			verr.Add(fieldPort, ValidatePort(cfg.Port))
+		}
+		threshold := orDefault(t.FailureThreshold, DefaultFailureThreshold)
+		checkThreshold(&verr, fieldTCPFailureThreshold, threshold)
+		config = cfg
 		row.IntervalSeconds, row.FailureThreshold = IntervalSeconds, int32(threshold) //nolint:gosec // validated 1..3
 	case TypeHeartbeat:
 		row.Type, resource = TypeHeartbeat, plans.ResourceHeartbeat
+		if in.SpeculaID != nil {
+			verr.Add(fieldSpeculaID, msgHTTPOnly)
+		}
 		if in.HTTP != nil {
-			verr.Add(fieldHTTP, msgHTTPOnly)
+			verr.Add(fieldHTTP, msgHTTPOnlyType)
+		}
+		if in.TCP != nil {
+			verr.Add(fieldTCP, msgTCPOnly)
 		}
 		hb := in.Heartbeat
 		if hb == nil {
@@ -260,10 +366,17 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 		// A heartbeat goes down at its first missed deadline: its failure threshold is always 1.
 		row.IntervalSeconds, row.FailureThreshold = int32(interval), 1 //nolint:gosec // validated 60..86400
 	default:
-		verr.Add("type", `must be "http" or "heartbeat"`)
+		verr.Add("type", `must be "http", "tcp" or "heartbeat"`)
 	}
 	if err := verr.Err(); err != nil {
 		return Monitor{}, err
+	}
+	id := uuidv7.New()
+	if isHTTP {
+		if err := s.sealRequest(&httpCfg, a.TenantID, id, httpSec); err != nil {
+			return Monitor{}, err
+		}
+		config = httpCfg
 	}
 	raw, err := json.Marshal(config)
 	if err != nil {
@@ -277,7 +390,6 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 		}
 	}
 
-	id := uuidv7.New()
 	row.ID, row.TenantID, row.Name, row.Config = id, a.TenantID, name, raw
 	row.TimeoutSeconds, row.NotificationsEnabled = TimeoutSeconds, orDefault(in.NotificationsEnabled, true)
 	var m Monitor
@@ -302,6 +414,11 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 		location, err := s.sched.DefaultLocation(ctx, tx)
 		if err != nil {
 			return err
+		}
+		if in.SpeculaID != nil {
+			if location, err = s.speculaLocation(ctx, tx, a.TenantID, *in.SpeculaID, project); err != nil {
+				return err
+			}
 		}
 		if err := q.InsertMonitor(ctx, row); err != nil {
 			return fmt.Errorf("insert monitor: %w", err)
@@ -360,6 +477,17 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 		}
 		name, interval, threshold, notificationsEnabled := cur.Name, int(cur.IntervalSeconds), int(cur.FailureThreshold), cur.NotificationsEnabled
 
+		// Where the monitor runs now and where it should run after this change.
+		curSpecula, err := currentSpecula(ctx, tx, a.TenantID, id)
+		if err != nil {
+			return err
+		}
+		wantSpecula := curSpecula
+		if in.Location != nil {
+			wantSpecula = in.Location.SpeculaID
+		}
+		locChanged := cur.Type != TypeHeartbeat && !sameID(curSpecula, wantSpecula)
+
 		var verr validation.Error
 		var changed []string
 		if in.Name != nil {
@@ -374,13 +502,20 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 		}
 
 		var config any
-		if cur.Type == TypeHeartbeat {
+		switch cur.Type {
+		case TypeHeartbeat:
 			var cfg heartbeatConfig
 			if err := json.Unmarshal(cur.Config, &cfg); err != nil {
 				return fmt.Errorf("monitor config: %w", err)
 			}
+			if in.Location != nil {
+				verr.Add(fieldSpeculaID, msgHTTPOnly)
+			}
 			if in.HTTP != nil {
-				verr.Add(fieldHTTP, msgHTTPOnly)
+				verr.Add(fieldHTTP, msgHTTPOnlyType)
+			}
+			if in.TCP != nil {
+				verr.Add(fieldTCP, msgTCPOnly)
 			}
 			if hb := in.Heartbeat; hb != nil {
 				if hb.ExpectedIntervalSeconds != nil {
@@ -397,7 +532,46 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 				}
 			}
 			config = cfg
-		} else {
+		case TypeTCP:
+			var cfg tcpConfig
+			if err := json.Unmarshal(cur.Config, &cfg); err != nil {
+				return fmt.Errorf("monitor config: %w", err)
+			}
+			if in.Heartbeat != nil {
+				verr.Add(fieldHeartbeat, msgHeartbeatOnly)
+			}
+			if in.HTTP != nil {
+				verr.Add(fieldHTTP, msgHTTPOnlyType)
+			}
+			if locChanged && (in.TCP == nil || in.TCP.Host == nil) {
+				// The target stays but must satisfy the rules of the new location.
+				v, msg := ValidateHost(cfg.Host, wantSpecula != nil)
+				if msg != "" {
+					verr.Add(fieldHost, msg)
+				}
+				cfg.Host = v
+			}
+			if t := in.TCP; t != nil {
+				if t.Host != nil {
+					v, msg := ValidateHost(*t.Host, wantSpecula != nil)
+					if msg != "" {
+						verr.Add(fieldHost, msg)
+					}
+					changed, cfg.Host = appendIf(changed, fieldHost, v != cfg.Host), v
+				}
+				if t.Port != nil {
+					if msg := ValidatePort(*t.Port); msg != "" {
+						verr.Add(fieldPort, msg)
+					}
+					changed, cfg.Port = appendIf(changed, fieldPort, *t.Port != cfg.Port), *t.Port
+				}
+				if t.FailureThreshold != nil {
+					checkThreshold(&verr, fieldTCPFailureThreshold, *t.FailureThreshold)
+					changed, threshold = appendIf(changed, fieldTCPFailureThreshold, *t.FailureThreshold != threshold), *t.FailureThreshold
+				}
+			}
+			config = cfg
+		default:
 			var cfg httpConfig
 			if err := json.Unmarshal(cur.Config, &cfg); err != nil {
 				return fmt.Errorf("monitor config: %w", err)
@@ -405,11 +579,23 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 			if in.Heartbeat != nil {
 				verr.Add(fieldHeartbeat, msgHeartbeatOnly)
 			}
+			if in.TCP != nil {
+				verr.Add(fieldTCP, msgTCPOnly)
+			}
+			if locChanged && (in.HTTP == nil || in.HTTP.URL == nil) {
+				// The target stays but must satisfy the rules of the new location.
+				v, msg := validateTarget(cfg.URL, wantSpecula != nil)
+				if msg != "" {
+					verr.Add(fieldURL, msg)
+				}
+				cfg.URL = v
+			}
 			if h := in.HTTP; h != nil {
+				oldURL := cfg.URL
 				checkFixed(&verr, fieldIntervalSeconds, h.IntervalSeconds, int(cur.IntervalSeconds))
 				checkFixed(&verr, fieldTimeoutSeconds, h.TimeoutSeconds, int(cur.TimeoutSeconds))
 				if h.URL != nil {
-					v, msg := ValidateURL(*h.URL)
+					v, msg := validateTarget(*h.URL, wantSpecula != nil)
 					if msg != "" {
 						verr.Add(fieldURL, msg)
 					}
@@ -422,8 +608,19 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 					changed, cfg.ExpectedStatus = appendIf(changed, fieldExpectedStatus, *h.ExpectedStatus != cfg.ExpectedStatus), *h.ExpectedStatus
 				}
 				if h.FailureThreshold != nil {
-					checkThreshold(&verr, *h.FailureThreshold)
+					checkThreshold(&verr, fieldFailureThreshold, *h.FailureThreshold)
 					changed, threshold = appendIf(changed, fieldFailureThreshold, *h.FailureThreshold != threshold), *h.FailureThreshold
+				}
+				hostMovedProblems(&verr, oldURL, cfg, h)
+				next, sec, dirty, reqChanged, perr := s.planRequest(&verr, cfg, a.TenantID, id, h)
+				if perr != nil {
+					return perr
+				}
+				cfg, changed = next, append(changed, reqChanged...)
+				if dirty && verr.Err() == nil {
+					if err := s.sealRequest(&cfg, a.TenantID, id, sec); err != nil {
+						return err
+					}
 				}
 			}
 			config = cfg
@@ -452,7 +649,12 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 			if err != nil {
 				return err
 			}
-			moveMeta = map[string]any{"from": project.String(), "to": target.String(), "channelsDetached": detached}
+			// Pages of the old project may show only its monitors.
+			componentsRemoved, err := statuspages.DetachForeignComponents(ctx, tx, a.TenantID, id, target, time.Now())
+			if err != nil {
+				return err
+			}
+			moveMeta = map[string]any{"from": project.String(), "to": target.String(), "channelsDetached": detached, "statusPageComponentsRemoved": componentsRemoved}
 			changed, project = append(changed, "projectId"), target
 		}
 		if in.ChannelIDs != nil {
@@ -462,13 +664,42 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 			}
 			changed = appendIf(changed, "channelIds", selected)
 		}
-		if slices.Contains(changed, fieldURL) {
-			// A new URL is a new target: its history says nothing about it. Restart like resume
-			// and end an open incident without a notification.
+		// A moved project must still be allowed to use the Specula the monitor runs at.
+		if wantSpecula != nil && project != cur.ProjectID && !locChanged {
+			if _, err := s.speculaLocation(ctx, tx, a.TenantID, *wantSpecula, project); err != nil {
+				return err
+			}
+		}
+		if locChanged {
+			locID, err := s.sched.DefaultLocation(ctx, tx)
+			if err != nil {
+				return err
+			}
+			if wantSpecula != nil {
+				if locID, err = s.speculaLocation(ctx, tx, a.TenantID, *wantSpecula, project); err != nil {
+					return err
+				}
+			}
+			var result string
+			if err := tx.QueryRow(ctx, `SELECT monitor_set_location($1, $2)`, id, locID).Scan(&result); err != nil {
+				return fmt.Errorf("set location: %w", err)
+			}
+			if result != "ok" {
+				return speculaFieldError()
+			}
+			changed = append(changed, fieldSpeculaID)
+		}
+		if slices.Contains(changed, fieldURL) || slices.Contains(changed, fieldHost) || slices.Contains(changed, fieldPort) || locChanged {
+			// A new target (URL or location): its history says nothing about it. Restart like
+			// resume and end an open incident without a notification.
 			if err := s.restart(ctx, tx, q, a.TenantID, id, true); err != nil {
 				return err
 			}
-			if err := s.incidents.ResolveOpen(ctx, tx, a.TenantID, id, incidents.ReasonURLChanged); err != nil {
+			reason := incidents.ReasonURLChanged
+			if locChanged {
+				reason = incidents.ReasonLocationChanged
+			}
+			if err := s.incidents.ResolveOpen(ctx, tx, a.TenantID, id, reason); err != nil {
 				return err
 			}
 		}
@@ -641,13 +872,18 @@ func get(ctx context.Context, q *monitorsdb.Queries, tenantID, id uuid.UUID) (Mo
 func fromRow(r monitorsdb.GetMonitorRow) (Monitor, error) {
 	var cfg struct {
 		httpConfig
+		tcpConfig
 		heartbeatConfig
 	}
 	if err := json.Unmarshal(r.Config, &cfg); err != nil {
 		return Monitor{}, fmt.Errorf("monitor %s config: %w", r.ID, err)
 	}
+	if r.Type == TypeHTTP && cfg.Method == "" {
+		cfg.Method = monitorrequest.Methods[0]
+	}
 	return Monitor{
 		ID: r.ID, ProjectID: r.ProjectID, Type: r.Type, Name: r.Name, URL: cfg.URL, ExpectedStatus: cfg.ExpectedStatus,
+		Method: cfg.Method, HeaderNames: cfg.HeaderNames, BodySet: cfg.BodySet, Host: cfg.Host, Port: cfg.Port,
 		IntervalSeconds: int(r.IntervalSeconds), TimeoutSeconds: int(r.TimeoutSeconds), GraceSeconds: cfg.GraceSeconds,
 		FailureThreshold: int(r.FailureThreshold), NotificationsEnabled: r.NotificationsEnabled, Paused: r.Paused,
 		Status: r.Status, StatusSince: r.StatusChangedAt, LastErrorKind: r.LastErrorKind,
@@ -679,9 +915,9 @@ func checkFixed(verr *validation.Error, field string, got *int, want int) {
 	}
 }
 
-func checkThreshold(verr *validation.Error, n int) {
+func checkThreshold(verr *validation.Error, field string, n int) {
 	if n < 1 || n > 3 {
-		verr.Add(fieldFailureThreshold, "must be between 1 and 3")
+		verr.Add(field, "must be between 1 and 3")
 	}
 }
 
@@ -697,4 +933,59 @@ func orDefault[T any](p *T, def T) T {
 		return def
 	}
 	return *p
+}
+
+// validateTarget checks a monitor's URL with the rules of where it runs: public https for
+// Proreta's own worker, the customer's network for a Specula.
+func validateTarget(raw string, specula bool) (string, string) {
+	if specula {
+		return ValidatePrivateURL(raw)
+	}
+	return ValidateURL(raw)
+}
+
+// speculaLocation returns the location of a Specula that the project may use. Anything else (it
+// does not exist, belongs to another organization, is revoked, or is not shared with the
+// project) is the same field error.
+func (s *Service) speculaLocation(ctx context.Context, tx pgx.Tx, tenantID, speculaID, project uuid.UUID) (uuid.UUID, error) {
+	var loc uuid.UUID
+	err := tx.QueryRow(ctx, `SELECT a.location_id FROM specula_agents AS a
+		WHERE a.tenant_id = $1 AND a.id = $2 AND a.revoked_at IS NULL
+		  AND (a.all_projects OR EXISTS (SELECT 1 FROM specula_projects AS sp WHERE sp.specula_id = a.id AND sp.project_id = $3))`,
+		tenantID, speculaID, project).Scan(&loc)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, speculaFieldError()
+	}
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("specula location: %w", err)
+	}
+	return loc, nil
+}
+
+// currentSpecula returns the Specula a monitor runs at, nil for Proreta's own worker.
+func currentSpecula(ctx context.Context, tx pgx.Tx, tenantID, monitorID uuid.UUID) (*uuid.UUID, error) {
+	var id uuid.UUID
+	err := tx.QueryRow(ctx, `SELECT a.id FROM monitor_location_state AS s
+		JOIN specula_agents AS a ON a.location_id = s.location_id AND a.tenant_id = s.tenant_id
+		WHERE s.tenant_id = $1 AND s.monitor_id = $2 LIMIT 1`, tenantID, monitorID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("current specula: %w", err)
+	}
+	return &id, nil
+}
+
+func sameID(a, b *uuid.UUID) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+func speculaFieldError() error {
+	var verr validation.Error
+	verr.Add(fieldSpeculaID, "does not exist or is not available to this project")
+	return &verr
 }

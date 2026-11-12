@@ -23,18 +23,30 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
 
 // Typed errors. Their messages are generic and never include resolved addresses.
 var (
-	ErrBlockedAddress   = errors.New("safehttp: destination address is not allowed")
-	ErrBadPort          = errors.New("safehttp: only port 443 is allowed")
-	ErrNotHTTPS         = errors.New("safehttp: only https URLs are allowed")
-	ErrTooManyRedirects = errors.New("safehttp: too many redirects")
-	ErrRedirectNotHTTPS = errors.New("safehttp: redirect to a non-https URL")
+	ErrBlockedAddress    = errors.New("safehttp: destination address is not allowed")
+	ErrBadPort           = errors.New("safehttp: only port 443 is allowed")
+	ErrNotHTTPS          = errors.New("safehttp: only https URLs are allowed")
+	ErrTooManyRedirects  = errors.New("safehttp: too many redirects")
+	ErrRedirectNotHTTPS  = errors.New("safehttp: redirect to a non-https URL")
+	ErrRedirectCrossHost = errors.New("safehttp: redirect to another host")
 )
+
+type sameHostKey struct{}
+
+// WithSameHostRedirects marks requests made with ctx as carrying data meant for one host only
+// (custom headers or a body): a redirect to another host then fails with ErrRedirectCrossHost
+// instead of forwarding them.
+func WithSameHostRedirects(ctx context.Context) context.Context {
+	return context.WithValue(ctx, sameHostKey{}, true)
+}
 
 const (
 	allowedPort          = "443"
@@ -114,6 +126,9 @@ func NewClient(opts Options) *http.Client {
 			if req.URL.Scheme != "https" {
 				return ErrRedirectNotHTTPS
 			}
+			if req.Context().Value(sameHostKey{}) != nil && !strings.EqualFold(req.URL.Host, via[0].URL.Host) {
+				return ErrRedirectCrossHost
+			}
 			if p := req.URL.Port(); p != "" && p != allowedPort {
 				return ErrBadPort
 			}
@@ -137,6 +152,8 @@ func (s schemeCheck) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 type guard struct {
+	// anyPort lifts the port-443 rule for NewDialer (TCP checks); the address rules stay.
+	anyPort  bool
 	extra    []netip.Prefix
 	resolver Resolver
 	dialer   *net.Dialer
@@ -151,6 +168,28 @@ func (g *guard) dialPort() uint16 {
 		return g.testPort
 	}
 	return 443
+}
+
+// NewDialer returns a dial function for TCP checks from our own infrastructure: the same
+// connect-time rules as NewClient (every resolved address must be allowed, the socket is dialed
+// to a validated IP, the control hook checks the actual address again), but to any port, because
+// a TCP monitor's purpose is the port. Redirects do not exist here. Only opts.Timeout,
+// BlockedPrefixes and Resolver apply.
+func NewDialer(opts Options) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = defaultTimeout
+	}
+	resolver := opts.Resolver
+	if resolver == nil {
+		resolver = net.DefaultResolver
+	}
+	g := &guard{
+		anyPort: true, extra: append([]netip.Prefix(nil), opts.BlockedPrefixes...), resolver: resolver,
+		override: opts.dialOverride, testPort: opts.loopbackPort,
+	}
+	g.dialer = &net.Dialer{Timeout: timeout, Control: g.control}
+	return g.dialContext
 }
 
 // allowedAddr is allowed() plus the test-only loopback exception.
@@ -168,7 +207,14 @@ func (g *guard) dialContext(ctx context.Context, network, addr string) (net.Conn
 	if err != nil {
 		return nil, ErrBlockedAddress
 	}
-	if port != allowedPort {
+	dialPort := g.dialPort()
+	if g.anyPort {
+		n, err := strconv.ParseUint(port, 10, 16)
+		if err != nil || n == 0 {
+			return nil, ErrBadPort
+		}
+		dialPort = uint16(n)
+	} else if port != allowedPort {
 		return nil, ErrBadPort
 	}
 	ips, err := g.resolve(ctx, host)
@@ -182,7 +228,7 @@ func (g *guard) dialContext(ctx context.Context, network, addr string) (net.Conn
 	}
 	var lastErr error
 	for _, ip := range ips {
-		target := netip.AddrPortFrom(ip.Unmap(), g.dialPort()).String()
+		target := netip.AddrPortFrom(ip.Unmap(), dialPort).String()
 		var conn net.Conn
 		if g.override != nil {
 			conn, err = g.override(ctx, network, target)
@@ -221,7 +267,7 @@ func (g *guard) control(_, address string, _ syscall.RawConn) error {
 	if err != nil {
 		return ErrBlockedAddress
 	}
-	if ap.Port() != g.dialPort() {
+	if !g.anyPort && ap.Port() != g.dialPort() {
 		return ErrBadPort
 	}
 	if !g.allowedAddr(ap.Addr()) {

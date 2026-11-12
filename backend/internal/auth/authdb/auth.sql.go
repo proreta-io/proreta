@@ -77,7 +77,7 @@ func (q *Queries) DisableUser(ctx context.Context, id uuid.UUID) error {
 }
 
 const getMembershipRole = `-- name: GetMembershipRole :one
-SELECT role
+SELECT coalesce(role, '')::text AS role
 FROM memberships
 WHERE tenant_id = $1 AND user_id = $2
 `
@@ -87,6 +87,7 @@ type GetMembershipRoleParams struct {
 	UserID   uuid.UUID
 }
 
+// The organization role; empty for a person who belongs only through projects.
 func (q *Queries) GetMembershipRole(ctx context.Context, arg GetMembershipRoleParams) (string, error) {
 	row := q.db.QueryRow(ctx, getMembershipRole, arg.TenantID, arg.UserID)
 	var role string
@@ -110,7 +111,7 @@ func (q *Queries) GetPasswordMustChange(ctx context.Context, id uuid.UUID) (bool
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, display_name, status, is_platform_admin, updated_at, password_changed_at, configured_password_hash, password_must_change, email_verified_at
+SELECT id, email, password_hash, display_name, status, is_platform_admin, is_system_admin, updated_at, password_changed_at, configured_password_hash, password_must_change, email_verified_at
 FROM users
 WHERE email = $1
 `
@@ -122,6 +123,7 @@ type GetUserByEmailRow struct {
 	DisplayName            string
 	Status                 string
 	IsPlatformAdmin        bool
+	IsSystemAdmin          bool
 	UpdatedAt              time.Time
 	PasswordChangedAt      *time.Time
 	ConfiguredPasswordHash *string
@@ -139,6 +141,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEm
 		&i.DisplayName,
 		&i.Status,
 		&i.IsPlatformAdmin,
+		&i.IsSystemAdmin,
 		&i.UpdatedAt,
 		&i.PasswordChangedAt,
 		&i.ConfiguredPasswordHash,
@@ -149,7 +152,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (GetUserByEm
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, display_name, status, is_platform_admin, password_must_change, email_verified_at
+SELECT id, email, display_name, status, is_platform_admin, is_system_admin, password_must_change, email_verified_at
 FROM users
 WHERE id = $1
 `
@@ -160,6 +163,7 @@ type GetUserByIDRow struct {
 	DisplayName        string
 	Status             string
 	IsPlatformAdmin    bool
+	IsSystemAdmin      bool
 	PasswordMustChange bool
 	EmailVerifiedAt    *time.Time
 }
@@ -173,6 +177,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (GetUserByIDRow
 		&i.DisplayName,
 		&i.Status,
 		&i.IsPlatformAdmin,
+		&i.IsSystemAdmin,
 		&i.PasswordMustChange,
 		&i.EmailVerifiedAt,
 	)
@@ -180,7 +185,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (GetUserByIDRow
 }
 
 const getUserCredential = `-- name: GetUserCredential :one
-SELECT email, password_hash, display_name, status, is_platform_admin
+SELECT email, password_hash, display_name, status, is_platform_admin, is_system_admin
 FROM users
 WHERE id = $1
 `
@@ -191,6 +196,7 @@ type GetUserCredentialRow struct {
 	DisplayName     string
 	Status          string
 	IsPlatformAdmin bool
+	IsSystemAdmin   bool
 }
 
 func (q *Queries) GetUserCredential(ctx context.Context, id uuid.UUID) (GetUserCredentialRow, error) {
@@ -202,13 +208,14 @@ func (q *Queries) GetUserCredential(ctx context.Context, id uuid.UUID) (GetUserC
 		&i.DisplayName,
 		&i.Status,
 		&i.IsPlatformAdmin,
+		&i.IsSystemAdmin,
 	)
 	return i, err
 }
 
 const insertMembership = `-- name: InsertMembership :exec
 INSERT INTO memberships (tenant_id, user_id, role)
-VALUES ($1, $2, $3)
+VALUES ($1, $2, nullif($3::text, ''))
 `
 
 type InsertMembershipParams struct {
@@ -217,6 +224,7 @@ type InsertMembershipParams struct {
 	Role     string
 }
 
+// An empty role stores NULL: no organization role.
 func (q *Queries) InsertMembership(ctx context.Context, arg InsertMembershipParams) error {
 	_, err := q.db.Exec(ctx, insertMembership, arg.TenantID, arg.UserID, arg.Role)
 	return err
@@ -306,9 +314,9 @@ SELECT m.user_id
 FROM memberships AS m
 JOIN users AS u ON u.id = m.user_id
 WHERE m.tenant_id = $1 AND m.role = 'owner' AND m.user_id <> $2 AND u.status = 'active'
-  -- Only a previous configured admin (still flagged until auth_sync_platform_admin runs after
+  -- Only a previous system admin (still flagged until auth_sync_platform_admin runs after
   -- this), never an owner granted through member management.
-  AND u.is_platform_admin
+  AND u.is_system_admin
 ORDER BY m.user_id
 `
 
@@ -462,10 +470,10 @@ func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) erro
 
 const upsertMembership = `-- name: UpsertMembership :exec
 INSERT INTO memberships (tenant_id, user_id, role)
-VALUES ($1, $2, $3)
+VALUES ($1, $2, nullif($3::text, ''))
 ON CONFLICT (tenant_id, user_id) DO UPDATE
 SET role = EXCLUDED.role
-WHERE memberships.role <> EXCLUDED.role
+WHERE memberships.role IS DISTINCT FROM EXCLUDED.role
 `
 
 type UpsertMembershipParams struct {

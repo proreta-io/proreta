@@ -1,0 +1,65 @@
+# Defaults of the Proreta Specula chart. Every key is validated by values.schema.json: unknown keys
+# are rejected. Required, with no default: proreta.url and token.existingSecret.
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  repository: ghcr.io/proreta-io/proreta-backend
+  # A release version such as 1.2.3 or a build of main, sha-<first 7 hex>. Empty: the chart's
+  # appVersion, which is the release version for a chart installed from
+  # oci://ghcr.io/proreta-io/charts/proreta-specula. A chart from a git checkout has no usable
+  # appVersion, so the tag is REQUIRED there.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+proreta:
+  # PRORETA_URL: the address of your Proreta installation, https, no trailing slash. The executor
+  # calls <url>/specula/v1 and must be able to reach it.
+  url: ""
+
+token:
+  # The name of a Secret you create in the namespace that holds the token shown once when the
+  # Specula was registered in the app. Create it without putting the token in a file or in your
+  # shell history, for example:
+  #   kubectl -n proreta-specula create secret generic proreta-specula-token --from-file=token=/dev/stdin
+  # (paste the token, then press Ctrl-D).
+  existingSecret: ""
+  key: token
+
+# Two replicas with the same token keep checking during a restart; a check is leased to one of
+# them at a time.
+replicas: 2
+
+specula:
+  concurrency: 20          # PRORETA_SPECULA_CONCURRENCY, checks in flight per pod
+  pollInterval: 5s         # PRORETA_SPECULA_POLL_INTERVAL
+  logLevel: info
+  adminPort: 9090          # PRORETA_ADMIN_ADDR, health and metrics
+
+resources:
+  requests: {cpu: 25m, memory: 48Mi}
+  limits: {cpu: 500m, memory: 192Mi}
+
+terminationGracePeriodSeconds: 45   # the executor drains running checks for up to 15 s
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+# Extra environment variables (Kubernetes EnvVar objects), for example a proxy for the call to Proreta:
+# [{name: HTTPS_PROXY, value: "http://proxy.internal:3128"}]. Checks never use a proxy.
+env: []
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  seccompProfile: {type: RuntimeDefault}
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities: {drop: [ALL]}

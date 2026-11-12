@@ -28,7 +28,7 @@ func TestIntegrationRendererOverTheDatabase(t *testing.T) {
 	pgtest.MustExec(t, admin, `INSERT INTO tenants (id, slug, name) VALUES ('`+tenant.String()+`', 'render', 'R')`,
 		`INSERT INTO users (id, email) VALUES ('`+user.String()+`', 'render@example.com')`)
 	svc := statuspages.NewService(env.Pool(t, env.APIURL, 2), statuspages.Options{HashParams: &crypto.Argon2Params{Memory: 64, Iterations: 1, Parallelism: 1, SaltLength: 16, KeyLength: 32}})
-	a := statuspages.Actor{TenantID: tenant, Access: authz.Actor{UserID: user, Role: authz.Admin}}
+	a := statuspages.Actor{TenantID: tenant, Access: authz.Actor{UserID: user, Role: authz.Maintainer}}
 	page, err := svc.Create(ctx, a, statuspages.CreateInput{Slug: "render-me", Title: "Render <b>me</b>"})
 	if err != nil {
 		t.Fatal(err)

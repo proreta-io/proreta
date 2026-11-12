@@ -59,8 +59,8 @@ not contain `proreta` (`fullnameOverride` replaces it).
 | `config.logLevel` | `info` | `PRORETA_LOG_LEVEL`. |
 | `config.adminPort` | `9090` | Health and metrics port of the backend pods. |
 | `config.sessionTTL`, `config.cookieSecure` | `24h`, `true` | Session lifetime; `Secure` cookies (keep `true`; `false` only with an `http://localhost` `config.publicUrl`, the api and statuspage refuse to start otherwise). |
-| `config.trustedProxyHops` | `0` | Trusted proxies in front of the api; `1` behind one Gateway. |
-| `config.registrationEnabled` | `false` | Self-service creation of organizations (addresses are verified by email only when the platform admin turns that on in Admin, Email, and nothing requires it). |
+| `config.trustedProxyHops` | `1` | Trusted proxies in front of the api: `1` for the Gateway of `httpRoute`, `0` only when nothing is in front. |
+| `config.registrationEnabled` | `false` | Self-service creation of organizations (addresses are verified by email only when the platform admin turns that on in Admin, Email, and nothing requires it). The platform admin can override it under Admin, Registration without a redeploy; this is then only the initial value and the fallback. |
 | `config.passwordLoginEnabled` | `true` | `false`: password form for the platform admin only; needs an OAuth provider. |
 | `config.blockedCIDRs` | `[]` | Extra ranges the SSRF guard refuses (cluster and VPC CIDRs). |
 | `database.secretName` | `""` | Secret with the connection URLs. Empty: `<fullname>-db`. |
@@ -74,6 +74,8 @@ not contain `proreta` (`fullnameOverride` replaces it).
 | `database.bootstrap.backoffLimit`, `.activeDeadlineSeconds`, `.ttlSecondsAfterFinished`, `.resources` | `2`, `300`, `600`, 50m/64Mi | Job settings. |
 | `secrets.admin.source`, `.login`, `.remoteKey` | `generate`, `admin`, `proreta/admin` | Platform admin Secret `<fullname>-admin`. |
 | `secrets.crypto.source`, `.keyId`, `.remoteKey` | `generate`, `k1`, `proreta/crypto` | Encryption key Secret `<fullname>-crypto`. |
+| `speculagw.enabled`, `.replicas`, `.httpPort`, `.resources` | `false`, `2`, `8080` | The [Specula](../../../docs/runbooks/specula.md) gateway: executors in customer networks call it at `httpRoute.speculaPathPrefix` (`/specula/v1`). It uses the worker database role and `secrets.request`. The executor itself is the separate chart [proreta-specula](../proreta-specula/README.md). |
+| `secrets.request.source`, `.keyId`, `.remoteKey` | `generate`, `r1`, `proreta/request` | Request key Secret `<fullname>-request`: seals the header values and bodies of monitor requests. |
 | `secrets.statuspage.source`, `.remoteKey` | `generate`, `proreta/statuspage` | Status page cookie key Secret `<fullname>-statuspage`. |
 | `secrets.oauth.existingSecret`, `.remoteKey` | `""`, `proreta/oauth` | OAuth client credentials. |
 | `secrets.bootstrap.backoffLimit`, `.activeDeadlineSeconds`, `.ttlSecondsAfterFinished`, `.resources` | `2`, `300`, `600`, 50m/96Mi | Secrets bootstrap Job settings. |
@@ -153,7 +155,7 @@ Source of truth: `backend/internal/platform/config/config.go`. Secret names belo
 | `PRORETA_ADMIN_ADDR`, `PRORETA_DATABASE_URL` (`api_url` / `worker_url`) | x | x | x | | |
 | `PRORETA_ENCRYPTION_KEYS`, `PRORETA_ENCRYPTION_ACTIVE_KEY_ID` (`proreta-crypto`) | x | **never** | x | | |
 | `PRORETA_ADMIN_LOGIN`, `PRORETA_ADMIN_PASSWORD_HASH` (`proreta-admin`) | x | **never** | **never** | | |
-| `PRORETA_HTTP_ADDR`, `PRORETA_SESSION_TTL`, `PRORETA_COOKIE_SECURE`, `PRORETA_TRUSTED_PROXY_HOPS` (`config.trustedProxyHops`: number of trusted proxies in front of the api, default `0`; set `1` behind one gateway) | x | | | | |
+| `PRORETA_HTTP_ADDR`, `PRORETA_SESSION_TTL`, `PRORETA_COOKIE_SECURE`, `PRORETA_TRUSTED_PROXY_HOPS` (`config.trustedProxyHops`: number of trusted proxies in front of the api, default `1` for the gateway; `0` only with nothing in front) | x | | | | |
 | `PRORETA_REGISTRATION_ENABLED` (`config.registrationEnabled`, chart default `false`; self-service creation of new organizations) | x | | | | |
 | `PRORETA_PASSWORD_LOGIN_ENABLED` (`config.passwordLoginEnabled`, default `true`, `false` keeps the password form for the platform admin only and needs an OAuth provider) | x | | | | |
 | `PRORETA_OAUTH_ALLOWED_DOMAINS` (`oauth.allowedDomains`, only rendered when non-empty; the Workspace domains organizations may claim) | x | | | | |
@@ -204,7 +206,7 @@ Secret you create. `externalSecrets.enabled` is `false` by default; set it to `t
 `externalSecrets.secretStoreRef.name`) to read any of the Secrets below from your secret store instead.
 
 Workloads always read `<fullname>-admin` (`login`, `password_hash`) and `<fullname>-crypto` (`keys`,
-`active_key_id`). `secrets.admin.source` and `secrets.crypto.source` choose, per Secret, who creates them:
+`active_key_id`). `secrets.admin.source`, `secrets.crypto.source` and `secrets.request.source` choose, per Secret, who creates them:
 
 - `generate` (default): the secrets bootstrap hook Job (`/app/proretactl secrets bootstrap`) creates the Secret
   in the cluster when it is absent and never overwrites it (an incomplete existing Secret fails the Job).
@@ -214,6 +216,9 @@ Workloads always read `<fullname>-admin` (`login`, `password_hash`) and `<fullna
     `<fullname>-admin-initial` (always safe, nothing reads it; its password no longer works). It is never recreated.
   - crypto: one random 32-byte key with id `secrets.crypto.keyId` (default `k1`). It lives only in the cluster;
     deleting the namespace loses it (it encrypts the Slack webhook URLs and the SMTP password, which can be re-entered, and the queued emails, which are lost with it). Export it first: [docs/install.md](../../../docs/install.md#back-up-the-secrets).
+  - request: one random 32-byte key with id `secrets.request.keyId` (default `r1`) in `<fullname>-request`. The api
+    seals the header values and bodies of monitor requests with it and the worker opens them; the worker holds no
+    other key. Losing it loses those stored values (they can be entered again).
 - `externalSecret`: an ExternalSecret (`externalSecrets.secretStoreRef`, wave -2) materialises it. Needs
   `externalSecrets.enabled: true`; rendering fails otherwise.
 
@@ -227,6 +232,7 @@ Rendering fails when neither is configured. See [docs/runbooks/oauth.md](../../.
 |---|---|---|
 | `secrets.admin.remoteKey` (`proreta/admin`) | `login`, `password_hash` | `<fullname>-admin` |
 | `secrets.crypto.remoteKey` (`proreta/crypto`) | `keys` (JSON string), `active_key_id` | `<fullname>-crypto` |
+| `secrets.request.remoteKey` (`proreta/request`) | `keys` (JSON string), `active_key_id` | `<fullname>-request` |
 | `secrets.statuspage.remoteKey` (`proreta/statuspage`) | `cookie_key` | `<fullname>-statuspage` |
 | `secrets.oauth.remoteKey` (`proreta/oauth`, when `secrets.oauth.existingSecret` is empty) | `google_client_id`, `google_client_secret`, `github_client_id`, `github_client_secret` (only those of enabled providers) | `<fullname>-oauth` |
 | `database.bootstrap.adminSecret.remoteKey` (`proreta/db-admin`, when `database.bootstrap.adminSecret.existingSecret` is empty) | `usernameKey`, `passwordKey` (default `username`, `password`) | `<database Secret>-admin` (hook, deleted after success) |

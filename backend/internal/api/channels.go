@@ -9,7 +9,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/platform/httpx"
 )
 
-// The webhook URL of a channel is write-only: these handlers never return it, and errors from
+// The destination URL of a channel is write-only: these handlers never return it, and errors from
 // sending to it reach the client only as a kind (errors.go).
 
 func (s *server) ListChannels(ctx context.Context, req gen.ListChannelsRequestObject) (gen.ListChannelsResponseObject, error) {
@@ -27,13 +27,17 @@ func (s *server) ListChannels(ctx context.Context, req gen.ListChannelsRequestOb
 			return nil, err
 		}
 	}
+	access, err := s.access(ctx)
+	if err != nil {
+		return nil, err
+	}
 	list, err := s.channels.List(ctx, p.TenantID, sc, req.Params.ProjectId)
 	if err != nil {
 		return nil, err
 	}
 	items := make([]gen.Channel, len(list))
 	for i, c := range list {
-		items[i] = toChannel(c)
+		items[i] = toChannel(c.ForViewer(access))
 	}
 	return gen.ListChannels200JSONResponse{Items: items}, nil
 }
@@ -44,7 +48,12 @@ func (s *server) CreateChannel(ctx context.Context, req gen.CreateChannelRequest
 		return nil, err
 	}
 	b := req.Body
+	var channelType string
+	if b.Type != nil {
+		channelType = string(*b.Type)
+	}
 	c, err := s.channels.Create(ctx, a, notify.CreateInput{
+		Type: channelType, ContentType: contentTypeIn(b.ContentType), BodyTemplate: b.BodyTemplate,
 		Name: b.Name, WebhookURL: b.WebhookUrl, Events: fromEvents(b.Events), Mention: b.Mention, ReminderMinutes: b.ReminderMinutes,
 		ProjectID: b.ProjectId, OrganizationWide: b.OrganizationWide != nil && *b.OrganizationWide,
 	})
@@ -63,11 +72,15 @@ func (s *server) GetChannel(ctx context.Context, req gen.GetChannelRequestObject
 	if err != nil {
 		return nil, err
 	}
+	access, err := s.access(ctx)
+	if err != nil {
+		return nil, err
+	}
 	c, err := s.channels.Get(ctx, p.TenantID, sc, req.ChannelId)
 	if err != nil {
 		return nil, err
 	}
-	return gen.GetChannel200JSONResponse(toChannel(c)), nil
+	return gen.GetChannel200JSONResponse(toChannel(c.ForViewer(access))), nil
 }
 
 func (s *server) UpdateChannel(ctx context.Context, req gen.UpdateChannelRequestObject) (gen.UpdateChannelResponseObject, error) {
@@ -78,6 +91,7 @@ func (s *server) UpdateChannel(ctx context.Context, req gen.UpdateChannelRequest
 	b := req.Body
 	c, err := s.channels.Update(ctx, a, req.ChannelId, notify.UpdateInput{
 		Name: b.Name, WebhookURL: b.WebhookUrl, Events: fromEvents(b.Events), Mention: b.Mention, ReminderMinutes: b.ReminderMinutes,
+		ContentType: contentTypeIn(b.ContentType), BodyTemplate: b.BodyTemplate,
 		ProjectID: b.ProjectId, OrganizationWide: b.OrganizationWide != nil && *b.OrganizationWide,
 	})
 	if err != nil {
@@ -112,12 +126,27 @@ func (s *server) TestChannel(ctx context.Context, req gen.TestChannelRequestObje
 	return gen.TestChannel204Response{}, nil
 }
 
+func (s *server) PreviewChannelTemplate(ctx context.Context, req gen.PreviewChannelTemplateRequestObject) (gen.PreviewChannelTemplateResponseObject, error) {
+	if _, err := s.principal(ctx); err != nil {
+		return nil, err
+	}
+	body, err := s.channels.PreviewTemplate(string(req.Body.ContentType), req.Body.BodyTemplate)
+	if err != nil {
+		return nil, err
+	}
+	return gen.PreviewChannelTemplate200JSONResponse{Body: body}, nil
+}
+
 func (s *server) notifyActor(ctx context.Context) (notify.Actor, error) {
 	p, err := s.principal(ctx)
 	if err != nil {
 		return notify.Actor{}, err
 	}
-	return notify.Actor{TenantID: p.TenantID, UserID: p.UserID, IP: httpx.ClientIP(httpRequest(ctx), s.cfg.TrustedProxyHops)}, nil
+	access, err := s.access(ctx)
+	if err != nil {
+		return notify.Actor{}, err
+	}
+	return notify.Actor{TenantID: p.TenantID, UserID: p.UserID, IP: httpx.ClientIP(httpRequest(ctx), s.cfg.TrustedProxyHops), Access: access}, nil
 }
 
 func toChannel(c notify.Channel) gen.Channel {
@@ -126,8 +155,8 @@ func toChannel(c notify.Channel) gen.Channel {
 		events[i] = gen.ChannelEvent(e)
 	}
 	return gen.Channel{
-		Id: c.ID, ProjectId: c.ProjectID, Name: c.Name, Type: gen.ChannelType(c.Type), Events: events, Mention: c.Mention,
-		ReminderMinutes: c.ReminderMinutes, Status: gen.ChannelStatus(c.Status), CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
+		Id: c.ID, ProjectId: c.ProjectID, Name: c.Name, Type: gen.ChannelType(c.Type), ConfigHidden: c.ConfigHidden, Events: events, Mention: c.Mention,
+		ReminderMinutes: c.ReminderMinutes, ContentType: contentTypeOut(c.ContentType), BodyTemplate: c.BodyTemplate, Status: gen.ChannelStatus(c.Status), CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 	}
 }
 
@@ -140,4 +169,20 @@ func fromEvents(in *gen.ChannelEvents) *[]string {
 		out[i] = string(e)
 	}
 	return &out
+}
+
+func contentTypeIn(in *gen.WebhookContentType) *string {
+	if in == nil {
+		return nil
+	}
+	v := string(*in)
+	return &v
+}
+
+func contentTypeOut(in *string) *gen.ChannelContentType {
+	if in == nil {
+		return nil
+	}
+	v := gen.ChannelContentType(*in)
+	return &v
 }

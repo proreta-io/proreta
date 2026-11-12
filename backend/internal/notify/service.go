@@ -29,11 +29,16 @@ const (
 	StatusFailed = "failed"
 )
 
-// TypeSlack is the only channel type: a Slack Incoming Webhook.
-const TypeSlack = "slack_webhook"
+// Channel types (notification_channels.type).
+const (
+	// TypeSlack is a Slack Incoming Webhook.
+	TypeSlack = "slack_webhook"
+	// TypeWebhook posts the message of a template to any https endpoint.
+	TypeWebhook = "webhook"
+)
 
-// ChannelTypes lists every channel type (the values of notification_channels.type).
-var ChannelTypes = []string{TypeSlack}
+// ChannelTypes lists every channel type.
+var ChannelTypes = []string{TypeSlack, TypeWebhook}
 
 // Audit actions written by this module. Their metadata never contains the webhook URL.
 const (
@@ -47,6 +52,8 @@ var (
 	// ErrChannelNotFound means no live channel with that id exists in the tenant (or a delivery
 	// names a channel that does not exist in its tenant).
 	ErrChannelNotFound = errors.New("notify: channel not found")
+	// ErrBadTemplate means a stored template does not render to a usable body; retrying will not help.
+	ErrBadTemplate = errors.New("notify: webhook template does not render to a valid body")
 	// ErrUndecryptable means the stored config cannot be decrypted (unknown key or tampering).
 	ErrUndecryptable = errors.New("notify: channel config cannot be decrypted")
 )
@@ -56,11 +63,48 @@ type sender interface {
 	Send(ctx context.Context, webhookURL, text string) error
 }
 
-// Actor is who changes channels; it scopes every operation to one tenant.
+// webhookSender sends one rendered body to a webhook; *WebhookNotifier implements it.
+type webhookSender interface {
+	Send(ctx context.Context, webhookURL, contentType, body string) error
+}
+
+// Actor is who changes channels; it scopes every operation to one tenant, and Access to the
+// projects whose channels the user may manage.
 type Actor struct {
 	TenantID uuid.UUID
 	UserID   uuid.UUID
 	IP       netip.Addr
+	Access   authz.Actor
+}
+
+// canManage checks that the actor may change a channel of a project (nil = organization-wide).
+// An organization-wide channel needs the permission through the organization role. A project the
+// actor has no role in is reported as a missing channel, so ids of other projects reveal nothing.
+func (a Actor) canManage(project *uuid.UUID) error {
+	if project == nil {
+		if !a.Access.Holds("channel.manage") {
+			return authz.ErrForbidden
+		}
+		return nil
+	}
+	if !a.Access.Sees(*project) {
+		return ErrChannelNotFound
+	}
+	if !a.Access.CanIn(*project, "channel.manage") {
+		return authz.ErrProjectForbidden
+	}
+	return nil
+}
+
+// canUse checks the project a channel is created in or moved to: unknown to the actor is a
+// validation error like a project that does not exist.
+func (a Actor) canUse(project *uuid.UUID) error {
+	if project != nil && !a.Access.Sees(*project) {
+		var verr validation.Error
+		verr.Add("projectId", "does not exist")
+		return &verr
+	}
+	return a.canManage(project)
 }
 
 // Channel is what the api may show about a channel: never the webhook URL.
@@ -71,8 +115,14 @@ type Channel struct {
 	Events          []string
 	Mention         []string
 	ReminderMinutes int
+	// ContentType and BodyTemplate are set on webhook channels whose settings are visible; the
+	// template is not secret.
+	ContentType  *string
+	BodyTemplate *string
 	// ProjectID is the channel's project; nil for an organization-wide channel.
 	ProjectID *uuid.UUID
+	// ConfigHidden is true when the settings were withheld by ForViewer.
+	ConfigHidden bool
 	// Status is StatusActive or StatusFailed.
 	Status    string
 	CreatedAt time.Time
@@ -86,11 +136,17 @@ type CreateInput struct {
 	// the channel organization-wide instead.
 	ProjectID        *uuid.UUID
 	OrganizationWide bool
-	Name             string
-	WebhookURL       string
-	Events           *[]string
-	Mention          *[]string
-	ReminderMinutes  *int
+	// Type is TypeSlack when empty.
+	Type       string
+	Name       string
+	WebhookURL string
+	// ContentType and BodyTemplate are for webhook channels; the defaults are json and its
+	// template.
+	ContentType     *string
+	BodyTemplate    *string
+	Events          *[]string
+	Mention         *[]string
+	ReminderMinutes *int
 }
 
 // UpdateInput changes the non-nil fields. ProjectID moves the channel to a project,
@@ -100,6 +156,8 @@ type UpdateInput struct {
 	OrganizationWide bool
 	Name             *string
 	WebhookURL       *string
+	ContentType      *string
+	BodyTemplate     *string
 	Events           *[]string
 	Mention          *[]string
 	ReminderMinutes  *int
@@ -112,6 +170,10 @@ type Target struct {
 	Status     string
 	WebhookURL string
 	Mention    []string
+	// ContentType, BodyTemplate and Hook are set for webhook channels.
+	ContentType  string
+	BodyTemplate string
+	Hook         WebhookContext
 	// Deleted channels have no webhook; their deliveries fail.
 	Deleted bool
 }
@@ -121,6 +183,7 @@ type Service struct {
 	pool      *db.Pool
 	keys      *crypto.Keyring
 	sender    sender
+	webhook   webhookSender
 	publicURL string
 }
 
@@ -130,10 +193,29 @@ func NewService(pool *db.Pool, keys *crypto.Keyring, s sender, publicURL string)
 	return &Service{pool: pool, keys: keys, sender: s, publicURL: publicURL}
 }
 
+// WithWebhook sets the sender of test messages to webhook channels and returns s.
+func (s *Service) WithWebhook(w webhookSender) *Service {
+	s.webhook = w
+	return s
+}
+
 // channelAAD binds a ciphertext to its row, so a value copied to another channel (or tenant)
 // does not decrypt.
 func channelAAD(id uuid.UUID) []byte {
 	return []byte("notification_channels.config_encrypted:" + id.String())
+}
+
+// ForViewer withholds the settings of an organization-wide channel from an actor without the
+// organization role: people who only hold project roles may select it for their monitors and see
+// its name, nothing else.
+func (c Channel) ForViewer(a authz.Actor) Channel {
+	if c.ProjectID != nil || a.Holds("channel.manage") {
+		return c
+	}
+	c.ConfigHidden = true
+	c.Events, c.Mention, c.ReminderMinutes = []string{}, []string{}, 0
+	c.ContentType, c.BodyTemplate = nil, nil
+	return c
 }
 
 // Visible reports whether a channel is visible within scope: organization-wide channels are
@@ -193,7 +275,8 @@ func get(ctx context.Context, q *notifydb.Queries, tenantID, id uuid.UUID) (Chan
 
 func toChannel(r notifydb.ListChannelsRow) Channel {
 	c := Channel{ID: r.ID, Name: r.Name, Type: r.Type, Events: r.Events, Mention: r.Mention,
-		ReminderMinutes: int(r.ReminderMinutes), Status: r.Status, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, ProjectID: r.ProjectID}
+		ReminderMinutes: int(r.ReminderMinutes), Status: r.Status, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, ProjectID: r.ProjectID,
+		ContentType: r.ContentType, BodyTemplate: r.BodyTemplate}
 	if c.Events == nil {
 		c.Events = []string{}
 	}
@@ -241,11 +324,47 @@ func (f *channelFields) apply(verr *validation.Error, name *string, events, ment
 	}
 }
 
-func checkWebhook(verr *validation.Error, u *string) {
-	if u != nil {
-		if msg := ValidateWebhookURL(*u); msg != "" {
+// checkTarget validates the destination URL of a channel of channelType and returns the form to
+// store.
+func checkTarget(verr *validation.Error, channelType, raw string) string {
+	if channelType == TypeWebhook {
+		u, msg := ValidateWebhookTargetURL(raw)
+		if msg != "" {
 			verr.Add("webhookUrl", msg)
 		}
+		return u
+	}
+	if msg := ValidateWebhookURL(raw); msg != "" {
+		verr.Add("webhookUrl", msg)
+	}
+	return raw
+}
+
+// checkWebhookFields validates the content type, template and mention of a channel of
+// channelType. contentType and tpl are the values after the change; changed says whether the
+// request touched either of them or the mention.
+func checkWebhookFields(verr *validation.Error, channelType string, contentType, tpl *string, mention []string) {
+	if channelType != TypeWebhook {
+		if contentType != nil {
+			verr.Add("contentType", "is only for webhook channels")
+		}
+		if tpl != nil {
+			verr.Add("bodyTemplate", "is only for webhook channels")
+		}
+		return
+	}
+	if len(mention) > 0 {
+		verr.Add("mention", "is only for Slack channels")
+	}
+	if contentType == nil || tpl == nil {
+		return
+	}
+	if msg := ValidateContentType(*contentType); msg != "" {
+		verr.Add("contentType", msg)
+		return
+	}
+	if msg := ValidateTemplate(*contentType, *tpl); msg != "" {
+		verr.Add("bodyTemplate", msg)
 	}
 }
 
@@ -254,14 +373,33 @@ func checkWebhook(verr *validation.Error, u *string) {
 func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Channel, error) {
 	f := channelFields{events: AllEvents, mention: []string{}}
 	var verr validation.Error
+	if in.Type == "" {
+		in.Type = TypeSlack
+	}
+	if !slices.Contains(ChannelTypes, in.Type) {
+		verr.Add("type", `must be "slack_webhook" or "webhook"`)
+		return Channel{}, &verr
+	}
 	f.apply(&verr, &in.Name, in.Events, in.Mention, in.ReminderMinutes)
-	checkWebhook(&verr, &in.WebhookURL)
+	target := checkTarget(&verr, in.Type, in.WebhookURL)
+	contentType, tpl := in.ContentType, in.BodyTemplate
+	if in.Type == TypeWebhook {
+		if contentType == nil {
+			ct := ContentJSON
+			contentType = &ct
+		}
+		if tpl == nil {
+			d := DefaultTemplate(*contentType)
+			tpl = &d
+		}
+	}
+	checkWebhookFields(&verr, in.Type, contentType, tpl, f.mention)
 	checkProject(&verr, in.ProjectID, in.OrganizationWide)
 	if err := verr.Err(); err != nil {
 		return Channel{}, err
 	}
 	id := uuidv7.New()
-	sealed, err := s.keys.Encrypt([]byte(in.WebhookURL), channelAAD(id))
+	sealed, err := s.keys.Encrypt([]byte(target), channelAAD(id))
 	if err != nil {
 		return Channel{}, fmt.Errorf("notify: encrypt: %w", err)
 	}
@@ -277,13 +415,17 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Channel,
 		if err != nil {
 			return err
 		}
+		if err := a.canUse(project); err != nil {
+			return err
+		}
 		if err := q.InsertChannel(ctx, notifydb.InsertChannelParams{
-			ID: id, TenantID: a.TenantID, Name: f.name, ConfigEncrypted: sealed, ProjectID: project,
+			ID: id, TenantID: a.TenantID, Type: in.Type, Name: f.name, ConfigEncrypted: sealed, ProjectID: project,
+			ContentType: contentType, BodyTemplate: tpl,
 			Events: f.events, Mention: f.mention, ReminderMinutes: int32(f.reminder), //nolint:gosec // validated 0..1440
 		}); err != nil {
 			return fmt.Errorf("notify: insert channel: %w", err)
 		}
-		if err := s.audit(ctx, tx, a, ActionChannelCreated, id, map[string]any{"keyId": s.keys.ActiveKeyID(), "project": projectMeta(project)}); err != nil {
+		if err := s.audit(ctx, tx, a, ActionChannelCreated, id, map[string]any{"keyId": s.keys.ActiveKeyID(), "type": in.Type, "project": projectMeta(project)}); err != nil {
 			return err
 		}
 		out, err = get(ctx, q, a.TenantID, id)
@@ -301,7 +443,6 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 	var verr validation.Error
 	var upd channelFields
 	upd.apply(&verr, in.Name, in.Events, in.Mention, in.ReminderMinutes)
-	checkWebhook(&verr, in.WebhookURL)
 	checkProject(&verr, in.ProjectID, in.OrganizationWide)
 	if err := verr.Err(); err != nil {
 		return Channel{}, err
@@ -320,6 +461,36 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 		}
 		cur, err := get(ctx, q, a.TenantID, id)
 		if err != nil {
+			return err
+		}
+		if err := a.canManage(cur.ProjectID); err != nil {
+			return err
+		}
+		var tv validation.Error
+		var target string
+		if in.WebhookURL != nil {
+			target = checkTarget(&tv, cur.Type, *in.WebhookURL)
+		}
+		contentType, tpl := cur.ContentType, cur.BodyTemplate
+		touched := in.ContentType != nil || in.BodyTemplate != nil
+		if in.ContentType != nil {
+			contentType = in.ContentType
+		}
+		if in.BodyTemplate != nil {
+			tpl = in.BodyTemplate
+		}
+		if touched || in.Mention != nil {
+			var m []string
+			if in.Mention != nil {
+				m = upd.mention
+			}
+			if touched {
+				checkWebhookFields(&tv, cur.Type, contentType, tpl, m)
+			} else {
+				checkWebhookFields(&tv, cur.Type, nil, nil, m)
+			}
+		}
+		if err := tv.Err(); err != nil {
 			return err
 		}
 		f := channelFields{name: cur.Name, events: cur.Events, mention: cur.Mention, reminder: cur.ReminderMinutes}
@@ -348,9 +519,13 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 		if f.reminder != cur.ReminderMinutes {
 			changed = append(changed, "reminderMinutes")
 		}
+		if touched && (!equalPtr(contentType, cur.ContentType) || !equalPtr(tpl, cur.BodyTemplate)) {
+			changed = append(changed, "template")
+		}
 		if len(changed) > 0 {
 			if err := q.UpdateChannel(ctx, notifydb.UpdateChannelParams{
 				TenantID: a.TenantID, ID: id, Name: f.name, Events: f.events, Mention: f.mention,
+				ContentType: contentType, BodyTemplate: tpl,
 				ReminderMinutes: int32(f.reminder), //nolint:gosec // validated 0..1440
 			}); err != nil {
 				return fmt.Errorf("notify: update channel: %w", err)
@@ -363,6 +538,9 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 				return err
 			}
 			if !sameProject(project, cur.ProjectID) {
+				if err := a.canUse(project); err != nil {
+					return err
+				}
 				if err := q.SetChannelProject(ctx, notifydb.SetChannelProjectParams{TenantID: a.TenantID, ID: id, ProjectID: project}); err != nil {
 					return fmt.Errorf("notify: move channel: %w", err)
 				}
@@ -378,7 +556,7 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 			}
 		}
 		if in.WebhookURL != nil {
-			sealed, err := s.keys.Encrypt([]byte(*in.WebhookURL), channelAAD(id))
+			sealed, err := s.keys.Encrypt([]byte(target), channelAAD(id))
 			if err != nil {
 				return fmt.Errorf("notify: encrypt: %w", err)
 			}
@@ -409,7 +587,11 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 func (s *Service) Delete(ctx context.Context, a Actor, id uuid.UUID) error {
 	return db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
 		q := notifydb.New(tx)
-		if _, err := lock(ctx, q, a.TenantID, id); err != nil {
+		ch, err := lock(ctx, q, a.TenantID, id)
+		if err != nil {
+			return err
+		}
+		if err := a.canManage(ch.ProjectID); err != nil {
 			return err
 		}
 		detached, err := q.DetachChannel(ctx, notifydb.DetachChannelParams{TenantID: a.TenantID, ChannelID: id})
@@ -443,19 +625,44 @@ func lock(ctx context.Context, q *notifydb.Queries, tenantID, id uuid.UUID) (not
 // marks the channel failed, like a failed delivery.
 func (s *Service) Test(ctx context.Context, a Actor, id uuid.UUID) error {
 	var target Target
+	var body string
+	isWebhook := false
 	err := db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
 		ch, err := lock(ctx, notifydb.New(tx), a.TenantID, id)
 		if err != nil {
 			return err
 		}
+		if err := a.canManage(ch.ProjectID); err != nil {
+			return err
+		}
 		target, err = s.open(id, ch.Status, ch.ConfigEncrypted)
-		return err
+		if err != nil {
+			return err
+		}
+		if isWebhook = ch.Type == TypeWebhook; isWebhook {
+			if ch.ContentType == nil || ch.BodyTemplate == nil {
+				return ErrBadTemplate
+			}
+			if body, err = s.PreviewTemplate(*ch.ContentType, *ch.BodyTemplate); err != nil {
+				return err
+			}
+			target.ContentType = *ch.ContentType
+		}
+		return nil
 	})
 	if err != nil {
 		return err
 	}
 
-	sendErr := s.sender.Send(ctx, target.WebhookURL, TestMessage(s.publicURL))
+	var sendErr error
+	if isWebhook {
+		if s.webhook == nil {
+			return errors.New("notify: no webhook sender configured")
+		}
+		sendErr = s.webhook.Send(ctx, target.WebhookURL, target.ContentType, body)
+	} else {
+		sendErr = s.sender.Send(ctx, target.WebhookURL, TestMessage(s.publicURL))
+	}
 	result := "ok"
 	var se *SendError
 	if errors.As(sendErr, &se) {
@@ -497,7 +704,7 @@ func (s *Service) DeliveryTarget(ctx context.Context, tx pgx.Tx, tenantID, chann
 	if err != nil {
 		return Target{}, fmt.Errorf("notify: get channel: %w", err)
 	}
-	if ch.Type != TypeSlack {
+	if !slices.Contains(ChannelTypes, ch.Type) {
 		return Target{}, ErrChannelNotFound
 	}
 	if ch.Deleted {
@@ -505,7 +712,45 @@ func (s *Service) DeliveryTarget(ctx context.Context, tx pgx.Tx, tenantID, chann
 	}
 	t, err := s.open(channelID, ch.Status, ch.ConfigEncrypted)
 	t.Type, t.Mention = ch.Type, ch.Mention
-	return t, err
+	if err != nil || ch.Type != TypeWebhook {
+		return t, err
+	}
+	if ch.ContentType == nil || ch.BodyTemplate == nil {
+		return t, ErrBadTemplate
+	}
+	t.ContentType, t.BodyTemplate = *ch.ContentType, *ch.BodyTemplate
+	return t, nil
+}
+
+// LoadWebhookContext reads the names a webhook template may use for the monitor of a delivery;
+// a monitor that no longer exists leaves them empty. tx must be a tenant transaction.
+func (s *Service) LoadWebhookContext(ctx context.Context, tx pgx.Tx, monitorID uuid.UUID) (WebhookContext, error) {
+	// Not a sqlc query: sqlc cannot resolve the columns of a function returning a table.
+	var c WebhookContext
+	err := tx.QueryRow(ctx, `SELECT monitor_type, project_name, organization_name FROM webhook_delivery_context($1)`, monitorID).
+		Scan(&c.MonitorType, &c.ProjectName, &c.OrganizationName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return WebhookContext{}, nil
+	}
+	if err != nil {
+		return WebhookContext{}, fmt.Errorf("notify: webhook context: %w", err)
+	}
+	return c, nil
+}
+
+// PreviewTemplate renders a template with sample data without sending anything. The error is a
+// *validation.Error with field errors when the template is not acceptable.
+func (s *Service) PreviewTemplate(contentType, tpl string) (string, error) {
+	var verr validation.Error
+	if msg := ValidateContentType(contentType); msg != "" {
+		verr.Add("contentType", msg)
+	} else if msg := ValidateTemplate(contentType, tpl); msg != "" {
+		verr.Add("bodyTemplate", msg)
+	}
+	if err := verr.Err(); err != nil {
+		return "", err
+	}
+	return RenderTemplate(contentType, tpl, SampleData(s.publicURL))
 }
 
 func (s *Service) open(id uuid.UUID, status string, sealed []byte) (Target, error) {
@@ -548,6 +793,13 @@ func channelProject(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, project 
 		return nil, err
 	}
 	return &id, nil
+}
+
+func equalPtr(a, b *string) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }
 
 func sameProject(a, b *uuid.UUID) bool {
