@@ -30,6 +30,7 @@ import {
   Segmented,
   Select,
   Skeleton,
+  Textarea,
   Loading,
 } from "../components/ui";
 import { formatDuration } from "../lib/format";
@@ -38,7 +39,15 @@ import {
   channelsForProject,
   describeSetup,
   emptyMonitorForm,
+  BODY_METHODS,
+  CONTENT_TYPES,
+  jsonWarning,
   keepLiveChannels,
+  METHODS,
+  REQUEST_BODY_MAX,
+  takesBody,
+  type HttpContentType,
+  type HttpMethod,
   mapServerErrors,
   NAME_MAX,
   toCreateRequest,
@@ -273,6 +282,9 @@ function MonitorFormBody({
         [
           "name",
           "url",
+          "method",
+          "contentType",
+          "requestBody",
           "expectedStatus",
           "expectedIntervalSeconds",
           "graceSeconds",
@@ -373,6 +385,8 @@ function MonitorFormBody({
               </div>
               <span className="text-caption text-muted-foreground">Fixed for now.</span>
             </div>
+
+            <RequestFields values={values} update={update} errors={errors} />
 
             <ExpectedStatus values={values} update={update} error={errors.expectedStatus} />
 
@@ -846,5 +860,98 @@ function HeartbeatFields({
         )}
       </Field>
     </>
+  );
+}
+
+function RequestFields({
+  values,
+  update,
+  errors,
+}: {
+  values: MonitorFormValues;
+  update: <K extends keyof MonitorFormValues>(key: K, value: MonitorFormValues[K]) => void;
+  errors: MonitorFormErrors;
+}) {
+  const withBody = takesBody(values.method);
+  const warning = jsonWarning(values);
+  const bytes = new TextEncoder().encode(values.requestBody).length;
+  return (
+    <div className="flex flex-col gap-6">
+      <Field
+        label="Method"
+        hint={
+          withBody
+            ? undefined
+            : "GET and HEAD send no body. Choose POST, PUT, PATCH or DELETE to send one."
+        }
+        error={errors.method}
+      >
+        {(c) => (
+          <Select
+            {...c}
+            data-field="method"
+            name="method"
+            value={values.method}
+            onChange={(e) => update("method", e.target.value as HttpMethod)}
+            className="sm:w-40"
+          >
+            {METHODS.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </Select>
+        )}
+      </Field>
+
+      {BODY_METHODS.includes(values.method) && (
+        <>
+          <Field label="Content type" error={errors.contentType}>
+            {(c) => (
+              <Select
+                {...c}
+                data-field="contentType"
+                name="contentType"
+                value={values.contentType}
+                onChange={(e) => update("contentType", e.target.value as HttpContentType)}
+              >
+                {CONTENT_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+          <Field
+            label="Request body"
+            hint={`Optional. Stored as plain text and visible to everyone who can see this monitor: do not put secrets here. ${bytes} of ${REQUEST_BODY_MAX} bytes.`}
+            error={errors.requestBody}
+          >
+            {(c) => (
+              <>
+                <Textarea
+                  {...c}
+                  data-field="requestBody"
+                  name="requestBody"
+                  rows={6}
+                  spellCheck={false}
+                  autoCapitalize="off"
+                  autoComplete="off"
+                  className="font-mono text-mono"
+                  value={values.requestBody}
+                  onChange={(e) => update("requestBody", e.target.value)}
+                />
+                {warning && (
+                  <span role="status" className="text-caption text-warning">
+                    {warning}
+                  </span>
+                )}
+              </>
+            )}
+          </Field>
+        </>
+      )}
+    </div>
   );
 }

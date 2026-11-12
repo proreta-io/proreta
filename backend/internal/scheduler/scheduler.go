@@ -135,11 +135,13 @@ type Lease struct {
 // Job is a claimed check with what is needed to run it.
 type Job struct {
 	Lease
-	URL              string
-	ExpectedStatus   string
-	FailureThreshold int
-	Interval         time.Duration
-	Timeout          time.Duration
+	URL            string
+	ExpectedStatus string
+	// Method, RequestBody and ContentType are the request to send; the body must never be logged.
+	Method, RequestBody, ContentType string
+	FailureThreshold                 int
+	Interval                         time.Duration
+	Timeout                          time.Duration
 	// NextRunAt is when the job was due; now minus NextRunAt is the scheduler lag.
 	NextRunAt time.Time
 }
@@ -151,7 +153,8 @@ func (s *Service) Claim(ctx context.Context, pool *db.Pool, n int, location stri
 	var jobs []Job
 	err := db.WithTx(ctx, pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT tenant_id, monitor_id, location_id, lease_token, lease_until, url, expected_status,
-			failure_threshold, interval_seconds, timeout_seconds, next_run_at FROM claim_due_monitors($1, $2)`, n, location)
+			failure_threshold, interval_seconds, timeout_seconds, next_run_at,
+			method, request_body, content_type FROM claim_due_monitors($1, $2)`, n, location)
 		if err != nil {
 			return err
 		}
@@ -159,7 +162,7 @@ func (s *Service) Claim(ctx context.Context, pool *db.Pool, n int, location stri
 			var j Job
 			var interval, timeout int32
 			err := r.Scan(&j.TenantID, &j.MonitorID, &j.LocationID, &j.Token, &j.Until, &j.URL, &j.ExpectedStatus,
-				&j.FailureThreshold, &interval, &timeout, &j.NextRunAt)
+				&j.FailureThreshold, &interval, &timeout, &j.NextRunAt, &j.Method, &j.RequestBody, &j.ContentType)
 			j.Interval, j.Timeout = time.Duration(interval)*time.Second, time.Duration(timeout)*time.Second
 			return j, err
 		})

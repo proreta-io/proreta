@@ -1,6 +1,6 @@
 -- name: InsertMonitor :exec
-INSERT INTO monitors (id, tenant_id, project_id, name, type, config, interval_seconds, timeout_seconds, failure_threshold, notifications_enabled)
-VALUES (@id, @tenant_id, @project_id, @name, @type, @config, @interval_seconds, @timeout_seconds, @failure_threshold, @notifications_enabled);
+INSERT INTO monitors (id, tenant_id, project_id, name, type, config, interval_seconds, timeout_seconds, failure_threshold, notifications_enabled, method, request_body, content_type)
+VALUES (@id, @tenant_id, @project_id, @name, @type, @config, @interval_seconds, @timeout_seconds, @failure_threshold, @notifications_enabled, @method, @request_body, @content_type);
 
 -- name: InsertMonitorLocation :exec
 INSERT INTO monitor_locations (tenant_id, monitor_id, location_id)
@@ -12,7 +12,7 @@ VALUES (@tenant_id, @monitor_id);
 
 -- name: GetMonitor :one
 SELECT m.id, m.project_id, m.name, m.type, m.config, m.interval_seconds, m.timeout_seconds, m.failure_threshold,
-       m.notifications_enabled, m.paused, m.created_at, m.updated_at,
+       m.notifications_enabled, m.paused, m.method, m.request_body, m.content_type, m.created_at, m.updated_at,
        s.status, s.status_changed_at, s.last_error_kind, s.last_checked_at, s.tls_expires_at,
        s.current_incident_id
 FROM monitors AS m
@@ -20,7 +20,7 @@ JOIN monitor_state AS s ON s.tenant_id = m.tenant_id AND s.monitor_id = m.id
 WHERE m.tenant_id = @tenant_id AND m.id = @id AND m.deleted_at IS NULL;
 
 -- name: LockMonitor :one
-SELECT id, project_id, name, type, config, interval_seconds, timeout_seconds, failure_threshold, notifications_enabled, paused
+SELECT id, project_id, name, type, config, interval_seconds, timeout_seconds, failure_threshold, notifications_enabled, paused, method, request_body, content_type
 FROM monitors
 WHERE tenant_id = @tenant_id AND id = @id AND deleted_at IS NULL
 FOR UPDATE;
@@ -28,7 +28,8 @@ FOR UPDATE;
 -- name: UpdateMonitor :exec
 UPDATE monitors
 SET name = @name, config = @config, interval_seconds = @interval_seconds, failure_threshold = @failure_threshold,
-    notifications_enabled = @notifications_enabled, updated_at = now()
+    notifications_enabled = @notifications_enabled, method = @method, request_body = @request_body,
+    content_type = @content_type, updated_at = now()
 WHERE tenant_id = @tenant_id AND id = @id;
 
 -- name: SetMonitorPaused :exec

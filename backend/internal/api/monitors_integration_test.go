@@ -47,6 +47,7 @@ func TestIntegrationMonitorLifecycle(t *testing.T) {
 	httpWant := map[string]any{
 		"url": "https://example.com/health?token=s3cr3t", "intervalSeconds": 60.0, "timeoutSeconds": 10.0,
 		"failureThreshold": 2.0, "expectedStatus": "2xx", "tlsExpiresAt": nil, "lastResponseMs": nil,
+		"method": "GET", "contentType": "", "hasRequestBody": false, "requestBody": "",
 	}
 	settings, _ := r.body["http"].(map[string]any)
 	for k, v := range httpWant {

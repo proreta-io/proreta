@@ -72,6 +72,9 @@ type Monitor struct {
 	Name                 string
 	URL                  string
 	ExpectedStatus       string
+	Method               string
+	RequestBody          string
+	ContentType          string
 	IntervalSeconds      int
 	TimeoutSeconds       int
 	FailureThreshold     int
@@ -114,6 +117,7 @@ type Summary struct {
 
 const monitorColumns = `
 SELECT m.id, m.project_id, m.type, m.name, COALESCE(m.config ->> 'url', ''), COALESCE(m.config ->> 'expectedStatus', '2xx'),
+       m.method, m.request_body, m.content_type,
        m.interval_seconds, m.timeout_seconds, m.failure_threshold, m.notifications_enabled, m.paused,
        m.created_at, m.updated_at,
        s.status, s.status_changed_at, s.last_error_kind, s.last_checked_at, s.tls_expires_at,
@@ -143,7 +147,7 @@ func scanMonitor(row pgx.Row) (Monitor, error) {
 	var incStarted *time.Time
 	var incReason string
 	var latency, grace *int32
-	err := row.Scan(&m.ID, &m.ProjectID, &m.Type, &m.Name, &m.URL, &m.ExpectedStatus, &interval, &timeout, &threshold, &m.NotificationsEnabled, &m.Paused,
+	err := row.Scan(&m.ID, &m.ProjectID, &m.Type, &m.Name, &m.URL, &m.ExpectedStatus, &m.Method, &m.RequestBody, &m.ContentType, &interval, &timeout, &threshold, &m.NotificationsEnabled, &m.Paused,
 		&m.CreatedAt, &m.UpdatedAt, &m.Status, &m.StatusSince, &m.LastErrorKind, &m.LastCheckedAt, &m.TLSExpiresAt,
 		&incID, &incStarted, &incReason, &latency, &m.LastPingAt, &grace)
 	if err != nil {

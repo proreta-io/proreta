@@ -277,7 +277,8 @@ func (w *Worker) check(ctx context.Context, j scheduler.Job, host string) {
 			"location_id", j.LocationID, "panic_type", fmt.Sprintf("%T", r))
 	}()
 	start := time.Now()
-	res := w.d.Prober.Probe(ctx, checks.Request{URL: j.URL, Timeout: j.Timeout, ExpectedStatus: j.ExpectedStatus})
+	res := w.d.Prober.Probe(ctx, checks.Request{URL: j.URL, Timeout: j.Timeout, ExpectedStatus: j.ExpectedStatus,
+		Method: j.Method, Body: j.RequestBody, ContentType: j.ContentType})
 	w.limiter.Release(j.TenantID, host)
 	released = true
 	if res.Cancelled || ctx.Err() != nil {

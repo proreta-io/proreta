@@ -43,6 +43,9 @@ func (s *server) ListMonitors(ctx context.Context, req gen.ListMonitorsRequestOb
 	items := make([]gen.MonitorListItem, len(list))
 	for i, m := range list {
 		http, heartbeat := monitorSettings(m)
+		if http != nil {
+			http.RequestBody = nil
+		}
 		items[i] = gen.MonitorListItem{
 			Id: m.ID, ProjectId: m.ProjectID, Type: gen.MonitorType(m.Type), Name: m.Name,
 			NotificationsEnabled: m.NotificationsEnabled, Paused: m.Paused,
@@ -69,7 +72,8 @@ func (s *server) CreateMonitor(ctx context.Context, req gen.CreateMonitorRequest
 	}
 	if h := b.Http; h != nil {
 		in.HTTP = &monitors.HTTPSettings{URL: &h.Url, ExpectedStatus: h.ExpectedStatus, IntervalSeconds: h.IntervalSeconds,
-			TimeoutSeconds: h.TimeoutSeconds, FailureThreshold: h.FailureThreshold}
+			TimeoutSeconds: h.TimeoutSeconds, FailureThreshold: h.FailureThreshold,
+			Method: methodPtr(h.Method), RequestBody: h.RequestBody, ContentType: contentTypePtr(h.ContentType)}
 	}
 	if hb := b.Heartbeat; hb != nil {
 		in.Heartbeat = &monitors.HeartbeatSettings{ExpectedIntervalSeconds: hb.ExpectedIntervalSeconds, GraceSeconds: hb.GraceSeconds}
@@ -106,7 +110,8 @@ func (s *server) UpdateMonitor(ctx context.Context, req gen.UpdateMonitorRequest
 	in := monitors.UpdateInput{Name: b.Name, NotificationsEnabled: b.NotificationsEnabled, ChannelIDs: b.ChannelIds, ProjectID: b.ProjectId}
 	if h := b.Http; h != nil {
 		in.HTTP = &monitors.HTTPSettings{URL: h.Url, ExpectedStatus: h.ExpectedStatus, IntervalSeconds: h.IntervalSeconds,
-			TimeoutSeconds: h.TimeoutSeconds, FailureThreshold: h.FailureThreshold}
+			TimeoutSeconds: h.TimeoutSeconds, FailureThreshold: h.FailureThreshold,
+			Method: methodPtr(h.Method), RequestBody: h.RequestBody, ContentType: contentTypePtr(h.ContentType)}
 	}
 	if hb := b.Heartbeat; hb != nil {
 		in.Heartbeat = &monitors.HeartbeatSettings{ExpectedIntervalSeconds: hb.ExpectedIntervalSeconds, GraceSeconds: hb.GraceSeconds}
@@ -269,8 +274,10 @@ func monitorSettings(m queries.Monitor) (*gen.HttpMonitor, *gen.HeartbeatMonitor
 	if m.Type == monitors.TypeHeartbeat {
 		return nil, &gen.HeartbeatMonitor{ExpectedIntervalSeconds: m.IntervalSeconds, GraceSeconds: deref(m.GraceSeconds), LastPingAt: m.LastPingAt}
 	}
-	return &gen.HttpMonitor{Url: m.URL, ExpectedStatus: m.ExpectedStatus, IntervalSeconds: m.IntervalSeconds,
-		TimeoutSeconds: m.TimeoutSeconds, FailureThreshold: m.FailureThreshold, TlsExpiresAt: m.TLSExpiresAt,
+	return &gen.HttpMonitor{Url: m.URL, ExpectedStatus: m.ExpectedStatus, Method: gen.HttpMethod(m.Method),
+		ContentType: gen.HttpMonitorContentType(m.ContentType), HasRequestBody: m.RequestBody != "", RequestBody: &m.RequestBody,
+		IntervalSeconds: m.IntervalSeconds,
+		TimeoutSeconds:  m.TimeoutSeconds, FailureThreshold: m.FailureThreshold, TlsExpiresAt: m.TLSExpiresAt,
 		LastResponseMs: m.LastResponseMs}, nil
 }
 
@@ -279,4 +286,20 @@ func toOngoing(in *queries.Incident) *gen.OngoingIncident {
 		return nil
 	}
 	return &gen.OngoingIncident{Id: in.ID, StartedAt: in.StartedAt, Reason: in.Reason}
+}
+
+func methodPtr(m *gen.HttpMethod) *string {
+	if m == nil {
+		return nil
+	}
+	v := string(*m)
+	return &v
+}
+
+func contentTypePtr(c *gen.HttpContentType) *string {
+	if c == nil {
+		return nil
+	}
+	v := string(*c)
+	return &v
 }

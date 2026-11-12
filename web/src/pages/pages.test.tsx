@@ -14,6 +14,9 @@ const httpOf = (over: Partial<HttpMonitor> = {}): HttpMonitor => ({
   intervalSeconds: 60,
   timeoutSeconds: 10,
   expectedStatus: "2xx",
+  method: "GET",
+  contentType: "",
+  hasRequestBody: false,
   failureThreshold: 2,
   tlsExpiresAt: null,
   lastResponseMs: 230,
@@ -318,7 +321,13 @@ describe("monitor form", () => {
     expect(body).toEqual({
       type: "http",
       name: "Website",
-      http: { url: "https://example.com/", expectedStatus: "204", failureThreshold: 3 },
+      http: {
+        url: "https://example.com/",
+        expectedStatus: "204",
+        failureThreshold: 3,
+        method: "GET",
+        requestBody: "",
+      },
       notificationsEnabled: false,
       channelIds: [],
     });
@@ -443,6 +452,61 @@ describe("monitor form", () => {
     expect(fetchMock.mock.calls.some(([r]) => (r as Request).method === "POST")).toBe(false);
   });
 
+  it("sends a body with a POST check and shows the hint, counter and JSON warning", async () => {
+    let body: unknown;
+    mockApi({
+      ...signedIn,
+      "POST /api/v1/monitors": async (req) => {
+        body = await req.json();
+        return json(detail({ id: "new3", name: "Hook" }), 201);
+      },
+      "GET /api/v1/monitors/new3": () => json(detail({ id: "new3", name: "Hook" })),
+    });
+    renderApp("/monitors/new");
+    await userEvent.type(await screen.findByLabelText("Name"), "Hook");
+    await userEvent.type(screen.getByLabelText("URL"), "example.com/hook");
+    // GET and HEAD show no body fields.
+    expect(screen.queryByLabelText("Request body")).not.toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("Method"), "POST");
+    const field = screen.getByLabelText("Request body");
+    expect(field).toHaveAccessibleDescription(expect.stringContaining("do not put secrets here"));
+    expect(field).toHaveAccessibleDescription(expect.stringContaining("0 of 16384 bytes"));
+    expect(screen.getByLabelText("Content type")).toHaveValue("application/json");
+    await userEvent.type(field, "{{oops");
+    expect(field).toHaveAccessibleDescription(expect.stringContaining("5 of 16384 bytes"));
+    expect(await screen.findByText(/not valid JSON/)).toBeInTheDocument();
+    await userEvent.clear(field);
+    await userEvent.type(field, '{{"ping":true}');
+    expect(screen.queryByText(/not valid JSON/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Create monitor" }));
+    await screen.findByRole("heading", { name: "Hook", level: 1 });
+    expect(body).toMatchObject({
+      http: {
+        method: "POST",
+        requestBody: '{"ping":true}',
+        contentType: "application/json",
+      },
+    });
+  });
+
+  it("shows the server's error for a body on GET next to the body field", async () => {
+    mockApi({
+      ...signedIn,
+      "GET /api/v1/monitors/m1": () =>
+        json(detail({ http: httpOf({ method: "POST", hasRequestBody: true, requestBody: "x" }) })),
+      "PATCH /api/v1/monitors/m1": () =>
+        problem(422, "Validation failed", {
+          fieldErrors: [{ field: "http.requestBody", message: "is not allowed with GET or HEAD" }],
+        }),
+    });
+    renderApp("/monitors/m1/edit");
+    expect(await screen.findByLabelText("Request body")).toHaveValue("x");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByLabelText("Request body")).toHaveAccessibleDescription(
+      "Is not allowed with GET or HEAD",
+    );
+  });
+
   it("shows the not-found view when the monitor to edit does not exist", async () => {
     mockApi({ ...signedIn, "GET /api/v1/monitors/gone": () => problem(404, "Not found") });
     renderApp("/monitors/gone/edit");
@@ -462,6 +526,35 @@ describe("monitor form", () => {
 });
 
 describe("monitor details", () => {
+  it("shows the method, content type and body to people who can edit", async () => {
+    mockApi({
+      ...signedIn,
+      "GET /api/v1/monitors/m1": () =>
+        json(
+          detail({
+            http: httpOf({
+              method: "POST",
+              contentType: "application/json",
+              hasRequestBody: true,
+              requestBody: '{"ping":true}',
+            }),
+          }),
+        ),
+    });
+    renderApp("/monitors/m1");
+    expect(
+      await screen.findByText("Sends POST · application/json · with a body"),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Request body")).toHaveTextContent('{"ping":true}');
+  });
+
+  it("shows a plain GET without a body", async () => {
+    mockApi({ ...signedIn, "GET /api/v1/monitors/m1": () => json(detail()) });
+    renderApp("/monitors/m1");
+    expect(await screen.findByText("Sends GET · no body")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Request body")).not.toBeInTheDocument();
+  });
+
   it("shows the monitor while stats, checks and incidents fail with 501", async () => {
     mockApi({ ...signedIn, "GET /api/v1/monitors/m1": () => json(detail()) });
     renderApp("/monitors/m1");

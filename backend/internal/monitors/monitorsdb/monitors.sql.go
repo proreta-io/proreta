@@ -14,7 +14,7 @@ import (
 
 const getMonitor = `-- name: GetMonitor :one
 SELECT m.id, m.project_id, m.name, m.type, m.config, m.interval_seconds, m.timeout_seconds, m.failure_threshold,
-       m.notifications_enabled, m.paused, m.created_at, m.updated_at,
+       m.notifications_enabled, m.paused, m.method, m.request_body, m.content_type, m.created_at, m.updated_at,
        s.status, s.status_changed_at, s.last_error_kind, s.last_checked_at, s.tls_expires_at,
        s.current_incident_id
 FROM monitors AS m
@@ -38,6 +38,9 @@ type GetMonitorRow struct {
 	FailureThreshold     int32
 	NotificationsEnabled bool
 	Paused               bool
+	Method               string
+	RequestBody          string
+	ContentType          string
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
 	Status               string
@@ -62,6 +65,9 @@ func (q *Queries) GetMonitor(ctx context.Context, arg GetMonitorParams) (GetMoni
 		&i.FailureThreshold,
 		&i.NotificationsEnabled,
 		&i.Paused,
+		&i.Method,
+		&i.RequestBody,
+		&i.ContentType,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Status,
@@ -91,8 +97,8 @@ func (q *Queries) InsertHeartbeatToken(ctx context.Context, arg InsertHeartbeatT
 }
 
 const insertMonitor = `-- name: InsertMonitor :exec
-INSERT INTO monitors (id, tenant_id, project_id, name, type, config, interval_seconds, timeout_seconds, failure_threshold, notifications_enabled)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+INSERT INTO monitors (id, tenant_id, project_id, name, type, config, interval_seconds, timeout_seconds, failure_threshold, notifications_enabled, method, request_body, content_type)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 `
 
 type InsertMonitorParams struct {
@@ -106,6 +112,9 @@ type InsertMonitorParams struct {
 	TimeoutSeconds       int32
 	FailureThreshold     int32
 	NotificationsEnabled bool
+	Method               string
+	RequestBody          string
+	ContentType          string
 }
 
 func (q *Queries) InsertMonitor(ctx context.Context, arg InsertMonitorParams) error {
@@ -120,6 +129,9 @@ func (q *Queries) InsertMonitor(ctx context.Context, arg InsertMonitorParams) er
 		arg.TimeoutSeconds,
 		arg.FailureThreshold,
 		arg.NotificationsEnabled,
+		arg.Method,
+		arg.RequestBody,
+		arg.ContentType,
 	)
 	return err
 }
@@ -189,7 +201,7 @@ func (q *Queries) LockHeartbeat(ctx context.Context, arg LockHeartbeatParams) (L
 }
 
 const lockMonitor = `-- name: LockMonitor :one
-SELECT id, project_id, name, type, config, interval_seconds, timeout_seconds, failure_threshold, notifications_enabled, paused
+SELECT id, project_id, name, type, config, interval_seconds, timeout_seconds, failure_threshold, notifications_enabled, paused, method, request_body, content_type
 FROM monitors
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
 FOR UPDATE
@@ -211,6 +223,9 @@ type LockMonitorRow struct {
 	FailureThreshold     int32
 	NotificationsEnabled bool
 	Paused               bool
+	Method               string
+	RequestBody          string
+	ContentType          string
 }
 
 func (q *Queries) LockMonitor(ctx context.Context, arg LockMonitorParams) (LockMonitorRow, error) {
@@ -227,6 +242,9 @@ func (q *Queries) LockMonitor(ctx context.Context, arg LockMonitorParams) (LockM
 		&i.FailureThreshold,
 		&i.NotificationsEnabled,
 		&i.Paused,
+		&i.Method,
+		&i.RequestBody,
+		&i.ContentType,
 	)
 	return i, err
 }
@@ -367,8 +385,9 @@ func (q *Queries) SoftDeleteMonitor(ctx context.Context, arg SoftDeleteMonitorPa
 const updateMonitor = `-- name: UpdateMonitor :exec
 UPDATE monitors
 SET name = $1, config = $2, interval_seconds = $3, failure_threshold = $4,
-    notifications_enabled = $5, updated_at = now()
-WHERE tenant_id = $6 AND id = $7
+    notifications_enabled = $5, method = $6, request_body = $7,
+    content_type = $8, updated_at = now()
+WHERE tenant_id = $9 AND id = $10
 `
 
 type UpdateMonitorParams struct {
@@ -377,6 +396,9 @@ type UpdateMonitorParams struct {
 	IntervalSeconds      int32
 	FailureThreshold     int32
 	NotificationsEnabled bool
+	Method               string
+	RequestBody          string
+	ContentType          string
 	TenantID             uuid.UUID
 	ID                   uuid.UUID
 }
@@ -388,6 +410,9 @@ func (q *Queries) UpdateMonitor(ctx context.Context, arg UpdateMonitorParams) er
 		arg.IntervalSeconds,
 		arg.FailureThreshold,
 		arg.NotificationsEnabled,
+		arg.Method,
+		arg.RequestBody,
+		arg.ContentType,
 		arg.TenantID,
 		arg.ID,
 	)

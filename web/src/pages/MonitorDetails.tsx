@@ -16,6 +16,7 @@ import {
   resumeMonitor,
   type Check,
   type Incident,
+  type HttpMonitor,
   type MonitorDetail,
   type StatsRange,
 } from "../api/endpoints";
@@ -303,6 +304,7 @@ function Header({
               {checkSettings(monitor.http)}
             </span>
           )}
+          {monitor.http && <RequestSummary http={monitor.http} canEdit={canEdit} />}
         </div>
         {canEdit ? (
           <div className="flex flex-wrap gap-2">
@@ -335,6 +337,26 @@ function Header({
             period ends.
           </p>
         </ConfirmDialog>
+      )}
+    </div>
+  );
+}
+
+/** The request an http monitor sends; the body itself only for people who can edit. */
+function RequestSummary({ http, canEdit }: { http: HttpMonitor; canEdit: boolean }) {
+  const parts = [`Sends ${http.method}`];
+  if (http.hasRequestBody) parts.push(http.contentType, "with a body");
+  else parts.push("no body");
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <span className="text-caption text-muted-foreground">{parts.join(" · ")}</span>
+      {canEdit && http.hasRequestBody && http.requestBody && (
+        <pre
+          aria-label="Request body"
+          className="max-h-48 max-w-full overflow-auto border border-border bg-muted px-2.5 py-2 font-mono text-mono break-all whitespace-pre-wrap"
+        >
+          {http.requestBody}
+        </pre>
       )}
     </div>
   );

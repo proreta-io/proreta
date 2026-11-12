@@ -34,6 +34,7 @@ var (
 	ErrNotHTTPS         = errors.New("safehttp: only https URLs are allowed")
 	ErrTooManyRedirects = errors.New("safehttp: too many redirects")
 	ErrRedirectNotHTTPS = errors.New("safehttp: redirect to a non-https URL")
+	ErrRedirectReplay   = errors.New("safehttp: redirect would replay a request to another host")
 )
 
 const (

@@ -1,6 +1,7 @@
 package checks
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -10,6 +11,8 @@ import (
 	"crypto/x509/pkix"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"math/big"
 	"net"
 	"net/http"
@@ -308,3 +311,146 @@ func TestClassify(t *testing.T) {
 
 // Compile-time check that the implementation satisfies the seam.
 var _ Prober = (*HTTPSProber)(nil)
+
+type seenRequest struct {
+	method, contentType, body string
+	contentLength             int64
+}
+
+func recorder(seen chan<- seenRequest) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		select {
+		case seen <- seenRequest{r.Method, r.Header.Get("Content-Type"), string(b), r.ContentLength}:
+		default:
+		}
+		w.WriteHeader(200)
+	}
+}
+
+func TestProbeSendsMethodBodyAndContentType(t *testing.T) {
+	cases := []struct {
+		name string
+		req  Request
+		want seenRequest
+	}{
+		{"default is GET", Request{}, seenRequest{method: "GET", contentLength: 0}},
+		{"head", Request{Method: "HEAD"}, seenRequest{method: "HEAD", contentLength: 0}},
+		{"post json", Request{Method: "POST", Body: `{"a":1}`, ContentType: "application/json"},
+			seenRequest{"POST", "application/json", `{"a":1}`, 7}},
+		{"put text", Request{Method: "PUT", Body: "héllo", ContentType: "text/plain"},
+			seenRequest{"PUT", "text/plain", "héllo", 6}},
+		{"patch form", Request{Method: "PATCH", Body: "a=b&c=d", ContentType: "application/x-www-form-urlencoded"},
+			seenRequest{"PATCH", "application/x-www-form-urlencoded", "a=b&c=d", 7}},
+		{"delete xml", Request{Method: "DELETE", Body: "<a/>", ContentType: "application/xml"},
+			seenRequest{"DELETE", "application/xml", "<a/>", 4}},
+		{"post without body sends no content type", Request{Method: "POST", ContentType: "text/plain"},
+			seenRequest{method: "POST", contentLength: 0}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			seen := make(chan seenRequest, 1)
+			s := newTLSServer(t, "site.test", time.Now().Add(time.Hour), recorder(seen))
+			p := NewHTTPSProber(routingClient(t, map[string]*tlsServer{"site.test": s}))
+			tc.req.URL = "https://site.test/x"
+			if r := p.Probe(context.Background(), tc.req); !r.OK {
+				t.Fatalf("got %+v", r)
+			}
+			if got := <-seen; got != tc.want {
+				t.Fatalf("server saw %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestProbeRedirects(t *testing.T) {
+	other := make(chan seenRequest, 4)
+	otherSrv := newTLSServer(t, "other.test", time.Now().Add(time.Hour), recorder(other))
+	sameHits := make(chan seenRequest, 4)
+	var origin *tlsServer
+	mux := http.NewServeMux()
+	mux.HandleFunc("/final", recorder(sameHits))
+	for path, status := range map[string]int{"/r301": 301, "/r302": 302, "/r303": 303, "/r307": 307, "/r308": 308} {
+		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "https://origin.test/final", status)
+		})
+		mux.HandleFunc(path+"x", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "https://other.test/final", status)
+		})
+	}
+	origin = newTLSServer(t, "origin.test", time.Now().Add(time.Hour), mux)
+	p := NewHTTPSProber(routingClient(t, map[string]*tlsServer{"origin.test": origin, "other.test": otherSrv}))
+	post := func(path string) Result {
+		return p.Probe(context.Background(), Request{URL: "https://origin.test" + path, Method: "POST", Body: "secret-ish", ContentType: "text/plain"})
+	}
+
+	// Same host: the standard behaviour. 301, 302 and 303 become a GET without a body; 307 and
+	// 308 keep the method and the body.
+	for _, tc := range []struct {
+		path string
+		want seenRequest
+	}{
+		{"/r301", seenRequest{method: "GET"}},
+		{"/r302", seenRequest{method: "GET"}},
+		{"/r303", seenRequest{method: "GET"}},
+		{"/r307", seenRequest{"POST", "text/plain", "secret-ish", 10}},
+		{"/r308", seenRequest{"POST", "text/plain", "secret-ish", 10}},
+	} {
+		if r := post(tc.path); !r.OK {
+			t.Fatalf("%s: %+v", tc.path, r)
+		}
+		if got := <-sameHits; got != tc.want {
+			t.Fatalf("%s: server saw %+v, want %+v", tc.path, got, tc.want)
+		}
+	}
+
+	// Another host: only the conversion to a body-less GET is followed; a replay is refused.
+	for _, path := range []string{"/r301x", "/r302x", "/r303x"} {
+		if r := post(path); !r.OK {
+			t.Fatalf("%s: %+v", path, r)
+		}
+		if got := <-other; got.method != "GET" || got.body != "" {
+			t.Fatalf("%s: other host saw %+v", path, got)
+		}
+	}
+	for _, path := range []string{"/r307x", "/r308x"} {
+		if r := post(path); r.OK || r.ErrorKind != KindRedirect {
+			t.Fatalf("%s: got %+v, want a redirect failure", path, r)
+		}
+	}
+	if len(other) != 0 {
+		t.Fatal("the other host received a replayed request")
+	}
+	// A GET is not affected by the rule.
+	if r := p.Probe(context.Background(), Request{URL: "https://origin.test/r307x"}); !r.OK {
+		t.Fatalf("GET across hosts: %+v", r)
+	}
+}
+
+func TestClassifyReplay(t *testing.T) {
+	if got := classify(context.Background(), fmt.Errorf("Post: %w", safehttp.ErrRedirectReplay)); got != KindRedirect {
+		t.Fatalf("got %q", got)
+	}
+}
+
+// The body never reaches anything the prober or its errors expose: a failing check carries only
+// a kind, and logging the result (as the worker does) cannot reveal it.
+func TestProbeFailureDoesNotExposeBody(t *testing.T) {
+	const body = "TOP-SECRET-BODY-TEXT"
+	s := newTLSServer(t, "site.test", time.Now().Add(time.Hour), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(500)
+	}))
+	p := NewHTTPSProber(routingClient(t, map[string]*tlsServer{"site.test": s}))
+	var buf bytes.Buffer
+	log := slog.New(slog.NewJSONHandler(&buf, nil))
+	for _, url := range []string{"https://site.test/", "https://unknown.test/", "https://site.test:8443/"} {
+		r := p.Probe(context.Background(), Request{URL: url, Method: "POST", Body: body, ContentType: "text/plain"})
+		if r.OK {
+			t.Fatalf("%s: expected a failure", url)
+		}
+		log.Info("check", "result", fmt.Sprintf("%+v", r), "kind", r.ErrorKind)
+	}
+	if strings.Contains(buf.String(), body) {
+		t.Fatalf("body found in log output: %s", buf.String())
+	}
+}

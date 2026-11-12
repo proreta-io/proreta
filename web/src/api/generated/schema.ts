@@ -2360,6 +2360,27 @@ export interface components {
      * @example 2xx
      */
     ExpectedStatus: string;
+    /**
+     * @description The request method of an HTTPS check; GET when omitted on create
+     * @example GET
+     * @enum {string}
+     */
+    HttpMethod: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
+    /**
+     * @description The `Content-Type` of the request body. Only meaningful with a body: `application/json` is
+     *     used when a body is set and this is omitted, and the value is ignored (and read back empty)
+     *     without a body.
+     * @enum {string}
+     */
+    HttpContentType:
+      "application/json" | "text/plain" | "application/x-www-form-urlencoded" | "application/xml";
+    /**
+     * @description The request body, UTF-8 text without NUL characters, at most 16384 bytes; empty means none.
+     *     Only POST, PUT, PATCH and DELETE take a body (422 on `http.requestBody` otherwise). It is
+     *     stored as plain text and readable by everyone who can read the monitor: never put secrets
+     *     in it.
+     */
+    HttpRequestBody: string;
     /** @description The settings of an HTTPS monitor in a create request */
     HttpSettings: {
       /**
@@ -2383,6 +2404,9 @@ export interface components {
        * @default 2
        */
       failureThreshold?: number;
+      method?: components["schemas"]["HttpMethod"];
+      requestBody?: components["schemas"]["HttpRequestBody"];
+      contentType?: components["schemas"]["HttpContentType"];
     };
     /** @description Changes of an HTTPS monitor's settings; only the given fields change */
     HttpSettingsUpdate: {
@@ -2394,6 +2418,9 @@ export interface components {
       /** @description Accepted only with the current value (10) */
       timeoutSeconds?: number;
       failureThreshold?: number;
+      method?: components["schemas"]["HttpMethod"];
+      requestBody?: components["schemas"]["HttpRequestBody"];
+      contentType?: components["schemas"]["HttpContentType"];
     };
     /**
      * @description The settings of a heartbeat monitor in a create or update request; omitted fields take
@@ -2521,6 +2548,24 @@ export interface components {
       /** @description The checked URL */
       url: string;
       expectedStatus: components["schemas"]["ExpectedStatus"];
+      method: components["schemas"]["HttpMethod"];
+      /**
+       * @description The content type of the request body; empty without a body
+       * @enum {string}
+       */
+      contentType:
+        | ""
+        | "application/json"
+        | "text/plain"
+        | "application/x-www-form-urlencoded"
+        | "application/xml";
+      /** @description Whether the check sends a body */
+      hasRequestBody: boolean;
+      /**
+       * @description The request body. Only in the response of one monitor (create, get, update, pause,
+       *     resume), never in the list. Plain text, readable by everyone who can read the monitor.
+       */
+      requestBody?: string;
       /** @description Check interval in seconds */
       intervalSeconds: number;
       /** @description Request deadline in seconds, including redirects */

@@ -93,6 +93,10 @@ type Monitor struct {
 	// URL and ExpectedStatus are empty for a heartbeat.
 	URL            string
 	ExpectedStatus string
+	// Method, RequestBody and ContentType are the request an http monitor sends; ContentType is
+	// empty without a body. The body is plain text and readable by everyone who can read the
+	// monitor.
+	Method, RequestBody, ContentType string
 	// IntervalSeconds is the check interval, or a heartbeat's expected ping interval.
 	IntervalSeconds      int
 	TimeoutSeconds       int
@@ -137,6 +141,9 @@ type HTTPSettings struct {
 	IntervalSeconds  *int
 	TimeoutSeconds   *int
 	FailureThreshold *int
+	Method           *string
+	RequestBody      *string
+	ContentType      *string
 }
 
 // HeartbeatSettings are the settings of a heartbeat; nil fields take their defaults on create
@@ -237,9 +244,12 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 		threshold := orDefault(h.FailureThreshold, DefaultFailureThreshold)
 		checkThreshold(&verr, threshold)
 		config = httpConfig{URL: target, ExpectedStatus: expected}
+		row.Method, row.RequestBody = orDefault(h.Method, DefaultMethod), orDefault(h.RequestBody, "")
+		row.ContentType = checkRequest(&verr, row.Method, row.RequestBody, orDefault(h.ContentType, ""))
 		row.IntervalSeconds, row.FailureThreshold = IntervalSeconds, int32(threshold) //nolint:gosec // validated 1..3
 	case TypeHeartbeat:
 		row.Type, resource = TypeHeartbeat, plans.ResourceHeartbeat
+		row.Method = DefaultMethod
 		if in.HTTP != nil {
 			verr.Add(fieldHTTP, msgHTTPOnly)
 		}
@@ -359,6 +369,7 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 			return err
 		}
 		name, interval, threshold, notificationsEnabled := cur.Name, int(cur.IntervalSeconds), int(cur.FailureThreshold), cur.NotificationsEnabled
+		method, requestBody, contentType := cur.Method, cur.RequestBody, cur.ContentType
 
 		var verr validation.Error
 		var changed []string
@@ -425,6 +436,19 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 					checkThreshold(&verr, *h.FailureThreshold)
 					changed, threshold = appendIf(changed, fieldFailureThreshold, *h.FailureThreshold != threshold), *h.FailureThreshold
 				}
+				// Only names are recorded in the audit trail, never the body.
+				if h.Method != nil {
+					changed, method = appendIf(changed, fieldMethod, *h.Method != method), *h.Method
+				}
+				if h.RequestBody != nil {
+					changed, requestBody = appendIf(changed, fieldRequestBody, *h.RequestBody != requestBody), *h.RequestBody
+				}
+				if h.ContentType != nil {
+					contentType = *h.ContentType
+				}
+				newType := checkRequest(&verr, method, requestBody, contentType)
+				changed = appendIf(changed, fieldContentType, newType != cur.ContentType)
+				contentType = newType
 			}
 			config = cfg
 		}
@@ -485,6 +509,7 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 			if err := q.UpdateMonitor(ctx, monitorsdb.UpdateMonitorParams{
 				TenantID: a.TenantID, ID: id, Name: name, Config: raw, IntervalSeconds: int32(interval), //nolint:gosec // validated
 				FailureThreshold: int32(threshold), NotificationsEnabled: notificationsEnabled, //nolint:gosec // validated 1..3
+				Method: method, RequestBody: requestBody, ContentType: contentType,
 			}); err != nil {
 				return fmt.Errorf("update monitor: %w", err)
 			}
@@ -653,6 +678,7 @@ func fromRow(r monitorsdb.GetMonitorRow) (Monitor, error) {
 	}
 	return Monitor{
 		ID: r.ID, ProjectID: r.ProjectID, Type: r.Type, Name: r.Name, URL: cfg.URL, ExpectedStatus: cfg.ExpectedStatus,
+		Method: r.Method, RequestBody: r.RequestBody, ContentType: r.ContentType,
 		IntervalSeconds: int(r.IntervalSeconds), TimeoutSeconds: int(r.TimeoutSeconds), GraceSeconds: cfg.GraceSeconds,
 		FailureThreshold: int(r.FailureThreshold), NotificationsEnabled: r.NotificationsEnabled, Paused: r.Paused,
 		Status: r.Status, StatusSince: r.StatusChangedAt, LastErrorKind: r.LastErrorKind,

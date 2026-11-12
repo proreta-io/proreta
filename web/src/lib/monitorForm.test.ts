@@ -6,6 +6,7 @@ import {
   validateMonitorForm,
   validateMonitorUrl,
   describeSetup,
+  jsonWarning,
   withHttps,
   withoutHttps,
   type MonitorFormValues,
@@ -84,10 +85,107 @@ describe("validateMonitorForm", () => {
       toMonitorRequest({ ...valid, name: " Site ", expectedMode: "exact", expectedCode: "204" }),
     ).toEqual({
       name: "Site",
-      http: { url: "https://example.com", expectedStatus: "204", failureThreshold: 2 },
+      http: {
+        url: "https://example.com",
+        expectedStatus: "204",
+        failureThreshold: 2,
+        method: "GET",
+        requestBody: "",
+      },
       notificationsEnabled: true,
       channelIds: [],
     });
+  });
+
+  it("sends the method, body and content type of a body method", () => {
+    const post = { ...valid, method: "POST" as const, requestBody: '{"a":1}' };
+    expect(toMonitorRequest(post).http).toMatchObject({
+      method: "POST",
+      requestBody: '{"a":1}',
+      contentType: "application/json",
+    });
+    // An emptied body is sent as empty (it clears the stored one) and without a content type.
+    const cleared = toMonitorRequest({ ...post, requestBody: "" }).http;
+    expect(cleared).toMatchObject({ method: "POST", requestBody: "" });
+    expect(cleared).not.toHaveProperty("contentType");
+    // A body left in the form is not sent with GET or HEAD.
+    expect(toMonitorRequest({ ...post, method: "HEAD" }).http).toMatchObject({ requestBody: "" });
+  });
+});
+
+describe("request validation (same rules and messages as the server)", () => {
+  const base = { ...emptyMonitorForm, name: "Site", url: "https://example.com" };
+
+  it.each([
+    ["GET", "", undefined],
+    ["HEAD", "", undefined],
+    ["POST", "", undefined],
+    ["POST", "x", undefined],
+    ["PUT", "héllo ✓", undefined],
+    ["PATCH", "a=b", undefined],
+    ["DELETE", "<a/>", undefined],
+    ["GET", "x", "Is not allowed with GET or HEAD"],
+    ["HEAD", "x", "Is not allowed with GET or HEAD"],
+    ["POST", "a".repeat(16384), undefined],
+    ["POST", "é".repeat(8192), undefined],
+    ["POST", "a".repeat(16385), "Must be at most 16384 bytes"],
+    ["POST", "é".repeat(8193), "Must be at most 16384 bytes"],
+    ["POST", "a\0b", "Must be valid UTF-8 text without NUL characters"],
+    ["POST", "a\ud800b", "Must be valid UTF-8 text without NUL characters"],
+    ["POST", "😀", undefined],
+  ] as const)("%s with body %j -> %s", (method, body, message) => {
+    expect(validateMonitorForm({ ...base, method, requestBody: body }).requestBody).toBe(message);
+  });
+
+  it("rejects an unknown method", () => {
+    const errors = validateMonitorForm({ ...base, method: "TRACE" as never });
+    expect(errors.method).toBe("Must be one of GET, HEAD, POST, PUT, PATCH or DELETE");
+  });
+
+  it("ignores the request fields of a heartbeat", () => {
+    const hb = {
+      ...emptyMonitorForm,
+      type: "heartbeat" as const,
+      name: "Job",
+      method: "GET" as const,
+    };
+    expect(validateMonitorForm({ ...hb, requestBody: "x" })).toEqual({});
+  });
+
+  it("warns, without blocking, about a JSON body that does not parse", () => {
+    const post = { ...base, method: "POST" as const };
+    expect(jsonWarning({ ...post, requestBody: '{"a":1}' })).toBeUndefined();
+    expect(jsonWarning({ ...post, requestBody: "" })).toBeUndefined();
+    expect(jsonWarning({ ...post, requestBody: "{oops" })).toMatch(/not valid JSON/);
+    expect(
+      jsonWarning({ ...post, requestBody: "{oops", contentType: "text/plain" }),
+    ).toBeUndefined();
+    expect(validateMonitorForm({ ...post, requestBody: "{oops" })).toEqual({});
+  });
+
+  it("maps the server's field errors onto the form fields", () => {
+    const err = new ApiError({
+      type: "x",
+      title: "Validation failed",
+      status: 422,
+      fieldErrors: [
+        { field: "http.requestBody", message: "is not allowed with GET or HEAD" },
+        { field: "http.method", message: "must be one of GET, HEAD, POST, PUT, PATCH or DELETE" },
+        { field: "http.contentType", message: "must be one of application/json" },
+      ],
+    });
+    expect(mapServerErrors(err).fields).toEqual({
+      requestBody: "Is not allowed with GET or HEAD",
+      method: "Must be one of GET, HEAD, POST, PUT, PATCH or DELETE",
+      contentType: "Must be one of application/json",
+    });
+  });
+
+  it("describes a non-GET check", () => {
+    const text = describeSetup({ ...base, method: "POST" })
+      .map((p) => p.text)
+      .join("");
+    expect(text).toMatch(/^Sends POST to example\.com every minute/);
   });
 });
 

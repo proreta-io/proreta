@@ -904,6 +904,10 @@ paths:
                     http:
                       url: https://example.com/health
                       expectedStatus: 2xx
+                      method: GET
+                      contentType: ""
+                      hasRequestBody: false
+                      requestBody: ""
                       intervalSeconds: 60
                       timeoutSeconds: 10
                       failureThreshold: 2
@@ -4216,6 +4220,25 @@ components:
         are rejected.
       pattern: "^(2xx|2[0-9]{2}|[45][0-9]{2})$"
       example: 2xx
+    HttpMethod:
+      type: string
+      description: The request method of an HTTPS check; GET when omitted on create
+      enum: [GET, HEAD, POST, PUT, PATCH, DELETE]
+      example: GET
+    HttpContentType:
+      type: string
+      description: |
+        The `Content-Type` of the request body. Only meaningful with a body: `application/json` is
+        used when a body is set and this is omitted, and the value is ignored (and read back empty)
+        without a body.
+      enum: [application/json, text/plain, application/x-www-form-urlencoded, application/xml]
+    HttpRequestBody:
+      type: string
+      description: |
+        The request body, UTF-8 text without NUL characters, at most 16384 bytes; empty means none.
+        Only POST, PUT, PATCH and DELETE take a body (422 on `http.requestBody` otherwise). It is
+        stored as plain text and readable by everyone who can read the monitor: never put secrets
+        in it.
     HttpSettings:
       type: object
       additionalProperties: false
@@ -4244,6 +4267,12 @@ components:
           minimum: 1
           maximum: 3
           default: 2
+        method:
+          $ref: "#/components/schemas/HttpMethod"
+        requestBody:
+          $ref: "#/components/schemas/HttpRequestBody"
+        contentType:
+          $ref: "#/components/schemas/HttpContentType"
     HttpSettingsUpdate:
       type: object
       additionalProperties: false
@@ -4266,6 +4295,12 @@ components:
           type: integer
           minimum: 1
           maximum: 3
+        method:
+          $ref: "#/components/schemas/HttpMethod"
+        requestBody:
+          $ref: "#/components/schemas/HttpRequestBody"
+        contentType:
+          $ref: "#/components/schemas/HttpContentType"
     HeartbeatSettings:
       type: object
       additionalProperties: false
@@ -4449,13 +4484,27 @@ components:
       type: object
       additionalProperties: false
       description: The settings and HTTP-specific state of an HTTPS monitor
-      required: [url, expectedStatus, intervalSeconds, timeoutSeconds, failureThreshold, tlsExpiresAt, lastResponseMs]
+      required: [url, expectedStatus, method, contentType, hasRequestBody, intervalSeconds, timeoutSeconds, failureThreshold, tlsExpiresAt, lastResponseMs]
       properties:
         url:
           type: string
           description: The checked URL
         expectedStatus:
           $ref: "#/components/schemas/ExpectedStatus"
+        method:
+          $ref: "#/components/schemas/HttpMethod"
+        contentType:
+          type: string
+          description: The content type of the request body; empty without a body
+          enum: ["", application/json, text/plain, application/x-www-form-urlencoded, application/xml]
+        hasRequestBody:
+          type: boolean
+          description: Whether the check sends a body
+        requestBody:
+          type: string
+          description: |
+            The request body. Only in the response of one monitor (create, get, update, pause,
+            resume), never in the list. Plain text, readable by everyone who can read the monitor.
         intervalSeconds:
           type: integer
           description: Check interval in seconds

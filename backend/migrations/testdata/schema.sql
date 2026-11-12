@@ -184,6 +184,9 @@ monitors.11 created_at timestamp with time zone not null default now()
 monitors.12 updated_at timestamp with time zone not null default now()
 monitors.13 deleted_at timestamp with time zone
 monitors.14 project_id uuid not null
+monitors.15 method text not null default 'GET'::text
+monitors.16 request_body text not null default ''::text
+monitors.17 content_type text not null default ''::text
 notification_channels.1 id uuid not null
 notification_channels.2 tenant_id uuid not null
 notification_channels.3 type text not null
@@ -437,6 +440,7 @@ monitor_state monitor_state_status_check CHECK ((status = ANY (ARRAY['unknown'::
 monitor_state monitor_state_tenant_id_monitor_id_fkey FOREIGN KEY (tenant_id, monitor_id) REFERENCES monitors(tenant_id, id)
 monitors monitors_check CHECK (((timeout_seconds > 0) AND (timeout_seconds < interval_seconds)))
 monitors monitors_config_check CHECK ((jsonb_typeof(config) = 'object'::text))
+monitors monitors_content_type_check CHECK ((content_type = ANY (ARRAY[''::text, 'application/json'::text, 'text/plain'::text, 'application/x-www-form-urlencoded'::text, 'application/xml'::text])))
 monitors monitors_failure_threshold_check CHECK (((failure_threshold >= 1) AND (failure_threshold <= 3)))
 monitors monitors_heartbeat_check CHECK (((type <> 'heartbeat'::text) OR (((interval_seconds >= 60) AND (interval_seconds <= 86400)) AND (failure_threshold = 1) AND
 CASE
@@ -444,11 +448,16 @@ CASE
     ELSE false
 END)))
 monitors monitors_interval_seconds_check CHECK ((interval_seconds > 0))
+monitors monitors_method_check CHECK ((method = ANY (ARRAY['GET'::text, 'HEAD'::text, 'POST'::text, 'PUT'::text, 'PATCH'::text, 'DELETE'::text])))
 monitors monitors_mvp_interval CHECK (((type <> 'http'::text) OR (interval_seconds = 60)))
 monitors monitors_mvp_timeout CHECK (((type <> 'http'::text) OR (timeout_seconds = 10)))
 monitors monitors_name_check CHECK (((char_length(name) >= 1) AND (char_length(name) <= 80)))
 monitors monitors_pkey PRIMARY KEY (id)
 monitors monitors_project_fkey FOREIGN KEY (tenant_id, project_id) REFERENCES projects(tenant_id, id)
+monitors monitors_request_body_method CHECK (((request_body = ''::text) OR (method = ANY (ARRAY['POST'::text, 'PUT'::text, 'PATCH'::text, 'DELETE'::text]))))
+monitors monitors_request_body_size CHECK ((octet_length(request_body) <= 16384))
+monitors monitors_request_content_type CHECK (((request_body = ''::text) = (content_type = ''::text)))
+monitors monitors_request_http_only CHECK (((type = 'http'::text) OR ((method = 'GET'::text) AND (request_body = ''::text))))
 monitors monitors_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id)
 monitors monitors_tenant_id_id_key UNIQUE (tenant_id, id)
 monitors monitors_type_check CHECK ((type = ANY (ARRAY['http'::text, 'heartbeat'::text])))
@@ -1718,7 +1727,7 @@ AS $function$
               d.claim_token
 $function$
 CREATE OR REPLACE FUNCTION public.claim_due_monitors(n integer, p_location text)
- RETURNS TABLE(tenant_id uuid, monitor_id uuid, location_id uuid, lease_token uuid, lease_until timestamp with time zone, url text, expected_status text, failure_threshold integer, interval_seconds integer, timeout_seconds integer, next_run_at timestamp with time zone)
+ RETURNS TABLE(tenant_id uuid, monitor_id uuid, location_id uuid, lease_token uuid, lease_until timestamp with time zone, url text, expected_status text, failure_threshold integer, interval_seconds integer, timeout_seconds integer, next_run_at timestamp with time zone, method text, request_body text, content_type text)
  LANGUAGE sql
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
@@ -1750,7 +1759,8 @@ AS $function$
       AND m.tenant_id = s.tenant_id AND m.id = s.monitor_id
     RETURNING s.tenant_id, s.monitor_id, s.location_id, s.lease_token, s.lease_until,
               m.config ->> 'url', COALESCE(m.config ->> 'expectedStatus', '2xx'),
-              m.failure_threshold, m.interval_seconds, m.timeout_seconds, s.next_run_at
+              m.failure_threshold, m.interval_seconds, m.timeout_seconds, s.next_run_at,
+              m.method, m.request_body, m.content_type
 $function$
 CREATE OR REPLACE FUNCTION public.claim_mail(n integer)
  RETURNS TABLE(id uuid, kind text, payload bytea, attempts integer, claim_token uuid)

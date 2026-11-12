@@ -118,3 +118,54 @@ INSERT INTO monitor_state (tenant_id, monitor_id) VALUES ('` + tenantA + `', '` 
 	// The schedule belongs to the worker (the api resets it only through reset_monitor_runtime).
 	mustFail(inTenant(worker, tenantA, `UPDATE monitor_location_state SET lease_token = gen_random_uuid()`, false), "check constraint")
 }
+
+// TestIntegrationMonitorRequestMigration checks that monitors that exist before the request
+// columns keep sending a plain GET, that the claim hands the request to the worker, and that the
+// constraints refuse inconsistent requests.
+func TestIntegrationMonitorRequestMigration(t *testing.T) {
+	env := pgtest.New(t, pgtest.DBName("monitorrequest"))
+	ctx := context.Background()
+	admin := env.AdminConn(t)
+	pgtest.MustExec(t, admin, `INSERT INTO tenants (id, slug, name) VALUES ('`+tenantA+`', 'a', 'A')`)
+	plain := seedMonitor(t, admin, tenantA, "now() - interval '1 minute'", false, false)
+	withBody := seedMonitor(t, admin, tenantA, "now() - interval '2 minutes'", false, false)
+	pgtest.MustExec(t, admin, `UPDATE monitors SET method = 'POST', request_body = '{"a":1}', content_type = 'application/json' WHERE id = '`+withBody+`'`)
+
+	rows, err := env.Conn(t, env.WorkerURL).Query(ctx, `SELECT monitor_id::text, method, request_body, content_type FROM claim_due_monitors(10, 'default')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type req struct{ method, body, ctype string }
+	got := map[string]req{}
+	for rows.Next() {
+		var id string
+		var r req
+		if err := rows.Scan(&id, &r.method, &r.body, &r.ctype); err != nil {
+			t.Fatal(err)
+		}
+		got[id] = r
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if got[plain] != (req{"GET", "", ""}) || got[withBody] != (req{"POST", `{"a":1}`, "application/json"}) {
+		t.Fatalf("claimed requests: %v", got)
+	}
+
+	for name, set := range map[string]string{
+		"unknown method":        `method = 'TRACE'`,
+		"body with GET":         `request_body = 'x', content_type = 'text/plain'`,
+		"body without type":     `method = 'POST', request_body = 'x'`,
+		"type without body":     `method = 'POST', content_type = 'text/plain'`,
+		"unknown content type":  `method = 'POST', request_body = 'x', content_type = 'text/html'`,
+		"body over 16 KB":       `method = 'POST', content_type = 'text/plain', request_body = repeat('a', 16385)`,
+		"multi-byte over 16 KB": `method = 'POST', content_type = 'text/plain', request_body = repeat('é', 8200)`,
+	} {
+		if _, err := admin.Exec(ctx, `UPDATE monitors SET `+set+` WHERE id = '`+plain+`'`); err == nil || !strings.Contains(err.Error(), "violates check constraint") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if _, err := admin.Exec(ctx, `UPDATE monitors SET method = 'DELETE', content_type = 'application/xml', request_body = repeat('a', 16384) WHERE id = '`+plain+`'`); err != nil {
+		t.Errorf("body at the limit: %v", err)
+	}
+}

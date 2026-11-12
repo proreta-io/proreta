@@ -9,6 +9,20 @@ import {
   INTERVAL_MIN,
 } from "./heartbeat";
 
+export type HttpMethod = NonNullable<NonNullable<MonitorCreate["http"]>["method"]>;
+export type HttpContentType = NonNullable<NonNullable<MonitorCreate["http"]>["contentType"]>;
+
+export const METHODS: HttpMethod[] = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"];
+export const BODY_METHODS: HttpMethod[] = ["POST", "PUT", "PATCH", "DELETE"];
+export const CONTENT_TYPES: HttpContentType[] = [
+  "application/json",
+  "text/plain",
+  "application/x-www-form-urlencoded",
+  "application/xml",
+];
+export const REQUEST_BODY_MAX = 16384;
+export const takesBody = (method: string) => BODY_METHODS.includes(method as HttpMethod);
+
 export type MonitorKind = "http" | "heartbeat";
 
 export interface MonitorFormValues {
@@ -18,6 +32,10 @@ export interface MonitorFormValues {
   expectedMode: "2xx" | "exact";
   expectedCode: string;
   failureThreshold: number;
+  method: HttpMethod;
+  /** Only sent with a body; the default is application/json. */
+  contentType: HttpContentType;
+  requestBody: string;
   notificationsEnabled: boolean;
   /** Selected notification channels; none means the active channels of the project. */
   channelIds: string[];
@@ -34,6 +52,9 @@ export const formFields = [
   "url",
   "expectedStatus",
   "failureThreshold",
+  "method",
+  "contentType",
+  "requestBody",
   "notificationsEnabled",
   "channelIds",
   "projectId",
@@ -48,6 +69,9 @@ const serverFields: Record<string, FormField> = {
   "http.url": "url",
   "http.expectedStatus": "expectedStatus",
   "http.failureThreshold": "failureThreshold",
+  "http.method": "method",
+  "http.contentType": "contentType",
+  "http.requestBody": "requestBody",
   "heartbeat.expectedIntervalSeconds": "expectedIntervalSeconds",
   "heartbeat.graceSeconds": "graceSeconds",
 };
@@ -66,6 +90,9 @@ export const emptyMonitorForm: MonitorFormValues = {
   expectedMode: "2xx",
   expectedCode: "200",
   failureThreshold: 2,
+  method: "GET",
+  contentType: "application/json",
+  requestBody: "",
   notificationsEnabled: true,
   channelIds: [],
   projectId: "",
@@ -83,6 +110,9 @@ export function valuesFromMonitor(m: MonitorDetail): MonitorFormValues {
     expectedMode: exact ? "exact" : "2xx",
     expectedCode: exact ? expected : "200",
     failureThreshold: m.http?.failureThreshold ?? emptyMonitorForm.failureThreshold,
+    method: m.http?.method ?? "GET",
+    contentType: m.http?.contentType || emptyMonitorForm.contentType,
+    requestBody: m.http?.requestBody ?? "",
     notificationsEnabled: m.notificationsEnabled,
     channelIds: m.channelIds,
     projectId: m.projectId,
@@ -131,6 +161,43 @@ export function validateMonitorUrl(raw: string): string | undefined {
   return undefined;
 }
 
+const UTF8_MESSAGE = "Must be valid UTF-8 text without NUL characters";
+// A lone surrogate cannot be encoded as UTF-8.
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/** Mirrors the server's checks of the request body and method; messages are the server's. */
+export function validateRequest(
+  v: Pick<MonitorFormValues, "method" | "requestBody">,
+): Pick<MonitorFormErrors, "method" | "requestBody"> {
+  const errors: Pick<MonitorFormErrors, "method" | "requestBody"> = {};
+  if (!METHODS.includes(v.method)) {
+    errors.method = "Must be one of GET, HEAD, POST, PUT, PATCH or DELETE";
+  }
+  if (new TextEncoder().encode(v.requestBody).length > REQUEST_BODY_MAX) {
+    errors.requestBody = `Must be at most ${REQUEST_BODY_MAX} bytes`;
+  } else if (v.requestBody.includes("\0") || LONE_SURROGATE.test(v.requestBody)) {
+    errors.requestBody = UTF8_MESSAGE;
+  } else if (v.requestBody !== "" && METHODS.includes(v.method) && !takesBody(v.method)) {
+    errors.requestBody = "Is not allowed with GET or HEAD";
+  }
+  return errors;
+}
+
+/** A gentle, non-blocking note when a JSON body does not parse. */
+export function jsonWarning(
+  v: Pick<MonitorFormValues, "method" | "contentType" | "requestBody">,
+): string | undefined {
+  if (!takesBody(v.method) || v.contentType !== "application/json" || !v.requestBody.trim()) {
+    return undefined;
+  }
+  try {
+    JSON.parse(v.requestBody);
+    return undefined;
+  } catch {
+    return "This is not valid JSON. It is sent exactly as written.";
+  }
+}
+
 export function validateMonitorForm(v: MonitorFormValues): MonitorFormErrors {
   const errors: MonitorFormErrors = {};
   const name = v.name.trim();
@@ -153,6 +220,7 @@ export function validateMonitorForm(v: MonitorFormValues): MonitorFormErrors {
   if (![1, 2, 3].includes(v.failureThreshold)) {
     errors.failureThreshold = "Choose 1, 2 or 3 failed checks.";
   }
+  Object.assign(errors, validateRequest(v));
   return errors;
 }
 
@@ -173,6 +241,10 @@ function settings(
       url: v.url.trim(),
       expectedStatus: v.expectedMode === "2xx" ? "2xx" : v.expectedCode.trim(),
       failureThreshold: v.failureThreshold,
+      method: v.method,
+      // GET and HEAD send an empty body, which also clears one left from another method.
+      requestBody: takesBody(v.method) ? v.requestBody : "",
+      ...(takesBody(v.method) && v.requestBody ? { contentType: v.contentType } : {}),
     },
   };
 }
@@ -278,7 +350,7 @@ export function describeSetup(v: MonitorFormValues): { text: string; blank?: boo
   const host = withoutHttps(v.url.trim()).replace(/\/$/, "");
   const exact = v.expectedMode === "exact";
   return [
-    { text: "Checks " },
+    { text: v.method === "GET" ? "Checks " : `Sends ${v.method} to ` },
     host ? { text: host } : { text: "your URL", blank: true },
     { text: " every minute" },
     ...(exact
