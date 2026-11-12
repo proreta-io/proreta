@@ -54,7 +54,7 @@ var (
 	ErrMemberNotFound = errors.New("projects: member not found")
 	// ErrSlugTaken means another live project of the tenant has the slug.
 	ErrSlugTaken = errors.New("projects: slug taken")
-	// ErrNotEmpty means the project still has live monitors or channels.
+	// ErrNotEmpty means the project still has live monitors, channels or status pages.
 	ErrNotEmpty = errors.New("projects: not empty")
 	// ErrDefault means the operation is not possible on the Default project (delete).
 	ErrDefault = errors.New("projects: default project")
@@ -438,7 +438,7 @@ func (s *Service) Delete(ctx context.Context, a Actor, id uuid.UUID) error {
 		if err != nil {
 			return fmt.Errorf("projects: count contents: %w", err)
 		}
-		if n.Monitors > 0 || n.Channels > 0 {
+		if n.Monitors > 0 || n.Channels > 0 || n.StatusPages > 0 {
 			return ErrNotEmpty
 		}
 		removed, err := q.DeleteProjectMembers(ctx, projectsdb.DeleteProjectMembersParams{TenantID: a.TenantID, ProjectID: id})

@@ -2220,11 +2220,15 @@ paths:
   /api/v1/status-pages:
     get:
       operationId: listStatusPages
-      summary: Status pages of the organization
+      summary: Status pages the caller sees
       description: |
-        Every role may read the organization's status pages (members see the public
-        link). The password itself is never returned, only `passwordProtected`.
+        The pages of the projects the caller can read and, with an organization role, the
+        organization-level pages (members see the public link). With `projectId`, only the pages
+        of that project (404 when the caller does not see the project). The password itself is
+        never returned, only `passwordProtected`.
       tags: [status-page]
+      parameters:
+        - $ref: "#/components/parameters/ProjectFilter"
       responses:
         "200":
           description: The status pages
@@ -2232,15 +2236,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StatusPageList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
         default:
           $ref: "#/components/responses/Error"
     post:
       operationId: createStatusPage
       summary: Create the status page
       description: |
-        Admin or owner. The page starts unpublished and without components. `slug` is global
+        Needs the status page permission in `projectId` (owners and maintainers of the project, or of
+        the organization) or, without `projectId`, an organization owner or maintainer. A page of a
+        project may show only monitors of that project; an organization-level page may show
+        monitors of every project. A project the caller does not see is 422 on `projectId`. The page starts unpublished and without components. `slug` is global
         (shared by every organization) and public; a slug in use is 409
         `urn:proreta:problem:slug-taken`, a reserved word is 422. The plan allows one page per
         organization: 409 `urn:proreta:problem:plan-limit-reached` (`limit` is `statusPages`).
@@ -2303,7 +2314,9 @@ paths:
       operationId: updateStatusPage
       summary: Change, publish or unpublish the status page
       description: |
-        Admin or owner. Only the given fields change; an empty `logoUrl` or `accentColor` removes
+        Owners and maintainers of the page's project (or of the organization); for an
+        organization-level page, organization owners and maintainers. A page of a project the
+        caller cannot see is 404. Only the given fields change; an empty `logoUrl` or `accentColor` removes
         it. `published` publishes or unpublishes the page: the public view is rebuilt in the same
         request and served within about 15 seconds. Audited as `status_page.updated` (field names
         only), `status_page.published` and `status_page.unpublished`.
@@ -4657,8 +4670,8 @@ components:
     Channel:
       type: object
       additionalProperties: false
-      required: [id, projectId, name, type, events, mention, reminderMinutes, status, createdAt, updatedAt]
-      description: A notification channel. Its webhook URL is a secret and is never returned.
+      required: [id, projectId, name, type, configHidden, events, mention, reminderMinutes, status, createdAt, updatedAt]
+      description: "A notification channel. Its webhook URL is a secret and is never returned. For an organization-wide channel the callers without the organization role get no settings: `configHidden` is true, `events` and `mention` are empty and `reminderMinutes` is 0."
       properties:
         id:
           type: string
@@ -4673,6 +4686,9 @@ components:
           example: "#ops-alerts"
         type:
           $ref: "#/components/schemas/ChannelType"
+        configHidden:
+          type: boolean
+          description: True when the settings of an organization-wide channel are withheld because the caller has no organization role
         events:
           $ref: "#/components/schemas/ChannelEvents"
         mention:
@@ -5690,11 +5706,16 @@ components:
     StatusPage:
       type: object
       additionalProperties: false
-      required: [id, slug, title, description, logoUrl, accentColor, published, passwordProtected, publicUrl, componentCount, createdAt, updatedAt]
+      required: [id, projectId, slug, title, description, logoUrl, accentColor, published, passwordProtected, publicUrl, componentCount, createdAt, updatedAt]
       properties:
         id:
           type: string
           format: uuid
+        projectId:
+          type: string
+          format: uuid
+          nullable: true
+          description: The project the page belongs to; null for an organization-level page, which may show monitors of several projects
         slug:
           type: string
           example: acme
@@ -5742,6 +5763,11 @@ components:
       additionalProperties: false
       required: [slug, title]
       properties:
+        projectId:
+          type: string
+          format: uuid
+          nullable: true
+          description: The project of the page; absent or null creates an organization-level page
         slug:
           type: string
           description: Lowercase letters, digits and hyphens (3-63), unique across Proreta; reserved words such as `api`, `admin` or `status` are refused

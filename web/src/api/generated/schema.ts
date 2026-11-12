@@ -1327,15 +1327,20 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Status pages of the organization
-     * @description Every role may read the organization's status pages (members see the public
-     *     link). The password itself is never returned, only `passwordProtected`.
+     * Status pages the caller sees
+     * @description The pages of the projects the caller can read and, with an organization role, the
+     *     organization-level pages (members see the public link). With `projectId`, only the pages
+     *     of that project (404 when the caller does not see the project). The password itself is
+     *     never returned, only `passwordProtected`.
      */
     get: operations["listStatusPages"];
     put?: never;
     /**
      * Create the status page
-     * @description Admin or owner. The page starts unpublished and without components. `slug` is global
+     * @description Needs the status page permission in `projectId` (owners and maintainers of the project, or of
+     *     the organization) or, without `projectId`, an organization owner or maintainer. A page of a
+     *     project may show only monitors of that project; an organization-level page may show
+     *     monitors of every project. A project the caller does not see is 422 on `projectId`. The page starts unpublished and without components. `slug` is global
      *     (shared by every organization) and public; a slug in use is 409
      *     `urn:proreta:problem:slug-taken`, a reserved word is 422. The plan allows one page per
      *     organization: 409 `urn:proreta:problem:plan-limit-reached` (`limit` is `statusPages`).
@@ -1374,7 +1379,9 @@ export interface paths {
     head?: never;
     /**
      * Change, publish or unpublish the status page
-     * @description Admin or owner. Only the given fields change; an empty `logoUrl` or `accentColor` removes
+     * @description Owners and maintainers of the page's project (or of the organization); for an
+     *     organization-level page, organization owners and maintainers. A page of a project the
+     *     caller cannot see is 404. Only the given fields change; an empty `logoUrl` or `accentColor` removes
      *     it. `published` publishes or unpublishes the page: the public view is rebuilt in the same
      *     request and served within about 15 seconds. Audited as `status_page.updated` (field names
      *     only), `status_page.published` and `status_page.unpublished`.
@@ -2639,7 +2646,7 @@ export interface components {
     ChannelMention: string[];
     /** @description 0 for no reminders, otherwise 5 to 1440 minutes between reminders while an incident stays open (1 to 4 is answered with 422) */
     ReminderMinutes: number;
-    /** @description A notification channel. Its webhook URL is a secret and is never returned. */
+    /** @description A notification channel. Its webhook URL is a secret and is never returned. For an organization-wide channel the callers without the organization role get no settings: `configHidden` is true, `events` and `mention` are empty and `reminderMinutes` is 0. */
     Channel: {
       /** Format: uuid */
       id: string;
@@ -2651,6 +2658,8 @@ export interface components {
       /** @example #ops-alerts */
       name: string;
       type: components["schemas"]["ChannelType"];
+      /** @description True when the settings of an organization-wide channel are withheld because the caller has no organization role */
+      configHidden: boolean;
       events: components["schemas"]["ChannelEvents"];
       mention: components["schemas"]["ChannelMention"];
       reminderMinutes: components["schemas"]["ReminderMinutes"];
@@ -3207,6 +3216,11 @@ export interface components {
     StatusPage: {
       /** Format: uuid */
       id: string;
+      /**
+       * Format: uuid
+       * @description The project the page belongs to; null for an organization-level page, which may show monitors of several projects
+       */
+      projectId: string | null;
       /** @example acme */
       slug: string;
       /** @example Acme status */
@@ -3232,6 +3246,11 @@ export interface components {
       items: components["schemas"]["StatusPage"][];
     };
     StatusPageCreate: {
+      /**
+       * Format: uuid
+       * @description The project of the page; absent or null creates an organization-level page
+       */
+      projectId?: string | null;
       /** @description Lowercase letters, digits and hyphens (3-63), unique across Proreta; reserved words such as `api`, `admin` or `status` are refused */
       slug: string;
       title: string;
@@ -5445,7 +5464,10 @@ export interface operations {
   };
   listStatusPages: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Only this project; 404 when the caller does not see it */
+        projectId?: components["parameters"]["ProjectFilter"];
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -5461,7 +5483,9 @@ export interface operations {
           "application/json": components["schemas"]["StatusPageList"];
         };
       };
+      400: components["responses"]["BadRequest"];
       401: components["responses"]["Unauthorized"];
+      404: components["responses"]["NotFound"];
       default: components["responses"]["Error"];
     };
   };

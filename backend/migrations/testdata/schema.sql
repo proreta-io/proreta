@@ -309,6 +309,7 @@ status_pages.9 published boolean not null default false
 status_pages.10 created_at timestamp with time zone not null default now()
 status_pages.11 updated_at timestamp with time zone not null default now()
 status_pages.12 deleted_at timestamp with time zone
+status_pages.13 project_id uuid
 tenants.1 id uuid not null
 tenants.2 slug text not null
 tenants.3 name text not null
@@ -548,6 +549,7 @@ status_pages status_pages_description_check CHECK ((char_length(description) <= 
 status_pages status_pages_logo_url_check CHECK (((logo_url IS NULL) OR ((char_length(logo_url) <= 500) AND (logo_url ~ '^https://[^\s/?#@]+'::text))))
 status_pages status_pages_password_hash_check CHECK (((password_hash IS NULL) OR (password_hash ~~ '$argon2id$%'::text)))
 status_pages status_pages_pkey PRIMARY KEY (id)
+status_pages status_pages_project_fkey FOREIGN KEY (tenant_id, project_id) REFERENCES projects(tenant_id, id)
 status_pages status_pages_slug_check CHECK (((slug ~ '^[a-z0-9][a-z0-9-]{2,62}$'::text) AND (slug <> ALL (ARRAY['admin'::text, 'api'::text, 'app'::text, 'assets'::text, 'auth'::text, 'badge'::text, 'dashboard'::text, 'docs'::text, 'embed'::text, 'feed'::text, 'health'::text, 'healthz'::text, 'help'::text, 'login'::text, 'logout'::text, 'metrics'::text, 'proreta'::text, 'public'::text, 'readyz'::text, 'register'::text, 'robots'::text, 'root'::text, 'rss'::text, 'settings'::text, 'signup'::text, 'static'::text, 'status'::text, 'support'::text, 'system'::text, 'www'::text]))))
 status_pages status_pages_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id)
 status_pages status_pages_tenant_id_id_key UNIQUE (tenant_id, id)
@@ -653,6 +655,7 @@ CREATE UNIQUE INDEX status_page_released_slugs_pkey ON public.status_page_releas
 CREATE INDEX status_page_released_slugs_slug_idx ON public.status_page_released_slugs USING btree (slug, released_at)
 CREATE UNIQUE INDEX status_page_snapshots_pkey ON public.status_page_snapshots USING btree (page_id)
 CREATE UNIQUE INDEX status_pages_pkey ON public.status_pages USING btree (id)
+CREATE INDEX status_pages_project_idx ON public.status_pages USING btree (tenant_id, project_id) WHERE ((deleted_at IS NULL) AND (project_id IS NOT NULL))
 CREATE UNIQUE INDEX status_pages_slug_idx ON public.status_pages USING btree (slug) WHERE (deleted_at IS NULL)
 CREATE UNIQUE INDEX status_pages_tenant_id_id_key ON public.status_pages USING btree (tenant_id, id)
 CREATE INDEX status_pages_tenant_idx ON public.status_pages USING btree (tenant_id) WHERE (deleted_at IS NULL)

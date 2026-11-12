@@ -52,7 +52,7 @@ export interface Abilities {
   /** Organization members and invitations. */
   manageMembers: boolean;
   deleteOrganization: boolean;
-  /** The status page belongs to the organization. */
+  /** Manages status pages of the organization or of at least one project. */
   manageStatusPage: boolean;
   /** Organization-wide plan usage. */
   seeUsage: boolean;
@@ -77,9 +77,24 @@ export function abilities(
     manageChannels: roleAtLeast(role, "maintainer") || inAProject("maintainer"),
     manageMembers: roleAtLeast(role, "maintainer"),
     deleteOrganization: role === "owner",
-    manageStatusPage: roleAtLeast(role, "maintainer"),
+    manageStatusPage: roleAtLeast(role, "maintainer") || inAProject("maintainer"),
     seeUsage: roleAtLeast(role, "maintainer"),
   };
+}
+
+/**
+ * Whether the session may change channels and status pages owned by a project, or by the
+ * organization when projectId is empty: the organization role decides for the latter, the role in
+ * the project (the higher of the two) for the former.
+ */
+export function canManageOwned(
+  session: SessionInfo | null | undefined,
+  projects: Pick<Project, "id" | "role">[] | undefined,
+  projectId: string | null | undefined,
+): boolean {
+  if (roleAtLeast(session?.role, "maintainer")) return true;
+  if (!projectId) return false;
+  return roleAtLeast(projects?.find((p) => p.id === projectId)?.role, "maintainer");
 }
 
 /** The roles an actor may give someone (nobody grants above their own; owner only by an owner). */
@@ -107,7 +122,7 @@ export const ROLE_HINTS = {
   manageChannels: "Only maintainers and owners can change notification channels.",
   manageMembers: "Only maintainers and owners can invite people or change roles.",
   manageStatusPage:
-    "Only organization maintainers and owners can change or publish the status page.",
+    "Only maintainers and owners of the organization or of the page's project can change or publish a status page.",
   organizationLevel:
     "You belong to this organization through projects only. Organization settings are for people with an organization role.",
 } as const;

@@ -452,7 +452,12 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 			if err != nil {
 				return err
 			}
-			moveMeta = map[string]any{"from": project.String(), "to": target.String(), "channelsDetached": detached}
+			// Pages of the old project may show only its monitors.
+			componentsRemoved, err := statuspages.DetachForeignComponents(ctx, tx, a.TenantID, id, target, time.Now())
+			if err != nil {
+				return err
+			}
+			moveMeta = map[string]any{"from": project.String(), "to": target.String(), "channelsDetached": detached, "statusPageComponentsRemoved": componentsRemoved}
 			changed, project = append(changed, "projectId"), target
 		}
 		if in.ChannelIDs != nil {

@@ -30,8 +30,10 @@ Permissions of the `organization` level are held only through an organization ro
 | `heartbeat.manage` | project | Regenerate heartbeat tokens | yes | yes | yes | |
 | `channel.read` | project | List and read notification channels | yes | yes | yes | yes |
 | `channel.manage` | project | Create, change, test and delete notification channels | yes | yes | | |
-| `statuspage.read` | organization | Read the status page settings and link | yes | yes | yes | yes |
-| `statuspage.manage` | organization | Configure, protect and publish status pages | yes | yes | | |
+| `statuspage.read` | project | Read the settings and link of the status pages of a project | yes | yes | yes | yes |
+| `statuspage.manage` | project | Configure, protect and publish the status pages of a project | yes | yes | | |
+| `organization.statuspages.read` | organization | Read the organization-level status pages | yes | yes | yes | yes |
+| `organization.statuspages.manage` | organization | Configure, protect and publish organization-level status pages | yes | yes | | |
 
 ## Operations
 

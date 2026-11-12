@@ -27,13 +27,17 @@ func (s *server) ListChannels(ctx context.Context, req gen.ListChannelsRequestOb
 			return nil, err
 		}
 	}
+	access, err := s.access(ctx)
+	if err != nil {
+		return nil, err
+	}
 	list, err := s.channels.List(ctx, p.TenantID, sc, req.Params.ProjectId)
 	if err != nil {
 		return nil, err
 	}
 	items := make([]gen.Channel, len(list))
 	for i, c := range list {
-		items[i] = toChannel(c)
+		items[i] = toChannel(c.ForViewer(access))
 	}
 	return gen.ListChannels200JSONResponse{Items: items}, nil
 }
@@ -63,11 +67,15 @@ func (s *server) GetChannel(ctx context.Context, req gen.GetChannelRequestObject
 	if err != nil {
 		return nil, err
 	}
+	access, err := s.access(ctx)
+	if err != nil {
+		return nil, err
+	}
 	c, err := s.channels.Get(ctx, p.TenantID, sc, req.ChannelId)
 	if err != nil {
 		return nil, err
 	}
-	return gen.GetChannel200JSONResponse(toChannel(c)), nil
+	return gen.GetChannel200JSONResponse(toChannel(c.ForViewer(access))), nil
 }
 
 func (s *server) UpdateChannel(ctx context.Context, req gen.UpdateChannelRequestObject) (gen.UpdateChannelResponseObject, error) {
@@ -130,7 +138,7 @@ func toChannel(c notify.Channel) gen.Channel {
 		events[i] = gen.ChannelEvent(e)
 	}
 	return gen.Channel{
-		Id: c.ID, ProjectId: c.ProjectID, Name: c.Name, Type: gen.ChannelType(c.Type), Events: events, Mention: c.Mention,
+		Id: c.ID, ProjectId: c.ProjectID, Name: c.Name, Type: gen.ChannelType(c.Type), ConfigHidden: c.ConfigHidden, Events: events, Mention: c.Mention,
 		ReminderMinutes: c.ReminderMinutes, Status: gen.ChannelStatus(c.Status), CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 	}
 }

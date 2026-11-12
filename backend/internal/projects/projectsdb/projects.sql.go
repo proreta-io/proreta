@@ -16,7 +16,9 @@ const countProjectContents = `-- name: CountProjectContents :one
 SELECT (SELECT count(*) FROM monitors AS m
         WHERE m.tenant_id = $1 AND m.project_id = $2::uuid AND m.deleted_at IS NULL)::bigint AS monitors,
        (SELECT count(*) FROM notification_channels AS c
-        WHERE c.tenant_id = $1 AND c.project_id = $2 AND c.deleted_at IS NULL)::bigint AS channels
+        WHERE c.tenant_id = $1 AND c.project_id = $2 AND c.deleted_at IS NULL)::bigint AS channels,
+       (SELECT count(*) FROM status_pages AS s
+        WHERE s.tenant_id = $1 AND s.project_id = $2 AND s.deleted_at IS NULL)::bigint AS status_pages
 `
 
 type CountProjectContentsParams struct {
@@ -25,14 +27,15 @@ type CountProjectContentsParams struct {
 }
 
 type CountProjectContentsRow struct {
-	Monitors int64
-	Channels int64
+	Monitors    int64
+	Channels    int64
+	StatusPages int64
 }
 
 func (q *Queries) CountProjectContents(ctx context.Context, arg CountProjectContentsParams) (CountProjectContentsRow, error) {
 	row := q.db.QueryRow(ctx, countProjectContents, arg.TenantID, arg.ProjectID)
 	var i CountProjectContentsRow
-	err := row.Scan(&i.Monitors, &i.Channels)
+	err := row.Scan(&i.Monitors, &i.Channels, &i.StatusPages)
 	return i, err
 }
 

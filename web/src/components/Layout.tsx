@@ -27,7 +27,6 @@ export default function Layout({ children }: { children?: ReactNode }) {
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const menuOpen = menuFor === location.pathname;
   const login = auth.session?.user.login;
-  const hasOrganizationRole = auth.session?.role != null;
   const isAdmin = auth.session?.user.isPlatformAdmin === true;
 
   async function onLogout() {
@@ -46,11 +45,9 @@ export default function Layout({ children }: { children?: ReactNode }) {
       <NavLink to="/members" className={navClass}>
         Members
       </NavLink>
-      {hasOrganizationRole && (
-        <NavLink to="/status-page" className={navClass}>
-          Status page
-        </NavLink>
-      )}
+      <NavLink to="/status-page" className={navClass}>
+        Status page
+      </NavLink>
       <NavLink to="/settings" className={navClass}>
         Settings
       </NavLink>

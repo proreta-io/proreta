@@ -15,7 +15,7 @@ import {
 } from "../api/endpoints";
 import { useAuth } from "../auth/AuthProvider";
 import SignInDomains from "../components/SignInDomains";
-import { abilities, ROLE_HINTS } from "../lib/roles";
+import { abilities, canManageOwned, ROLE_HINTS } from "../lib/roles";
 import { useToast } from "../components/Toasts";
 import {
   Alert,
@@ -209,6 +209,7 @@ type TestResult = { channel: Channel } & (
 
 function NotificationChannels() {
   const canManage = useAbilities().manageChannels;
+  const session = useAuth().session;
   const queryClient = useQueryClient();
   const toast = useToast();
   const usage = useUsage();
@@ -302,13 +303,21 @@ function NotificationChannels() {
                 {multiProject && (
                   <Td className="text-caption">{channelScopeLabel(c.projectId, projects)}</Td>
                 )}
-                <Td className="text-caption">{eventsLabel(c.events)}</Td>
-                <Td className="font-mono text-caption">
-                  {c.mention.length > 0 ? c.mention.join(" ") : "None"}
-                </Td>
-                <Td className="text-caption whitespace-nowrap">
-                  {reminderLabel(c.reminderMinutes)}
-                </Td>
+                {c.configHidden ? (
+                  <Td colSpan={3} className="text-caption text-muted-foreground">
+                    Settings are managed by the organization.
+                  </Td>
+                ) : (
+                  <>
+                    <Td className="text-caption">{eventsLabel(c.events)}</Td>
+                    <Td className="font-mono text-caption">
+                      {c.mention.length > 0 ? c.mention.join(" ") : "None"}
+                    </Td>
+                    <Td className="text-caption whitespace-nowrap">
+                      {reminderLabel(c.reminderMinutes)}
+                    </Td>
+                  </>
+                )}
                 <Td>
                   {c.status === "active" ? (
                     <Badge tone="success">Active</Badge>
@@ -321,32 +330,36 @@ function NotificationChannels() {
                 {canManage && (
                   <Td>
                     <div className="flex justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="small"
-                        aria-label={`Edit ${c.name}`}
-                        onClick={() => setEditing({ mode: "edit", channel: c })}
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="small"
-                        aria-label={`Send a test message to ${c.name}`}
-                        busy={test.isPending && test.variables?.id === c.id}
-                        disabled={test.isPending}
-                        onClick={() => test.mutate(c)}
-                      >
-                        Test
-                      </Button>
-                      <Button
-                        variant="ghost-destructive"
-                        size="small"
-                        aria-label={`Delete ${c.name}`}
-                        onClick={() => setDeleting(c)}
-                      >
-                        Delete
-                      </Button>
+                      {canManageOwned(session, projects, c.projectId) && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="small"
+                            aria-label={`Edit ${c.name}`}
+                            onClick={() => setEditing({ mode: "edit", channel: c })}
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="small"
+                            aria-label={`Send a test message to ${c.name}`}
+                            busy={test.isPending && test.variables?.id === c.id}
+                            disabled={test.isPending}
+                            onClick={() => test.mutate(c)}
+                          >
+                            Test
+                          </Button>
+                          <Button
+                            variant="ghost-destructive"
+                            size="small"
+                            aria-label={`Delete ${c.name}`}
+                            onClick={() => setDeleting(c)}
+                          >
+                            Delete
+                          </Button>
+                        </>
+                      )}
                     </div>
                   </Td>
                 )}
@@ -437,6 +450,7 @@ function ChannelForm({
   const queryClient = useQueryClient();
   const creating = channel === undefined;
   const scope = useProjectScope();
+  const session = useAuth().session;
   const projects = scope.projects.data?.items;
   // A new channel starts in the project the shell is filtered to, or the Default project.
   const defaultProject = scope.projectId ?? projects?.find((p) => p.isDefault)?.id ?? "";
@@ -605,12 +619,16 @@ function ChannelForm({
                 value={values.project || defaultProject}
                 onChange={(e) => update("project", e.target.value)}
               >
-                {(projects ?? []).map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-                <option value={ORGANIZATION_WIDE}>Organization-wide</option>
+                {(projects ?? [])
+                  .filter((p) => canManageOwned(session, projects, p.id))
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                {canManageOwned(session, projects, null) && (
+                  <option value={ORGANIZATION_WIDE}>Organization-wide</option>
+                )}
               </Select>
             )}
           </Field>

@@ -143,7 +143,7 @@ func writeError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 		p.Detail = "Status page addresses are shared by every organization on this Proreta; choose another."
 	case errors.Is(err, projects.ErrNotEmpty):
 		p.Type, p.Title, p.Status = problemProjectNotEmpty, "The project is not empty", http.StatusConflict
-		p.Detail = "Move or delete its monitors and channels first."
+		p.Detail = "Move or delete its monitors, channels and status pages first."
 	case errors.Is(err, projects.ErrDefault):
 		p.Type, p.Title, p.Status = problemDefaultProject, "The Default project cannot be deleted", http.StatusConflict
 	case errors.Is(err, authz.ErrForbidden):

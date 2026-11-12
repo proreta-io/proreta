@@ -321,6 +321,7 @@ describe("monitor form with projects", () => {
     projectId,
     name: id,
     type: "slack_webhook",
+    configHidden: false,
     events: ["down", "recovered", "tls_expiring"],
     mention: [],
     reminderMinutes: 0,

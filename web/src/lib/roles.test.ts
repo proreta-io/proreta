@@ -44,9 +44,10 @@ describe("roles", () => {
     expect(abilities(none, [{ role: "maintainer" }])).toMatchObject({
       manageChannels: true,
       manageMembers: false,
-      manageStatusPage: false,
+      manageStatusPage: true,
       seeUsage: false,
     });
+    expect(abilities(none, [{ role: "member" }])).toMatchObject({ manageStatusPage: false });
     // A project role raises an organization viewer in that project.
     expect(abilities(as("viewer"), [{ role: "maintainer" }])).toMatchObject({
       editMonitors: true,
