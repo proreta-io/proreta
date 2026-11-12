@@ -122,6 +122,14 @@ func run() error {
 	slack := notify.NewSlackNotifier(notifyClient)
 
 	sched := scheduler.New()
+	monitorSvc := monitors.NewService(pool, sched, incidents.NewService(sched))
+	if len(cfg.Request.Keys) > 0 {
+		requestKeys, err := crypto.NewKeyring(cfg.Request.Keys, cfg.Request.KeyID)
+		if err != nil {
+			return err
+		}
+		monitorSvc.WithRequestKeys(requestKeys)
+	}
 	handler, err := api.NewHandler(api.Config{
 		Version:              version,
 		Commit:               commit,
@@ -132,7 +140,7 @@ func run() error {
 		PasswordLoginEnabled: cfg.PasswordLoginEnabled,
 	}, api.Deps{
 		Auth:     authSvc,
-		Monitors: monitors.NewService(pool, sched, incidents.NewService(sched)),
+		Monitors: monitorSvc,
 		Queries:  queries.New(pool, nil),
 		Channels: notify.NewService(pool, keys, slack, cfg.PublicURL).WithWebhook(notify.NewWebhookNotifier(notifyClient)),
 		Plans:    plans.NewService(pool), Projects: projectsSvc,

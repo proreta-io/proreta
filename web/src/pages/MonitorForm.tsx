@@ -31,15 +31,22 @@ import {
   Select,
   Skeleton,
   Loading,
+  Textarea,
+  WriteOnlyValue,
 } from "../components/ui";
 import { formatDuration } from "../lib/format";
 import { GRACE_MAX, INTERVAL_MAX, INTERVAL_MIN, INTERVAL_PRESETS } from "../lib/heartbeat";
 import {
+  BODY_MAX_BYTES,
+  BODY_METHODS,
   channelsForProject,
   describeSetup,
   emptyMonitorForm,
+  isSafeMethod,
   keepLiveChannels,
   mapServerErrors,
+  MAX_HEADERS,
+  METHODS,
   NAME_MAX,
   toCreateRequest,
   toMonitorRequest,
@@ -49,6 +56,8 @@ import {
   withHttps,
   withoutHttps,
   type FormField,
+  type HeaderRow,
+  type Method,
   type MonitorFormErrors,
   type MonitorFormValues,
 } from "../lib/monitorForm";
@@ -273,6 +282,9 @@ function MonitorFormBody({
         [
           "name",
           "url",
+          "method",
+          "headers",
+          "body",
           "expectedStatus",
           "expectedIntervalSeconds",
           "graceSeconds",
@@ -365,6 +377,8 @@ function MonitorFormBody({
                 />
               )}
             </Field>
+
+            <RequestFields values={values} update={update} errors={errors} />
 
             <div className="flex flex-col gap-1.5">
               <div className="grid grid-cols-2 gap-3">
@@ -711,6 +725,178 @@ function TypeCard({
         )}
       </span>
     </div>
+  );
+}
+
+type Update = <K extends keyof MonitorFormValues>(key: K, value: MonitorFormValues[K]) => void;
+
+/** Method, custom headers and body of the request. Header values and the body are write-only. */
+function RequestFields({
+  values,
+  update,
+  errors,
+}: {
+  values: MonitorFormValues;
+  update: Update;
+  errors: MonitorFormErrors;
+}) {
+  const canHaveBody = BODY_METHODS.includes(values.method);
+  return (
+    <>
+      <Field
+        label="Method"
+        hint="GET is enough for most health checks."
+        error={errors.method}
+        className="sm:max-w-48"
+      >
+        {(c) => (
+          <Select
+            {...c}
+            data-field="method"
+            name="method"
+            value={values.method}
+            onChange={(e) => update("method", e.target.value as Method)}
+          >
+            {METHODS.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </Select>
+        )}
+      </Field>
+      {!isSafeMethod(values.method) && (
+        <Alert tone="neutral" title={`This check sends ${values.method} every minute.`}>
+          It acts on your system each time. Use it only against an endpoint that is safe to call
+          that often.
+        </Alert>
+      )}
+      <HeadersEditor
+        rows={values.headers}
+        error={errors.headers}
+        onChange={(rows) => update("headers", rows)}
+      />
+      {canHaveBody && <BodyField values={values} update={update} error={errors.body} />}
+      {!canHaveBody && errors.body && (
+        <span role="alert" data-field="body" tabIndex={-1} className="text-caption text-down">
+          {errors.body}
+        </span>
+      )}
+    </>
+  );
+}
+
+function HeadersEditor({
+  rows,
+  error,
+  onChange,
+}: {
+  rows: HeaderRow[];
+  error?: string;
+  onChange: (rows: HeaderRow[]) => void;
+}) {
+  const set = (i: number, patch: Partial<HeaderRow>) =>
+    // A renamed header is a new one: the stored value belonged to the old name.
+    onChange(
+      rows.map((r, j) =>
+        j === i ? { ...r, ...patch, ...(patch.name !== undefined ? { stored: false } : {}) } : r,
+      ),
+    );
+  return (
+    <fieldset className="flex flex-col gap-2" data-field="headers" tabIndex={-1}>
+      <legend className="pb-1 text-caption font-medium">Request headers</legend>
+      {rows.map((r, i) => (
+        <div key={i} className="grid grid-cols-[1fr_auto] gap-2 sm:grid-cols-[1fr_1fr_auto]">
+          <Input
+            aria-label={`Header ${i + 1} name`}
+            mono
+            spellCheck={false}
+            autoCapitalize="off"
+            autoComplete="off"
+            placeholder="Authorization"
+            value={r.name}
+            onChange={(e) => set(i, { name: e.target.value })}
+            className="col-span-2 sm:col-span-1"
+          />
+          <Input
+            aria-label={`Header ${i + 1} value`}
+            mono
+            secret
+            autoComplete="off"
+            placeholder={r.stored ? "Unchanged" : "Value"}
+            value={r.value}
+            onChange={(e) => set(i, { value: e.target.value })}
+          />
+          <Button
+            variant="secondary"
+            aria-label={`Remove header ${i + 1}`}
+            onClick={() => onChange(rows.filter((_, j) => j !== i))}
+          >
+            Remove
+          </Button>
+        </div>
+      ))}
+      <div>
+        <Button
+          variant="secondary"
+          disabled={rows.length >= MAX_HEADERS}
+          onClick={() => onChange([...rows, { name: "", value: "", stored: false }])}
+        >
+          Add header
+        </Button>
+      </div>
+      <span className="text-caption text-muted-foreground">
+        {error ??
+          "For tokens and content types. Values are stored encrypted and are never shown again; leave a saved value empty to keep it."}
+      </span>
+    </fieldset>
+  );
+}
+
+function BodyField({
+  values,
+  update,
+  error,
+}: {
+  values: MonitorFormValues;
+  update: Update;
+  error?: string;
+}) {
+  if (values.bodyStored && !values.bodyDirty) {
+    return (
+      <WriteOnlyValue
+        label="Request body"
+        hint="Stored encrypted; it cannot be shown. It is kept unless you replace it."
+        onReplace={() => update("bodyDirty", true)}
+      />
+    );
+  }
+  return (
+    <Field
+      label="Request body"
+      hint={`Text, up to ${BODY_MAX_BYTES / 1024} KiB, sent as is (JSON unless a Content-Type header says otherwise). Stored encrypted and never shown again.${
+        values.bodyStored ? " Leave it empty to remove the stored body." : ""
+      }`}
+      error={error}
+    >
+      {(c) => (
+        <Textarea
+          {...c}
+          data-field="body"
+          name="body"
+          rows={5}
+          spellCheck={false}
+          autoComplete="off"
+          className="font-mono sm:text-caption"
+          placeholder='{"check": true}'
+          value={values.body}
+          onChange={(e) => {
+            update("body", e.target.value);
+            update("bodyDirty", true);
+          }}
+        />
+      )}
+    </Field>
   );
 }
 

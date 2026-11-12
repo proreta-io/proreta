@@ -225,17 +225,20 @@ The Secret `proreta-db` (the role passwords) stays; it is not managed by Helm. I
 **Optional next steps:** Slack and [webhook](runbooks/alerts-webhook.md) channels in the app, [outgoing email](runbooks/email.md) (configured after your first sign-in under **Admin → Email**: an SMTP server, a test message and three switches; everything is off by default, and nothing is emailed until you turn it on), [sign-in with Google or GitHub](runbooks/oauth.md), [status pages](runbooks/status-page.md), [Alertmanager watchdog](runbooks/heartbeat-alertmanager.md), [metrics and alerts](runbooks/observability.md). Add the CIDRs of your cluster and VPC to `config.blockedCIDRs` so monitors cannot probe internal addresses ([chart README](../deploy/helm/proreta/README.md)).
 
 ## Back up the secrets
-The database backup alone is not enough to restore an installation. Two Secrets are generated in the cluster and exist nowhere else (with `secrets.*.source: externalSecret` your secret store is the copy, and you can skip this):
+The database backup alone is not enough to restore an installation. Three Secrets are generated in the cluster and exist nowhere else (with `secrets.*.source: externalSecret` your secret store is the copy, and you can skip this):
 
 | Secret (release `proreta`) | Keys | What it protects | If it is lost |
 |---|---|---|---|
 | `proreta-crypto` | `keys` (JSON `{"<keyId>":"<base64 of 32 bytes>"}`, for example `{"k1":"..."}`), `active_key_id` | AES-256-GCM encryption of the Slack and webhook URLs in the database (each stored value names the key id that sealed it) | The stored webhook URLs cannot be decrypted and are lost. Monitors, incidents and users are unaffected; Slack and webhook channels must be created again. |
+| `proreta-request` | `keys` (JSON, like `proreta-crypto`; for example `{"r1":"..."}`), `active_key_id` | AES-256-GCM encryption of the header values and bodies of monitor requests; the worker holds only this key | The stored header values and bodies cannot be decrypted and are lost; monitors with them fail their checks until the values are entered again. Nothing else is affected. |
 | `proreta-statuspage` | `cookie_key` | Signature of the cookie that records a visitor's password unlock on a protected status page | Visitors of protected pages enter the password again. Nothing is lost. |
 
 **Export.** Print the data of each Secret without the cluster-specific metadata (name, namespace, uid, resource version) and store the output in a password manager or an external secret store, never in Git or in the same place as the database backup:
 ```sh
 kubectl -n proreta get secret proreta-crypto -o yaml \
   | yq 'del(.metadata) | .metadata.name = "proreta-crypto"'
+kubectl -n proreta get secret proreta-request -o yaml \
+  | yq 'del(.metadata) | .metadata.name = "proreta-request"'
 kubectl -n proreta get secret proreta-statuspage -o yaml \
   | yq 'del(.metadata) | .metadata.name = "proreta-statuspage"'
 ```
@@ -244,9 +247,9 @@ Without `yq`, copy the two `data` entries: `kubectl -n proreta get secret proret
 **Restore.** On a new cluster or after `kubectl delete namespace`, create the Secrets before the first `helm upgrade --install` (the secrets bootstrap Job creates a Secret only when it is absent and never overwrites it):
 ```sh
 kubectl create namespace proreta
-kubectl -n proreta apply -f proreta-crypto.yaml -f proreta-statuspage.yaml   # the saved files, with metadata.name and no namespace or uid
+kubectl -n proreta apply -f proreta-crypto.yaml -f proreta-request.yaml -f proreta-statuspage.yaml   # the saved files, with metadata.name and no namespace or uid
 ```
-Then install with the same `secrets.crypto.keyId`, restore the database, and check that a channel can send a test message. If the Secrets already exist with other content, apply the saved files over them and restart `api` and `jobs` (`kubectl -n proreta rollout restart deploy/proreta-api deploy/proreta-jobs`) and the `statuspage` Deployment, which read the Secrets only at start.
+Then install with the same `secrets.crypto.keyId`, restore the database, and check that a channel can send a test message. If the Secrets already exist with other content, apply the saved files over them and restart `api`, `worker` and `jobs` (`kubectl -n proreta rollout restart deploy/proreta-api deploy/proreta-worker deploy/proreta-jobs`) and the `statuspage` Deployment, which read the Secrets only at start.
 
 **Rotation.** Add a second entry to `keys` and point `active_key_id` at it; never remove an old entry while stored webhook URLs may still be sealed with it, because there is no re-encryption tool and a webhook URL is re-sealed only when its channel is saved again:
 ```sh
@@ -279,8 +282,8 @@ This removes the Deployments, Services, HTTPRoute and ServiceAccounts. It leaves
 
 To remove everything for good:
 ```sh
-# export proreta-crypto and proreta-statuspage first: see "Back up the secrets"
-kubectl -n proreta delete secret proreta-db proreta-admin proreta-admin-initial proreta-crypto proreta-statuspage --ignore-not-found
+# export proreta-crypto, proreta-request and proreta-statuspage first: see "Back up the secrets"
+kubectl -n proreta delete secret proreta-db proreta-admin proreta-admin-initial proreta-crypto proreta-request proreta-statuspage --ignore-not-found
 kubectl delete namespace proreta
 ```
 If you keep the namespace, also remove hook objects that a failed install left behind (after a successful run Helm deletes them itself; all chart objects carry the label `app.kubernetes.io/instance=<release>`):

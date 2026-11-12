@@ -867,6 +867,18 @@ paths:
                     url: https://example.com/health
                     expectedStatus: 2xx
                     failureThreshold: 2
+              httpPost:
+                summary: An HTTPS monitor that posts JSON with a token (headers and body are write-only)
+                value:
+                  type: http
+                  name: Orders API
+                  http:
+                    url: https://example.com/api/ping
+                    method: POST
+                    headers:
+                      - name: Authorization
+                        value: Bearer example-token
+                    body: '{"check":true}'
               heartbeat:
                 summary: A heartbeat that expects a ping every 5 minutes
                 value:
@@ -904,6 +916,9 @@ paths:
                     http:
                       url: https://example.com/health
                       expectedStatus: 2xx
+                      method: GET
+                      headerNames: []
+                      bodySet: false
                       intervalSeconds: 60
                       timeoutSeconds: 10
                       failureThreshold: 2
@@ -4260,6 +4275,44 @@ components:
         are rejected.
       pattern: "^(2xx|2[0-9]{2}|[45][0-9]{2})$"
       example: 2xx
+    HttpMethod:
+      type: string
+      description: |
+        The HTTP method of the check. `POST`, `PUT`, `PATCH` and `DELETE` act on the target
+        system once a minute; use them only against endpoints that are safe to call that often.
+        Defaults to `GET`; omitted on update keeps the current method.
+      enum: [GET, HEAD, POST, PUT, PATCH, DELETE]
+      example: GET
+    HttpHeaderInput:
+      type: object
+      additionalProperties: false
+      description: |
+        A custom request header. The value is write-only: it is stored encrypted and never
+        returned. On update, a header whose `value` is omitted keeps the value stored for the same
+        name (422 when there is none); on create `value` is required.
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: |
+            A header name. `Host`, `Content-Length`, `Transfer-Encoding`, `Connection`, `Upgrade`,
+            `TE`, `Trailer`, `Expect` and `Proxy-*` are refused; `User-Agent` replaces ours.
+          example: Authorization
+        value:
+          type: string
+          maxLength: 2048
+          description: The value, without control characters
+          writeOnly: true
+    HttpBody:
+      type: string
+      maxLength: 65536
+      writeOnly: true
+      description: |
+        A text request body of at most 64 KiB, sent as is. Only for `POST`, `PUT`, `PATCH` and
+        `DELETE`; `Content-Type` defaults to `application/json` when no such header is set.
+        Write-only: stored encrypted and never returned. On update an empty string removes the body.
     HttpSettings:
       type: object
       additionalProperties: false
@@ -4274,6 +4327,16 @@ components:
           example: https://example.com/health
         expectedStatus:
           $ref: "#/components/schemas/ExpectedStatus"
+        method:
+          $ref: "#/components/schemas/HttpMethod"
+        headers:
+          type: array
+          description: Custom request headers, at most 10; a name may appear once
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/HttpHeaderInput"
+        body:
+          $ref: "#/components/schemas/HttpBody"
         intervalSeconds:
           type: integer
           description: Check interval in seconds; 60 is the only accepted value (422 otherwise)
@@ -4300,6 +4363,16 @@ components:
           maxLength: 2048
         expectedStatus:
           $ref: "#/components/schemas/ExpectedStatus"
+        method:
+          $ref: "#/components/schemas/HttpMethod"
+        headers:
+          type: array
+          description: Replaces the custom headers; omit to keep them, send `[]` to remove them all
+          maxItems: 10
+          items:
+            $ref: "#/components/schemas/HttpHeaderInput"
+        body:
+          $ref: "#/components/schemas/HttpBody"
         intervalSeconds:
           type: integer
           description: Accepted only with the current value (60)
@@ -4493,13 +4566,23 @@ components:
       type: object
       additionalProperties: false
       description: The settings and HTTP-specific state of an HTTPS monitor
-      required: [url, expectedStatus, intervalSeconds, timeoutSeconds, failureThreshold, tlsExpiresAt, lastResponseMs]
+      required: [url, expectedStatus, method, headerNames, bodySet, intervalSeconds, timeoutSeconds, failureThreshold, tlsExpiresAt, lastResponseMs]
       properties:
         url:
           type: string
           description: The checked URL
         expectedStatus:
           $ref: "#/components/schemas/ExpectedStatus"
+        method:
+          $ref: "#/components/schemas/HttpMethod"
+        headerNames:
+          type: array
+          description: The names of the custom headers; their values are never returned
+          items:
+            type: string
+        bodySet:
+          type: boolean
+          description: Whether the monitor sends a body; the body itself is never returned
         intervalSeconds:
           type: integer
           description: Check interval in seconds

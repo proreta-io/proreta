@@ -14,6 +14,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/checks"
 	"github.com/proreta-io/proreta/backend/internal/incidents"
 	"github.com/proreta-io/proreta/backend/internal/platform/config"
+	"github.com/proreta-io/proreta/backend/internal/platform/crypto"
 	"github.com/proreta-io/proreta/backend/internal/platform/db"
 	"github.com/proreta-io/proreta/backend/internal/platform/httpx"
 	"github.com/proreta-io/proreta/backend/internal/platform/logging"
@@ -55,6 +56,13 @@ func run() error {
 		return err
 	}
 
+	var requestKeys *crypto.Keyring
+	if len(cfg.Request.Keys) > 0 {
+		if requestKeys, err = crypto.NewKeyring(cfg.Request.Keys, cfg.Request.KeyID); err != nil {
+			return err
+		}
+	}
+
 	reg := metrics.NewRegistry("worker", version, commit)
 	sched := scheduler.New()
 	client := safehttp.NewClient(safehttp.Options{
@@ -66,7 +74,7 @@ func run() error {
 		DrainTimeout: cfg.ShutdownTimeout, Location: cfg.Location,
 	}, worker.Deps{
 		Pool: pool, Scheduler: sched, Incidents: incidents.NewService(sched),
-		Prober: checks.NewHTTPSProber(client), Metrics: worker.NewMetrics(reg), Log: log,
+		Prober: checks.NewHTTPSProber(client), RequestKeys: requestKeys, Metrics: worker.NewMetrics(reg), Log: log,
 	})
 
 	g, gctx := errgroup.WithContext(ctx)

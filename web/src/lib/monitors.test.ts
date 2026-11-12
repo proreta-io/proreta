@@ -1,6 +1,7 @@
 import type { HttpMonitor, MonitorList, MonitorListItem } from "../api/endpoints";
 import {
   checkSettings,
+  requestSummary,
   downReason,
   failureStreak,
   filterMonitors,
@@ -20,6 +21,9 @@ const httpSettings = (over: Partial<HttpMonitor> = {}): HttpMonitor => ({
   intervalSeconds: 60,
   timeoutSeconds: 10,
   expectedStatus: "2xx",
+  method: "GET",
+  headerNames: [],
+  bodySet: false,
   failureThreshold: 2,
   tlsExpiresAt: null,
   lastResponseMs: 120,
@@ -243,5 +247,20 @@ describe("checkSettings", () => {
     expect(checkSettings(httpSettings({ expectedStatus: "204", failureThreshold: 1 }))).toBe(
       "every 60 s · 10 s timeout · expects HTTP 204 · alerts on the first failure",
     );
+  });
+});
+
+describe("requestSummary", () => {
+  it("is empty for a plain GET", () => {
+    expect(requestSummary(httpSettings())).toBeUndefined();
+  });
+
+  it("lists the method, header names and a hidden body", () => {
+    expect(
+      requestSummary(
+        httpSettings({ method: "POST", headerNames: ["Authorization", "X-Env"], bodySet: true }),
+      ),
+    ).toBe("POST · headers: Authorization, X-Env · body set (hidden)");
+    expect(requestSummary(httpSettings({ headerNames: ["X-A"] }))).toBe("headers: X-A");
   });
 });

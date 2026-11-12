@@ -84,16 +84,91 @@ describe("validateMonitorForm", () => {
       toMonitorRequest({ ...valid, name: " Site ", expectedMode: "exact", expectedCode: "204" }),
     ).toEqual({
       name: "Site",
-      http: { url: "https://example.com", expectedStatus: "204", failureThreshold: 2 },
+      http: {
+        url: "https://example.com",
+        expectedStatus: "204",
+        failureThreshold: 2,
+        method: "GET",
+        headers: [],
+      },
       notificationsEnabled: true,
       channelIds: [],
     });
+  });
+
+  it("sends a stored header by name only and a body only when it was touched", () => {
+    const stored = { ...valid, method: "POST" as const, bodyStored: true };
+    const kept = toMonitorRequest({
+      ...stored,
+      headers: [
+        { name: "Authorization", value: "", stored: true },
+        { name: "X-New", value: "v", stored: false },
+        { name: "X-Replaced", value: "new", stored: true },
+      ],
+    });
+    expect(kept.http?.headers).toEqual([
+      { name: "Authorization" },
+      { name: "X-New", value: "v" },
+      { name: "X-Replaced", value: "new" },
+    ]);
+    expect(kept.http).not.toHaveProperty("body");
+    expect(toMonitorRequest({ ...stored, bodyDirty: true, body: "" }).http?.body).toBe("");
+    expect(toMonitorRequest({ ...valid, method: "POST", body: "x" }).http?.body).toBe("x");
+  });
+
+  it("checks the method, headers and body", () => {
+    const row = (name: string, value = "v") => ({ name, value, stored: false });
+    const errs = (over: Partial<MonitorFormValues>) => validateMonitorForm({ ...valid, ...over });
+    expect(errs({ method: "POST", headers: [row("Authorization")], body: "{}" })).toEqual({});
+    expect(errs({ body: "x" }).body).toMatch(/GET request cannot have a body/);
+    expect(errs({ method: "HEAD", bodyStored: true }).body).toMatch(/HEAD request/);
+    expect(
+      errs({ method: "HEAD", bodyStored: true, bodyDirty: true, body: "" }).body,
+    ).toBeUndefined();
+    expect(errs({ method: "POST", body: "a".repeat(64 * 1024 + 1) }).body).toBe(
+      "Use 64 KiB or less.",
+    );
+    expect(errs({ headers: [row("Bad Name")] }).headers).toMatch(/Header 1: enter a valid/);
+    expect(errs({ headers: [row("Host")] }).headers).toBe("Header 1: Host cannot be set.");
+    expect(errs({ headers: [row("proxy-authorization")] }).headers).toMatch(/cannot be set/);
+    expect(errs({ headers: [row("X-A"), row("x-a")] }).headers).toBe(
+      "Header 2: x-a is already set.",
+    );
+    expect(errs({ headers: [row("X-A", "a\nb")] }).headers).toMatch(/control characters/);
+    expect(errs({ headers: [row("X-A", "")] }).headers).toBe("Header 1: enter a value.");
+    expect(errs({ headers: [{ name: "X-A", value: "", stored: true }] }).headers).toBeUndefined();
+    expect(errs({ headers: Array.from({ length: 11 }, (_, i) => row(`X-${i}`)) }).headers).toBe(
+      "Use at most 10 headers.",
+    );
+  });
+
+  it("describes a non-GET method", () => {
+    const text = describeSetup({ ...valid, method: "POST" })
+      .map((p) => p.text)
+      .join("");
+    expect(text).toMatch(/^Sends POST to example\.com every minute/);
   });
 });
 
 describe("mapServerErrors", () => {
   const apiError = (status: number, fieldErrors: { field: string; message: string }[]) =>
     new ApiError({ type: "x", title: "Validation failed", status, fieldErrors });
+
+  it("maps header errors to the headers", () => {
+    const mapped = mapServerErrors(
+      new ApiError({
+        type: "x",
+        title: "Validation failed",
+        status: 422,
+        fieldErrors: [
+          { field: "http.headers[1].value", message: "must not contain control characters" },
+          { field: "http.body", message: "is not allowed with GET or HEAD" },
+        ],
+      }),
+    );
+    expect(mapped.fields.headers).toBe("Header 2: must not contain control characters");
+    expect(mapped.fields.body).toBe("Is not allowed with GET or HEAD");
+  });
 
   it("puts known field errors next to fields", () => {
     expect(

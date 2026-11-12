@@ -534,6 +534,72 @@
             }
           ]
         },
+        "request": {
+          "type": "object",
+          "title": "request key Secret",
+          "description": "Secret <fullname>-request (keys, active_key_id): the keyring that seals the header values and bodies of monitor requests (api seals, worker opens)",
+          "additionalProperties": false,
+          "properties": {
+            "source": {
+              "type": "string",
+              "title": "source",
+              "description": "who creates the Secret: generate (the secrets bootstrap Job, default) or externalSecret (read from remoteKey through External Secrets; needs externalSecrets.enabled)",
+              "enum": [
+                "generate",
+                "externalSecret"
+              ]
+            },
+            "keyId": {
+              "type": "string",
+              "title": "key id",
+              "description": "id of the generated key (generate mode), PRORETA_REQUEST_ACTIVE_KEY_ID",
+              "pattern": "^[A-Za-z0-9_-]{1,32}$"
+            },
+            "remoteKey": {
+              "type": "string",
+              "title": "request remote key",
+              "description": "externalSecret mode: JSON secret with properties keys (JSON string), active_key_id"
+            }
+          },
+          "required": [
+            "source"
+          ],
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "source": {
+                    "const": "generate"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "keyId"
+                ]
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "source": {
+                    "const": "externalSecret"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "remoteKey"
+                ],
+                "properties": {
+                  "remoteKey": {
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          ]
+        },
         "statuspage": {
           "type": "object",
           "title": "status page cookie key Secret",
@@ -637,6 +703,7 @@
       "required": [
         "admin",
         "crypto",
+        "request",
         "statuspage",
         "oauth",
         "bootstrap"

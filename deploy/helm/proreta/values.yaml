@@ -116,6 +116,16 @@ secrets:
     keyId: k1
     # externalSecret mode: JSON secret with properties keys (JSON string), active_key_id
     remoteKey: proreta/crypto
+  # Keyring that seals the header values and bodies of monitor requests, Secret `<fullname>-request`
+  # (keys, active_key_id). The api seals with it and the worker opens with it; the worker holds no
+  # other key. A generated key exists only in the cluster: losing it loses the stored header values
+  # and bodies (they can be entered again).
+  request:
+    source: generate
+    # Key id of the generated key (generate mode); PRORETA_REQUEST_ACTIVE_KEY_ID.
+    keyId: r1
+    # externalSecret mode: JSON secret with properties keys (JSON string), active_key_id
+    remoteKey: proreta/request
   # Key that signs the unlock cookies of password-protected status pages, Secret
   # `<fullname>-statuspage` (cookie_key). Only rendered and read with statuspage.enabled. Losing it
   # only signs visitors of protected pages out.

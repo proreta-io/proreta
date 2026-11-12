@@ -20,9 +20,11 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/audit"
 	"github.com/proreta-io/proreta/backend/internal/authz"
 	"github.com/proreta-io/proreta/backend/internal/incidents"
+	"github.com/proreta-io/proreta/backend/internal/monitorrequest"
 	"github.com/proreta-io/proreta/backend/internal/monitors/monitorsdb"
 	"github.com/proreta-io/proreta/backend/internal/notify"
 	"github.com/proreta-io/proreta/backend/internal/plans"
+	"github.com/proreta-io/proreta/backend/internal/platform/crypto"
 	"github.com/proreta-io/proreta/backend/internal/platform/db"
 	"github.com/proreta-io/proreta/backend/internal/platform/uuidv7"
 	"github.com/proreta-io/proreta/backend/internal/platform/validation"
@@ -93,6 +95,11 @@ type Monitor struct {
 	// URL and ExpectedStatus are empty for a heartbeat.
 	URL            string
 	ExpectedStatus string
+	// Method, HeaderNames and BodySet describe the request of an http monitor; header values and
+	// the body are write-only and never returned.
+	Method      string
+	HeaderNames []string
+	BodySet     bool
 	// IntervalSeconds is the check interval, or a heartbeat's expected ping interval.
 	IntervalSeconds      int
 	TimeoutSeconds       int
@@ -132,8 +139,13 @@ type CreateInput struct {
 // HTTPSettings are the settings of an http monitor; nil fields take their defaults on create
 // and keep their value on update. URL is required on create.
 type HTTPSettings struct {
-	URL              *string
-	ExpectedStatus   *string
+	URL            *string
+	ExpectedStatus *string
+	// Method defaults to GET. Headers replaces the custom headers (nil keeps them). Body
+	// replaces the body: nil keeps it, an empty string removes it.
+	Method           *string
+	Headers          *[]HeaderInput
+	Body             *string
 	IntervalSeconds  *int
 	TimeoutSeconds   *int
 	FailureThreshold *int
@@ -162,6 +174,12 @@ type UpdateInput struct {
 type httpConfig struct {
 	URL            string `json:"url"`
 	ExpectedStatus string `json:"expectedStatus"`
+	// Method is omitted for GET. Request is the sealed headers and body (monitorrequest); the
+	// names and the flag are kept in the clear so reads never open it.
+	Method      string   `json:"method,omitempty"`
+	HeaderNames []string `json:"headerNames,omitempty"`
+	BodySet     bool     `json:"bodySet,omitempty"`
+	Request     string   `json:"request,omitempty"`
 }
 
 // heartbeatConfig is monitors.config for type heartbeat.
@@ -187,9 +205,10 @@ const (
 
 // Service implements the monitor lifecycle.
 type Service struct {
-	pool      *db.Pool
-	sched     *scheduler.Service
-	incidents *incidents.Service
+	pool        *db.Pool
+	sched       *scheduler.Service
+	incidents   *incidents.Service
+	requestKeys *crypto.Keyring
 }
 
 // NewService returns a Service.
@@ -208,6 +227,9 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 	}
 	var row monitorsdb.InsertMonitorParams
 	var config any
+	var httpCfg httpConfig
+	var httpSec monitorrequest.Secrets
+	var isHTTP bool
 	resource := plans.ResourceMonitor
 	switch in.Type {
 	case "", TypeHTTP:
@@ -236,7 +258,12 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 		}
 		threshold := orDefault(h.FailureThreshold, DefaultFailureThreshold)
 		checkThreshold(&verr, threshold)
-		config = httpConfig{URL: target, ExpectedStatus: expected}
+		httpCfg = httpConfig{URL: target, ExpectedStatus: expected}
+		var perr error
+		if httpCfg, httpSec, _, _, perr = s.planRequest(&verr, httpCfg, a.TenantID, uuid.Nil, h); perr != nil {
+			return Monitor{}, perr
+		}
+		isHTTP = true
 		row.IntervalSeconds, row.FailureThreshold = IntervalSeconds, int32(threshold) //nolint:gosec // validated 1..3
 	case TypeHeartbeat:
 		row.Type, resource = TypeHeartbeat, plans.ResourceHeartbeat
@@ -265,6 +292,13 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 	if err := verr.Err(); err != nil {
 		return Monitor{}, err
 	}
+	id := uuidv7.New()
+	if isHTTP {
+		if err := s.sealRequest(&httpCfg, a.TenantID, id, httpSec); err != nil {
+			return Monitor{}, err
+		}
+		config = httpCfg
+	}
 	raw, err := json.Marshal(config)
 	if err != nil {
 		return Monitor{}, fmt.Errorf("monitors: config: %w", err)
@@ -277,7 +311,6 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 		}
 	}
 
-	id := uuidv7.New()
 	row.ID, row.TenantID, row.Name, row.Config = id, a.TenantID, name, raw
 	row.TimeoutSeconds, row.NotificationsEnabled = TimeoutSeconds, orDefault(in.NotificationsEnabled, true)
 	var m Monitor
@@ -424,6 +457,16 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 				if h.FailureThreshold != nil {
 					checkThreshold(&verr, *h.FailureThreshold)
 					changed, threshold = appendIf(changed, fieldFailureThreshold, *h.FailureThreshold != threshold), *h.FailureThreshold
+				}
+				next, sec, dirty, reqChanged, perr := s.planRequest(&verr, cfg, a.TenantID, id, h)
+				if perr != nil {
+					return perr
+				}
+				cfg, changed = next, append(changed, reqChanged...)
+				if dirty && verr.Err() == nil {
+					if err := s.sealRequest(&cfg, a.TenantID, id, sec); err != nil {
+						return err
+					}
 				}
 			}
 			config = cfg
@@ -651,8 +694,12 @@ func fromRow(r monitorsdb.GetMonitorRow) (Monitor, error) {
 	if err := json.Unmarshal(r.Config, &cfg); err != nil {
 		return Monitor{}, fmt.Errorf("monitor %s config: %w", r.ID, err)
 	}
+	if r.Type == TypeHTTP && cfg.Method == "" {
+		cfg.Method = monitorrequest.Methods[0]
+	}
 	return Monitor{
 		ID: r.ID, ProjectID: r.ProjectID, Type: r.Type, Name: r.Name, URL: cfg.URL, ExpectedStatus: cfg.ExpectedStatus,
+		Method: cfg.Method, HeaderNames: cfg.HeaderNames, BodySet: cfg.BodySet,
 		IntervalSeconds: int(r.IntervalSeconds), TimeoutSeconds: int(r.TimeoutSeconds), GraceSeconds: cfg.GraceSeconds,
 		FailureThreshold: int(r.FailureThreshold), NotificationsEnabled: r.NotificationsEnabled, Paused: r.Paused,
 		Status: r.Status, StatusSince: r.StatusChangedAt, LastErrorKind: r.LastErrorKind,

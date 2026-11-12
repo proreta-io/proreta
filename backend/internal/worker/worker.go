@@ -23,7 +23,9 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/checks"
 	"github.com/proreta-io/proreta/backend/internal/incidents"
 	"github.com/proreta-io/proreta/backend/internal/incidents/machine"
+	"github.com/proreta-io/proreta/backend/internal/monitorrequest"
 	"github.com/proreta-io/proreta/backend/internal/platform/clock"
+	"github.com/proreta-io/proreta/backend/internal/platform/crypto"
 	"github.com/proreta-io/proreta/backend/internal/platform/db"
 	"github.com/proreta-io/proreta/backend/internal/platform/logging"
 	"github.com/proreta-io/proreta/backend/internal/results"
@@ -81,8 +83,11 @@ type Deps struct {
 	Scheduler *scheduler.Service
 	Incidents *incidents.Service
 	Prober    checks.Prober
-	Metrics   *Metrics
-	Log       *slog.Logger
+	// RequestKeys opens the sealed headers and bodies of monitor requests; nil on an
+	// installation without them, where such a job fails with an error kind.
+	RequestKeys *crypto.Keyring
+	Metrics     *Metrics
+	Log         *slog.Logger
 	// Clock defaults to the system clock; Jitter to a uniform value in [-MaxJitter, MaxJitter].
 	Clock  clock.Clock
 	Jitter func() time.Duration
@@ -277,7 +282,22 @@ func (w *Worker) check(ctx context.Context, j scheduler.Job, host string) {
 			"location_id", j.LocationID, "panic_type", fmt.Sprintf("%T", r))
 	}()
 	start := time.Now()
-	res := w.d.Prober.Probe(ctx, checks.Request{URL: j.URL, Timeout: j.Timeout, ExpectedStatus: j.ExpectedStatus})
+	req := checks.Request{URL: j.URL, Method: j.Method, Timeout: j.Timeout, ExpectedStatus: j.ExpectedStatus}
+	var res checks.Result
+	if j.Request != "" {
+		sec, err := monitorrequest.Open(w.d.RequestKeys, j.TenantID, j.MonitorID, j.Request)
+		if err != nil {
+			// The error carries no value; the check still fails visibly instead of being sent
+			// without its headers.
+			w.d.Log.Error("cannot open the sealed request of a monitor", "tenant_id", j.TenantID, "monitor_id", j.MonitorID, "error", err)
+			res = checks.Result{CheckedAt: time.Now().UTC(), ErrorKind: checks.KindOther}
+		} else {
+			req.Header, req.Body = sec.HTTPHeader(), []byte(sec.Body)
+		}
+	}
+	if res.CheckedAt.IsZero() {
+		res = w.d.Prober.Probe(ctx, req)
+	}
 	w.limiter.Release(j.TenantID, host)
 	released = true
 	if res.Cancelled || ctx.Err() != nil {

@@ -14,6 +14,9 @@ const httpOf = (over: Partial<HttpMonitor> = {}): HttpMonitor => ({
   intervalSeconds: 60,
   timeoutSeconds: 10,
   expectedStatus: "2xx",
+  method: "GET",
+  headerNames: [],
+  bodySet: false,
   failureThreshold: 2,
   tlsExpiresAt: null,
   lastResponseMs: 230,
@@ -318,11 +321,103 @@ describe("monitor form", () => {
     expect(body).toEqual({
       type: "http",
       name: "Website",
-      http: { url: "https://example.com/", expectedStatus: "204", failureThreshold: 3 },
+      http: {
+        url: "https://example.com/",
+        expectedStatus: "204",
+        failureThreshold: 3,
+        method: "GET",
+        headers: [],
+      },
       notificationsEnabled: false,
       channelIds: [],
     });
     expect(screen.getByRole("status")).toHaveTextContent("Monitor created");
+  });
+
+  it("sends a method, headers and a body, and warns for a non-safe method", async () => {
+    let body: unknown;
+    const created = detail({ id: "new2", name: "Orders" });
+    mockApi({
+      ...signedIn,
+      "POST /api/v1/monitors": async (req) => {
+        body = await req.json();
+        return json(created, 201);
+      },
+      "GET /api/v1/monitors/new2": () => json(created),
+    });
+    renderApp("/monitors/new");
+    await userEvent.type(await screen.findByLabelText("Name"), "Orders");
+    await userEvent.type(screen.getByLabelText("URL"), "https://example.com/ping");
+    // GET has no body field and no warning.
+    expect(screen.queryByLabelText("Request body")).not.toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("Method"), "POST");
+    expect(screen.getByText("This check sends POST every minute.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Add header" }));
+    await userEvent.type(screen.getByLabelText("Header 1 name"), "Authorization");
+    await userEvent.type(screen.getByLabelText("Header 1 value"), "Bearer s3cret");
+    await userEvent.click(screen.getByLabelText("Request body"));
+    await userEvent.paste('{"check":true}');
+    await userEvent.click(screen.getByRole("button", { name: "Create monitor" }));
+
+    expect(await screen.findByRole("heading", { name: "Orders", level: 1 })).toBeInTheDocument();
+    expect(body).toMatchObject({
+      http: {
+        method: "POST",
+        headers: [{ name: "Authorization", value: "Bearer s3cret" }],
+        body: '{"check":true}',
+      },
+    });
+  });
+
+  it("keeps stored header values and the body unless they are replaced", async () => {
+    let body: unknown;
+    const current = detail({
+      id: "m8",
+      name: "Orders",
+      http: httpOf({ method: "POST", headerNames: ["Authorization"], bodySet: true }),
+    });
+    mockApi({
+      ...signedIn,
+      "GET /api/v1/monitors/m8": () => json(current),
+      "PATCH /api/v1/monitors/m8": async (req) => {
+        body = await req.json();
+        return json(current);
+      },
+    });
+    renderApp("/monitors/m8/edit");
+    // The stored value is hidden; the body is a write-only value, not a text box.
+    expect(await screen.findByLabelText("Header 1 name")).toHaveValue("Authorization");
+    expect(screen.getByLabelText("Header 1 value")).toHaveValue("");
+    expect(screen.getByLabelText("Header 1 value")).toHaveAttribute("placeholder", "Unchanged");
+    expect(screen.queryByLabelText("Request body")).not.toBeInTheDocument();
+    expect(screen.getByText("Configured, hidden")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(body).toBeDefined());
+    // The name alone keeps the value; no body key keeps the body.
+    expect((body as { http: Record<string, unknown> }).http).toMatchObject({
+      method: "POST",
+      headers: [{ name: "Authorization" }],
+    });
+    expect((body as { http: Record<string, unknown> }).http).not.toHaveProperty("body");
+    expect(JSON.stringify(body)).not.toContain('"value"');
+  });
+
+  it("shows a server error about a header next to the headers", async () => {
+    mockApi({
+      ...signedIn,
+      "POST /api/v1/monitors": () =>
+        problem(422, "Validation failed", {
+          fieldErrors: [{ field: "http.headers[0].name", message: "cannot be set" }],
+        }),
+    });
+    renderApp("/monitors/new");
+    await userEvent.type(await screen.findByLabelText("Name"), "Site");
+    await userEvent.type(screen.getByLabelText("URL"), "example.com");
+    await userEvent.click(screen.getByRole("button", { name: "Add header" }));
+    await userEvent.type(screen.getByLabelText("Header 1 name"), "X-Api-Key");
+    await userEvent.type(screen.getByLabelText("Header 1 value"), "k");
+    await userEvent.click(screen.getByRole("button", { name: "Create monitor" }));
+    expect(await screen.findByText("Header 1: cannot be set")).toBeInTheDocument();
   });
 
   it("shows a server error about Slack under the Notify Slack choice", async () => {

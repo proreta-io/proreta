@@ -23,18 +23,29 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"strings"
 	"syscall"
 	"time"
 )
 
 // Typed errors. Their messages are generic and never include resolved addresses.
 var (
-	ErrBlockedAddress   = errors.New("safehttp: destination address is not allowed")
-	ErrBadPort          = errors.New("safehttp: only port 443 is allowed")
-	ErrNotHTTPS         = errors.New("safehttp: only https URLs are allowed")
-	ErrTooManyRedirects = errors.New("safehttp: too many redirects")
-	ErrRedirectNotHTTPS = errors.New("safehttp: redirect to a non-https URL")
+	ErrBlockedAddress    = errors.New("safehttp: destination address is not allowed")
+	ErrBadPort           = errors.New("safehttp: only port 443 is allowed")
+	ErrNotHTTPS          = errors.New("safehttp: only https URLs are allowed")
+	ErrTooManyRedirects  = errors.New("safehttp: too many redirects")
+	ErrRedirectNotHTTPS  = errors.New("safehttp: redirect to a non-https URL")
+	ErrRedirectCrossHost = errors.New("safehttp: redirect to another host")
 )
+
+type sameHostKey struct{}
+
+// WithSameHostRedirects marks requests made with ctx as carrying data meant for one host only
+// (custom headers or a body): a redirect to another host then fails with ErrRedirectCrossHost
+// instead of forwarding them.
+func WithSameHostRedirects(ctx context.Context) context.Context {
+	return context.WithValue(ctx, sameHostKey{}, true)
+}
 
 const (
 	allowedPort          = "443"
@@ -113,6 +124,9 @@ func NewClient(opts Options) *http.Client {
 			}
 			if req.URL.Scheme != "https" {
 				return ErrRedirectNotHTTPS
+			}
+			if req.Context().Value(sameHostKey{}) != nil && !strings.EqualFold(req.URL.Host, via[0].URL.Host) {
+				return ErrRedirectCrossHost
 			}
 			if p := req.URL.Port(); p != "" && p != allowedPort {
 				return ErrBadPort

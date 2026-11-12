@@ -1724,7 +1724,7 @@ AS $function$
               d.claim_token
 $function$
 CREATE OR REPLACE FUNCTION public.claim_due_monitors(n integer, p_location text)
- RETURNS TABLE(tenant_id uuid, monitor_id uuid, location_id uuid, lease_token uuid, lease_until timestamp with time zone, url text, expected_status text, failure_threshold integer, interval_seconds integer, timeout_seconds integer, next_run_at timestamp with time zone)
+ RETURNS TABLE(tenant_id uuid, monitor_id uuid, location_id uuid, lease_token uuid, lease_until timestamp with time zone, url text, expected_status text, failure_threshold integer, interval_seconds integer, timeout_seconds integer, next_run_at timestamp with time zone, method text, request text)
  LANGUAGE sql
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
@@ -1756,7 +1756,8 @@ AS $function$
       AND m.tenant_id = s.tenant_id AND m.id = s.monitor_id
     RETURNING s.tenant_id, s.monitor_id, s.location_id, s.lease_token, s.lease_until,
               m.config ->> 'url', COALESCE(m.config ->> 'expectedStatus', '2xx'),
-              m.failure_threshold, m.interval_seconds, m.timeout_seconds, s.next_run_at
+              m.failure_threshold, m.interval_seconds, m.timeout_seconds, s.next_run_at,
+              COALESCE(m.config ->> 'method', 'GET'), COALESCE(m.config ->> 'request', '')
 $function$
 CREATE OR REPLACE FUNCTION public.claim_mail(n integer)
  RETURNS TABLE(id uuid, kind text, payload bytea, attempts integer, claim_token uuid)

@@ -14,6 +14,7 @@ import (
 	"go/build/constraint"
 	"go/parser"
 	"go/token"
+	"io"
 	"io/fs"
 	"math/big"
 	"net"
@@ -613,4 +614,63 @@ func TestLoopbackModeKeepsOtherRules(t *testing.T) {
 	if hits.Load() != before {
 		t.Fatal("normal client connected to the loopback server")
 	}
+}
+
+func TestSameHostRedirects(t *testing.T) {
+	var gotBody, gotKey string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/cross", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://other.test/final", http.StatusTemporaryRedirect)
+	})
+	mux.HandleFunc("/same", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "https://example.test/final", http.StatusTemporaryRedirect)
+	})
+	mux.HandleFunc("/final", func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotBody, gotKey = string(b), r.Header.Get("X-Api-Key")
+	})
+	post := func(t *testing.T, ctx context.Context, c *http.Client, path string) error {
+		t.Helper()
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://example.test"+path, strings.NewReader("secret-body"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("X-Api-Key", "secret-key")
+		resp, err := c.Do(req)
+		if err == nil {
+			_ = resp.Body.Close()
+		}
+		return err
+	}
+	newClient := func(t *testing.T) (*http.Client, *testServer) {
+		ts := newTestServer(t, mux)
+		return NewClient(ts.options(Options{Resolver: static("93.184.215.14"), MaxRedirects: 3})), ts
+	}
+
+	t.Run("cross host is refused before anything is sent", func(t *testing.T) {
+		gotBody, gotKey = "", ""
+		c, ts := newClient(t)
+		err := post(t, WithSameHostRedirects(context.Background()), c, "/cross")
+		if !errors.Is(err, ErrRedirectCrossHost) {
+			t.Fatalf("err = %v", err)
+		}
+		if len(ts.dialed()) != 1 || gotBody != "" || gotKey != "" {
+			t.Fatalf("dials %v, body %q, key %q", ts.dialed(), gotBody, gotKey)
+		}
+	})
+	t.Run("same host keeps body and header on 307", func(t *testing.T) {
+		c, _ := newClient(t)
+		if err := post(t, WithSameHostRedirects(context.Background()), c, "/same"); err != nil {
+			t.Fatal(err)
+		}
+		if gotBody != "secret-body" || gotKey != "secret-key" {
+			t.Fatalf("body %q, key %q", gotBody, gotKey)
+		}
+	})
+	t.Run("without the mark a cross host redirect is followed as before", func(t *testing.T) {
+		c, _ := newClient(t)
+		if err := post(t, context.Background(), c, "/cross"); err != nil {
+			t.Fatal(err)
+		}
+	})
 }

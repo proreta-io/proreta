@@ -543,3 +543,37 @@ func TestBootstrapSecretFile(t *testing.T) {
 		t.Fatalf("secret file = %q, %v", cfg.SecretFile, err)
 	}
 }
+
+func TestRequestSeal(t *testing.T) {
+	key := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	e := apiEnv(t)
+	cfg, err := LoadAPI(env(e))
+	if err != nil || cfg.Request.Keys != nil || cfg.Request.KeyID != "" {
+		t.Fatalf("unset: %+v %v", cfg.Request, err)
+	}
+	e["PRORETA_REQUEST_KEYS"] = fmt.Sprintf(`{"r1":%q}`, key)
+	if _, err := LoadAPI(env(e)); err == nil || !strings.Contains(err.Error(), "must be set together") {
+		t.Fatalf("keys without id: %v", err)
+	}
+	e["PRORETA_REQUEST_ACTIVE_KEY_ID"] = "r1"
+	cfg, err = LoadAPI(env(e))
+	if err != nil || len(cfg.Request.Keys) != 1 || cfg.Request.KeyID != "r1" {
+		t.Fatalf("api: %+v %v", cfg.Request, err)
+	}
+	if fmt.Sprint(cfg.Request.Keys) != "[redacted]" {
+		t.Fatalf("keys not redacted: %v", cfg.Request.Keys)
+	}
+	w, err := LoadWorker(env(e))
+	if err != nil || len(w.Request.Keys) != 1 {
+		t.Fatalf("worker: %+v %v", w.Request, err)
+	}
+	e["PRORETA_REQUEST_ACTIVE_KEY_ID"] = "other"
+	if _, err := LoadWorker(env(e)); err == nil || !strings.Contains(err.Error(), "PRORETA_REQUEST_KEYS") {
+		t.Fatalf("unknown active id: %v", err)
+	}
+	e["PRORETA_REQUEST_ACTIVE_KEY_ID"] = "r1"
+	e["PRORETA_REQUEST_KEYS"] = `{"r1":"c2hvcnQ="}`
+	if _, err := LoadAPI(env(e)); err == nil || !strings.Contains(err.Error(), "PRORETA_REQUEST_KEYS") {
+		t.Fatalf("short key: %v", err)
+	}
+}

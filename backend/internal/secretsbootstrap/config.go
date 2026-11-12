@@ -81,6 +81,9 @@ func LoadConfig(lookup func(string) (string, bool)) (Config, error) {
 		AdminInitialSecretName: label("PRORETA_SECRETS_ADMIN_INITIAL_SECRET_NAME", "proreta-admin-initial"),
 		CryptoSecretName:       label("PRORETA_SECRETS_CRYPTO_SECRET_NAME", "proreta-crypto"),
 		CryptoKeyID:            get("PRORETA_SECRETS_CRYPTO_KEY_ID", "k1"),
+		RequestMode:            modeOr("PRORETA_SECRETS_REQUEST_MODE", ModeSkip),
+		RequestSecretName:      label("PRORETA_SECRETS_REQUEST_SECRET_NAME", "proreta-request"),
+		RequestKeyID:           get("PRORETA_SECRETS_REQUEST_KEY_ID", "r1"),
 		StatuspageMode:         modeOr("PRORETA_SECRETS_STATUSPAGE_MODE", ModeSkip),
 		StatuspageSecretName:   label("PRORETA_SECRETS_STATUSPAGE_SECRET_NAME", "proreta-statuspage"),
 	}
@@ -96,6 +99,9 @@ func LoadConfig(lookup func(string) (string, bool)) (Config, error) {
 	}
 	if err := crypto.ValidateKeyID(o.CryptoKeyID); err != nil {
 		fail("PRORETA_SECRETS_CRYPTO_KEY_ID", err.Error())
+	}
+	if err := crypto.ValidateKeyID(o.RequestKeyID); err != nil {
+		fail("PRORETA_SECRETS_REQUEST_KEY_ID", err.Error())
 	}
 	c.Options = o
 	if len(errs) > 0 {

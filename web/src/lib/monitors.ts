@@ -142,6 +142,21 @@ export function failureStreak(checks: Check[]): {
 }
 
 /** "every 60 s · 10 s timeout · expects 2xx · alerts after 2 failed checks". */
+/**
+ * What an http monitor sends besides the URL, for the details page: the method when it is not
+ * GET, the header names and whether a body is stored. Values are never known to the client.
+ */
+export function requestSummary(
+  m: Pick<HttpMonitor, "method" | "headerNames" | "bodySet">,
+): string | undefined {
+  const parts = [
+    m.method !== "GET" ? m.method : "",
+    m.headerNames.length > 0 ? `headers: ${m.headerNames.join(", ")}` : "",
+    m.bodySet ? "body set (hidden)" : "",
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : undefined;
+}
+
 export function checkSettings(
   m: Pick<
     HttpMonitor,

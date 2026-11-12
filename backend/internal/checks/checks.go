@@ -1,16 +1,19 @@
-// Package checks runs monitor checks. There is one kind: an HTTPS GET through the SSRF
+// Package checks runs monitor checks. There is one kind: an HTTPS request through the SSRF
 // guard (internal/safehttp) that records status, latency to response headers and the leaf
 // certificate expiry, and never reads the response body.
 package checks
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/proreta-io/proreta/backend/internal/safehttp"
@@ -36,10 +39,28 @@ const DefaultTimeout = 10 * time.Second
 // Request describes one check.
 type Request struct {
 	URL string
+	// Method defaults to GET.
+	Method string
+	// Header holds the monitor's custom headers; User-Agent may override ours. Headers refused
+	// by DeniedHeader are dropped.
+	Header http.Header
+	// Body is sent as is; Content-Type defaults to application/json when Header has none.
+	Body []byte
 	// Timeout defaults to DefaultTimeout.
 	Timeout time.Duration
 	// ExpectedStatus is "2xx" (also when empty) or an exact code such as "204".
 	ExpectedStatus string
+}
+
+// DeniedHeader reports whether a monitor may not set the header name: those that frame the
+// message or the connection, which the HTTP client owns.
+func DeniedHeader(name string) bool {
+	n := strings.ToLower(name)
+	switch n {
+	case "host", "content-length", "transfer-encoding", "connection", "upgrade", "te", "trailer", "expect":
+		return true
+	}
+	return strings.HasPrefix(n, "proxy-")
 }
 
 // Result is the outcome of one check.
@@ -74,7 +95,7 @@ func NewHTTPSProber(client *http.Client) *HTTPSProber {
 	return &HTTPSProber{client: client, now: func() time.Time { return time.Now().UTC() }}
 }
 
-// Probe issues a GET and reports the result. It never returns an error: failures are kinds.
+// Probe issues the request and reports the result. It never returns an error: failures are kinds.
 func (p *HTTPSProber) Probe(parent context.Context, req Request) Result {
 	res := Result{CheckedAt: p.now()}
 	timeout := req.Timeout
@@ -85,12 +106,37 @@ func (p *HTTPSProber) Probe(parent context.Context, req Request) Result {
 	// Cancelling right after the headers abandons the body without reading it.
 	defer cancel()
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, req.URL, nil)
+	method := req.Method
+	if method == "" {
+		method = http.MethodGet
+	}
+	var body io.Reader
+	if len(req.Body) > 0 {
+		// A bytes.Reader gives the request a GetBody, so 307 and 308 can resend it.
+		body = bytes.NewReader(req.Body)
+	}
+	custom := len(req.Header) > 0 || len(req.Body) > 0
+	if custom {
+		ctx = safehttp.WithSameHostRedirects(ctx)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, method, req.URL, body)
 	if err != nil {
 		res.ErrorKind = KindOther
 		return res
 	}
 	httpReq.Header.Set("User-Agent", "Proreta/1 (+uptime check)")
+	for name, values := range req.Header {
+		if DeniedHeader(name) {
+			continue
+		}
+		httpReq.Header.Del(name)
+		for _, v := range values {
+			httpReq.Header.Add(name, v)
+		}
+	}
+	if len(req.Body) > 0 && httpReq.Header.Get("Content-Type") == "" {
+		httpReq.Header.Set("Content-Type", "application/json")
+	}
 
 	start := time.Now()
 	resp, err := p.client.Do(httpReq)
@@ -146,7 +192,8 @@ func classify(ctx context.Context, err error) string {
 		return KindBlockedAddress
 	case errors.Is(err, safehttp.ErrBadPort):
 		return KindBadPort
-	case errors.Is(err, safehttp.ErrTooManyRedirects), errors.Is(err, safehttp.ErrRedirectNotHTTPS):
+	case errors.Is(err, safehttp.ErrTooManyRedirects), errors.Is(err, safehttp.ErrRedirectNotHTTPS),
+		errors.Is(err, safehttp.ErrRedirectCrossHost):
 		return KindRedirect
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(ctx.Err(), context.DeadlineExceeded),
 		errors.As(err, &netErr) && netErr.Timeout():

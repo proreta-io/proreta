@@ -16,11 +16,14 @@ ADMIN_SECRET_KEYS = {"PRORETA_ADMIN_LOGIN": "login", "PRORETA_ADMIN_PASSWORD_HAS
 # The worker is the only process that runs tenant-supplied targets; the processes below must
 # not see anything the worker has not been given.
 ENCRYPTION_COMPONENTS = {"api", "jobs"}
+# The request keyring (header values and bodies of monitor requests): the api seals, the worker opens.
+REQUEST_COMPONENTS = {"api", "worker"}
+ENV_NAMES_REQUEST = {"PRORETA_REQUEST_KEYS", "PRORETA_REQUEST_ACTIVE_KEY_ID"}
 # The only components whose ServiceAccount and pod mount an API token (they create Secrets).
 TOKEN_COMPONENTS = {"db-bootstrap", "secrets-bootstrap"}
 # The exact Secrets the secrets bootstrap Role may read/update, as suffixes of the chart's full name
 # (<fullname>-admin, ...).
-SECRETS_BOOTSTRAP_SUFFIXES = ("admin", "admin-initial", "crypto")
+SECRETS_BOOTSTRAP_SUFFIXES = ("admin", "admin-initial", "crypto", "request")
 # Plus the status page cookie key when the renderer is enabled and the key is generated.
 STATUSPAGE_SUFFIX = "statuspage"
 # Fixed keys of the database Secret per consumer (the contract with the database bootstrap Job).
@@ -168,6 +171,14 @@ def check(path):
     worker = env_of("worker")
     if not worker:
         fail("no worker Deployment")
+    request_users = {comp for comp in deployments if ENV_NAMES_REQUEST & set(env_of(comp))}
+    if request_users != REQUEST_COMPONENTS:
+        fail(f"PRORETA_REQUEST_* present in {sorted(request_users)}, want exactly {sorted(REQUEST_COMPONENTS)}")
+    for comp in REQUEST_COMPONENTS:
+        for n, key in (("PRORETA_REQUEST_KEYS", "keys"), ("PRORETA_REQUEST_ACTIVE_KEY_ID", "active_key_id")):
+            ref = env_of(comp).get(n, {}).get("valueFrom", {}).get("secretKeyRef", {})
+            if ref != {"name": f"{fullname}-request", "key": key}:
+                fail(f"{comp} {n} must come from {fullname}-request/{key}, got {ref}")
     if ADMIN_ENV & set(worker) or any(n.startswith("PRORETA_ENCRYPTION_") for n in worker):
         fail("worker has admin credentials or encryption keys")
     for n in ("PRORETA_WORKER_CLAIM_BATCH", "PRORETA_WORKER_CONCURRENCY", "PRORETA_WORKER_TENANT_CONCURRENCY", "PRORETA_WORKER_HOST_CONCURRENCY", "PRORETA_WORKER_LOCATION"):
@@ -316,7 +327,7 @@ def check(path):
                 fail(f"secrets-bootstrap Job reads {n} from a Secret")
         if re.search(r"DATABASE|BOOTSTRAP_|owner_url|api_url|worker_url|-db\b", str(c)):
             fail("secrets-bootstrap Job has database configuration")
-        for n in ("ADMIN", "CRYPTO", "STATUSPAGE"):
+        for n in ("ADMIN", "CRYPTO", "REQUEST", "STATUSPAGE"):
             modes[n] = env.get(f"PRORETA_SECRETS_{n}_MODE", {}).get("value")
             if modes[n] not in ("generate", "skip"):
                 fail(f"secrets-bootstrap Job: PRORETA_SECRETS_{n}_MODE is {modes[n]!r}")
@@ -350,7 +361,7 @@ def check(path):
             want = {(k, k) for k in ADMIN_SECRET_KEYS.values()}
             if props != want:
                 fail(f"ExternalSecret {ADMIN_SECRET} maps {sorted(props)}, want {sorted(want)}")
-    pairs = [("ADMIN", ADMIN_SECRET), ("CRYPTO", f"{fullname}-crypto")]
+    pairs = [("ADMIN", ADMIN_SECRET), ("CRYPTO", f"{fullname}-crypto"), ("REQUEST", f"{fullname}-request")]
     if sp:
         pairs.append(("STATUSPAGE", STATUSPAGE_SECRET))
     elif modes.get("STATUSPAGE") == "generate" or STATUSPAGE_SECRET in es_names:

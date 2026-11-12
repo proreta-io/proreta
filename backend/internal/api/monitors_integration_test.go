@@ -47,6 +47,7 @@ func TestIntegrationMonitorLifecycle(t *testing.T) {
 	httpWant := map[string]any{
 		"url": "https://example.com/health?token=s3cr3t", "intervalSeconds": 60.0, "timeoutSeconds": 10.0,
 		"failureThreshold": 2.0, "expectedStatus": "2xx", "tlsExpiresAt": nil, "lastResponseMs": nil,
+		"method": "GET", "bodySet": false,
 	}
 	settings, _ := r.body["http"].(map[string]any)
 	for k, v := range httpWant {
@@ -54,7 +55,7 @@ func TestIntegrationMonitorLifecycle(t *testing.T) {
 			t.Errorf("create http.%s = %v, want %v", k, settings[k], v)
 		}
 	}
-	if _, ok := r.body["heartbeat"]; ok || len(settings) != len(httpWant) {
+	if _, ok := r.body["heartbeat"]; ok || len(settings) != len(httpWant)+1 { // + headerNames, a list
 		t.Errorf("an http monitor has exactly the http sub-object: %s", r.raw)
 	}
 	if up, _ := r.body["uptime"].(map[string]any); up == nil || up["h24"] != nil {
