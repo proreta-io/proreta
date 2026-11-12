@@ -1,6 +1,7 @@
 package monitors
 
 import (
+	"net/url"
 	"regexp"
 	"strings"
 	"unicode"
@@ -82,6 +83,46 @@ func ValidateExpectedInterval(n int) string {
 func ValidateGrace(n int) string {
 	if n < 0 || n > MaxGraceSeconds {
 		return "must be between 0 and 3600 seconds"
+	}
+	return ""
+}
+
+// ValidateHost checks the host of a tcp monitor (a name or an IP address, nothing else) and
+// returns it normalised. From Proreta's own worker it must be public; at a Specula any name or
+// address of the customer's network is accepted. Like ValidateURL it is only the first layer:
+// the connection is checked again when made.
+func ValidateHost(raw string, specula bool) (string, string) {
+	h := strings.TrimSpace(raw)
+	if h == "" {
+		return "", "is required"
+	}
+	if strings.ContainsAny(h, "/?#@") || strings.ContainsAny(h, " \t") {
+		return "", "must be a host name or an IP address only"
+	}
+	u := h
+	if strings.Contains(h, ":") && !strings.HasPrefix(h, "[") {
+		u = "[" + h + "]" // a bare IPv6 address
+	}
+	var got, msg string
+	if specula {
+		got, msg = safehttp.ValidatePrivateURL("http://" + u)
+	} else {
+		got, msg = safehttp.ValidatePublicHTTPSURL("https://" + u)
+	}
+	if msg != "" {
+		return "", msg
+	}
+	p, err := url.Parse(got)
+	if err != nil || p.Port() != "" {
+		return "", "must be a host name or an IP address only"
+	}
+	return p.Hostname(), ""
+}
+
+// ValidatePort checks the port of a tcp monitor.
+func ValidatePort(n int) string {
+	if n < 1 || n > 65535 {
+		return "must be between 1 and 65535"
 	}
 	return ""
 }

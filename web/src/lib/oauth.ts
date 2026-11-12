@@ -43,11 +43,6 @@ export function useEmailEnabled(): boolean {
   return useAuthProviders()?.emailEnabled === true;
 }
 
-/** Whether the forgot-password flow is on: the admin turned it on and the password form exists. */
-export function usePasswordResetEnabled(): boolean {
-  return useAuthProviders()?.passwordResetEnabled === true;
-}
-
 /** Whether registrations get a verification email (and so the banner has a link to resend). */
 export function useEmailVerificationEnabled(): boolean {
   return useAuthProviders()?.emailVerificationEnabled === true;

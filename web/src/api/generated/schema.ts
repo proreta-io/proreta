@@ -528,11 +528,16 @@ export interface paths {
     put?: never;
     /**
      * Create a monitor
-     * @description Creates an HTTPS monitor (`type` `http`) or a heartbeat monitor (`type` `heartbeat`).
-     *     The settings of the type go in the sub-object of the same name, which is required: `http`
-     *     for an HTTPS monitor, `heartbeat` for a heartbeat. Sending the other sub-object, or none,
-     *     is 422 with a field error on `http` or `heartbeat`; errors inside a sub-object point at
-     *     its field, for example `http.url`. A future monitor type adds its own sub-object.
+     * @description Creates an HTTPS monitor (`type` `http`), a TCP monitor (`type` `tcp`) or a heartbeat
+     *     monitor (`type` `heartbeat`). The settings of the type go in the sub-object of the same
+     *     name, which is required: `http` for an HTTPS monitor, `tcp` for a TCP monitor, `heartbeat`
+     *     for a heartbeat. Sending another sub-object, or none, is 422 with a field error on `http`,
+     *     `tcp` or `heartbeat`; errors inside a sub-object point at its field, for example
+     *     `http.url` or `tcp.port`. A future monitor type adds its own sub-object.
+     *
+     *     A TCP monitor needs `tcp.host` and `tcp.port`; it connects every minute with a 10 second
+     *     deadline and is up when the handshake completes. It counts toward the monitor quota like
+     *     an HTTPS monitor and can run from Proreta or at a Specula (`location`).
      *
      *     An HTTPS monitor needs `http.url`; it starts with status `unknown` and is first checked
      *     within about 30 seconds. A heartbeat expects a ping every `heartbeat.expectedIntervalSeconds`
@@ -590,7 +595,7 @@ export interface paths {
      * Edit a monitor
      * @description Merge semantics: only the fields that are sent change, also inside the type's sub-object
      *     (`{"http": {"url": "..."}}` changes the URL and keeps the expected status). The type of a
-     *     monitor cannot change; sending the sub-object of the other type is 422 on `http` or
+     *     monitor cannot change; sending the sub-object of another type is 422 on `http`, `tcp` or
      *     `heartbeat`. `http.intervalSeconds` and `http.timeoutSeconds` are fixed (60 and 10):
      *     sending them with a different value fails with 422. A new `http.url` restarts the
      *     monitor like a resume (status `unknown`, an open incident is resolved without a
@@ -2436,12 +2441,13 @@ export interface components {
      */
     MonitorStatus: "unknown" | "up" | "down";
     /**
-     * @description `http`: an HTTPS check every minute. `heartbeat`: a watchdog that expects pings on its
+     * @description `http`: an HTTPS check every minute. `tcp`: a TCP connection to a host and a port every
+     *     minute, up when the handshake completes. `heartbeat`: a watchdog that expects pings on its
      *     secret URL. New types may be added, each with its own settings sub-object (for example
-     *     `tcp` or `dns`); clients must tolerate a type they do not know.
+     *     `dns`); clients must tolerate a type they do not know.
      * @enum {string}
      */
-    MonitorType: "http" | "heartbeat";
+    MonitorType: "http" | "tcp" | "heartbeat";
     HeartbeatToken: {
       /**
        * @description The secret ping URL; shown once, store it like a password
@@ -2513,6 +2519,27 @@ export interface components {
        */
       failureThreshold?: number;
     };
+    /** @description The settings of a TCP monitor in a create request */
+    TcpSettings: {
+      /**
+       * @description A host name or an IP address, without scheme, port or path. From Proreta's own worker it must be public (private addresses and internal names are rejected with 422, and the connection is checked again when made); at a Specula any host name or address is accepted.
+       * @example db.example.com
+       */
+      host: string;
+      /** @example 5432 */
+      port: number;
+      /**
+       * @description Consecutive failed checks before the monitor is down
+       * @default 2
+       */
+      failureThreshold?: number;
+    };
+    /** @description Changes of a TCP monitor's settings; only the given fields change. A new host or port restarts the monitor. */
+    TcpSettingsUpdate: {
+      host?: string;
+      port?: number;
+      failureThreshold?: number;
+    };
     /** @description Changes of an HTTPS monitor's settings; only the given fields change */
     HttpSettingsUpdate: {
       /** @description A new target, with the rules of create; restarts the monitor */
@@ -2541,7 +2568,7 @@ export interface components {
     };
     /**
      * @description A new monitor. `type` selects the sub-object that carries the type's settings: `http`
-     *     for `http`, `heartbeat` for `heartbeat`. Exactly that sub-object must be sent (422
+     *     for `http`, `tcp` for `tcp`, `heartbeat` for `heartbeat`. Exactly that sub-object must be sent (422
      *     otherwise).
      */
     MonitorCreate: {
@@ -2562,11 +2589,12 @@ export interface components {
       channelIds?: string[];
       location?: components["schemas"]["MonitorLocationInput"];
       http?: components["schemas"]["HttpSettings"];
+      tcp?: components["schemas"]["TcpSettings"];
       heartbeat?: components["schemas"]["HeartbeatSettings"];
     };
     /**
      * @description Only the given fields change, also inside the sub-object. The sub-object must match the
-     *     monitor's type (422 on `http` or `heartbeat` otherwise).
+     *     monitor's type (422 on `http`, `tcp` or `heartbeat` otherwise).
      */
     MonitorUpdate: {
       name?: string;
@@ -2580,11 +2608,12 @@ export interface components {
       channelIds?: string[];
       location?: components["schemas"]["MonitorLocationInput"];
       http?: components["schemas"]["HttpSettingsUpdate"];
+      tcp?: components["schemas"]["TcpSettingsUpdate"];
       heartbeat?: components["schemas"]["HeartbeatSettings"];
     };
     /**
      * @description Why a check failed or a monitor went down. Known values: `dns` (the name did not resolve),
-     *     `connect` (no TCP connection), `tls` (handshake or certificate failure), `timeout` (no
+     *     `connect` (no TCP connection; for a tcp monitor, refused or unreachable), `tls` (handshake or certificate failure), `timeout` (no
      *     answer within the timeout), `blocked_address` (the target resolved to a blocked, for
      *     example private, address), `bad_port` (a connection or redirect to a port other than 443),
      *     `redirect` (too many redirects or a redirect to a non-HTTPS URL), `unexpected_status`
@@ -2613,7 +2642,7 @@ export interface components {
       reason: components["schemas"]["ErrorKind"];
     } | null;
     /**
-     * @description A monitor in the list. The type's sub-object (`http` or `heartbeat`) is always present
+     * @description A monitor in the list. The type's sub-object (`http`, `tcp` or `heartbeat`) is always present
      *     and the other one is omitted; a client must ignore a sub-object it does not know.
      */
     MonitorListItem: {
@@ -2650,6 +2679,7 @@ export interface components {
       uptime24h: number | null;
       location?: components["schemas"]["MonitorLocation"];
       http?: components["schemas"]["HttpMonitor"];
+      tcp?: components["schemas"]["TcpMonitor"];
       heartbeat?: components["schemas"]["HeartbeatMonitor"];
     };
     /** @description The settings and HTTP-specific state of an HTTPS monitor */
@@ -2674,6 +2704,19 @@ export interface components {
        */
       tlsExpiresAt: string | null;
       /** @description Response time of the last check in milliseconds; null when no check ran or it got no response */
+      lastResponseMs: number | null;
+    };
+    /** @description The settings and state of a TCP monitor. A check has no status code; its response time is the time to complete the connection. */
+    TcpMonitor: {
+      host: string;
+      port: number;
+      /** @description Check interval in seconds */
+      intervalSeconds: number;
+      /** @description Connection deadline in seconds */
+      timeoutSeconds: number;
+      /** @description Consecutive failed checks before the monitor is down */
+      failureThreshold: number;
+      /** @description Time to connect of the last check in milliseconds; null when no check ran or it did not connect */
       lastResponseMs: number | null;
     };
     /** @description The settings and ping state of a heartbeat monitor */
@@ -2714,7 +2757,7 @@ export interface components {
       d30: number | null;
     };
     /**
-     * @description One monitor. The type's sub-object (`http` or `heartbeat`) is always present and the
+     * @description One monitor. The type's sub-object (`http`, `tcp` or `heartbeat`) is always present and the
      *     other one is omitted; a client must ignore a sub-object it does not know.
      */
     MonitorDetail: {
@@ -2753,6 +2796,7 @@ export interface components {
       updatedAt: string;
       location?: components["schemas"]["MonitorLocation"];
       http?: components["schemas"]["HttpMonitor"];
+      tcp?: components["schemas"]["TcpMonitor"];
       heartbeat?: components["schemas"]["HeartbeatMonitor"];
     };
     /**
@@ -2941,7 +2985,7 @@ export interface components {
     };
     /** @enum {string} */
     MonitorLocationType: "cloud" | "specula";
-    /** @description Where an http monitor runs */
+    /** @description Where an http or tcp monitor runs */
     MonitorLocation: {
       type: components["schemas"]["MonitorLocationType"];
       /**
@@ -2953,9 +2997,9 @@ export interface components {
       speculaName?: string;
     };
     /**
-     * @description `cloud` runs the monitor from Proreta (public HTTPS targets only). `specula` runs it at a
+     * @description `cloud` runs the monitor from Proreta (public HTTPS targets, or public hosts for tcp). `specula` runs it at a
      *     Specula of the organization that the monitor's project may use (`speculaId` is required);
-     *     its target may be http or https, on any port, at an internal address or name.
+     *     its target may be http or https (tcp: any host), on any port, at an internal address or name.
      *     Moving a monitor ends an open incident and starts its history over.
      */
     MonitorLocationInput: {

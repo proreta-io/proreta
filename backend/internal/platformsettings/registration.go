@@ -44,7 +44,8 @@ func NewRegistration(pool *db.Pool, env bool, log *slog.Logger) *Registration {
 func (r *Registration) Environment() bool { return r != nil && r.env }
 
 // Enabled reports whether registration is open, cached for TTL. On a database error it keeps the
-// last answer for another TTL and, with none, falls back to the environment value.
+// last answer for another TTL and, with none, reports closed: an admin may have closed it, and a
+// failed read must not reopen it.
 func (r *Registration) Enabled(ctx context.Context) bool {
 	if r == nil {
 		return false
@@ -60,7 +61,7 @@ func (r *Registration) Enabled(ctx context.Context) bool {
 			if ctx.Err() == nil {
 				r.log.WarnContext(ctx, "reading the registration setting failed", "error", err)
 			}
-			return r.env
+			return false
 		default:
 			r.at = r.now()
 		}

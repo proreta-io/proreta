@@ -42,7 +42,7 @@ func (q *Queries) CountLiveHeartbeats(ctx context.Context, tenantID uuid.UUID) (
 const countLiveMonitors = `-- name: CountLiveMonitors :one
 SELECT count(*)
 FROM monitors
-WHERE tenant_id = $1 AND deleted_at IS NULL AND type = 'http'
+WHERE tenant_id = $1 AND deleted_at IS NULL AND type <> 'heartbeat'
 `
 
 // Read-only count for the quota (monitors are owned by internal/monitors). Soft-deleted

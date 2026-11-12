@@ -43,7 +43,8 @@ Operators: the gateway is a separate Deployment of the Proreta chart, off by def
 ## Use it in a monitor
 When a project may use at least one Specula, the monitor form has a **Run from** field: *Proreta cloud* or one of them.
 
-- A monitor that runs at a Specula may use `http` or `https`, any port, and internal host names or addresses such as `http://orders.shop.svc:8080/health`. The executor reaches whatever your network lets it reach; Proreta's blocking of private addresses does not apply there because the targets are yours.
+- A TCP monitor ([TCP monitors](../tcp-monitors.md)) may run at a Specula too: its host may be any name or address your network resolves, on any port. Upgrade the executor before you place TCP monitors on it.
+- An HTTP monitor that runs at a Specula may use `http` or `https`, any port, and internal host names or addresses such as `http://orders.shop.svc:8080/health`. The executor reaches whatever your network lets it reach; Proreta's blocking of private addresses does not apply there because the targets are yours.
 - Moving a monitor between *Proreta cloud* and a Specula ends an open incident and starts its status over. A target that only works inside your network is refused when you move it back to *Proreta cloud*.
 - Method, headers and body work as in [Monitor requests](../monitor-requests.md). The executor receives the decrypted headers and body over TLS, so install it only where you trust the host.
 
@@ -68,6 +69,6 @@ Owners and maintainers register, edit and revoke Specula and see all of them. Me
 
 ## Limits
 - Going offline or being revoked does not open an incident or send a notification yet; the monitors show *unknown*. Watch the Specula page, or alert on the executor's own metrics.
-- HTTP and HTTPS checks only; TCP checks are not available yet.
 - The plan limits how many Specula an organization may have (`max_agents`: `free` 1, `internal` 20, `community` unlimited). Revoked ones do not count; at the limit, registering another fails with "plan limit reached" until you revoke one. The operator can override it per organization in `tenants.limits`.
+- HTTP, HTTPS and TCP checks only.
 - A token has no expiry; rotate by registering a new Specula and revoking the old one.

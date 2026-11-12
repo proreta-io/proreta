@@ -7,6 +7,7 @@ export type MonitorDetail = Schemas["MonitorDetail"];
 export type MonitorCreate = Schemas["MonitorCreate"];
 export type MonitorUpdate = Schemas["MonitorUpdate"];
 export type HttpMonitor = Schemas["HttpMonitor"];
+export type TcpMonitor = Schemas["TcpMonitor"];
 export type HeartbeatMonitor = Schemas["HeartbeatMonitor"];
 export type ErrorKind = Schemas["ErrorKind"];
 export type MonitorStats = Schemas["MonitorStats"];

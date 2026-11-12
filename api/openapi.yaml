@@ -828,11 +828,16 @@ paths:
       operationId: createMonitor
       summary: Create a monitor
       description: |
-        Creates an HTTPS monitor (`type` `http`) or a heartbeat monitor (`type` `heartbeat`).
-        The settings of the type go in the sub-object of the same name, which is required: `http`
-        for an HTTPS monitor, `heartbeat` for a heartbeat. Sending the other sub-object, or none,
-        is 422 with a field error on `http` or `heartbeat`; errors inside a sub-object point at
-        its field, for example `http.url`. A future monitor type adds its own sub-object.
+        Creates an HTTPS monitor (`type` `http`), a TCP monitor (`type` `tcp`) or a heartbeat
+        monitor (`type` `heartbeat`). The settings of the type go in the sub-object of the same
+        name, which is required: `http` for an HTTPS monitor, `tcp` for a TCP monitor, `heartbeat`
+        for a heartbeat. Sending another sub-object, or none, is 422 with a field error on `http`,
+        `tcp` or `heartbeat`; errors inside a sub-object point at its field, for example
+        `http.url` or `tcp.port`. A future monitor type adds its own sub-object.
+
+        A TCP monitor needs `tcp.host` and `tcp.port`; it connects every minute with a 10 second
+        deadline and is up when the handshake completes. It counts toward the monitor quota like
+        an HTTPS monitor and can run from Proreta or at a Specula (`location`).
 
         An HTTPS monitor needs `http.url`; it starts with status `unknown` and is first checked
         within about 30 seconds. A heartbeat expects a ping every `heartbeat.expectedIntervalSeconds`
@@ -997,7 +1002,7 @@ paths:
       description: |
         Merge semantics: only the fields that are sent change, also inside the type's sub-object
         (`{"http": {"url": "..."}}` changes the URL and keeps the expected status). The type of a
-        monitor cannot change; sending the sub-object of the other type is 422 on `http` or
+        monitor cannot change; sending the sub-object of another type is 422 on `http`, `tcp` or
         `heartbeat`. `http.intervalSeconds` and `http.timeoutSeconds` are fixed (60 and 10):
         sending them with a different value fails with 422. A new `http.url` restarts the
         monitor like a resume (status `unknown`, an open incident is resolved without a
@@ -4432,10 +4437,11 @@ components:
     MonitorType:
       type: string
       description: |
-        `http`: an HTTPS check every minute. `heartbeat`: a watchdog that expects pings on its
+        `http`: an HTTPS check every minute. `tcp`: a TCP connection to a host and a port every
+        minute, up when the handshake completes. `heartbeat`: a watchdog that expects pings on its
         secret URL. New types may be added, each with its own settings sub-object (for example
-        `tcp` or `dns`); clients must tolerate a type they do not know.
-      enum: [http, heartbeat]
+        `dns`); clients must tolerate a type they do not know.
+      enum: [http, tcp, heartbeat]
     HeartbeatToken:
       type: object
       additionalProperties: false
@@ -4529,6 +4535,46 @@ components:
           minimum: 1
           maximum: 3
           default: 2
+    TcpSettings:
+      type: object
+      additionalProperties: false
+      description: The settings of a TCP monitor in a create request
+      required: [host, port]
+      properties:
+        host:
+          type: string
+          description: A host name or an IP address, without scheme, port or path. From Proreta's own worker it must be public (private addresses and internal names are rejected with 422, and the connection is checked again when made); at a Specula any host name or address is accepted.
+          minLength: 1
+          maxLength: 255
+          example: db.example.com
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          example: 5432
+        failureThreshold:
+          type: integer
+          description: Consecutive failed checks before the monitor is down
+          minimum: 1
+          maximum: 3
+          default: 2
+    TcpSettingsUpdate:
+      type: object
+      additionalProperties: false
+      description: Changes of a TCP monitor's settings; only the given fields change. A new host or port restarts the monitor.
+      properties:
+        host:
+          type: string
+          minLength: 1
+          maxLength: 255
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        failureThreshold:
+          type: integer
+          minimum: 1
+          maximum: 3
     HttpSettingsUpdate:
       type: object
       additionalProperties: false
@@ -4584,7 +4630,7 @@ components:
       additionalProperties: false
       description: |
         A new monitor. `type` selects the sub-object that carries the type's settings: `http`
-        for `http`, `heartbeat` for `heartbeat`. Exactly that sub-object must be sent (422
+        for `http`, `tcp` for `tcp`, `heartbeat` for `heartbeat`. Exactly that sub-object must be sent (422
         otherwise).
       required: [type, name]
       properties:
@@ -4614,6 +4660,8 @@ components:
           $ref: "#/components/schemas/MonitorLocationInput"
         http:
           $ref: "#/components/schemas/HttpSettings"
+        tcp:
+          $ref: "#/components/schemas/TcpSettings"
         heartbeat:
           $ref: "#/components/schemas/HeartbeatSettings"
     MonitorUpdate:
@@ -4621,7 +4669,7 @@ components:
       additionalProperties: false
       description: |
         Only the given fields change, also inside the sub-object. The sub-object must match the
-        monitor's type (422 on `http` or `heartbeat` otherwise).
+        monitor's type (422 on `http`, `tcp` or `heartbeat` otherwise).
       properties:
         name:
           type: string
@@ -4644,13 +4692,15 @@ components:
           $ref: "#/components/schemas/MonitorLocationInput"
         http:
           $ref: "#/components/schemas/HttpSettingsUpdate"
+        tcp:
+          $ref: "#/components/schemas/TcpSettingsUpdate"
         heartbeat:
           $ref: "#/components/schemas/HeartbeatSettings"
     ErrorKind:
       type: string
       description: |
         Why a check failed or a monitor went down. Known values: `dns` (the name did not resolve),
-        `connect` (no TCP connection), `tls` (handshake or certificate failure), `timeout` (no
+        `connect` (no TCP connection; for a tcp monitor, refused or unreachable), `tls` (handshake or certificate failure), `timeout` (no
         answer within the timeout), `blocked_address` (the target resolved to a blocked, for
         example private, address), `bad_port` (a connection or redirect to a port other than 443),
         `redirect` (too many redirects or a redirect to a non-HTTPS URL), `unexpected_status`
@@ -4696,7 +4746,7 @@ components:
       type: object
       additionalProperties: false
       description: |
-        A monitor in the list. The type's sub-object (`http` or `heartbeat`) is always present
+        A monitor in the list. The type's sub-object (`http`, `tcp` or `heartbeat`) is always present
         and the other one is omitted; a client must ignore a sub-object it does not know.
       required: [id, projectId, type, name, notificationsEnabled, paused, status, statusSince, lastErrorKind, lastCheckedAt, ongoingIncident, uptime24h]
       properties:
@@ -4744,6 +4794,8 @@ components:
           $ref: "#/components/schemas/MonitorLocation"
         http:
           $ref: "#/components/schemas/HttpMonitor"
+        tcp:
+          $ref: "#/components/schemas/TcpMonitor"
         heartbeat:
           $ref: "#/components/schemas/HeartbeatMonitor"
     HttpMonitor:
@@ -4785,6 +4837,29 @@ components:
           type: integer
           nullable: true
           description: Response time of the last check in milliseconds; null when no check ran or it got no response
+    TcpMonitor:
+      type: object
+      additionalProperties: false
+      description: The settings and state of a TCP monitor. A check has no status code; its response time is the time to complete the connection.
+      required: [host, port, intervalSeconds, timeoutSeconds, failureThreshold, lastResponseMs]
+      properties:
+        host:
+          type: string
+        port:
+          type: integer
+        intervalSeconds:
+          type: integer
+          description: Check interval in seconds
+        timeoutSeconds:
+          type: integer
+          description: Connection deadline in seconds
+        failureThreshold:
+          type: integer
+          description: Consecutive failed checks before the monitor is down
+        lastResponseMs:
+          type: integer
+          nullable: true
+          description: Time to connect of the last check in milliseconds; null when no check ran or it did not connect
     HeartbeatMonitor:
       type: object
       additionalProperties: false
@@ -4853,7 +4928,7 @@ components:
       type: object
       additionalProperties: false
       description: |
-        One monitor. The type's sub-object (`http` or `heartbeat`) is always present and the
+        One monitor. The type's sub-object (`http`, `tcp` or `heartbeat`) is always present and the
         other one is omitted; a client must ignore a sub-object it does not know.
       required: [id, projectId, type, name, notificationsEnabled, paused, status, statusSince, lastErrorKind, lastCheckedAt, ongoingIncident, uptime, channelIds, createdAt, updatedAt]
       properties:
@@ -4908,6 +4983,8 @@ components:
           $ref: "#/components/schemas/MonitorLocation"
         http:
           $ref: "#/components/schemas/HttpMonitor"
+        tcp:
+          $ref: "#/components/schemas/TcpMonitor"
         heartbeat:
           $ref: "#/components/schemas/HeartbeatMonitor"
     StatsRange:
@@ -5212,7 +5289,7 @@ components:
     MonitorLocation:
       type: object
       additionalProperties: false
-      description: Where an http monitor runs
+      description: Where an http or tcp monitor runs
       required: [type]
       properties:
         type:
@@ -5228,9 +5305,9 @@ components:
       type: object
       additionalProperties: false
       description: |
-        `cloud` runs the monitor from Proreta (public HTTPS targets only). `specula` runs it at a
+        `cloud` runs the monitor from Proreta (public HTTPS targets, or public hosts for tcp). `specula` runs it at a
         Specula of the organization that the monitor's project may use (`speculaId` is required);
-        its target may be http or https, on any port, at an internal address or name.
+        its target may be http or https (tcp: any host), on any port, at an internal address or name.
         Moving a monitor ends an open incident and starts its history over.
       required: [type]
       properties:

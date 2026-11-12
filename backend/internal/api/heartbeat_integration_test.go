@@ -143,7 +143,7 @@ func TestIntegrationHeartbeatAPI(t *testing.T) {
 			`{"type":"heartbeat","name":"x","heartbeat":{"graceSeconds":-1}}`,
 			`{"type":"heartbeat","name":"x","heartbeat":{"graceSeconds":3601}}`,
 			`{"type":"heartbeat","name":"x","heartbeat":{},"url":"https://example.com"}`,
-			`{"type":"tcp","name":"x"}`,
+			`{"type":"ftp","name":"x"}`,
 			`{"name":"x","http":{"url":"https://example.com"}}`,
 		} {
 			if v := c.do(http.MethodPost, "/api/v1/monitors", body, unsafe); v.code != http.StatusBadRequest {

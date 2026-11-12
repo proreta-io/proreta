@@ -8,7 +8,7 @@ WHERE key = @key;
 -- monitors free their slot; paused ones still count. Heartbeats have their own quota.
 SELECT count(*)
 FROM monitors
-WHERE tenant_id = @tenant_id AND deleted_at IS NULL AND type = 'http';
+WHERE tenant_id = @tenant_id AND deleted_at IS NULL AND type <> 'heartbeat';
 
 -- name: CountLiveHeartbeats :one
 SELECT count(*)
