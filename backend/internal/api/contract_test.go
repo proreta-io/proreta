@@ -208,21 +208,29 @@ func TestEveryOperationExceptPublicNeedsSession(t *testing.T) {
 // are exactly the ones without a session.
 func TestAuthzTableCoversSpec(t *testing.T) {
 	_, ops := specOperations(t)
+	defined := map[authz.Permission]bool{}
+	for _, d := range authz.Permissions() {
+		defined[d.Name] = true
+	}
 	inSpec := map[string]bool{}
 	for _, o := range ops {
 		id := strings.ToLower(o.id)
 		inSpec[id] = true
-		min, ok := authz.MinRole(o.id)
+		perm, ok := authz.PermissionOf(o.id)
 		if !ok {
-			t.Errorf("%s %s (%s) is not in the authorization table", o.method, o.path, o.id)
+			t.Errorf("%s %s (%s) has no permission in the authorization table", o.method, o.path, o.id)
 			continue
 		}
 		public := slices.ContainsFunc(publicOperations, func(p string) bool { return strings.EqualFold(p, o.id) })
-		if public != (min == authz.Public) {
-			t.Errorf("%s: public in the contract test %v, in the table %v", o.id, public, min == authz.Public)
+		if public != (perm == authz.NoSession) {
+			t.Errorf("%s: public in the contract test %v, in the table %v", o.id, public, perm == authz.NoSession)
 		}
-		if strings.HasPrefix(o.path, adminPathPrefix) && min != authz.Viewer {
-			t.Errorf("%s: platform admin operations are decided by the flag, want minimum role viewer, got %s", o.id, min)
+		isAdmin := strings.HasPrefix(o.path, adminPathPrefix)
+		if isAdmin != (perm == authz.PlatformAdmin) {
+			t.Errorf("%s: platform admin operations are decided by the flag: path %v, permission %q", o.id, isAdmin, perm)
+		}
+		if !public && !isAdmin && !defined[perm] {
+			t.Errorf("%s: permission %q is not defined", o.id, perm)
 		}
 	}
 	for _, id := range authz.Operations() {

@@ -23,4 +23,6 @@ Operator and contributor documentation for Proreta.
 | [Observability](runbooks/observability.md) | Metrics, logs and suggested alert rules |
 
 ## API
+What each role may do is listed in [Roles and permissions](roles.md), generated from the code.
+
 The API contract is [api/openapi.yaml](../api/openapi.yaml) (OpenAPI 3.0). The Go server and the web client are generated from it.
