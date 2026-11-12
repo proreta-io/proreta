@@ -216,3 +216,45 @@ func TestValidatePrivateURL(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateHost(t *testing.T) {
+	for _, tc := range []struct {
+		in       string
+		specula  bool
+		want     string
+		wantFail bool
+	}{
+		{"DB.Example.com", false, "db.example.com", false},
+		{" 93.184.216.34 ", false, "93.184.216.34", false},
+		{"2606:4700::1111", false, "2606:4700::1111", false},
+		{"db.example.com.", false, "db.example.com.", false},
+		{"postgres", true, "postgres", false},
+		{"10.0.0.5", true, "10.0.0.5", false},
+		{"db.svc.cluster.local", true, "db.svc.cluster.local", false},
+		{"[fd00::1]", true, "fd00::1", false},
+		{"postgres", false, "", true},
+		{"10.0.0.5", false, "", true},
+		{"localhost", false, "", true},
+		{"::1", false, "", true},
+		{"", true, "", true},
+		{"db.example.com:5432", false, "", true},
+		{"https://db.example.com", false, "", true},
+		{"user@db.example.com", false, "", true},
+		{"db.example.com/x", true, "", true},
+		{"db example.com", true, "", true},
+		{"bücher.example", true, "", true},
+	} {
+		got, msg := ValidateHost(tc.in, tc.specula)
+		if (msg != "") != tc.wantFail || got != tc.want {
+			t.Errorf("ValidateHost(%q, %v) = %q, %q; want %q, fail=%v", tc.in, tc.specula, got, msg, tc.want, tc.wantFail)
+		}
+	}
+}
+
+func TestValidatePort(t *testing.T) {
+	for n, ok := range map[int]bool{0: false, -1: false, 1: true, 443: true, 65535: true, 65536: false} {
+		if (ValidatePort(n) == "") != ok {
+			t.Errorf("ValidatePort(%d) = %q", n, ValidatePort(n))
+		}
+	}
+}

@@ -1,10 +1,12 @@
 package safehttp
 
 import (
+	"context"
 	"crypto/tls"
 	"net"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // NewPrivateClient returns a client for checks that run inside a customer's own network: it
@@ -49,4 +51,13 @@ func NewPrivateClient(opts Options) *http.Client {
 			return nil
 		},
 	}
+}
+
+// NewPrivateDialer is the TCP counterpart of NewPrivateClient: no address guard, any port. The
+// same rule applies, only cmd/specula may build one (TestPrivateClientOnlyInSpecula).
+func NewPrivateDialer(timeout time.Duration) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	if timeout <= 0 {
+		timeout = defaultTimeout
+	}
+	return (&net.Dialer{Timeout: timeout}).DialContext
 }

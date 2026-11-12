@@ -68,13 +68,14 @@ func run() error {
 	client := safehttp.NewClient(safehttp.Options{
 		Timeout: checks.DefaultTimeout, MaxRedirects: 3, BlockedPrefixes: cfg.BlockedCIDRs,
 	})
+	dial := safehttp.NewDialer(safehttp.Options{Timeout: checks.DefaultTimeout, BlockedPrefixes: cfg.BlockedCIDRs})
 	w := worker.New(worker.Config{
 		ClaimBatch: cfg.ClaimBatch, Concurrency: cfg.Concurrency,
 		TenantConcurrency: cfg.TenantConcurrency, HostConcurrency: cfg.HostConcurrency,
 		DrainTimeout: cfg.ShutdownTimeout, Location: cfg.Location,
 	}, worker.Deps{
 		Pool: pool, Scheduler: sched, Incidents: incidents.NewService(sched),
-		Prober: checks.NewHTTPSProber(client), RequestKeys: requestKeys, Metrics: worker.NewMetrics(reg), Log: log,
+		Prober: checks.Mux{HTTP: checks.NewHTTPSProber(client), TCP: checks.NewTCPProber(dial)}, RequestKeys: requestKeys, Metrics: worker.NewMetrics(reg), Log: log,
 	})
 
 	g, gctx := errgroup.WithContext(ctx)

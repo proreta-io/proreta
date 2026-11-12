@@ -691,7 +691,7 @@ func TestPrivateClientOnlyInSpecula(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if strings.Contains(string(b), "NewPrivateClient") {
+		if strings.Contains(string(b), "NewPrivateClient") || strings.Contains(string(b), "NewPrivateDialer") {
 			offenders = append(offenders, slash)
 		}
 		return nil
@@ -700,7 +700,7 @@ func TestPrivateClientOnlyInSpecula(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(offenders) > 0 {
-		t.Fatalf("NewPrivateClient (no SSRF guard) is used outside cmd/specula: %v", offenders)
+		t.Fatalf("NewPrivateClient or NewPrivateDialer (no SSRF guard) is used outside cmd/specula: %v", offenders)
 	}
 }
 

@@ -39,13 +39,23 @@ type Header struct {
 	Value string `json:"value"`
 }
 
+// Job types. An empty Type is TypeHTTP.
+const (
+	TypeHTTP = "http"
+	TypeTCP  = "tcp"
+)
+
 // Job is one check to run before LeaseUntil. Headers and Body are the monitor's secrets, sent
-// over TLS to an executor the customer installed.
+// over TLS to an executor the customer installed. A TCP job has Host and Port; its URL, Method
+// and ExpectedStatus are unused.
 type Job struct {
 	MonitorID      uuid.UUID `json:"monitorId"`
 	LeaseToken     uuid.UUID `json:"leaseToken"`
 	LeaseUntil     time.Time `json:"leaseUntil"`
+	Type           string    `json:"type,omitempty"`
 	URL            string    `json:"url"`
+	Host           string    `json:"host,omitempty"`
+	Port           int       `json:"port,omitempty"`
 	Method         string    `json:"method"`
 	Headers        []Header  `json:"headers,omitempty"`
 	Body           string    `json:"body,omitempty"`

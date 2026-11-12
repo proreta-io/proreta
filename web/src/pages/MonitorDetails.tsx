@@ -69,6 +69,8 @@ import {
 } from "../lib/heartbeat";
 import {
   checkSettings,
+  tcpCheckSettings,
+  targetText,
   requestSummary,
   downReason,
   failureStreak,
@@ -209,7 +211,7 @@ function Details({
           ) : checks.data.items.length === 0 ? (
             <EmptyNote>No checks yet. Results appear here as they come in.</EmptyNote>
           ) : (
-            <CheckTable items={checks.data.items} />
+            <CheckTable items={checks.data.items} showStatus={!monitor.tcp} />
           )}
         </Section>
       )}
@@ -292,16 +294,23 @@ function Header({
             <h1 className="min-w-0 text-headline leading-[1.1] font-semibold tracking-[-0.02em] break-words sm:text-display">
               {monitor.name}
             </h1>
-            <Badge>{heartbeat ? "Watchdog" : "HTTP"}</Badge>
+            <Badge>{heartbeat ? "Watchdog" : monitor.tcp ? "TCP" : "HTTP"}</Badge>
           </div>
           <span className="font-mono text-[13px] break-all">
             {monitor.heartbeat
               ? `Watchdog · ${expectationText(monitor.heartbeat)}`
-              : monitor.http?.url}
+              : monitor.tcp
+                ? targetText(monitor)
+                : monitor.http?.url}
           </span>
           {monitor.http && (
             <span className="text-caption text-muted-foreground">
               {checkSettings(monitor.http)}
+            </span>
+          )}
+          {monitor.tcp && (
+            <span className="text-caption text-muted-foreground">
+              {tcpCheckSettings(monitor.tcp)}
             </span>
           )}
           {monitor.location?.type === "specula" && (
@@ -702,15 +711,15 @@ function IncidentTable({ items, now }: { items: Incident[]; now: number }) {
   );
 }
 
-function CheckTable({ items }: { items: Check[] }) {
+function CheckTable({ items, showStatus = true }: { items: Check[]; showStatus?: boolean }) {
   return (
     <Table>
       <thead>
         <tr>
           <Th>Time</Th>
           <Th>Result</Th>
-          <Th numeric>HTTP</Th>
-          <Th numeric>Response</Th>
+          {showStatus && <Th numeric>HTTP</Th>}
+          <Th numeric>{showStatus ? "Response" : "Connect time"}</Th>
           <Th className="max-sm:hidden">Error</Th>
         </tr>
       </thead>
@@ -725,7 +734,7 @@ function CheckTable({ items }: { items: Check[] }) {
                 <StatusIndicator status="down" inline label="Failed" />
               )}
             </Td>
-            <Td numeric>{c.httpStatus ?? "—"}</Td>
+            {showStatus && <Td numeric>{c.httpStatus ?? "—"}</Td>}
             <Td numeric>{formatMs(c.responseMs)}</Td>
             <Td className="text-muted-foreground max-sm:hidden">
               {c.ok ? "" : describeErrorKind(c.errorKind)}

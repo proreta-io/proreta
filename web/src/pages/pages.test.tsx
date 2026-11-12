@@ -349,6 +349,76 @@ describe("monitor form", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Monitor created");
   });
 
+  it("creates a TCP monitor from a host and a port, without the HTTP fields", async () => {
+    let body: unknown;
+    const created = detail({
+      id: "tcp1",
+      name: "Postgres",
+      type: "tcp",
+      status: "unknown",
+      http: undefined,
+      tcp: {
+        host: "db.example.com",
+        port: 5432,
+        intervalSeconds: 60,
+        timeoutSeconds: 10,
+        failureThreshold: 2,
+        lastResponseMs: null,
+      },
+    });
+    mockApi({
+      ...signedIn,
+      "POST /api/v1/monitors": async (req) => {
+        body = await req.json();
+        return json(created, 201);
+      },
+      "GET /api/v1/monitors/tcp1": () => json(created),
+    });
+    renderApp("/monitors/new");
+    await userEvent.click(await screen.findByRole("radio", { name: /TCP port/ }));
+    expect(screen.queryByLabelText("URL")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Exact code")).not.toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Name"), "Postgres");
+    await userEvent.type(screen.getByLabelText("Host"), "db.example.com");
+    await userEvent.type(screen.getByLabelText("Port"), "5432");
+    expect(
+      screen.getByText(
+        (_, el) =>
+          el?.tagName === "P" &&
+          el.textContent ===
+            "Connects to db.example.com:5432 every minute and alerts Slack after 2 failures in a row.",
+      ),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Create monitor" }));
+
+    expect(await screen.findByRole("heading", { name: "Postgres", level: 1 })).toBeInTheDocument();
+    expect(body).toEqual({
+      type: "tcp",
+      name: "Postgres",
+      tcp: { host: "db.example.com", port: 5432, failureThreshold: 2 },
+      notificationsEnabled: true,
+      channelIds: [],
+    });
+    expect(screen.getByText("db.example.com:5432")).toBeInTheDocument();
+    expect(screen.getByText("TCP")).toBeInTheDocument();
+  });
+
+  it("validates a TCP monitor's host and port on the client", async () => {
+    const fetchMock = mockApi({ ...signedIn });
+    renderApp("/monitors/new");
+    await userEvent.click(await screen.findByRole("radio", { name: /TCP port/ }));
+    await userEvent.type(screen.getByLabelText("Host"), "https://db.example.com");
+    await userEvent.type(screen.getByLabelText("Port"), "70000");
+    await userEvent.click(screen.getByRole("button", { name: "Create monitor" }));
+    expect(screen.getByLabelText("Host")).toHaveAccessibleDescription(
+      "Enter only the host: no http://, path, user name or spaces.",
+    );
+    expect(screen.getByLabelText("Port")).toHaveAccessibleDescription(
+      "Enter a port from 1 to 65535.",
+    );
+    expect(fetchMock.mock.calls.some(([r]) => (r as Request).method === "POST")).toBe(false);
+  });
+
   it("sends a method, headers and a body, and warns for a non-safe method", async () => {
     let body: unknown;
     const created = detail({ id: "new2", name: "Orders" });
