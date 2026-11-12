@@ -304,6 +304,35 @@ func TestIntegrationLoginLimitHoldsUnderConcurrency(t *testing.T) {
 	}
 }
 
+// Wrong passwords from one address do not lock the account for everybody else.
+func TestIntegrationLoginLockoutIsPerAddress(t *testing.T) {
+	env := pgtest.New(t, pgtest.DBName("auth_lockout"))
+	ctx := context.Background()
+	hash, _ := crypto.HashPassword("pw", cheap)
+	const limit = 3
+	svc, err := auth.NewService(env.Pool(t, env.APIURL, 4), auth.Options{
+		SessionTTL:   time.Hour,
+		IPLimiter:    auth.NewLimiter(1000, 15*time.Minute, 1000, clock.System{}),
+		LoginLimiter: auth.NewLimiter(limit, 15*time.Minute, 1000, clock.System{}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.BootstrapAdmin(ctx, "admin", hash); err != nil {
+		t.Fatal(err)
+	}
+	attacker, owner := netip.MustParseAddr("203.0.113.9"), netip.MustParseAddr("198.51.100.7")
+	for range limit + 2 {
+		_, _ = svc.Login(ctx, auth.LoginInput{Login: "admin", Password: "wrong", IP: attacker})
+	}
+	if _, err := svc.Login(ctx, auth.LoginInput{Login: "admin", Password: "pw", IP: attacker}); !errors.Is(err, auth.ErrRateLimited) {
+		t.Fatalf("the attacking address is not limited: %v", err)
+	}
+	if _, err := svc.Login(ctx, auth.LoginInput{Login: "admin", Password: "pw", IP: owner}); err != nil {
+		t.Fatalf("the owner from another address is locked out: %v", err)
+	}
+}
+
 // A registered user logs in to their own tenant; a suspended or deleted tenant refuses the login
 // with the generic error, and a user without any membership cannot log in.
 func TestIntegrationRegisteredLoginBindsToOwnTenant(t *testing.T) {
