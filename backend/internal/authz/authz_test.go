@@ -387,7 +387,7 @@ func TestProjectOnlyReachesOperations(t *testing.T) {
 			}
 		}
 		// Operations of the organization level stay closed, whatever the project role.
-		for _, op := range []string{"listMembers", "updateMember", "removeMember", "listInvitations", "createInvitation",
+		for _, op := range []string{"updateMember", "removeMember",
 			"createProject", "getUsage", "deleteOrganization", "listAuthDomains"} {
 			if Can(a, op) {
 				t.Errorf("project-only %s can call %s", r, op)
@@ -397,6 +397,10 @@ func TestProjectOnlyReachesOperations(t *testing.T) {
 		for op, p := range map[string]Permission{"listMonitors": "monitor.read", "createMonitor": "monitor.create",
 			"createChannel": "channel.manage", "putProjectMember": "project.members.manage", "deleteProject": "project.delete",
 			"updateProject": "project.update", "getProject": "project.read",
+			// People: the list is narrowed to the person's projects by the service, invitations
+			// into a project follow the project role (organization ones are refused by the service).
+			"listMembers": "project.members.read", "listInvitations": "project.members.manage",
+			"createInvitation": "project.members.manage", "revokeInvitation": "project.members.manage",
 			"listStatusPages": "statuspage.read", "createStatusPage": "statuspage.manage"} {
 			if got := Can(a, op); got != Has(r, p) {
 				t.Errorf("project-only %s: Can(%s) = %v", r, op, got)

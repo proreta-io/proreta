@@ -17,12 +17,15 @@ export const ROLE_LABELS: Record<MembershipRole, string> = {
   viewer: "Viewer",
 };
 
-/** The label of a missing organization role. */
+/** The option that takes the organization role away. */
 export const NO_ROLE_LABEL = "No organization role (projects only)";
+
+/** What a list shows for a person without an organization role. */
+export const PROJECTS_ONLY_LABEL = "Projects only";
 
 /** The label of a role that may be missing. */
 export function roleLabel(role: OptionalRole): string {
-  return role ? ROLE_LABELS[role] : NO_ROLE_LABEL;
+  return role ? ROLE_LABELS[role] : PROJECTS_ONLY_LABEL;
 }
 
 /** What each role may do on the organization; a project role gives the project parts only. */

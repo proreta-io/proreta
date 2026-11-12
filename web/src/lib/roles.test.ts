@@ -3,7 +3,7 @@ import {
   abilities,
   assignableRoles,
   canManageMember,
-  NO_ROLE_LABEL,
+  PROJECTS_ONLY_LABEL,
   roleAtLeast,
   roleLabel,
 } from "./roles";
@@ -20,7 +20,7 @@ describe("roles", () => {
   });
 
   it("names a missing organization role", () => {
-    expect(roleLabel(null)).toBe(NO_ROLE_LABEL);
+    expect(roleLabel(null)).toBe(PROJECTS_ONLY_LABEL);
     expect(roleLabel("maintainer")).toBe("Maintainer");
   });
 

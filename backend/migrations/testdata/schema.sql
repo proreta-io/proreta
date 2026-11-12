@@ -126,6 +126,7 @@ invitations.8 expires_at timestamp with time zone not null
 invitations.9 accepted_at timestamp with time zone
 invitations.10 accepted_by uuid
 invitations.11 revoked_at timestamp with time zone
+invitations.12 project_id uuid
 mail_outbox.1 id uuid not null
 mail_outbox.2 kind text not null
 mail_outbox.3 payload bytea not null
@@ -395,7 +396,8 @@ invitations invitations_created_by_fkey FOREIGN KEY (created_by) REFERENCES user
 invitations invitations_expiry CHECK ((expires_at > created_at))
 invitations invitations_label_check CHECK ((length(label) <= 80))
 invitations invitations_pkey PRIMARY KEY (id)
-invitations invitations_role_check CHECK ((role = ANY (ARRAY['maintainer'::text, 'member'::text, 'viewer'::text])))
+invitations invitations_project_fk FOREIGN KEY (tenant_id, project_id) REFERENCES projects(tenant_id, id)
+invitations invitations_role_check CHECK ((((project_id IS NULL) AND (role = ANY (ARRAY['maintainer'::text, 'member'::text, 'viewer'::text]))) OR ((project_id IS NOT NULL) AND (role = ANY (ARRAY['owner'::text, 'maintainer'::text, 'member'::text, 'viewer'::text])))))
 invitations invitations_single_outcome CHECK (((accepted_at IS NULL) OR (revoked_at IS NULL)))
 invitations invitations_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id)
 invitations invitations_tenant_id_id_key UNIQUE (tenant_id, id)
@@ -591,6 +593,7 @@ CREATE UNIQUE INDEX incidents_pkey ON public.incidents USING btree (id)
 CREATE UNIQUE INDEX incidents_tenant_id_id_key ON public.incidents USING btree (tenant_id, id)
 CREATE INDEX incidents_tenant_started_idx ON public.incidents USING btree (tenant_id, started_at DESC)
 CREATE UNIQUE INDEX invitations_pkey ON public.invitations USING btree (id)
+CREATE INDEX invitations_project_idx ON public.invitations USING btree (tenant_id, project_id, created_at DESC) WHERE (project_id IS NOT NULL)
 CREATE INDEX invitations_tenant_created_idx ON public.invitations USING btree (tenant_id, created_at DESC)
 CREATE UNIQUE INDEX invitations_tenant_id_id_key ON public.invitations USING btree (tenant_id, id)
 CREATE UNIQUE INDEX invitations_token_hash_key ON public.invitations USING btree (token_hash)
@@ -696,6 +699,7 @@ notification_deliveries tenant_isolation cmd=* permissive=true to=public using (
 org_auth_domains owner_domain_lookup cmd=r permissive=true to=proreta_owner using true
 org_auth_domains tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
 project_members tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
+projects owner_invitation_project_lookup cmd=r permissive=true to=proreta_owner using true
 projects tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
 result_rollups_hourly owner_rollup_write cmd=* permissive=true to=proreta_owner using true check true
 result_rollups_hourly tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
@@ -1538,14 +1542,15 @@ AS $function$
       AND t.deleted_at IS NULL
 $function$
 CREATE OR REPLACE FUNCTION public.auth_invitation_lookup(p_token_hash bytea)
- RETURNS TABLE(invitation_id uuid, tenant_id uuid, tenant_name text, role text, expires_at timestamp with time zone)
+ RETURNS TABLE(invitation_id uuid, tenant_id uuid, tenant_name text, role text, expires_at timestamp with time zone, project_id uuid, project_name text)
  LANGUAGE sql
  STABLE SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-    SELECT i.id, i.tenant_id, t.name, i.role, i.expires_at
+    SELECT i.id, i.tenant_id, t.name, i.role, i.expires_at, i.project_id, p.name
     FROM invitations AS i
     JOIN tenants AS t ON t.id = i.tenant_id
+    LEFT JOIN projects AS p ON p.tenant_id = i.tenant_id AND p.id = i.project_id
     WHERE i.token_hash = p_token_hash
       AND length(p_token_hash) = 32
       AND i.accepted_at IS NULL
@@ -1553,6 +1558,7 @@ AS $function$
       AND i.expires_at > now()
       AND t.status = 'active'
       AND t.deleted_at IS NULL
+      AND (i.project_id IS NULL OR p.deleted_at IS NULL)
 $function$
 CREATE OR REPLACE FUNCTION public.auth_login_tenant(p_user_id uuid)
  RETURNS uuid

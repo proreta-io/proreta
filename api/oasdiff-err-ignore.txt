@@ -48,3 +48,10 @@ PUT /api/v1/admin/organizations/{organizationId}/members/{userId} added `#/compo
 PUT /api/v1/admin/organizations/{organizationId}/projects/{projectId}/members/{userId} the request property `role` became required
 PATCH /api/v1/members/{userId} added `#/components/schemas/MembershipRole` to the `role` request property `allOf` list
 PUT /api/v1/projects/{projectId}/members/{userId} the request property `role` became required
+
+# An invitation into a project carries the role in the project, which may be owner, so the shared invitation role gains that value. Before the first stable release there is no compatibility with older clients (the web app changes in the same release).
+GET /api/v1/admin/organizations/{organizationId}/invitations added the new `owner` enum value to the `items/items/role` response property for the response status `200`
+POST /api/v1/admin/organizations/{organizationId}/invitations added the new `owner` enum value to the `invitation/role` response property for the response status `201`
+GET /api/v1/invitations added the new `owner` enum value to the `items/items/role` response property for the response status `200`
+POST /api/v1/invitations added the new `owner` enum value to the `invitation/role` response property for the response status `201`
+POST /api/v1/invitations/lookup added the new `owner` enum value to the `role` response property for the response status `200`

@@ -180,8 +180,10 @@ func TestIntegrationRoleMatrix(t *testing.T) {
 		projectOnly[role] = hdr
 	}
 	// Organization-scope operations, written down by hand: a direct project role never reaches them.
+	// createInvitation is here because the request of the matrix is an organization invitation; a
+	// project invitation follows the project role (see TestIntegrationProjectInvitationPermissions).
 	orgScoped := map[string]bool{}
-	for _, op := range []string{"listMembers", "updateMember", "removeMember", "listInvitations", "createInvitation", "revokeInvitation",
+	for _, op := range []string{"updateMember", "removeMember", "createInvitation",
 		"getUsage", "createProject", "deleteOrganization", "listAuthDomains", "createAuthDomain", "updateAuthDomain", "deleteAuthDomain",
 		// The request of the matrix names no project, which makes the page organization-level.
 		"createStatusPage"} {

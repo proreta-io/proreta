@@ -44,6 +44,7 @@ import {
 } from "../lib/roles";
 import { useProjectScope } from "../lib/useProjectScope";
 import { memberLabel } from "../lib/members";
+import ProjectInvitations from "../components/ProjectInvitations";
 
 const NAME_MAX = 60;
 
@@ -90,6 +91,9 @@ export default function Projects() {
       )}
 
       {shown && <ProjectMembers key={shown.id} project={shown} />}
+      {shown && roleAtLeast(shown.role, "maintainer") && (
+        <ProjectInvitations key={`invitations-${shown.id}`} project={shown} />
+      )}
     </section>
   );
 }

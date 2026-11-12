@@ -34,7 +34,7 @@ var specs = map[Kind]kindSpec{
 	KindVerifyEmail:   {subject: "Confirm your email address for Proreta", linkPath: "/verify-email#"},
 	KindPasswordReset: {subject: "Reset your Proreta password", linkPath: "/reset-password#"},
 	KindInvitation: {
-		subject:  `{{if .Params.inviter}}{{.Params.inviter}} invited you to {{.Params.org}} on Proreta{{else}}You are invited to {{.Params.org}} on Proreta{{end}}`,
+		subject:  `{{if .Params.inviter}}{{.Params.inviter}} invited you to {{if .Params.project}}{{.Params.project}} in {{end}}{{.Params.org}} on Proreta{{else}}You are invited to {{if .Params.project}}{{.Params.project}} in {{end}}{{.Params.org}} on Proreta{{end}}`,
 		linkPath: "/invite#",
 	},
 }
