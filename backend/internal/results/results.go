@@ -12,7 +12,7 @@ import (
 )
 
 // Row is one raw check result. StatusCode and LatencyMs are zero when no response arrived and
-// are then stored as NULL; ErrorKind is empty for a successful check.
+// are then stored as NULL (a TCP check has no status code, its latency is the connect time); ErrorKind is empty for a successful check.
 type Row struct {
 	TenantID    uuid.UUID
 	MonitorID   uuid.UUID
@@ -32,8 +32,13 @@ func Insert(ctx context.Context, tx pgx.Tx, r Row) error {
 		Ok: r.OK, TlsNotAfter: r.TLSNotAfter,
 	}
 	if r.StatusCode > 0 {
-		code, latency := int16(r.StatusCode), int32(max(r.LatencyMs, 0)) //nolint:gosec // HTTP status and a latency bounded by the 10 s timeout
-		p.StatusCode, p.LatencyMs = &code, &latency
+		code := int16(r.StatusCode) //nolint:gosec // an HTTP status
+		p.StatusCode = &code
+	}
+	// A TCP check that connected has a latency and no status code.
+	if r.StatusCode > 0 || r.OK {
+		latency := int32(max(r.LatencyMs, 0)) //nolint:gosec // bounded by the 10 s timeout
+		p.LatencyMs = &latency
 	}
 	if r.ErrorKind != "" {
 		p.ErrorKind = &r.ErrorKind

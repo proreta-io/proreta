@@ -54,6 +54,7 @@ const (
 // Monitor types (monitors.type).
 const (
 	TypeHTTP      = "http"
+	TypeTCP       = "tcp"
 	TypeHeartbeat = "heartbeat"
 )
 
@@ -100,6 +101,9 @@ type Monitor struct {
 	Method      string
 	HeaderNames []string
 	BodySet     bool
+	// Host and Port are the target of a tcp monitor.
+	Host string
+	Port int
 	// IntervalSeconds is the check interval, or a heartbeat's expected ping interval.
 	IntervalSeconds      int
 	TimeoutSeconds       int
@@ -128,6 +132,7 @@ type CreateInput struct {
 	Name                 string
 	NotificationsEnabled *bool
 	HTTP                 *HTTPSettings
+	TCP                  *TCPSettings
 	Heartbeat            *HeartbeatSettings
 	// ProjectID is the monitor's project; nil means the Default project.
 	ProjectID *uuid.UUID
@@ -135,11 +140,11 @@ type CreateInput struct {
 	// the active channels of the project).
 	ChannelIDs *[]uuid.UUID
 	// SpeculaID runs the monitor at a Specula of the organization that the project may use; nil
-	// runs it from Proreta's own worker. Only for http monitors.
+	// runs it from Proreta's own worker. Only for http and tcp monitors.
 	SpeculaID *uuid.UUID
 }
 
-// Location is where an http monitor runs: SpeculaID nil is Proreta's own worker.
+// Location is where an http or tcp monitor runs: SpeculaID nil is Proreta's own worker.
 type Location struct {
 	SpeculaID *uuid.UUID
 }
@@ -159,6 +164,14 @@ type HTTPSettings struct {
 	FailureThreshold *int
 }
 
+// TCPSettings are the settings of a tcp monitor; nil fields take their defaults on create and
+// keep their value on update. Host and Port are required on create.
+type TCPSettings struct {
+	Host             *string
+	Port             *int
+	FailureThreshold *int
+}
+
 // HeartbeatSettings are the settings of a heartbeat; nil fields take their defaults on create
 // and keep their value on update.
 type HeartbeatSettings struct {
@@ -171,12 +184,13 @@ type UpdateInput struct {
 	Name                 *string
 	NotificationsEnabled *bool
 	HTTP                 *HTTPSettings
+	TCP                  *TCPSettings
 	Heartbeat            *HeartbeatSettings
 	// ProjectID moves the monitor; selected channels of the old project are dropped.
 	ProjectID *uuid.UUID
 	// ChannelIDs replaces the channel selection.
 	ChannelIDs *[]uuid.UUID
-	// Location moves an http monitor; the target is checked again with the rules of the new
+	// Location moves an http or tcp monitor; the target is checked again with the rules of the new
 	// location and an open incident ends.
 	Location *Location
 }
@@ -193,6 +207,12 @@ type httpConfig struct {
 	Request     string   `json:"request,omitempty"`
 }
 
+// tcpConfig is monitors.config for type tcp.
+type tcpConfig struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
+}
+
 // heartbeatConfig is monitors.config for type heartbeat.
 type heartbeatConfig struct {
 	GraceSeconds int `json:"graceSeconds"`
@@ -203,6 +223,10 @@ const (
 	fieldSpeculaID               = "location.speculaId"
 	fieldHTTP                    = "http"
 	fieldHeartbeat               = "heartbeat"
+	fieldTCP                     = "tcp"
+	fieldHost                    = "tcp.host"
+	fieldPort                    = "tcp.port"
+	fieldTCPFailureThreshold     = "tcp.failureThreshold"
 	fieldURL                     = "http.url"
 	fieldExpectedStatus          = "http.expectedStatus"
 	fieldIntervalSeconds         = "http.intervalSeconds"
@@ -211,7 +235,9 @@ const (
 	fieldExpectedIntervalSeconds = "heartbeat.expectedIntervalSeconds"
 	fieldGraceSeconds            = "heartbeat.graceSeconds"
 
-	msgHTTPOnly      = "is only for http monitors"
+	msgHTTPOnly      = "is only for http and tcp monitors"
+	msgHTTPOnlyType  = "is only for http monitors"
+	msgTCPOnly       = "is only for tcp monitors"
 	msgHeartbeatOnly = "is only for heartbeat monitors"
 )
 
@@ -249,6 +275,9 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 		if in.Heartbeat != nil {
 			verr.Add(fieldHeartbeat, msgHeartbeatOnly)
 		}
+		if in.TCP != nil {
+			verr.Add(fieldTCP, msgTCPOnly)
+		}
 		h := in.HTTP
 		if h == nil {
 			verr.Add(fieldHTTP, "is required for http monitors")
@@ -269,7 +298,7 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 			verr.Add(fieldExpectedStatus, msg)
 		}
 		threshold := orDefault(h.FailureThreshold, DefaultFailureThreshold)
-		checkThreshold(&verr, threshold)
+		checkThreshold(&verr, fieldFailureThreshold, threshold)
 		httpCfg = httpConfig{URL: target, ExpectedStatus: expected}
 		var perr error
 		if httpCfg, httpSec, _, _, perr = s.planRequest(&verr, httpCfg, a.TenantID, uuid.Nil, h); perr != nil {
@@ -277,13 +306,48 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 		}
 		isHTTP = true
 		row.IntervalSeconds, row.FailureThreshold = IntervalSeconds, int32(threshold) //nolint:gosec // validated 1..3
+	case TypeTCP:
+		row.Type = TypeTCP
+		if in.HTTP != nil {
+			verr.Add(fieldHTTP, msgHTTPOnlyType)
+		}
+		if in.Heartbeat != nil {
+			verr.Add(fieldHeartbeat, msgHeartbeatOnly)
+		}
+		t := in.TCP
+		if t == nil {
+			verr.Add(fieldTCP, "is required for tcp monitors")
+			t = &TCPSettings{}
+		}
+		var cfg tcpConfig
+		if t.Host == nil {
+			if in.TCP != nil {
+				verr.Add(fieldHost, "is required")
+			}
+		} else if cfg.Host, msg = ValidateHost(*t.Host, in.SpeculaID != nil); msg != "" {
+			verr.Add(fieldHost, msg)
+		}
+		if t.Port == nil {
+			if in.TCP != nil {
+				verr.Add(fieldPort, "is required")
+			}
+		} else if cfg.Port = *t.Port; ValidatePort(cfg.Port) != "" {
+			verr.Add(fieldPort, ValidatePort(cfg.Port))
+		}
+		threshold := orDefault(t.FailureThreshold, DefaultFailureThreshold)
+		checkThreshold(&verr, fieldTCPFailureThreshold, threshold)
+		config = cfg
+		row.IntervalSeconds, row.FailureThreshold = IntervalSeconds, int32(threshold) //nolint:gosec // validated 1..3
 	case TypeHeartbeat:
 		row.Type, resource = TypeHeartbeat, plans.ResourceHeartbeat
 		if in.SpeculaID != nil {
 			verr.Add(fieldSpeculaID, msgHTTPOnly)
 		}
 		if in.HTTP != nil {
-			verr.Add(fieldHTTP, msgHTTPOnly)
+			verr.Add(fieldHTTP, msgHTTPOnlyType)
+		}
+		if in.TCP != nil {
+			verr.Add(fieldTCP, msgTCPOnly)
 		}
 		hb := in.Heartbeat
 		if hb == nil {
@@ -302,7 +366,7 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 		// A heartbeat goes down at its first missed deadline: its failure threshold is always 1.
 		row.IntervalSeconds, row.FailureThreshold = int32(interval), 1 //nolint:gosec // validated 60..86400
 	default:
-		verr.Add("type", `must be "http" or "heartbeat"`)
+		verr.Add("type", `must be "http", "tcp" or "heartbeat"`)
 	}
 	if err := verr.Err(); err != nil {
 		return Monitor{}, err
@@ -422,7 +486,7 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 		if in.Location != nil {
 			wantSpecula = in.Location.SpeculaID
 		}
-		locChanged := cur.Type == TypeHTTP && !sameID(curSpecula, wantSpecula)
+		locChanged := cur.Type != TypeHeartbeat && !sameID(curSpecula, wantSpecula)
 
 		var verr validation.Error
 		var changed []string
@@ -438,7 +502,8 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 		}
 
 		var config any
-		if cur.Type == TypeHeartbeat {
+		switch cur.Type {
+		case TypeHeartbeat:
 			var cfg heartbeatConfig
 			if err := json.Unmarshal(cur.Config, &cfg); err != nil {
 				return fmt.Errorf("monitor config: %w", err)
@@ -447,7 +512,10 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 				verr.Add(fieldSpeculaID, msgHTTPOnly)
 			}
 			if in.HTTP != nil {
-				verr.Add(fieldHTTP, msgHTTPOnly)
+				verr.Add(fieldHTTP, msgHTTPOnlyType)
+			}
+			if in.TCP != nil {
+				verr.Add(fieldTCP, msgTCPOnly)
 			}
 			if hb := in.Heartbeat; hb != nil {
 				if hb.ExpectedIntervalSeconds != nil {
@@ -464,13 +532,55 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 				}
 			}
 			config = cfg
-		} else {
+		case TypeTCP:
+			var cfg tcpConfig
+			if err := json.Unmarshal(cur.Config, &cfg); err != nil {
+				return fmt.Errorf("monitor config: %w", err)
+			}
+			if in.Heartbeat != nil {
+				verr.Add(fieldHeartbeat, msgHeartbeatOnly)
+			}
+			if in.HTTP != nil {
+				verr.Add(fieldHTTP, msgHTTPOnlyType)
+			}
+			if locChanged && (in.TCP == nil || in.TCP.Host == nil) {
+				// The target stays but must satisfy the rules of the new location.
+				v, msg := ValidateHost(cfg.Host, wantSpecula != nil)
+				if msg != "" {
+					verr.Add(fieldHost, msg)
+				}
+				cfg.Host = v
+			}
+			if t := in.TCP; t != nil {
+				if t.Host != nil {
+					v, msg := ValidateHost(*t.Host, wantSpecula != nil)
+					if msg != "" {
+						verr.Add(fieldHost, msg)
+					}
+					changed, cfg.Host = appendIf(changed, fieldHost, v != cfg.Host), v
+				}
+				if t.Port != nil {
+					if msg := ValidatePort(*t.Port); msg != "" {
+						verr.Add(fieldPort, msg)
+					}
+					changed, cfg.Port = appendIf(changed, fieldPort, *t.Port != cfg.Port), *t.Port
+				}
+				if t.FailureThreshold != nil {
+					checkThreshold(&verr, fieldTCPFailureThreshold, *t.FailureThreshold)
+					changed, threshold = appendIf(changed, fieldTCPFailureThreshold, *t.FailureThreshold != threshold), *t.FailureThreshold
+				}
+			}
+			config = cfg
+		default:
 			var cfg httpConfig
 			if err := json.Unmarshal(cur.Config, &cfg); err != nil {
 				return fmt.Errorf("monitor config: %w", err)
 			}
 			if in.Heartbeat != nil {
 				verr.Add(fieldHeartbeat, msgHeartbeatOnly)
+			}
+			if in.TCP != nil {
+				verr.Add(fieldTCP, msgTCPOnly)
 			}
 			if locChanged && (in.HTTP == nil || in.HTTP.URL == nil) {
 				// The target stays but must satisfy the rules of the new location.
@@ -497,7 +607,7 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 					changed, cfg.ExpectedStatus = appendIf(changed, fieldExpectedStatus, *h.ExpectedStatus != cfg.ExpectedStatus), *h.ExpectedStatus
 				}
 				if h.FailureThreshold != nil {
-					checkThreshold(&verr, *h.FailureThreshold)
+					checkThreshold(&verr, fieldFailureThreshold, *h.FailureThreshold)
 					changed, threshold = appendIf(changed, fieldFailureThreshold, *h.FailureThreshold != threshold), *h.FailureThreshold
 				}
 				next, sec, dirty, reqChanged, perr := s.planRequest(&verr, cfg, a.TenantID, id, h)
@@ -577,7 +687,7 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 			}
 			changed = append(changed, fieldSpeculaID)
 		}
-		if slices.Contains(changed, fieldURL) || locChanged {
+		if slices.Contains(changed, fieldURL) || slices.Contains(changed, fieldHost) || slices.Contains(changed, fieldPort) || locChanged {
 			// A new target (URL or location): its history says nothing about it. Restart like
 			// resume and end an open incident without a notification.
 			if err := s.restart(ctx, tx, q, a.TenantID, id, true); err != nil {
@@ -760,6 +870,7 @@ func get(ctx context.Context, q *monitorsdb.Queries, tenantID, id uuid.UUID) (Mo
 func fromRow(r monitorsdb.GetMonitorRow) (Monitor, error) {
 	var cfg struct {
 		httpConfig
+		tcpConfig
 		heartbeatConfig
 	}
 	if err := json.Unmarshal(r.Config, &cfg); err != nil {
@@ -770,7 +881,7 @@ func fromRow(r monitorsdb.GetMonitorRow) (Monitor, error) {
 	}
 	return Monitor{
 		ID: r.ID, ProjectID: r.ProjectID, Type: r.Type, Name: r.Name, URL: cfg.URL, ExpectedStatus: cfg.ExpectedStatus,
-		Method: cfg.Method, HeaderNames: cfg.HeaderNames, BodySet: cfg.BodySet,
+		Method: cfg.Method, HeaderNames: cfg.HeaderNames, BodySet: cfg.BodySet, Host: cfg.Host, Port: cfg.Port,
 		IntervalSeconds: int(r.IntervalSeconds), TimeoutSeconds: int(r.TimeoutSeconds), GraceSeconds: cfg.GraceSeconds,
 		FailureThreshold: int(r.FailureThreshold), NotificationsEnabled: r.NotificationsEnabled, Paused: r.Paused,
 		Status: r.Status, StatusSince: r.StatusChangedAt, LastErrorKind: r.LastErrorKind,
@@ -802,9 +913,9 @@ func checkFixed(verr *validation.Error, field string, got *int, want int) {
 	}
 }
 
-func checkThreshold(verr *validation.Error, n int) {
+func checkThreshold(verr *validation.Error, field string, n int) {
 	if n < 1 || n > 3 {
-		verr.Add(fieldFailureThreshold, "must be between 1 and 3")
+		verr.Add(field, "must be between 1 and 3")
 	}
 }
 

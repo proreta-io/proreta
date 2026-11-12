@@ -1,6 +1,7 @@
-// Package checks runs monitor checks. There is one kind: an HTTPS request through the SSRF
-// guard (internal/safehttp) that records status, latency to response headers and the leaf
-// certificate expiry, and never reads the response body.
+// Package checks runs monitor checks. There are two kinds. HTTP: an HTTPS request through the
+// SSRF guard (internal/safehttp) that records status, latency to response headers and the leaf
+// certificate expiry, and never reads the response body. TCP: a connection to a host and a port,
+// up when the handshake completes, with the latency of the connect and nothing sent or read.
 package checks
 
 import (
@@ -36,8 +37,13 @@ const (
 // DefaultTimeout is the check timeout of every http monitor; it covers redirects.
 const DefaultTimeout = 10 * time.Second
 
-// Request describes one check.
+// Request describes one check. A TCP check has Host and Port and none of the HTTP fields.
 type Request struct {
+	// TCP selects a TCP check.
+	TCP  bool
+	Host string
+	Port int
+
 	URL string
 	// Method defaults to GET.
 	Method string
@@ -207,4 +213,55 @@ func classify(ctx context.Context, err error) string {
 		return KindConnect
 	}
 	return KindOther
+}
+
+// DialFunc opens a TCP connection: the guarded dialer of internal/safehttp in our own processes,
+// the unguarded one only in the Specula executor.
+type DialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
+
+// TCPProber implements Prober for TCP checks.
+type TCPProber struct {
+	dial DialFunc
+	now  func() time.Time
+}
+
+// NewTCPProber returns a prober that connects with dial.
+func NewTCPProber(dial DialFunc) *TCPProber {
+	return &TCPProber{dial: dial, now: func() time.Time { return time.Now().UTC() }}
+}
+
+// Probe connects to req.Host:req.Port and closes the connection at once. The latency is the time
+// to connect; failures are kinds, as for HTTP.
+func (p *TCPProber) Probe(parent context.Context, req Request) Result {
+	res := Result{CheckedAt: p.now()}
+	timeout := req.Timeout
+	if timeout <= 0 {
+		timeout = DefaultTimeout
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+	start := time.Now()
+	conn, err := p.dial(ctx, "tcp", net.JoinHostPort(req.Host, strconv.Itoa(req.Port)))
+	latency := time.Since(start)
+	if err != nil {
+		if errors.Is(parent.Err(), context.Canceled) {
+			return Result{CheckedAt: res.CheckedAt, Cancelled: true}
+		}
+		res.ErrorKind = classify(ctx, err)
+		return res
+	}
+	_ = conn.Close()
+	res.OK, res.LatencyMs = true, int(latency.Milliseconds())
+	return res
+}
+
+// Mux sends TCP requests to TCP and everything else to HTTP.
+type Mux struct{ HTTP, TCP Prober }
+
+// Probe implements Prober.
+func (m Mux) Probe(ctx context.Context, req Request) Result {
+	if req.TCP {
+		return m.TCP.Probe(ctx, req)
+	}
+	return m.HTTP.Probe(ctx, req)
 }

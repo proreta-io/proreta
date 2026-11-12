@@ -49,6 +49,7 @@ import {
   mapServerErrors,
   MAX_HEADERS,
   METHODS,
+  HOST_MAX,
   NAME_MAX,
   toCreateRequest,
   toMonitorRequest,
@@ -167,7 +168,9 @@ export default function MonitorForm({ mode }: { mode: "create" | "edit" }) {
       title={`Edit ${m.name}`}
       note={
         <span className="flex flex-wrap items-center gap-2.5 text-caption text-muted-foreground">
-          <Badge tone="strong">{m.type === "heartbeat" ? "Watchdog" : "HTTP"}</Badge>
+          <Badge tone="strong">
+            {m.type === "heartbeat" ? "Watchdog" : m.type === "tcp" ? "TCP" : "HTTP"}
+          </Badge>
           The type cannot change after a monitor is created.
         </span>
       }
@@ -338,6 +341,7 @@ function MonitorFormBody({
   }
 
   const heartbeat = values.type === "heartbeat";
+  const tcp = values.type === "tcp";
   const hasErrors = Object.values(errors).some(Boolean);
   const cancelTo = mode === "edit" && id ? `/monitors/${id}` : "/";
   const scheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(withoutHttps(values.url));
@@ -368,7 +372,7 @@ function MonitorFormBody({
               name="name"
               autoComplete="off"
               maxLength={NAME_MAX * 2}
-              placeholder={heartbeat ? "Nightly backup" : "Checkout API"}
+              placeholder={heartbeat ? "Nightly backup" : tcp ? "Postgres" : "Checkout API"}
               value={values.name}
               onChange={(e) => update("name", e.target.value)}
             />
@@ -387,35 +391,46 @@ function MonitorFormBody({
               onChange={(id) => update("speculaId", id)}
             />
 
-            <Field
-              label="URL"
-              hint={
-                speculaId
-                  ? "http or https, any port. Addresses inside your network are fine: the Specula checks from there."
-                  : "HTTPS only. Private and internal addresses are not allowed."
-              }
-              error={errors.url}
-            >
-              {(c) => (
-                <Input
-                  {...c}
-                  data-field="url"
-                  name="url"
-                  mono
-                  inputMode="url"
-                  spellCheck={false}
-                  autoCapitalize="off"
-                  autoComplete="off"
-                  maxLength={URL_MAX}
-                  placeholder="api.example.com/health"
-                  start={<span className={scheme ? "hidden" : undefined}>https://</span>}
-                  value={withoutHttps(values.url)}
-                  onChange={(e) => update("url", withHttps(e.target.value))}
-                />
-              )}
-            </Field>
+            {tcp ? (
+              <TcpFields
+                values={values}
+                update={update}
+                errors={errors}
+                specula={speculaId !== ""}
+              />
+            ) : (
+              <>
+                <Field
+                  label="URL"
+                  hint={
+                    speculaId
+                      ? "http or https, any port. Addresses inside your network are fine: the Specula checks from there."
+                      : "HTTPS only. Private and internal addresses are not allowed."
+                  }
+                  error={errors.url}
+                >
+                  {(c) => (
+                    <Input
+                      {...c}
+                      data-field="url"
+                      name="url"
+                      mono
+                      inputMode="url"
+                      spellCheck={false}
+                      autoCapitalize="off"
+                      autoComplete="off"
+                      maxLength={URL_MAX}
+                      placeholder="api.example.com/health"
+                      start={<span className={scheme ? "hidden" : undefined}>https://</span>}
+                      value={withoutHttps(values.url)}
+                      onChange={(e) => update("url", withHttps(e.target.value))}
+                    />
+                  )}
+                </Field>
 
-            <RequestFields values={values} update={update} errors={errors} />
+                <RequestFields values={values} update={update} errors={errors} />
+              </>
+            )}
 
             <div className="flex flex-col gap-1.5">
               <div className="grid grid-cols-2 gap-3">
@@ -425,7 +440,9 @@ function MonitorFormBody({
               <span className="text-caption text-muted-foreground">Fixed for now.</span>
             </div>
 
-            <ExpectedStatus values={values} update={update} error={errors.expectedStatus} />
+            {!tcp && (
+              <ExpectedStatus values={values} update={update} error={errors.expectedStatus} />
+            )}
 
             <div className="flex flex-col gap-1.5">
               <span className="text-caption font-medium">Alert after</span>
@@ -471,7 +488,9 @@ function MonitorFormBody({
           description={
             heartbeat
               ? "Slack gets a message when no ping arrives in time and when pings resume."
-              : "Slack gets a message when it goes down and when it recovers, and a warning when the TLS certificate expires in 14 days or less."
+              : tcp
+                ? "Slack gets a message when it goes down and when it recovers."
+                : "Slack gets a message when it goes down and when it recovers, and a warning when the TLS certificate expires in 14 days or less."
           }
           data-field="notificationsEnabled"
           error={errors.notificationsEnabled}
@@ -680,6 +699,12 @@ function TypeChoice({
       full: httpFull ? "Your plan's HTTP monitor limit is reached." : undefined,
     },
     {
+      type: "tcp" as const,
+      title: "TCP port",
+      text: "Proreta connects to a host and a port every minute: a database, a mail server, any service that is not a web page.",
+      full: httpFull ? "Your plan's monitor limit is reached." : undefined,
+    },
+    {
       type: "heartbeat" as const,
       title: "Watchdog (heartbeat)",
       text: "Your job or Alertmanager's always-firing Watchdog alert pings a secret URL; Proreta alerts when the pings stop.",
@@ -689,7 +714,7 @@ function TypeChoice({
   return (
     <fieldset className="flex flex-col gap-2">
       <legend className="pb-2 text-caption font-medium">What to monitor</legend>
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="grid gap-2 sm:grid-cols-3">
         {options.map((o) => (
           <TypeCard
             key={o.type}
@@ -938,6 +963,65 @@ function BodyField({
 }
 
 /** Where the check runs: Proreta's own worker, or a Specula inside your network. */
+/** The target of a tcp monitor: where to connect. */
+function TcpFields({
+  values,
+  update,
+  errors,
+  specula,
+}: {
+  values: MonitorFormValues;
+  update: Update;
+  errors: MonitorFormErrors;
+  specula: boolean;
+}) {
+  return (
+    <div className="grid gap-4 sm:grid-cols-[1fr_8rem]">
+      <Field
+        label="Host"
+        hint={
+          specula
+            ? "A name or an address in your network, such as postgres.prod.svc or 10.0.4.12."
+            : "A public host name or IP address, without http:// or a port."
+        }
+        error={errors.host}
+      >
+        {(c) => (
+          <Input
+            {...c}
+            data-field="host"
+            name="host"
+            mono
+            spellCheck={false}
+            autoCapitalize="off"
+            autoComplete="off"
+            maxLength={HOST_MAX}
+            placeholder="db.example.com"
+            value={values.host}
+            onChange={(e) => update("host", e.target.value)}
+          />
+        )}
+      </Field>
+      <Field label="Port" error={errors.port}>
+        {(c) => (
+          <Input
+            {...c}
+            data-field="port"
+            name="port"
+            mono
+            inputMode="numeric"
+            autoComplete="off"
+            maxLength={5}
+            placeholder="5432"
+            value={values.port}
+            onChange={(e) => update("port", e.target.value)}
+          />
+        )}
+      </Field>
+    </div>
+  );
+}
+
 function RunFrom({
   value,
   specula,
@@ -958,7 +1042,7 @@ function RunFrom({
   return (
     <Field
       label="Run from"
-      hint="Proreta cloud checks public HTTPS addresses. A Specula checks from inside your own network."
+      hint="Proreta cloud checks public addresses. A Specula checks from inside your own network."
       error={error}
       className="sm:max-w-80"
     >

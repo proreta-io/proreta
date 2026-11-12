@@ -11,6 +11,7 @@ Operator and contributor documentation for Proreta.
 
 ## Using Proreta
 - [Monitor requests](monitor-requests.md): method, headers and body of an HTTP check, what is stored and what is never shown
+- [TCP monitors](tcp-monitors.md): checking that a host accepts connections on a port, from Proreta's cloud or inside your network
 
 ## Runbooks
 | Runbook | Covers |
