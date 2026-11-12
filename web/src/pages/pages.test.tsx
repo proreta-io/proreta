@@ -1,6 +1,7 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {
+  Specula,
   Channel,
   HeartbeatMonitor,
   HttpMonitor,
@@ -60,6 +61,20 @@ const detail = (over: Partial<MonitorDetail> = {}): MonitorDetail => {
     ...over,
   };
 };
+
+const speculaOf = (over: Partial<Specula> = {}): Specula => ({
+  id: "s1",
+  name: "Prod cluster",
+  allProjects: true,
+  projectIds: [],
+  status: "online",
+  version: "0.1.0",
+  hostname: "pod-1",
+  lastSeenAt: "2026-11-12T10:00:00Z",
+  createdAt: "2026-11-01T00:00:00Z",
+  revokedAt: null,
+  ...over,
+});
 
 const channel = (over: Partial<Channel> = {}): Channel => ({
   id: "c1",
@@ -400,6 +415,49 @@ describe("monitor form", () => {
     });
     expect((body as { http: Record<string, unknown> }).http).not.toHaveProperty("body");
     expect(JSON.stringify(body)).not.toContain('"value"');
+  });
+
+  it("runs a monitor at a Specula and accepts a target inside the network", async () => {
+    let body: unknown;
+    const created = detail({ id: "new3", name: "Orders" });
+    mockApi({
+      ...signedIn,
+      "GET /api/v1/specula": () =>
+        json({
+          items: [
+            { ...speculaOf(), id: "s1", name: "Prod cluster" },
+            { ...speculaOf(), id: "s2", name: "Lab", status: "offline" },
+          ],
+        }),
+      "POST /api/v1/monitors": async (req) => {
+        body = await req.json();
+        return json(created, 201);
+      },
+      "GET /api/v1/monitors/new3": () => json(created),
+    });
+    renderApp("/monitors/new");
+    await userEvent.type(await screen.findByLabelText("Name"), "Orders");
+    await userEvent.type(screen.getByLabelText("URL"), "http://orders.shop.svc:8080/health");
+    // From Proreta's own worker the private http target is refused on the client.
+    await userEvent.click(screen.getByRole("button", { name: "Create monitor" }));
+    expect(await screen.findByText("Use an https:// URL.")).toBeInTheDocument();
+    const select = screen.getByLabelText("Run from");
+    expect(within(select).getByRole("option", { name: "Lab (offline)" })).toBeInTheDocument();
+    await userEvent.selectOptions(select, "s1");
+    expect(screen.getByText(/http or https, any port/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Create monitor" }));
+    expect(await screen.findByRole("heading", { name: "Orders", level: 1 })).toBeInTheDocument();
+    expect(body).toMatchObject({
+      location: { type: "specula", speculaId: "s1" },
+      http: { url: "http://orders.shop.svc:8080/health" },
+    });
+  });
+
+  it("hides Run from when no Specula can be used", async () => {
+    mockApi({ ...signedIn, "GET /api/v1/specula": () => json({ items: [] }) });
+    renderApp("/monitors/new");
+    await screen.findByLabelText("Name");
+    await waitFor(() => expect(screen.queryByLabelText("Run from")).not.toBeInTheDocument());
   });
 
   it("shows a server error about a header next to the headers", async () => {
@@ -1381,6 +1439,7 @@ describe("watchdogs", () => {
         }),
         notificationsEnabled: true,
         channelIds: [],
+        location: { type: "cloud" },
       });
       expect(sent.body).not.toHaveProperty("projectId");
     });

@@ -14,6 +14,13 @@ export type StatsRange = Schemas["StatsRange"];
 export type LatencyPoint = Schemas["LatencyPoint"];
 export type Check = Schemas["Check"];
 export type Incident = Schemas["Incident"];
+export type Specula = Schemas["Specula"];
+export type SpeculaCreate = Schemas["SpeculaCreate"];
+export type SpeculaUpdate = Schemas["SpeculaUpdate"];
+export type SpeculaCreated = Schemas["SpeculaCreated"];
+export type SpeculaStatus = Schemas["SpeculaStatus"];
+export type MonitorLocation = Schemas["MonitorLocation"];
+export type MonitorLocationInput = Schemas["MonitorLocationInput"];
 export type Channel = Schemas["Channel"];
 export type ChannelCreate = Schemas["ChannelCreate"];
 export type ChannelUpdate = Schemas["ChannelUpdate"];
@@ -79,6 +86,8 @@ export const queryKeys = {
   stats: (id: string, range: StatsRange) => ["monitors", id, "stats", range] as const,
   checks: (id: string) => ["monitors", id, "checks"] as const,
   incidents: (id: string) => ["monitors", id, "incidents"] as const,
+  specula: ["specula"] as const,
+  speculaFor: (projectId: string | undefined) => ["specula", "for", projectId ?? "all"] as const,
   channels: ["channels"] as const,
   channelsFor: (projectId: string | undefined) => ["channels", "for", projectId ?? "all"] as const,
   projects: ["projects"] as const,
@@ -227,6 +236,30 @@ export const listChecks = (monitorId: string, limit = 20) =>
 
 export const listIncidents = (monitorId: string) =>
   unwrap(client.GET("/api/v1/monitors/{monitorId}/incidents", monitorPath(monitorId)));
+
+/** The Specula executors the user sees; with a project id, those a monitor of it may run at. */
+export const listSpecula = (projectId?: string, includeRevoked = false) =>
+  unwrap(
+    client.GET("/api/v1/specula", {
+      params: {
+        query: {
+          ...(projectId ? { projectId } : {}),
+          ...(includeRevoked ? { includeRevoked } : {}),
+        },
+      },
+    }),
+  );
+
+const speculaPath = (speculaId: string) => ({ params: { path: { speculaId } } });
+
+export const createSpecula = (body: SpeculaCreate) =>
+  unwrap(client.POST("/api/v1/specula", { body }));
+
+export const updateSpecula = (speculaId: string, body: SpeculaUpdate) =>
+  unwrap(client.PATCH("/api/v1/specula/{speculaId}", { ...speculaPath(speculaId), body }));
+
+export const revokeSpecula = (speculaId: string) =>
+  unwrap(client.DELETE("/api/v1/specula/{speculaId}", speculaPath(speculaId)));
 
 /** The channels the user sees; with a project id, those a monitor of that project may select. */
 export const listChannels = (projectId?: string) =>

@@ -2,6 +2,7 @@ import { ApiError, PLAN_LIMIT_PROBLEM_TYPE } from "../api/client";
 import {
   emptyMonitorForm,
   mapServerErrors,
+  toCreateRequest,
   toMonitorRequest,
   validateMonitorForm,
   validateMonitorUrl,
@@ -93,7 +94,28 @@ describe("validateMonitorForm", () => {
       },
       notificationsEnabled: true,
       channelIds: [],
+      location: { type: "cloud" },
     });
+  });
+
+  it("sends the location: always on edit, only for a Specula on create", () => {
+    const atSpecula = { ...valid, speculaId: "s1" };
+    expect(toMonitorRequest(atSpecula).location).toEqual({ type: "specula", speculaId: "s1" });
+    expect(toCreateRequest(atSpecula).location).toEqual({ type: "specula", speculaId: "s1" });
+    expect(toCreateRequest(valid)).not.toHaveProperty("location");
+    expect(toMonitorRequest({ ...valid, type: "heartbeat" })).not.toHaveProperty("location");
+  });
+
+  it("checks the URL with the rules of where the monitor runs", () => {
+    const private_ = { ...valid, url: "http://orders.shop.svc:8080/health" };
+    expect(validateMonitorForm(private_).url).toBe("Use an https:// URL.");
+    expect(validateMonitorForm({ ...private_, speculaId: "s1" }).url).toBeUndefined();
+    expect(validateMonitorUrl("https://example.com:8443/", true)).toBeUndefined();
+    expect(validateMonitorUrl("https://example.com:8443/")).toBe("Only port 443 is allowed.");
+    expect(validateMonitorUrl("ftp://svc/", true)).toBe("Use an http:// or https:// URL.");
+    expect(validateMonitorUrl("http://u:p@svc/", true)).toBe(
+      "Remove the user name and password from the URL.",
+    );
   });
 
   it("sends a stored header by name only and a body only when it was touched", () => {
@@ -168,6 +190,23 @@ describe("mapServerErrors", () => {
     );
     expect(mapped.fields.headers).toBe("Header 2: must not contain control characters");
     expect(mapped.fields.body).toBe("Is not allowed with GET or HEAD");
+  });
+
+  it("maps a Specula error to the Run from field", () => {
+    const mapped = mapServerErrors(
+      new ApiError({
+        type: "x",
+        title: "Validation failed",
+        status: 422,
+        fieldErrors: [
+          {
+            field: "location.speculaId",
+            message: "does not exist or is not available to this project",
+          },
+        ],
+      }),
+    );
+    expect(mapped.fields.speculaId).toBe("Does not exist or is not available to this project");
   });
 
   it("puts known field errors next to fields", () => {
