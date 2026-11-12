@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -395,4 +396,35 @@ func wrap(err error) error {
 		return err
 	}
 	return fmt.Errorf("specula: %w", err)
+}
+
+// Statuses of a Specula as the app shows them.
+const (
+	StatusPending = "pending"
+	StatusOnline  = "online"
+	StatusOffline = "offline"
+	StatusRevoked = "revoked"
+)
+
+// OnlineWindow is how recently a Specula must have been heard from to count as online. It
+// reports every minute, so this tolerates a missed report or two.
+const OnlineWindow = 90 * time.Second
+
+// Status is the state of s at now.
+func (s Specula) Status(now time.Time) string {
+	switch {
+	case s.RevokedAt != nil:
+		return StatusRevoked
+	case s.LastSeenAt == nil:
+		return StatusPending
+	case now.Sub(*s.LastSeenAt) <= OnlineWindow:
+		return StatusOnline
+	}
+	return StatusOffline
+}
+
+// UsableBy reports whether a project may use the Specula (it is not revoked and is shared with
+// the project).
+func (s Specula) UsableBy(project uuid.UUID) bool {
+	return s.RevokedAt == nil && (s.AllProjects || slices.Contains(s.ProjectIDs, project))
 }

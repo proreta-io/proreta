@@ -200,7 +200,7 @@ type heartbeatConfig struct {
 
 // Field names of validation errors and audit records: the API's, with the sub-object prefix.
 const (
-	fieldSpeculaID               = "speculaId"
+	fieldSpeculaID               = "location.speculaId"
 	fieldHTTP                    = "http"
 	fieldHeartbeat               = "heartbeat"
 	fieldURL                     = "http.url"

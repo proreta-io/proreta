@@ -8,6 +8,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/api/gen"
 	"github.com/proreta-io/proreta/backend/internal/monitors"
 	"github.com/proreta-io/proreta/backend/internal/platform/httpx"
+	"github.com/proreta-io/proreta/backend/internal/platform/validation"
 	"github.com/proreta-io/proreta/backend/internal/queries"
 )
 
@@ -48,7 +49,7 @@ func (s *server) ListMonitors(ctx context.Context, req gen.ListMonitorsRequestOb
 			NotificationsEnabled: m.NotificationsEnabled, Paused: m.Paused,
 			Status: gen.MonitorStatus(m.Status), StatusSince: m.StatusSince, LastErrorKind: m.LastErrorKind,
 			LastCheckedAt: m.LastCheckedAt, OngoingIncident: toOngoing(m.Ongoing),
-			Uptime24h: m.Uptime24h, Http: http, Heartbeat: heartbeat,
+			Uptime24h: m.Uptime24h, Location: locationFrom(m), Http: http, Heartbeat: heartbeat,
 		}
 	}
 	return gen.ListMonitors200JSONResponse{
@@ -66,6 +67,13 @@ func (s *server) CreateMonitor(ctx context.Context, req gen.CreateMonitorRequest
 	in := monitors.CreateInput{
 		Type: string(b.Type), Name: b.Name, NotificationsEnabled: b.NotificationsEnabled,
 		ChannelIDs: b.ChannelIds, ProjectID: b.ProjectId,
+	}
+	if b.Location != nil {
+		loc, err := locationOf(*b.Location)
+		if err != nil {
+			return nil, err
+		}
+		in.SpeculaID = loc.SpeculaID
 	}
 	if h := b.Http; h != nil {
 		in.HTTP = &monitors.HTTPSettings{URL: &h.Url, ExpectedStatus: h.ExpectedStatus, IntervalSeconds: h.IntervalSeconds,
@@ -105,6 +113,13 @@ func (s *server) UpdateMonitor(ctx context.Context, req gen.UpdateMonitorRequest
 	}
 	b := req.Body
 	in := monitors.UpdateInput{Name: b.Name, NotificationsEnabled: b.NotificationsEnabled, ChannelIDs: b.ChannelIds, ProjectID: b.ProjectId}
+	if b.Location != nil {
+		loc, err := locationOf(*b.Location)
+		if err != nil {
+			return nil, err
+		}
+		in.Location = &loc
+	}
 	if h := b.Http; h != nil {
 		in.HTTP = &monitors.HTTPSettings{URL: h.Url, ExpectedStatus: h.ExpectedStatus, IntervalSeconds: h.IntervalSeconds,
 			TimeoutSeconds: h.TimeoutSeconds, FailureThreshold: h.FailureThreshold,
@@ -261,7 +276,7 @@ func (s *server) detail(ctx context.Context, id uuid.UUID) (gen.MonitorDetail, e
 		Uptime:     gen.Uptime{H24: m.Uptime24h, D7: d.Uptime7d, D30: d.Uptime30d},
 		ChannelIds: d.ChannelIDs,
 		CreatedAt:  m.CreatedAt, UpdatedAt: m.UpdatedAt,
-		Http: http, Heartbeat: heartbeat,
+		Location: locationFrom(m), Http: http, Heartbeat: heartbeat,
 	}, nil
 }
 
@@ -313,4 +328,36 @@ func headersOf(h *[]gen.HttpHeaderInput) *[]monitors.HeaderInput {
 		out[i] = monitors.HeaderInput{Name: x.Name, Value: x.Value}
 	}
 	return &out
+}
+
+// locationOf turns the request's location into the service's: cloud has no Specula, specula
+// needs one.
+func locationOf(in gen.MonitorLocationInput) (monitors.Location, error) {
+	var verr validation.Error
+	switch in.Type {
+	case gen.MonitorLocationTypeCloud:
+		if in.SpeculaId != nil {
+			verr.Add("location.speculaId", "must be omitted for the cloud location")
+		}
+	case gen.MonitorLocationTypeSpecula:
+		if in.SpeculaId == nil {
+			verr.Add("location.speculaId", "is required for a Specula location")
+		}
+	}
+	if err := verr.Err(); err != nil {
+		return monitors.Location{}, err
+	}
+	return monitors.Location{SpeculaID: in.SpeculaId}, nil
+}
+
+// locationFrom is the location a read shows: nil for heartbeats, which have no location.
+func locationFrom(m queries.Monitor) *gen.MonitorLocation {
+	if m.Type != monitors.TypeHTTP {
+		return nil
+	}
+	if m.SpeculaID == nil {
+		return &gen.MonitorLocation{Type: gen.MonitorLocationTypeCloud}
+	}
+	name := m.SpeculaName
+	return &gen.MonitorLocation{Type: gen.MonitorLocationTypeSpecula, SpeculaId: m.SpeculaID, SpeculaName: &name}
 }

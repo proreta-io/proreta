@@ -22,6 +22,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/projects"
 	"github.com/proreta-io/proreta/backend/internal/queries"
 	"github.com/proreta-io/proreta/backend/internal/scheduler"
+	"github.com/proreta-io/proreta/backend/internal/specula"
 	"github.com/proreta-io/proreta/backend/internal/testsupport/pgtest"
 )
 
@@ -107,7 +108,7 @@ func newServerKeys(t *testing.T, env *pgtest.Env, opts auth.Options, requestKeys
 	sched := scheduler.New()
 	h, err := api.NewHandler(api.Config{Version: "test", Commit: "test", CookieSecure: true, TrustedProxyHops: 1},
 		api.Deps{Auth: svc, Monitors: monitors.NewService(pool, sched, incidents.NewService(sched)).WithRequestKeys(requestKeys), Queries: queries.New(pool, nil),
-			Plans: plans.NewService(pool), Projects: projects.NewService(pool), Logger: log})
+			Plans: plans.NewService(pool), Projects: projects.NewService(pool), Specula: specula.NewService(pool), Logger: log})
 	if err != nil {
 		t.Fatal(err)
 	}

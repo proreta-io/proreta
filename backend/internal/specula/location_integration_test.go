@@ -96,11 +96,11 @@ func TestIntegrationMonitorLocation(t *testing.T) {
 	t.Run("a Specula the project may not use is refused", func(t *testing.T) {
 		for name, id := range map[string]uuid.UUID{"not shared with the project": onlyOther.ID, "other organization": foreign.ID, "revoked": revoked.ID, "unknown": uuid.New()} {
 			_, err := create(privateURL, &id)
-			t.Run(name, func(t *testing.T) { field(err, "speculaId") })
+			t.Run(name, func(t *testing.T) { field(err, "location.speculaId") })
 		}
 		hb := 300
 		_, err := mon.Create(ctx, ma, monitors.CreateInput{Type: "heartbeat", Name: "hb", SpeculaID: &all.ID, Heartbeat: &monitors.HeartbeatSettings{ExpectedIntervalSeconds: &hb}})
-		field(err, "speculaId")
+		field(err, "location.speculaId")
 	})
 
 	t.Run("moving a monitor between the worker and a Specula", func(t *testing.T) {
@@ -148,7 +148,7 @@ func TestIntegrationMonitorLocation(t *testing.T) {
 		}
 		// A move to a Specula the project may not use changes nothing.
 		_, err = mon.Update(ctx, ma, m.ID, monitors.UpdateInput{Location: &monitors.Location{SpeculaID: &onlyOther.ID}})
-		field(err, "speculaId")
+		field(err, "location.speculaId")
 		// Leaving the location unchanged is not a move.
 		if _, err := mon.Update(ctx, ma, m.ID, monitors.UpdateInput{Location: &monitors.Location{}}); err != nil {
 			t.Fatal(err)
@@ -163,7 +163,7 @@ func TestIntegrationMonitorLocation(t *testing.T) {
 		pgtest.MustExec(t, admin, `UPDATE specula_agents SET all_projects = false WHERE id = '`+all.ID.String()+`'`)
 		defer pgtest.MustExec(t, admin, `UPDATE specula_agents SET all_projects = true WHERE id = '`+all.ID.String()+`'`)
 		_, err = mon.Update(ctx, ma, m.ID, monitors.UpdateInput{ProjectID: &otherProject})
-		field(err, "speculaId")
+		field(err, "location.speculaId")
 	})
 }
 

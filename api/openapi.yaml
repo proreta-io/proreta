@@ -88,6 +88,13 @@ tags:
       Projects of the organization and their members. Every organization has a
       Default project that cannot be deleted. Organization owners and maintainers create projects;
       project owners and maintainers manage the people and settings of their project.
+  - name: specula
+    description: |
+      Specula executors: programs that run inside your own network and check services that are
+      not reachable from outside. A Specula belongs to the organization and is shared with all
+      of its projects or with chosen ones; a monitor can run at one of them (see `location` of a
+      monitor). Owners and maintainers register, share and revoke them; every role that sees a
+      project reads the ones it may use. The token is shown once, when the Specula is created.
   - name: monitors
     description: HTTPS and heartbeat (watchdog) monitors, their status, statistics, checks and incidents
   - name: heartbeat
@@ -1808,6 +1815,166 @@ paths:
       responses:
         "204":
           description: Removed
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/specula:
+    get:
+      operationId: listSpecula
+      summary: List Specula executors
+      description: |
+        Owners and maintainers get every Specula of the organization that is not revoked (revoked
+        ones with `includeRevoked`), newest first, with the projects each is shared with. Other
+        roles get the ones their projects may use, without `projectIds`. With `projectId`, only
+        the Specula that project may use (404 when the caller does not see the project).
+      tags: [specula]
+      parameters:
+        - $ref: "#/components/parameters/ProjectFilter"
+        - name: includeRevoked
+          in: query
+          required: false
+          description: Include revoked Specula (owners and maintainers only; ignored for other roles)
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: The Specula executors
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpeculaList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createSpecula
+      summary: Register a Specula
+      description: |
+        Registers an executor and returns its token once; it is stored only as a hash and cannot be
+        read again. Run the executor with `PRORETA_SPECULA_TOKEN` set to it. `allProjects` defaults
+        to true; with false, `projectIds` lists the projects that may use it (at least one).
+        Business-rule failures are 422 with `fieldErrors`.
+      tags: [specula]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SpeculaCreate"
+      responses:
+        "201":
+          description: The registered Specula with its token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpeculaCreated"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/specula/{speculaId}:
+    parameters:
+      - $ref: "#/components/parameters/SpeculaId"
+    get:
+      operationId: getSpecula
+      summary: One Specula
+      description: |
+        Owners and maintainers read any Specula of the organization; other roles only one their
+        projects may use (404 otherwise).
+      tags: [specula]
+      responses:
+        "200":
+          description: The Specula
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Specula"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+    patch:
+      operationId: updateSpecula
+      summary: Rename a Specula or change who may use it
+      description: |
+        Changes the given fields. `projectIds` replaces the list; it is kept while `allProjects` is
+        true and applies again when it is set back to false. Monitors that run at the Specula
+        keep running even if their project loses access, but are not handed out by it any more:
+        move them first. A revoked Specula is 404.
+      tags: [specula]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SpeculaUpdate"
+      responses:
+        "200":
+          description: The updated Specula
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Specula"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: revokeSpecula
+      summary: Revoke a Specula
+      description: |
+        Revokes the token at once: the executor is refused from its next call and the location
+        hands out no more checks. A revoked Specula cannot be restored; register a new one.
+      tags: [specula]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Revoked
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -3877,6 +4044,14 @@ components:
       schema:
         type: string
         format: uuid
+    SpeculaId:
+      name: speculaId
+      in: path
+      required: true
+      description: Specula id; a value that is not a UUID is answered with 400
+      schema:
+        type: string
+        format: uuid
     ChannelId:
       name: channelId
       in: path
@@ -4432,6 +4607,8 @@ components:
           items:
             type: string
             format: uuid
+        location:
+          $ref: "#/components/schemas/MonitorLocationInput"
         http:
           $ref: "#/components/schemas/HttpSettings"
         heartbeat:
@@ -4460,6 +4637,8 @@ components:
           items:
             type: string
             format: uuid
+        location:
+          $ref: "#/components/schemas/MonitorLocationInput"
         http:
           $ref: "#/components/schemas/HttpSettingsUpdate"
         heartbeat:
@@ -4558,6 +4737,8 @@ components:
           minimum: 0
           maximum: 100
           description: Percentage of successful checks in the last 24 h; null when no check ran
+        location:
+          $ref: "#/components/schemas/MonitorLocation"
         http:
           $ref: "#/components/schemas/HttpMonitor"
         heartbeat:
@@ -4720,6 +4901,8 @@ components:
         updatedAt:
           type: string
           format: date-time
+        location:
+          $ref: "#/components/schemas/MonitorLocation"
         http:
           $ref: "#/components/schemas/HttpMonitor"
         heartbeat:
@@ -4918,6 +5101,141 @@ components:
         body:
           type: string
           description: The template rendered with sample data
+    SpeculaStatus:
+      type: string
+      description: |
+        `pending`: registered, never connected. `online`: heard from in the last 90 seconds.
+        `offline`: connected before but silent for longer. `revoked`: the token no longer works.
+      enum: [pending, online, offline, revoked]
+    Specula:
+      type: object
+      additionalProperties: false
+      required: [id, name, allProjects, projectIds, status, version, hostname, lastSeenAt, createdAt, revokedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 80
+        allProjects:
+          type: boolean
+          description: Every project of the organization may use it
+        projectIds:
+          type: array
+          description: The projects that may use it when `allProjects` is false; empty for roles that cannot manage Specula
+          items:
+            type: string
+            format: uuid
+        status:
+          $ref: "#/components/schemas/SpeculaStatus"
+        version:
+          type: string
+          description: What the executor reported; empty before its first call
+        hostname:
+          type: string
+          description: The host the executor reported; empty before its first call
+        lastSeenAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        revokedAt:
+          type: string
+          format: date-time
+          nullable: true
+    SpeculaCreated:
+      type: object
+      additionalProperties: false
+      description: A new Specula and its token, shown once
+      required: [specula, token]
+      properties:
+        specula:
+          $ref: "#/components/schemas/Specula"
+        token:
+          type: string
+          description: Starts with `spc_`. Store it now; it cannot be read again.
+          example: spc_n0t-a-real-token
+    SpeculaList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Specula"
+    SpeculaCreate:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: Unique among the organization's Specula that are not revoked, ignoring case
+          example: Production cluster
+        allProjects:
+          type: boolean
+          default: true
+        projectIds:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            format: uuid
+    SpeculaUpdate:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        allProjects:
+          type: boolean
+        projectIds:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            format: uuid
+    MonitorLocationType:
+      type: string
+      enum: [cloud, specula]
+    MonitorLocation:
+      type: object
+      additionalProperties: false
+      description: Where an http monitor runs
+      required: [type]
+      properties:
+        type:
+          $ref: "#/components/schemas/MonitorLocationType"
+        speculaId:
+          type: string
+          format: uuid
+          description: The Specula, when `type` is `specula`
+        speculaName:
+          type: string
+          description: Its name, when `type` is `specula`
+    MonitorLocationInput:
+      type: object
+      additionalProperties: false
+      description: |
+        `cloud` runs the monitor from Proreta (public HTTPS targets only). `specula` runs it at a
+        Specula of the organization that the monitor's project may use (`speculaId` is required);
+        its target may be http or https, on any port, at an internal address or name.
+        Moving a monitor ends an open incident and starts its history over.
+      required: [type]
+      properties:
+        type:
+          $ref: "#/components/schemas/MonitorLocationType"
+        speculaId:
+          type: string
+          format: uuid
     ChannelList:
       type: object
       additionalProperties: false

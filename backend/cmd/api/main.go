@@ -29,6 +29,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/projects"
 	"github.com/proreta-io/proreta/backend/internal/queries"
 	"github.com/proreta-io/proreta/backend/internal/scheduler"
+	"github.com/proreta-io/proreta/backend/internal/specula"
 	"github.com/proreta-io/proreta/backend/internal/statuspages"
 	"github.com/proreta-io/proreta/backend/migrations"
 )
@@ -141,6 +142,7 @@ func run() error {
 	}, api.Deps{
 		Auth:     authSvc,
 		Monitors: monitorSvc,
+		Specula:  specula.NewService(pool),
 		Queries:  queries.New(pool, nil),
 		Channels: notify.NewService(pool, keys, slack, cfg.PublicURL).WithWebhook(notify.NewWebhookNotifier(notifyClient)),
 		Plans:    plans.NewService(pool), Projects: projectsSvc,

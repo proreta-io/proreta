@@ -247,6 +247,8 @@ var permissions = []Definition{
 	{"statuspage.manage", LevelProject, "Configure, protect and publish the status pages of a project"},
 	{"organization.statuspages.read", LevelOrganization, "Read the organization-level status pages"},
 	{"organization.statuspages.manage", LevelOrganization, "Configure, protect and publish organization-level status pages"},
+	{"specula.read", LevelProject, "List the Specula executors the project may use"},
+	{"specula.manage", LevelOrganization, "Register, rename, share and revoke Specula executors"},
 }
 
 // grants is the one role table: each role is the set of permissions it holds, listed in full.
@@ -258,6 +260,7 @@ var grants = map[Role][]Permission{
 		"monitor.read", "monitor.create", "monitor.update", "monitor.delete", "incident.read", "heartbeat.manage",
 		"channel.read", "channel.manage", "statuspage.read", "statuspage.manage",
 		"organization.statuspages.read", "organization.statuspages.manage",
+		"specula.read", "specula.manage",
 	},
 	Maintainer: {
 		"account.use",
@@ -266,20 +269,21 @@ var grants = map[Role][]Permission{
 		"monitor.read", "monitor.create", "monitor.update", "monitor.delete", "incident.read", "heartbeat.manage",
 		"channel.read", "channel.manage", "statuspage.read", "statuspage.manage",
 		"organization.statuspages.read", "organization.statuspages.manage",
+		"specula.read", "specula.manage",
 	},
 	Member: {
 		"account.use",
 		"organization.members.read",
 		"project.read", "project.members.read",
 		"monitor.read", "monitor.create", "monitor.update", "monitor.delete", "incident.read", "heartbeat.manage",
-		"channel.read", "statuspage.read", "organization.statuspages.read",
+		"channel.read", "statuspage.read", "organization.statuspages.read", "specula.read",
 	},
 	Viewer: {
 		"account.use",
 		"organization.members.read",
 		"project.read", "project.members.read",
 		"monitor.read", "incident.read",
-		"channel.read", "statuspage.read", "organization.statuspages.read",
+		"channel.read", "statuspage.read", "organization.statuspages.read", "specula.read",
 	},
 }
 
@@ -330,6 +334,8 @@ var operations = map[string]Permission{
 	"listmonitorchecks":    "monitor.read",
 	"listmonitorincidents": "incident.read",
 	"listchannels":         "channel.read",
+	"listspecula":          "specula.read",
+	"getspecula":           "specula.read",
 	"getchannel":           "channel.read",
 	// Everyone who belongs lists people; a person without an organization role gets only those
 	// who share a project (the service narrows the list).
@@ -346,6 +352,11 @@ var operations = map[string]Permission{
 	"pausemonitor":             "monitor.update",
 	"resumemonitor":            "monitor.update",
 	"regenerateheartbeattoken": "heartbeat.manage",
+
+	// Specula executors.
+	"createspecula": "specula.manage",
+	"updatespecula": "specula.manage",
+	"revokespecula": "specula.manage",
 
 	// Notification channels, members and invitations.
 	"createchannel": "channel.manage",
