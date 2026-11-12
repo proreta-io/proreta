@@ -155,6 +155,30 @@ type Worker struct {
 	Location string
 }
 
+// SpeculaGateway is the configuration of cmd/speculagw, the endpoint of the executors that run in
+// customer networks. It uses the worker's database role.
+type SpeculaGateway struct {
+	Server
+	HTTPAddr string
+	// Request opens the sealed headers and bodies of monitor requests handed to an executor.
+	Request RequestSeal
+}
+
+// Specula is the configuration of cmd/specula, the executor that runs inside a customer's network.
+// It has no database and no encryption keys: it only calls Proreta over HTTPS.
+type Specula struct {
+	Base
+	AdminAddr string
+	// URL is PRORETA_URL, the address of Proreta (the Specula gateway), without a trailing slash.
+	URL string
+	// Token is PRORETA_SPECULA_TOKEN, created in the app when the Specula is registered.
+	Token Secret
+	// Concurrency caps checks in flight (PRORETA_SPECULA_CONCURRENCY, default 20).
+	Concurrency int
+	// PollInterval is how often it asks for work (PRORETA_SPECULA_POLL_INTERVAL, default 5s).
+	PollInterval time.Duration
+}
+
 // Jobs is the configuration of cmd/jobs.
 type Jobs struct {
 	Server
@@ -298,6 +322,37 @@ func LoadWorker(lookup LookupFunc) (Worker, error) {
 		TenantConcurrency: l.integer("PRORETA_WORKER_TENANT_CONCURRENCY", 5, 1, 1000),
 		HostConcurrency:   l.integer("PRORETA_WORKER_HOST_CONCURRENCY", 2, 1, 1000),
 		Location:          l.dnsLabel("PRORETA_WORKER_LOCATION", "default"),
+	}
+	return cfg, l.err()
+}
+
+// LoadSpeculaGateway loads the Specula gateway configuration.
+func LoadSpeculaGateway(lookup LookupFunc) (SpeculaGateway, error) {
+	l := &loader{lookup: lookup}
+	cfg := SpeculaGateway{
+		Server:   l.server(10),
+		HTTPAddr: l.addr("PRORETA_HTTP_ADDR", ":8080"),
+		Request:  l.requestSeal(),
+	}
+	if cfg.HTTPAddr != "" && cfg.HTTPAddr == cfg.AdminAddr {
+		l.fail("PRORETA_HTTP_ADDR", "must differ from PRORETA_ADMIN_ADDR")
+	}
+	return cfg, l.err()
+}
+
+// LoadSpecula loads the Specula executor configuration.
+func LoadSpecula(lookup LookupFunc) (Specula, error) {
+	l := &loader{lookup: lookup}
+	cfg := Specula{
+		Base:         l.base(),
+		AdminAddr:    l.addr("PRORETA_ADMIN_ADDR", ":9090"),
+		URL:          l.publicURL("PRORETA_URL"),
+		Token:        Secret(l.required("PRORETA_SPECULA_TOKEN")),
+		Concurrency:  l.integer("PRORETA_SPECULA_CONCURRENCY", 20, 1, 500),
+		PollInterval: l.duration("PRORETA_SPECULA_POLL_INTERVAL", 5*time.Second, time.Second, time.Minute),
+	}
+	if t := cfg.Token.Value(); t != "" && !strings.HasPrefix(t, "spc_") {
+		l.fail("PRORETA_SPECULA_TOKEN", "must be a Specula token (it starts with spc_)")
 	}
 	return cfg, l.err()
 }

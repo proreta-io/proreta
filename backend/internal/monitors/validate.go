@@ -85,3 +85,9 @@ func ValidateGrace(n int) string {
 	}
 	return ""
 }
+
+// ValidatePrivateURL checks the target of a monitor that runs at a Specula, inside the customer's
+// own network; see safehttp.ValidatePrivateURL.
+func ValidatePrivateURL(raw string) (string, string) {
+	return safehttp.ValidatePrivateURL(raw)
+}

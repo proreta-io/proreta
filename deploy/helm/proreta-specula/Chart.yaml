@@ -1,0 +1,22 @@
+apiVersion: v2
+name: proreta-specula
+description: Proreta Specula, the executor that checks services inside your own network and reports to Proreta over HTTPS
+type: application
+# The release workflow packages the chart with --version and --app-version from the Git tag
+# (vX.Y.Z -> X.Y.Z). In a git checkout both are placeholders and image.tag must be set.
+version: 0.1.0
+appVersion: "0.0.0"
+kubeVersion: ">=1.29.0-0"
+home: https://github.com/proreta-io/proreta
+sources:
+  - https://github.com/proreta-io/proreta
+keywords:
+  - uptime
+  - monitoring
+  - private-network
+maintainers:
+  - name: Proreta maintainers
+    url: https://github.com/proreta-io/proreta
+annotations:
+  artifacthub.io/category: monitoring-logging
+  artifacthub.io/license: Apache-2.0

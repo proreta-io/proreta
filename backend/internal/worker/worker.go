@@ -20,15 +20,14 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/proreta-io/proreta/backend/internal/checkresult"
 	"github.com/proreta-io/proreta/backend/internal/checks"
 	"github.com/proreta-io/proreta/backend/internal/incidents"
-	"github.com/proreta-io/proreta/backend/internal/incidents/machine"
 	"github.com/proreta-io/proreta/backend/internal/monitorrequest"
 	"github.com/proreta-io/proreta/backend/internal/platform/clock"
 	"github.com/proreta-io/proreta/backend/internal/platform/crypto"
 	"github.com/proreta-io/proreta/backend/internal/platform/db"
 	"github.com/proreta-io/proreta/backend/internal/platform/logging"
-	"github.com/proreta-io/proreta/backend/internal/results"
 	"github.com/proreta-io/proreta/backend/internal/scheduler"
 )
 
@@ -95,11 +94,12 @@ type Deps struct {
 
 // Worker claims, runs and records checks.
 type Worker struct {
-	cfg     Config
-	d       Deps
-	limiter *Limiter
-	batch   *batcher
-	running sync.WaitGroup
+	cfg      Config
+	d        Deps
+	limiter  *Limiter
+	batch    *batcher
+	running  sync.WaitGroup
+	recorder checkresult.Recorder
 }
 
 type outcome struct {
@@ -125,8 +125,9 @@ func New(cfg Config, d Deps) *Worker {
 	}
 	return &Worker{
 		cfg: cfg, d: d,
-		limiter: NewLimiter(cfg.Concurrency, cfg.TenantConcurrency, cfg.HostConcurrency),
-		batch:   newBatcher(cfg.FlushSize),
+		recorder: checkresult.Recorder{Scheduler: d.Scheduler, Incidents: d.Incidents, Clock: d.Clock, Jitter: d.Jitter},
+		limiter:  NewLimiter(cfg.Concurrency, cfg.TenantConcurrency, cfg.HostConcurrency),
+		batch:    newBatcher(cfg.FlushSize),
 	}
 }
 
@@ -395,57 +396,16 @@ func (w *Worker) flushTenant(ctx context.Context, tenant uuid.UUID, items []outc
 	w.d.Metrics.writeErrors.Add(float64(failed))
 }
 
-// write records one outcome and reports false when the lease was stale. The result row is
-// inserted before the lease check so that this transaction locks the monitor row (foreign key)
-// before its schedule row, the same order as pause, resume and delete in the api: the
-// opposite order could deadlock with a resume. A stale outcome is rolled back by the caller.
+// write records one outcome and reports false when the lease was stale.
 func (w *Worker) write(ctx context.Context, tx pgx.Tx, o outcome) (bool, error) {
-	j, r := o.job, o.res
-	if err := results.Insert(ctx, tx, results.Row{
-		TenantID: j.TenantID, MonitorID: j.MonitorID, LocationID: j.LocationID, CheckedAt: r.CheckedAt,
-		OK: r.OK, StatusCode: r.StatusCode, LatencyMs: r.LatencyMs, ErrorKind: r.ErrorKind, TLSNotAfter: r.TLSNotAfter,
-	}); err != nil {
-		return false, err
+	j := o.job
+	ok, permanent, err := w.recorder.Write(ctx, tx, j.Lease, j.Interval, o.res)
+	if permanent != "" {
+		w.d.Metrics.applyErrors.Inc()
+		w.d.Log.ErrorContext(ctx, "applying a result failed permanently; result kept, lease completed",
+			"monitor_id", j.MonitorID, "location_id", j.LocationID, "error_kind", permanent)
 	}
-	ok, err := w.d.Scheduler.Complete(ctx, tx, j.Lease, r.CheckedAt.Add(j.Interval).Add(w.d.Jitter()))
-	if err != nil || !ok {
-		return false, err
-	}
-	// The state machine runs in a nested savepoint: a permanent error undoes only its part, the
-	// result and the completed lease are kept, so the job is not repeated just to fail again.
-	sp, err := tx.Begin(ctx)
-	if err != nil {
-		return false, err
-	}
-	_, err = w.d.Incidents.ApplyResult(ctx, sp, incidents.ResultInput{
-		TenantID: j.TenantID, MonitorID: j.MonitorID, LocationID: j.LocationID, Now: w.d.Clock.Now(),
-		Result: machine.Result{OK: r.OK, ErrorKind: r.ErrorKind, TLSNotAfter: r.TLSNotAfter, CheckedAt: r.CheckedAt},
-	})
-	if err == nil {
-		return true, sp.Commit(ctx)
-	}
-	kind := permanentKind(err)
-	if kind == "" {
-		return false, err
-	}
-	if err := sp.Rollback(ctx); err != nil {
-		return false, err
-	}
-	w.d.Metrics.applyErrors.Inc()
-	w.d.Log.ErrorContext(ctx, "applying a result failed permanently; result kept, lease completed",
-		"monitor_id", j.MonitorID, "location_id", j.LocationID, "error_kind", kind)
-	return true, nil
-}
-
-// permanentKind names a permanent ApplyResult error, or returns "" for any other error.
-func permanentKind(err error) string {
-	switch {
-	case errors.Is(err, incidents.ErrMonitorNotFound):
-		return "monitor_not_found"
-	case errors.Is(err, incidents.ErrInconsistentState):
-		return "inconsistent_state"
-	}
-	return ""
+	return ok, err
 }
 
 func isLockTimeout(err error) bool {

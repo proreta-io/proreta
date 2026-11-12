@@ -74,6 +74,7 @@ not contain `proreta` (`fullnameOverride` replaces it).
 | `database.bootstrap.backoffLimit`, `.activeDeadlineSeconds`, `.ttlSecondsAfterFinished`, `.resources` | `2`, `300`, `600`, 50m/64Mi | Job settings. |
 | `secrets.admin.source`, `.login`, `.remoteKey` | `generate`, `admin`, `proreta/admin` | Platform admin Secret `<fullname>-admin`. |
 | `secrets.crypto.source`, `.keyId`, `.remoteKey` | `generate`, `k1`, `proreta/crypto` | Encryption key Secret `<fullname>-crypto`. |
+| `speculagw.enabled`, `.replicas`, `.httpPort`, `.resources` | `false`, `2`, `8080` | The [Specula](../../../docs/runbooks/specula.md) gateway: executors in customer networks call it at `httpRoute.speculaPathPrefix` (`/specula/v1`). It uses the worker database role and `secrets.request`. The executor itself is the separate chart [proreta-specula](../proreta-specula/README.md). |
 | `secrets.request.source`, `.keyId`, `.remoteKey` | `generate`, `r1`, `proreta/request` | Request key Secret `<fullname>-request`: seals the header values and bodies of monitor requests. |
 | `secrets.statuspage.source`, `.remoteKey` | `generate`, `proreta/statuspage` | Status page cookie key Secret `<fullname>-statuspage`. |
 | `secrets.oauth.existingSecret`, `.remoteKey` | `""`, `proreta/oauth` | OAuth client credentials. |

@@ -34,6 +34,13 @@ curl -s -b .dev/jar -H "X-CSRF-Token: $CSRF" -H 'Content-Type: application/json'
 curl -s -b .dev/jar $B/api/v1/monitors
 ```
 
+## A Specula on your machine
+A monitor that runs at a [Specula](runbooks/specula.md) may use `http://localhost:3000/...`: the executor does not apply the worker's address rules. Start the gateway next to the other processes (`make dev-speculagw`), register a Specula in the app (**Specula → Register a Specula**), copy its token and run the executor:
+```sh
+make dev-specula SPECULA_TOKEN=spc_...
+```
+Then choose the Specula under **Run from** when you add a monitor.
+
 ## Plain http on localhost
 `PRORETA_PUBLIC_URL` must be https, with one exception: `http://localhost`, `http://127.0.0.1` and `http://[::1]` (with or without a port) are accepted for local development. Because browsers and `curl` do not send a `Secure` cookie back over plain http, the api and the status page renderer then refuse to start unless `PRORETA_COOKIE_SECURE=false` is set explicitly, and the session cookie is named `proreta_session` instead of `__Host-proreta_session`. Never use this in production; `.dev/env` sets both values for you. The Helm chart accepts the same pair (`config.publicUrl: http://localhost:8081` with `config.cookieSecure: false`) for a trial on a local cluster, see [Trying it without a Gateway controller](install.md#trying-it-without-a-gateway-controller).
 

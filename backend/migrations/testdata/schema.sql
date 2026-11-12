@@ -32,6 +32,8 @@ projects kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arw/pror
 result_rollups_hourly kind=r owner=proreta_owner rls=true force=true acl=proreta_api=r/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=r/proreta_owner
 rollup_state kind=r owner=proreta_owner rls=true force=false acl=proreta_owner=arwdDxt/proreta_owner
 sessions kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arwd/proreta_owner,proreta_owner=arwdDxt/proreta_owner
+specula_agents kind=r owner=proreta_owner rls=true force=true acl=proreta_api=ar/proreta_owner,proreta_owner=arwdDxt/proreta_owner
+specula_projects kind=r owner=proreta_owner rls=true force=true acl=proreta_api=ard/proreta_owner,proreta_owner=arwdDxt/proreta_owner
 status_page_components kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arwd/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=rd/proreta_owner
 status_page_released_slugs kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arw/proreta_owner,proreta_owner=arwdDxt/proreta_owner
 status_page_snapshots kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arwd/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=arwd/proreta_owner
@@ -282,6 +284,23 @@ sessions.7 expires_at timestamp with time zone not null
 sessions.8 last_seen_at timestamp with time zone not null default now()
 sessions.9 ip inet
 sessions.10 user_agent text
+specula_agents.1 tenant_id uuid not null
+specula_agents.2 id uuid not null
+specula_agents.3 name text not null acl=proreta_api=w/proreta_owner
+specula_agents.4 token_hash bytea not null
+specula_agents.5 all_projects boolean not null default true acl=proreta_api=w/proreta_owner
+specula_agents.6 location_id uuid not null
+specula_agents.7 version text
+specula_agents.8 hostname text
+specula_agents.9 last_seen_at timestamp with time zone
+specula_agents.10 revoked_at timestamp with time zone
+specula_agents.11 created_by uuid
+specula_agents.12 created_at timestamp with time zone not null default now()
+specula_agents.13 updated_at timestamp with time zone not null default now() acl=proreta_api=w/proreta_owner
+specula_projects.1 tenant_id uuid not null
+specula_projects.2 specula_id uuid not null
+specula_projects.3 project_id uuid not null
+specula_projects.4 created_at timestamp with time zone not null default now()
 status_page_components.1 id uuid not null
 status_page_components.2 tenant_id uuid not null
 status_page_components.3 page_id uuid not null
@@ -389,7 +408,7 @@ incidents incidents_check CHECK (((resolved_at IS NULL) = (resolve_reason IS NUL
 incidents incidents_monitor_fkey FOREIGN KEY (tenant_id, monitor_id) REFERENCES monitors(tenant_id, id)
 incidents incidents_pkey PRIMARY KEY (id)
 incidents incidents_reason_check CHECK (((length(reason) >= 1) AND (length(reason) <= 64)))
-incidents incidents_resolve_reason_check CHECK ((resolve_reason = ANY (ARRAY['recovered'::text, 'paused'::text, 'deleted'::text, 'url_changed'::text])))
+incidents incidents_resolve_reason_check CHECK ((resolve_reason = ANY (ARRAY['recovered'::text, 'paused'::text, 'deleted'::text, 'url_changed'::text, 'location_changed'::text])))
 incidents incidents_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id)
 incidents incidents_tenant_id_id_key UNIQUE (tenant_id, id)
 invitations invitations_accepted_by_fkey FOREIGN KEY (accepted_by) REFERENCES users(id)
@@ -534,6 +553,20 @@ sessions sessions_tenant_id_user_id_fkey FOREIGN KEY (tenant_id, user_id) REFERE
 sessions sessions_token_hash_check CHECK ((length(token_hash) = 32))
 sessions sessions_token_hash_key UNIQUE (token_hash)
 sessions sessions_user_agent_check CHECK ((length(user_agent) <= 512))
+specula_agents specula_agents_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id)
+specula_agents specula_agents_hostname_check CHECK ((length(hostname) <= 253))
+specula_agents specula_agents_id_key UNIQUE (id)
+specula_agents specula_agents_location_id_fkey FOREIGN KEY (location_id) REFERENCES probe_locations(id)
+specula_agents specula_agents_location_id_key UNIQUE (location_id)
+specula_agents specula_agents_name_check CHECK (((char_length(name) >= 1) AND (char_length(name) <= 80)))
+specula_agents specula_agents_pkey PRIMARY KEY (tenant_id, id)
+specula_agents specula_agents_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+specula_agents specula_agents_token_hash_check CHECK ((length(token_hash) = 32))
+specula_agents specula_agents_token_hash_key UNIQUE (token_hash)
+specula_agents specula_agents_version_check CHECK ((length(version) <= 64))
+specula_projects specula_projects_pkey PRIMARY KEY (specula_id, project_id)
+specula_projects specula_projects_tenant_id_project_id_fkey FOREIGN KEY (tenant_id, project_id) REFERENCES projects(tenant_id, id)
+specula_projects specula_projects_tenant_id_specula_id_fkey FOREIGN KEY (tenant_id, specula_id) REFERENCES specula_agents(tenant_id, id)
 status_page_components status_page_components_group_name_check CHECK (((group_name IS NULL) OR ((char_length(group_name) >= 1) AND (char_length(group_name) <= 60))))
 status_page_components status_page_components_page_id_monitor_id_key UNIQUE (page_id, monitor_id)
 status_page_components status_page_components_page_id_position_key UNIQUE (page_id, "position")
@@ -654,6 +687,12 @@ CREATE INDEX sessions_expires_at_idx ON public.sessions USING btree (expires_at)
 CREATE UNIQUE INDEX sessions_pkey ON public.sessions USING btree (id)
 CREATE INDEX sessions_tenant_user_idx ON public.sessions USING btree (tenant_id, user_id)
 CREATE UNIQUE INDEX sessions_token_hash_key ON public.sessions USING btree (token_hash)
+CREATE UNIQUE INDEX specula_agents_id_key ON public.specula_agents USING btree (id)
+CREATE UNIQUE INDEX specula_agents_location_id_key ON public.specula_agents USING btree (location_id)
+CREATE UNIQUE INDEX specula_agents_name_idx ON public.specula_agents USING btree (tenant_id, lower(name)) WHERE (revoked_at IS NULL)
+CREATE UNIQUE INDEX specula_agents_pkey ON public.specula_agents USING btree (tenant_id, id)
+CREATE UNIQUE INDEX specula_agents_token_hash_key ON public.specula_agents USING btree (token_hash)
+CREATE UNIQUE INDEX specula_projects_pkey ON public.specula_projects USING btree (specula_id, project_id)
 CREATE INDEX status_page_components_monitor_idx ON public.status_page_components USING btree (tenant_id, monitor_id)
 CREATE UNIQUE INDEX status_page_components_page_id_monitor_id_key ON public.status_page_components USING btree (page_id, monitor_id)
 CREATE UNIQUE INDEX status_page_components_page_id_position_key ON public.status_page_components USING btree (page_id, "position")
@@ -692,6 +731,8 @@ monitor_location_state owner_claim_lease cmd=w permissive=true to=proreta_owner 
 monitor_location_state owner_claim_read cmd=r permissive=true to=proreta_owner using true
 monitor_location_state tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
 monitor_locations tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
+monitor_state owner_specula_unreachable_read cmd=r permissive=true to=proreta_owner using true
+monitor_state owner_specula_unreachable_write cmd=w permissive=true to=proreta_owner using true check true
 monitor_state tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
 monitors owner_claim_read cmd=r permissive=true to=proreta_owner using true
 monitors tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
@@ -711,6 +752,10 @@ result_rollups_hourly tenant_isolation cmd=* permissive=true to=public using (te
 sessions owner_session_lookup cmd=r permissive=true to=proreta_owner using true
 sessions owner_session_purge cmd=d permissive=true to=proreta_owner using (expires_at < now())
 sessions tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
+specula_agents owner_specula cmd=* permissive=true to=proreta_owner using true check true
+specula_agents tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
+specula_projects owner_specula_read cmd=r permissive=true to=proreta_owner using true
+specula_projects tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
 status_page_components tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
 status_page_released_slugs owner_slug_hold_read cmd=r permissive=true to=proreta_owner using true
 status_page_released_slugs tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
@@ -720,6 +765,7 @@ status_pages owner_statuspage_read cmd=r permissive=true to=proreta_owner using 
 status_pages tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
 
 -- triggers
+CREATE TRIGGER specula_agents_sync_location AFTER UPDATE OF name ON public.specula_agents FOR EACH ROW EXECUTE FUNCTION specula_agents_sync_location()
 CREATE TRIGGER tenants_create_default_project AFTER INSERT ON public.tenants FOR EACH ROW EXECUTE FUNCTION tenants_create_default_project()
 
 -- function privileges
@@ -776,6 +822,7 @@ heartbeat_ping(bytea) owner=proreta_owner definer=true acl=proreta_api=X/proreta
 list_droppable_partitions() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 list_due_heartbeats(integer) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 mail_pending() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+monitor_set_location(uuid,uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 org_delete_tenant(uuid,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 outbox_pending() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 platform_registration_override() owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
@@ -784,6 +831,12 @@ purge_expired_sessions() owner=proreta_owner definer=true acl=proreta_owner=X/pr
 purge_mail_outbox(interval) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 purge_password_resets() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 reset_monitor_runtime(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+specula_agents_sync_location() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner
+specula_authenticate(bytea) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+specula_create(uuid,text,bytea,boolean,uuid[],uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+specula_hello(uuid,text,text) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+specula_mark_unreachable(interval) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+specula_revoke(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 status_page_published_pages() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 status_page_slug_held(text) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 status_page_snapshot(text) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_statuspage=X/proreta_owner
@@ -1744,6 +1797,12 @@ AS $function$
           AND m.type = 'http'
           AND NOT m.paused
           AND m.deleted_at IS NULL
+          AND (l.kind = 'platform' OR EXISTS (
+                SELECT 1 FROM specula_agents AS a
+                WHERE a.location_id = l.id AND a.tenant_id = s.tenant_id AND a.revoked_at IS NULL
+                  AND (a.all_projects OR EXISTS (
+                        SELECT 1 FROM specula_projects AS sp
+                        WHERE sp.specula_id = a.id AND sp.project_id = m.project_id))))
         ORDER BY s.next_run_at
         LIMIT least(greatest(n, 0), 1000)
         FOR UPDATE OF s SKIP LOCKED
@@ -2269,6 +2328,47 @@ CREATE OR REPLACE FUNCTION public.mail_pending()
 AS $function$
     SELECT count(*) FROM mail_outbox WHERE status = 'pending'
 $function$
+CREATE OR REPLACE FUNCTION public.monitor_set_location(p_monitor_id uuid, p_location_id uuid)
+ RETURNS text
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    caller_tenant uuid := NULLIF(current_setting('app.tenant_id', true), '')::uuid;
+    mon_project   uuid;
+    loc_kind      text;
+BEGIN
+    IF caller_tenant IS NULL THEN
+        RAISE EXCEPTION 'monitor_set_location: app.tenant_id is not set' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    SELECT project_id INTO mon_project FROM monitors
+    WHERE tenant_id = caller_tenant AND id = p_monitor_id AND deleted_at IS NULL AND type = 'http';
+    IF mon_project IS NULL THEN
+        RETURN 'no_monitor';
+    END IF;
+    SELECT kind INTO loc_kind FROM probe_locations WHERE id = p_location_id AND status = 'active';
+    IF loc_kind IS NULL THEN
+        RETURN 'bad_location';
+    END IF;
+    IF loc_kind = 'agent' AND NOT EXISTS (
+        SELECT 1 FROM specula_agents AS a
+        WHERE a.tenant_id = caller_tenant AND a.location_id = p_location_id AND a.revoked_at IS NULL
+          AND (a.all_projects OR EXISTS (
+                SELECT 1 FROM specula_projects AS sp WHERE sp.specula_id = a.id AND sp.project_id = mon_project)))
+    THEN
+        RETURN 'bad_location';
+    END IF;
+    DELETE FROM monitor_location_state
+    WHERE tenant_id = caller_tenant AND monitor_id = p_monitor_id AND location_id <> p_location_id;
+    INSERT INTO monitor_locations (tenant_id, monitor_id, location_id)
+    VALUES (caller_tenant, p_monitor_id, p_location_id) ON CONFLICT DO NOTHING;
+    INSERT INTO monitor_location_state (tenant_id, monitor_id, location_id, next_run_at)
+    VALUES (caller_tenant, p_monitor_id, p_location_id, now() + random() * interval '30 seconds')
+    ON CONFLICT DO NOTHING;
+    RETURN 'ok';
+END
+$function$
 CREATE OR REPLACE FUNCTION public.org_delete_tenant(p_actor uuid, p_audit_id uuid, p_ip inet)
  RETURNS boolean
  LANGUAGE plpgsql
@@ -2409,6 +2509,132 @@ BEGIN
       AND s.tenant_id = m.tenant_id AND s.monitor_id = m.id;
     GET DIAGNOSTICS n = ROW_COUNT;
     RETURN n;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.specula_agents_sync_location()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+    IF NEW.name IS DISTINCT FROM OLD.name THEN
+        UPDATE probe_locations SET name = NEW.name WHERE id = NEW.location_id;
+    END IF;
+    RETURN NEW;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.specula_authenticate(p_token_hash bytea)
+ RETURNS TABLE(specula_id uuid, tenant_id uuid, location_id uuid, location_code text)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+    RETURN QUERY
+    WITH hit AS (
+        SELECT a.id, a.tenant_id, a.location_id, l.code
+        FROM specula_agents AS a
+        JOIN tenants AS t ON t.id = a.tenant_id
+        JOIN probe_locations AS l ON l.id = a.location_id
+        WHERE a.token_hash = p_token_hash
+          AND a.revoked_at IS NULL
+          AND t.status = 'active' AND t.deleted_at IS NULL
+          AND l.status = 'active'
+    ), seen AS (
+        UPDATE specula_agents AS a SET last_seen_at = now()
+        FROM hit
+        WHERE a.tenant_id = hit.tenant_id AND a.id = hit.id
+          AND (a.last_seen_at IS NULL OR a.last_seen_at < now() - interval '10 seconds')
+    )
+    SELECT hit.id, hit.tenant_id, hit.location_id, hit.code FROM hit;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.specula_create(p_id uuid, p_name text, p_token_hash bytea, p_all_projects boolean, p_project_ids uuid[], p_actor uuid)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    caller_tenant uuid := NULLIF(current_setting('app.tenant_id', true), '')::uuid;
+    loc           uuid := p_id;
+    project       uuid;
+BEGIN
+    IF caller_tenant IS NULL THEN
+        RAISE EXCEPTION 'specula_create: app.tenant_id is not set' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    INSERT INTO probe_locations (id, code, name, provider, region, kind)
+    VALUES (loc, 'specula-' || replace(p_id::text, '-', ''), p_name, 'customer', 'private-network', 'agent');
+    INSERT INTO specula_agents (tenant_id, id, name, token_hash, all_projects, location_id, created_by)
+    VALUES (caller_tenant, p_id, p_name, p_token_hash, p_all_projects, loc, p_actor);
+    IF NOT p_all_projects THEN
+        FOREACH project IN ARRAY COALESCE(p_project_ids, '{}') LOOP
+            INSERT INTO specula_projects (tenant_id, specula_id, project_id) VALUES (caller_tenant, p_id, project)
+            ON CONFLICT DO NOTHING;
+        END LOOP;
+    END IF;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.specula_hello(p_specula_id uuid, p_version text, p_hostname text)
+ RETURNS boolean
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    WITH u AS (
+        UPDATE specula_agents SET version = left(p_version, 64), hostname = left(p_hostname, 253), last_seen_at = now()
+        WHERE id = p_specula_id AND revoked_at IS NULL
+        RETURNING 1
+    )
+    SELECT EXISTS (SELECT 1 FROM u)
+$function$
+CREATE OR REPLACE FUNCTION public.specula_mark_unreachable(p_after interval DEFAULT '00:03:00'::interval)
+ RETURNS integer
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    WITH gone AS (
+        SELECT a.location_id
+        FROM specula_agents AS a
+        WHERE a.revoked_at IS NOT NULL OR a.last_seen_at < now() - p_after
+    ), flagged AS (
+        UPDATE monitor_location_state AS s
+        SET status = 'unknown', consecutive_failures = 0
+        FROM gone
+        WHERE s.location_id = gone.location_id AND s.status <> 'unknown'
+        RETURNING s.tenant_id, s.monitor_id
+    ), changed AS (
+        UPDATE monitor_state AS m
+        SET status = 'unknown', status_changed_at = now()
+        FROM flagged
+        WHERE m.tenant_id = flagged.tenant_id AND m.monitor_id = flagged.monitor_id AND m.status <> 'unknown'
+        RETURNING 1
+    )
+    SELECT count(*)::integer FROM changed
+$function$
+CREATE OR REPLACE FUNCTION public.specula_revoke(p_id uuid)
+ RETURNS boolean
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    caller_tenant uuid := NULLIF(current_setting('app.tenant_id', true), '')::uuid;
+    loc           uuid;
+BEGIN
+    IF caller_tenant IS NULL THEN
+        RAISE EXCEPTION 'specula_revoke: app.tenant_id is not set' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    UPDATE specula_agents SET revoked_at = now(), updated_at = now()
+    WHERE tenant_id = caller_tenant AND id = p_id AND revoked_at IS NULL
+    RETURNING location_id INTO loc;
+    IF loc IS NULL THEN
+        RETURN false;
+    END IF;
+    UPDATE probe_locations SET status = 'disabled' WHERE id = loc;
+    RETURN true;
 END
 $function$
 CREATE OR REPLACE FUNCTION public.status_page_published_pages()

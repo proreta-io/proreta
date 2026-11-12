@@ -22,6 +22,7 @@ Operator and contributor documentation for Proreta.
 | [Sign-in with Google and GitHub](runbooks/oauth.md) | OAuth clients, redirect URIs, Workspace domains, OAuth-only mode |
 | [Outgoing email](runbooks/email.md) | Optional SMTP, set up in Admin → Email: settings, what is sent, delivery and troubleshooting |
 | [Webhook alert channels](runbooks/alerts-webhook.md) | What a webhook channel sends, message templates and placeholders, JSON escaping, SSRF limits, retries |
+| [Specula executors](runbooks/specula.md) | Checking services inside your own network: registering, running the executor, sharing with projects, revoking |
 | [Public status page](runbooks/status-page.md) | Enabling the renderer, caching, protected pages, abuse |
 | [Heartbeats with Alertmanager](runbooks/heartbeat-alertmanager.md) | Watchdog heartbeats for Prometheus Alertmanager |
 | [Observability](runbooks/observability.md) | Metrics, logs and suggested alert rules |

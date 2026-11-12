@@ -11,7 +11,7 @@ import (
 
 // Written by hand per role, not computed from the tables in authz.
 const (
-	permsProjectViewer     = "channel.read,incident.read,monitor.read,project.members.read,project.read,statuspage.read"
+	permsProjectViewer     = "channel.read,incident.read,monitor.read,project.members.read,project.read,specula.read,statuspage.read"
 	permsProjectMember     = permsProjectViewer + ",heartbeat.manage,monitor.create,monitor.delete,monitor.update"
 	permsProjectMaintainer = permsProjectMember + ",channel.manage,project.members.manage,project.update,statuspage.manage"
 	permsProjectOwner      = permsProjectMaintainer + ",project.delete"
@@ -28,8 +28,8 @@ var permsOrganization = map[authz.Role]string{
 	"":               "account.use",
 	authz.Viewer:     "account.use,organization.members.read,organization.statuspages.read," + permsProjectViewer,
 	authz.Member:     "account.use,organization.members.read,organization.statuspages.read," + permsProjectMember,
-	authz.Maintainer: "account.use,organization.members.manage,organization.members.read,organization.statuspages.manage,organization.statuspages.read,project.create,usage.read," + permsProjectMaintainer,
-	authz.Owner:      "account.use,organization.delete,organization.domains.manage,organization.members.manage,organization.members.read,organization.statuspages.manage,organization.statuspages.read,project.create,usage.read," + permsProjectOwner,
+	authz.Maintainer: "account.use,organization.members.manage,organization.members.read,organization.statuspages.manage,organization.statuspages.read,project.create,specula.manage,usage.read," + permsProjectMaintainer,
+	authz.Owner:      "account.use,organization.delete,organization.domains.manage,organization.members.manage,organization.members.read,organization.statuspages.manage,organization.statuspages.read,project.create,specula.manage,usage.read," + permsProjectOwner,
 }
 
 func sortedList(v any) string {

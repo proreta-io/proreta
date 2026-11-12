@@ -1,3 +1,4 @@
+import SpeculaPage from "./pages/Specula";
 import { Route, Routes } from "react-router-dom";
 import RequireAuth from "./auth/RequireAuth";
 import RequirePermission from "./auth/RequirePermission";
@@ -53,6 +54,9 @@ export default function App() {
           </Route>
           <Route element={<RequirePermission permission="channel.read" />}>
             <Route path="/channels" element={<Channels />} />
+          </Route>
+          <Route element={<RequirePermission permission="specula.read" />}>
+            <Route path="/specula" element={<SpeculaPage />} />
           </Route>
           <Route element={<RequirePermission permission="statuspage.read" />}>
             <Route path="/status-page" element={<StatusPageSettings />} />

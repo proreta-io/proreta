@@ -304,6 +304,11 @@ function Header({
               {checkSettings(monitor.http)}
             </span>
           )}
+          {monitor.location?.type === "specula" && (
+            <span className="text-caption text-muted-foreground">
+              Runs at {monitor.location.speculaName ?? "a Specula"} inside your network
+            </span>
+          )}
           {monitor.http && requestSummary(monitor.http) && (
             <span className="text-caption text-muted-foreground">
               Request: {requestSummary(monitor.http)}

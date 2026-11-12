@@ -1,0 +1,10 @@
+{{- if .Values.speculagw.enabled }}
+{{- /* Specula gateway: the worker database role (claims through SECURITY DEFINER functions) and the
+       request keyring, nothing else: no data encryption keys, no admin credentials, no outbound
+       calls (so no SSRF settings). */ -}}
+{{- $env := join "\n" (list
+  (include "proreta.env.common" (dict "ctx" . "dbKey" "worker_url"))
+  (include "proreta.env.request" .)
+  (include "proreta.env.speculagw" .)) -}}
+{{ include "proreta.backendDeployment" (dict "ctx" . "component" "speculagw" "cfg" .Values.speculagw "env" $env "httpPort" .Values.speculagw.httpPort) }}
+{{- end }}

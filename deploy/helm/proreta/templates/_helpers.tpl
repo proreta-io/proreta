@@ -264,6 +264,12 @@ with it and the worker opens them. The worker's only key. Arg: root context
       key: cookie_key
 {{- end }}
 
+{{/* Specula gateway env (config.SpeculaGateway). Arg: root context */}}
+{{- define "proreta.env.speculagw" -}}
+- name: PRORETA_HTTP_ADDR
+  value: {{ printf ":%d" (int .Values.speculagw.httpPort) | quote }}
+{{- end }}
+
 {{/* worker-only env (config.Worker). Arg: root context */}}
 {{- define "proreta.env.worker" -}}
 {{- $w := .Values.worker }}

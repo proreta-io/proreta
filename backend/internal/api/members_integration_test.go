@@ -122,6 +122,11 @@ var roleCalls = map[string]struct {
 	"deleteChannel":            {authz.Maintainer, http.MethodDelete, "/api/v1/channels/{id}", ""},
 	"testChannel":              {authz.Maintainer, http.MethodPost, "/api/v1/channels/{id}/test", ""},
 	"previewChannelTemplate":   {authz.Maintainer, http.MethodPost, "/api/v1/channels/preview-template", `{"contentType":"text","bodyTemplate":"{{event}}"}`},
+	"listSpecula":              {authz.Viewer, http.MethodGet, "/api/v1/specula", ""},
+	"createSpecula":            {authz.Maintainer, http.MethodPost, "/api/v1/specula", `{"name":"role matrix"}`},
+	"getSpecula":               {authz.Viewer, http.MethodGet, "/api/v1/specula/{id}", ""},
+	"updateSpecula":            {authz.Maintainer, http.MethodPatch, "/api/v1/specula/{id}", `{"name":"x"}`},
+	"revokeSpecula":            {authz.Maintainer, http.MethodDelete, "/api/v1/specula/{id}", ""},
 	"listMembers":              {authz.Viewer, http.MethodGet, "/api/v1/members", ""},
 	"updateMember":             {authz.Maintainer, http.MethodPatch, "/api/v1/members/{id}", `{"role":"viewer"}`},
 	"removeMember":             {authz.Maintainer, http.MethodDelete, "/api/v1/members/{id}", ""},
@@ -186,7 +191,7 @@ func TestIntegrationRoleMatrix(t *testing.T) {
 	// project invitation follows the project role (see TestIntegrationProjectInvitationPermissions).
 	orgScoped := map[string]bool{}
 	for _, op := range []string{"updateMember", "removeMember", "createInvitation",
-		"getUsage", "createProject", "deleteOrganization", "listAuthDomains", "createAuthDomain", "updateAuthDomain", "deleteAuthDomain",
+		"getUsage", "createProject", "deleteOrganization", "createSpecula", "updateSpecula", "revokeSpecula", "listAuthDomains", "createAuthDomain", "updateAuthDomain", "deleteAuthDomain",
 		// The request of the matrix names no project, which makes the page organization-level.
 		"createStatusPage"} {
 		orgScoped[strings.ToLower(op)] = true

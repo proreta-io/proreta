@@ -34,7 +34,7 @@ var expectedMinimum = map[Role][]string{
 		"changePassword", "acceptInvitation", "leaveOrganization", "listIdentities", "unlinkIdentity",
 		"listMonitors", "getMonitor", "getMonitorStats", "listMonitorChecks", "listMonitorIncidents",
 		"listChannels", "getChannel", "listMembers", "listProjects", "getProject", "listProjectMembers",
-		"listStatusPages", "getStatusPage",
+		"listStatusPages", "getStatusPage", "listSpecula", "getSpecula",
 	},
 	Member: {
 		"createMonitor", "updateMonitor", "deleteMonitor", "pauseMonitor", "resumeMonitor",
@@ -46,6 +46,7 @@ var expectedMinimum = map[Role][]string{
 		"createProject", "updateProject", "putProjectMember", "removeProjectMember",
 		"createStatusPage", "updateStatusPage", "deleteStatusPage", "setStatusPagePassword",
 		"clearStatusPagePassword", "listStatusPageComponents", "putStatusPageComponents", "previewStatusPage",
+		"createSpecula", "updateSpecula", "revokeSpecula",
 	},
 	Owner: {
 		"deleteProject", "deleteOrganization", "listAuthDomains", "createAuthDomain", "updateAuthDomain", "deleteAuthDomain",
@@ -232,6 +233,7 @@ func TestHigher(t *testing.T) {
 var expectedInProject = map[Permission][]Role{
 	"project.read":           {Owner, Maintainer, Member, Viewer},
 	"project.members.read":   {Owner, Maintainer, Member, Viewer},
+	"specula.read":           {Owner, Maintainer, Member, Viewer},
 	"monitor.read":           {Owner, Maintainer, Member, Viewer},
 	"incident.read":          {Owner, Maintainer, Member, Viewer},
 	"channel.read":           {Owner, Maintainer, Member, Viewer},
@@ -255,6 +257,7 @@ var expectedInOrganization = map[Permission][]Role{
 	"project.create":                  {Owner, Maintainer},
 	"organization.members.manage":     {Owner, Maintainer},
 	"organization.statuspages.manage": {Owner, Maintainer},
+	"specula.manage":                  {Owner, Maintainer},
 	"organization.delete":             {Owner},
 	"organization.domains.manage":     {Owner},
 }
@@ -486,8 +489,8 @@ func TestHeldAndRolesWith(t *testing.T) {
 	if got := (Actor{}).Held(); len(got) != 0 {
 		t.Errorf("nobody holds %v", got)
 	}
-	if got := (Actor{UserID: uuid.New(), Role: Member}).Held(); len(got) != 13 {
-		t.Errorf("member holds %v, want 13 permissions", got)
+	if got := (Actor{UserID: uuid.New(), Role: Member}).Held(); len(got) != 14 {
+		t.Errorf("member holds %v, want 14 permissions", got)
 	}
 	if got := ProjectPermissions("nobody"); len(got) != 0 {
 		t.Errorf("unknown role holds %v in a project", got)

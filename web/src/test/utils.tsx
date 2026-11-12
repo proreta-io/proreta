@@ -24,6 +24,7 @@ const PROJECT_VIEWER = [
   "monitor.read",
   "project.members.read",
   "project.read",
+  "specula.read",
   "statuspage.read",
 ];
 const PROJECT_MEMBER = [
@@ -53,6 +54,7 @@ const ORGANIZATION_MANAGE = [
   "organization.members.manage",
   "organization.statuspages.manage",
   "project.create",
+  "specula.manage",
   "usage.read",
 ];
 const ORGANIZATION_PERMISSIONS: Record<MembershipRole, string[]> = {

@@ -35,6 +35,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/platformsettings"
 	"github.com/proreta-io/proreta/backend/internal/projects"
 	"github.com/proreta-io/proreta/backend/internal/queries"
+	"github.com/proreta-io/proreta/backend/internal/specula"
 	"github.com/proreta-io/proreta/backend/internal/statuspages"
 )
 
@@ -84,6 +85,8 @@ type Deps struct {
 	Projects *projects.Service
 	// StatusPages configures the public status page.
 	StatusPages *statuspages.Service
+	// Specula manages the executors that run inside customer networks.
+	Specula *specula.Service
 	// Admin serves /api/v1/admin; nil answers those operations with 500.
 	Admin *admin.Service
 	// Registration is the registration switch the platform admin changes in the panel; nil
@@ -116,6 +119,7 @@ type server struct {
 	plans    *plans.Service
 	projects *projects.Service
 	pages    *statuspages.Service
+	specula  *specula.Service
 	admin    *admin.Service
 	oauth    *oauth.Flow
 	// registration is nil when no switch is wired: Config.RegistrationEnabled decides.
@@ -150,7 +154,7 @@ func NewHandler(cfg Config, deps Deps) (http.Handler, error) {
 	if pings == nil {
 		pings = NewPingMetrics(prometheus.NewRegistry())
 	}
-	s := &server{cfg: cfg, auth: deps.Auth, monitors: deps.Monitors, queries: deps.Queries, channels: deps.Channels, plans: deps.Plans, projects: deps.Projects, pages: deps.StatusPages, admin: deps.Admin, registration: deps.Registration, oauth: deps.OAuth, entitlements: deps.Entitlements, log: deps.Logger,
+	s := &server{cfg: cfg, auth: deps.Auth, monitors: deps.Monitors, queries: deps.Queries, channels: deps.Channels, plans: deps.Plans, projects: deps.Projects, pages: deps.StatusPages, specula: deps.Specula, admin: deps.Admin, registration: deps.Registration, oauth: deps.OAuth, entitlements: deps.Entitlements, log: deps.Logger,
 		channelTests:    auth.NewLimiter(1, channelTestInterval, 10_000, clk),
 		emailTestBurst:  auth.NewLimiter(1, emailTestInterval, 100, clk),
 		emailTestHourly: auth.NewLimiter(20, time.Hour, 100, clk),

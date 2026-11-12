@@ -27,6 +27,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/projects"
 	"github.com/proreta-io/proreta/backend/internal/queries"
 	"github.com/proreta-io/proreta/backend/internal/scheduler"
+	"github.com/proreta-io/proreta/backend/internal/specula"
 	"github.com/proreta-io/proreta/backend/internal/statuspages"
 	"github.com/proreta-io/proreta/backend/internal/testsupport/pgtest"
 )
@@ -69,7 +70,7 @@ func newRegistrationServerWithSlack(t *testing.T, env *pgtest.Env, opts auth.Opt
 	h, err := api.NewHandler(api.Config{Version: "test", Commit: "test", CookieSecure: true, TrustedProxyHops: 1, RegistrationEnabled: registration, PublicURL: heartbeatPublicURL},
 		api.Deps{
 			Auth: svc, Monitors: monitors.NewService(pool, sched, incidents.NewService(sched)), Queries: queries.New(pool, nil),
-			Channels: notify.NewService(pool, keys, sender, "https://proreta.example.com"), Plans: plans.NewService(pool), Projects: projects.NewService(pool), Logger: log,
+			Channels: notify.NewService(pool, keys, sender, "https://proreta.example.com"), Plans: plans.NewService(pool), Projects: projects.NewService(pool), Specula: specula.NewService(pool), Logger: log,
 			StatusPages:  statuspages.NewService(pool, statuspages.Options{HashParams: &testHashParams}),
 			Entitlements: entitlements.NewService(pool),
 		})

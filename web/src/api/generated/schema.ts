@@ -1080,6 +1080,72 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/specula": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Specula executors
+     * @description Owners and maintainers get every Specula of the organization that is not revoked (revoked
+     *     ones with `includeRevoked`), newest first, with the projects each is shared with. Other
+     *     roles get the ones their projects may use, without `projectIds`. With `projectId`, only
+     *     the Specula that project may use (404 when the caller does not see the project).
+     */
+    get: operations["listSpecula"];
+    put?: never;
+    /**
+     * Register a Specula
+     * @description Registers an executor and returns its token once; it is stored only as a hash and cannot be
+     *     read again. Run the executor with `PRORETA_SPECULA_TOKEN` set to it. `allProjects` defaults
+     *     to true; with false, `projectIds` lists the projects that may use it (at least one).
+     *     Business-rule failures are 422 with `fieldErrors`.
+     */
+    post: operations["createSpecula"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/specula/{speculaId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Specula id; a value that is not a UUID is answered with 400 */
+        speculaId: components["parameters"]["SpeculaId"];
+      };
+      cookie?: never;
+    };
+    /**
+     * One Specula
+     * @description Owners and maintainers read any Specula of the organization; other roles only one their
+     *     projects may use (404 otherwise).
+     */
+    get: operations["getSpecula"];
+    put?: never;
+    post?: never;
+    /**
+     * Revoke a Specula
+     * @description Revokes the token at once: the executor is refused from its next call and the location
+     *     hands out no more checks. A revoked Specula cannot be restored; register a new one.
+     */
+    delete: operations["revokeSpecula"];
+    options?: never;
+    head?: never;
+    /**
+     * Rename a Specula or change who may use it
+     * @description Changes the given fields. `projectIds` replaces the list; it is kept while `allProjects` is
+     *     true and applies again when it is set back to false. Monitors that run at the Specula
+     *     keep running even if their project loses access, but are not handed out by it any more:
+     *     move them first. A revoked Specula is 404.
+     */
+    patch: operations["updateSpecula"];
+    trace?: never;
+  };
   "/api/v1/members": {
     parameters: {
       query?: never;
@@ -2493,6 +2559,7 @@ export interface components {
       projectId?: string;
       /** @description The notification channels of the monitor (of its project or organization-wide); empty or omitted means the active channels of its project */
       channelIds?: string[];
+      location?: components["schemas"]["MonitorLocationInput"];
       http?: components["schemas"]["HttpSettings"];
       heartbeat?: components["schemas"]["HeartbeatSettings"];
     };
@@ -2510,6 +2577,7 @@ export interface components {
       projectId?: string;
       /** @description The notification channels of the monitor; replaces the selection; an empty list means the active channels of the monitor's project */
       channelIds?: string[];
+      location?: components["schemas"]["MonitorLocationInput"];
       http?: components["schemas"]["HttpSettingsUpdate"];
       heartbeat?: components["schemas"]["HeartbeatSettings"];
     };
@@ -2579,6 +2647,7 @@ export interface components {
        * @description Percentage of successful checks in the last 24 h; null when no check ran
        */
       uptime24h: number | null;
+      location?: components["schemas"]["MonitorLocation"];
       http?: components["schemas"]["HttpMonitor"];
       heartbeat?: components["schemas"]["HeartbeatMonitor"];
     };
@@ -2681,6 +2750,7 @@ export interface components {
       createdAt: string;
       /** Format: date-time */
       updatedAt: string;
+      location?: components["schemas"]["MonitorLocation"];
       http?: components["schemas"]["HttpMonitor"];
       heartbeat?: components["schemas"]["HeartbeatMonitor"];
     };
@@ -2814,6 +2884,83 @@ export interface components {
     ChannelTemplatePreview: {
       /** @description The template rendered with sample data */
       body: string;
+    };
+    /**
+     * @description `pending`: registered, never connected. `online`: heard from in the last 90 seconds.
+     *     `offline`: connected before but silent for longer. `revoked`: the token no longer works.
+     * @enum {string}
+     */
+    SpeculaStatus: "pending" | "online" | "offline" | "revoked";
+    Specula: {
+      /** Format: uuid */
+      id: string;
+      name: string;
+      /** @description Every project of the organization may use it */
+      allProjects: boolean;
+      /** @description The projects that may use it when `allProjects` is false; empty for roles that cannot manage Specula */
+      projectIds: string[];
+      status: components["schemas"]["SpeculaStatus"];
+      /** @description What the executor reported; empty before its first call */
+      version: string;
+      /** @description The host the executor reported; empty before its first call */
+      hostname: string;
+      /** Format: date-time */
+      lastSeenAt: string | null;
+      /** Format: date-time */
+      createdAt: string;
+      /** Format: date-time */
+      revokedAt: string | null;
+    };
+    /** @description A new Specula and its token, shown once */
+    SpeculaCreated: {
+      specula: components["schemas"]["Specula"];
+      /**
+       * @description Starts with `spc_`. Store it now; it cannot be read again.
+       * @example spc_n0t-a-real-token
+       */
+      token: string;
+    };
+    SpeculaList: {
+      items: components["schemas"]["Specula"][];
+    };
+    SpeculaCreate: {
+      /**
+       * @description Unique among the organization's Specula that are not revoked, ignoring case
+       * @example Production cluster
+       */
+      name: string;
+      /** @default true */
+      allProjects?: boolean;
+      projectIds?: string[];
+    };
+    SpeculaUpdate: {
+      name?: string;
+      allProjects?: boolean;
+      projectIds?: string[];
+    };
+    /** @enum {string} */
+    MonitorLocationType: "cloud" | "specula";
+    /** @description Where an http monitor runs */
+    MonitorLocation: {
+      type: components["schemas"]["MonitorLocationType"];
+      /**
+       * Format: uuid
+       * @description The Specula, when `type` is `specula`
+       */
+      speculaId?: string;
+      /** @description Its name, when `type` is `specula` */
+      speculaName?: string;
+    };
+    /**
+     * @description `cloud` runs the monitor from Proreta (public HTTPS targets only). `specula` runs it at a
+     *     Specula of the organization that the monitor's project may use (`speculaId` is required);
+     *     its target may be http or https, on any port, at an internal address or name.
+     *     Moving a monitor ends an open incident and starts its history over.
+     */
+    MonitorLocationInput: {
+      type: components["schemas"]["MonitorLocationType"];
+      /** Format: uuid */
+      speculaId?: string;
     };
     ChannelList: {
       items: components["schemas"]["Channel"][];
@@ -3828,6 +3975,8 @@ export interface components {
   parameters: {
     /** @description Monitor id; a value that is not a UUID is answered with 400 */
     MonitorId: string;
+    /** @description Specula id; a value that is not a UUID is answered with 400 */
+    SpeculaId: string;
     /** @description Notification channel id; a value that is not a UUID is answered with 400 */
     ChannelId: string;
     /** @description Organization id; a value that is not a UUID is answered with 400 */
@@ -5295,6 +5444,159 @@ export interface operations {
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
+      default: components["responses"]["Error"];
+    };
+  };
+  listSpecula: {
+    parameters: {
+      query?: {
+        /** @description Only this project; 404 when the caller does not see it */
+        projectId?: components["parameters"]["ProjectFilter"];
+        /** @description Include revoked Specula (owners and maintainers only; ignored for other roles) */
+        includeRevoked?: boolean;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The Specula executors */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SpeculaList"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      404: components["responses"]["NotFound"];
+      default: components["responses"]["Error"];
+    };
+  };
+  createSpecula: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SpeculaCreate"];
+      };
+    };
+    responses: {
+      /** @description The registered Specula with its token */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SpeculaCreated"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      422: components["responses"]["UnprocessableEntity"];
+      default: components["responses"]["Error"];
+    };
+  };
+  getSpecula: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Specula id; a value that is not a UUID is answered with 400 */
+        speculaId: components["parameters"]["SpeculaId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The Specula */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Specula"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      404: components["responses"]["NotFound"];
+      default: components["responses"]["Error"];
+    };
+  };
+  revokeSpecula: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description Specula id; a value that is not a UUID is answered with 400 */
+        speculaId: components["parameters"]["SpeculaId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Revoked */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      default: components["responses"]["Error"];
+    };
+  };
+  updateSpecula: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description Specula id; a value that is not a UUID is answered with 400 */
+        speculaId: components["parameters"]["SpeculaId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SpeculaUpdate"];
+      };
+    };
+    responses: {
+      /** @description The updated Specula */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Specula"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      422: components["responses"]["UnprocessableEntity"];
       default: components["responses"]["Error"];
     };
   };

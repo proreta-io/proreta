@@ -14,7 +14,7 @@ GENERATED := backend/internal/api/gen backend/internal/auth/authdb backend/inter
 	backend/internal/notify/notifydb backend/internal/plans/plansdb backend/internal/projects/projectsdb \
 	backend/internal/statuspages/statuspagesdb
 
-.PHONY: generate check-generated lint test test-e2e build tidy dev-db dev-db-down dev-migrate dev-api dev-worker dev-jobs dev-statuspage dev-web
+.PHONY: generate check-generated lint test test-e2e build tidy dev-db dev-db-down dev-migrate dev-api dev-worker dev-jobs dev-statuspage dev-speculagw dev-specula dev-web
 
 generate:
 	$(TOOLS) sqlc generate -f $(ROOT)/sqlc.yaml
@@ -75,6 +75,15 @@ dev-jobs:
 
 dev-statuspage:
 	$(DEV_ENV) && cd $(BACKEND) && PRORETA_DATABASE_URL=$$DEV_STATUSPAGE_URL PRORETA_HTTP_ADDR=127.0.0.1:8081 PRORETA_ADMIN_ADDR=127.0.0.1:9093 go run ./cmd/statuspage
+
+# The Specula gateway and an executor against it. Register a Specula in the app first, then run
+# `make dev-specula SPECULA_TOKEN=spc_...`.
+dev-speculagw:
+	$(DEV_ENV) && cd $(BACKEND) && PRORETA_DATABASE_URL=$$DEV_WORKER_URL PRORETA_HTTP_ADDR=127.0.0.1:8082 PRORETA_ADMIN_ADDR=127.0.0.1:9094 go run ./cmd/speculagw
+
+dev-specula:
+	@test -n "$(SPECULA_TOKEN)" || { echo "usage: make dev-specula SPECULA_TOKEN=spc_..."; exit 1; }
+	cd $(BACKEND) && PRORETA_URL=http://127.0.0.1:8082 PRORETA_SPECULA_TOKEN=$(SPECULA_TOKEN) PRORETA_ADMIN_ADDR=127.0.0.1:9095 go run ./cmd/specula
 
 dev-web:
 	$(DEV_ENV) && cd $(ROOT)/web && { [ -d node_modules ] || npm ci; } && npm run dev

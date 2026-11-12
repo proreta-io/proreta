@@ -277,6 +277,23 @@ statuspage:
   service:
     port: 8080
 
+# Specula gateway: the endpoint of the Specula executors that customers run inside their own networks
+# (Deployment <fullname>-speculagw, routed at httpRoute.speculaPathPrefix). Off by default; turn it
+# on to let organizations register Specula (Specula in the app). It uses the worker database role and
+# the request keys (secrets.request) to hand decrypted monitor requests to an executor, and makes no
+# outbound calls. Executors reach it over HTTPS at the public URL, so the Gateway must be reachable
+# from their networks.
+speculagw:
+  enabled: false
+  replicas: 2
+  httpPort: 8080
+  resources:
+    requests: {cpu: 25m, memory: 64Mi}
+    limits: {cpu: 300m, memory: 192Mi}
+  env: []
+  service:
+    port: 8080
+
 # Frontend (React, nginx static). The web image tag defaults to image.tag (both images are
 # released together).
 web:
@@ -330,6 +347,9 @@ httpRoute:
   apiRequestTimeout: 60s
   # Routed to the statuspage Service when statuspage.enabled.
   statusPathPrefix: /status
+  # Where the Specula API is served (only with speculagw.enabled). The app's own page for managing
+  # Specula is /specula, so the API prefix is longer and does not shadow it.
+  speculaPathPrefix: /specula/v1
 
 # --- Optional resources, all disabled by default ---
 

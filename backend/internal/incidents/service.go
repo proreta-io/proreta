@@ -32,6 +32,8 @@ const (
 	ReasonDeleted   = "deleted"
 	// ReasonURLChanged ends an incident when the monitor's URL changes.
 	ReasonURLChanged = "url_changed"
+	// ReasonLocationChanged ends an incident when the monitor moves to another location.
+	ReasonLocationChanged = "location_changed"
 )
 
 // ErrMonitorNotFound means the monitor or its state row does not exist in the tenant.

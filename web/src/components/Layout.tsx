@@ -51,6 +51,11 @@ export default function Layout({ children }: { children?: ReactNode }) {
           Channels
         </NavLink>
       )}
+      {can.anywhere("specula.read") && (
+        <NavLink to="/specula" className={navClass}>
+          Specula
+        </NavLink>
+      )}
       <NavLink to="/settings" className={navClass}>
         Settings
       </NavLink>

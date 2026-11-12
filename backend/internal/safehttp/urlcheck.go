@@ -4,6 +4,7 @@ import (
 	"net/netip"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -123,4 +124,67 @@ func checkAddr(a netip.Addr) string {
 		return "host must be a public address"
 	}
 	return ""
+}
+
+// ValidatePrivateURL checks the target of a monitor that runs at a Specula, inside the customer's
+// own network, and returns it normalised. Unlike ValidateURL it accepts http, any port, internal
+// and single-label host names and private addresses: the executor runs where those services are,
+// and the customer chose the targets.
+func ValidatePrivateURL(raw string) (string, string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "is required"
+	}
+	if len(raw) > MaxURLBytes {
+		return "", "must be at most 2048 bytes"
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", "is not a valid URL"
+	}
+	if u.Scheme != "https" && u.Scheme != "http" {
+		return "", "must use http or https"
+	}
+	if u.Opaque != "" || u.Host == "" {
+		return "", "must have a host"
+	}
+	if u.User != nil {
+		return "", "must not contain a user name or password"
+	}
+	if p := u.Port(); p != "" {
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 1 || n > 65535 {
+			return "", "has an invalid port"
+		}
+	}
+	host := strings.ToLower(u.Hostname())
+	switch {
+	case strings.Contains(host, ":"):
+		if a, err := netip.ParseAddr(host); err != nil || a.Zone() != "" {
+			return "", "host is not a valid IPv6 address"
+		}
+	default:
+		for _, r := range host {
+			if r >= utf8.RuneSelf {
+				return "", "host must be ASCII; write internationalised domain names in their xn-- form"
+			}
+		}
+		name := strings.TrimSuffix(host, ".")
+		if name == "" || len(name) > maxHostBytes || !hostPattern.MatchString(name) {
+			return "", "host is not a valid domain name"
+		}
+		labels := strings.Split(name, ".")
+		for _, l := range labels {
+			if len(l) > 63 {
+				return "", "host is not a valid domain name"
+			}
+		}
+		if numericLabel.MatchString(labels[len(labels)-1]) {
+			if a, err := netip.ParseAddr(name); err != nil || !a.Is4() {
+				return "", "IP addresses must be written as four decimal numbers (a.b.c.d)"
+			}
+		}
+	}
+	u.Host = strings.ToLower(u.Host)
+	return u.String(), ""
 }

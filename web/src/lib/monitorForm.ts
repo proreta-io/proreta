@@ -1,5 +1,11 @@
 import { ApiError, errorMessage } from "../api/client";
-import type { Channel, MonitorCreate, MonitorDetail, MonitorUpdate } from "../api/endpoints";
+import type {
+  Channel,
+  MonitorCreate,
+  MonitorDetail,
+  MonitorLocationInput,
+  MonitorUpdate,
+} from "../api/endpoints";
 import { formatDuration } from "./format";
 import {
   DEFAULT_GRACE,
@@ -52,6 +58,8 @@ export interface MonitorFormValues {
   channelIds: string[];
   /** The monitor's project; empty lets the server use the Default project. */
   projectId: string;
+  /** The Specula the monitor runs at; empty runs it from Proreta's own worker. */
+  speculaId: string;
   /** Heartbeat fields, as typed (seconds). */
   expectedIntervalSeconds: string;
   graceSeconds: string;
@@ -69,6 +77,7 @@ export const formFields = [
   "notificationsEnabled",
   "channelIds",
   "projectId",
+  "speculaId",
   "expectedIntervalSeconds",
   "graceSeconds",
 ] as const;
@@ -78,6 +87,7 @@ export type MonitorFormErrors = Partial<Record<FormField, string>>;
 /** The form field of a server field error; the type's settings are in `http` and `heartbeat`. */
 const serverFields: Record<string, FormField> = {
   "http.url": "url",
+  "location.speculaId": "speculaId",
   "http.expectedStatus": "expectedStatus",
   "http.method": "method",
   "http.headers": "headers",
@@ -109,6 +119,7 @@ export const emptyMonitorForm: MonitorFormValues = {
   notificationsEnabled: true,
   channelIds: [],
   projectId: "",
+  speculaId: "",
   expectedIntervalSeconds: String(DEFAULT_INTERVAL),
   graceSeconds: String(DEFAULT_GRACE),
 };
@@ -131,6 +142,7 @@ export function valuesFromMonitor(m: MonitorDetail): MonitorFormValues {
     notificationsEnabled: m.notificationsEnabled,
     channelIds: m.channelIds,
     projectId: m.projectId,
+    speculaId: m.location?.speculaId ?? "",
     expectedIntervalSeconds: String(m.heartbeat?.expectedIntervalSeconds ?? DEFAULT_INTERVAL),
     graceSeconds: String(m.heartbeat?.graceSeconds ?? DEFAULT_GRACE),
   };
@@ -157,8 +169,11 @@ function seconds(raw: string, min: number, max: number): number | undefined {
   return n >= min && n <= max ? n : undefined;
 }
 
-/** Mirrors the server's URL policy that can be checked without DNS: https, no credentials, port 443. */
-export function validateMonitorUrl(raw: string): string | undefined {
+/**
+ * Mirrors the server's URL policy that can be checked without DNS. From Proreta's own worker:
+ * https, no credentials, port 443. At a Specula, inside your network: http or https, any port.
+ */
+export function validateMonitorUrl(raw: string, specula = false): string | undefined {
   const value = raw.trim();
   if (!value) return "Enter a URL.";
   if (value.length > URL_MAX) return `Use ${URL_MAX} characters or fewer.`;
@@ -168,11 +183,14 @@ export function validateMonitorUrl(raw: string): string | undefined {
   } catch {
     return "Enter a full URL, such as https://example.com/health.";
   }
-  if (url.protocol !== "https:") return "Use an https:// URL.";
+  if (specula) {
+    if (url.protocol !== "https:" && url.protocol !== "http:")
+      return "Use an http:// or https:// URL.";
+  } else if (url.protocol !== "https:") return "Use an https:// URL.";
   if (!url.hostname) return "Enter a host name.";
   if (url.username || url.password) return "Remove the user name and password from the URL.";
   // URL drops the default port, so any remaining port is not 443.
-  if (url.port !== "") return "Only port 443 is allowed.";
+  if (!specula && url.port !== "") return "Only port 443 is allowed.";
   return undefined;
 }
 
@@ -190,7 +208,7 @@ export function validateMonitorForm(v: MonitorFormValues): MonitorFormErrors {
     }
     return errors;
   }
-  const urlError = validateMonitorUrl(v.url);
+  const urlError = validateMonitorUrl(v.url, v.speculaId !== "");
   if (urlError) errors.url = urlError;
   if (v.expectedMode === "exact" && !EXPECTED_STATUS_PATTERN.test(v.expectedCode.trim())) {
     errors.expectedStatus = EXPECTED_STATUS_MESSAGE;
@@ -263,6 +281,9 @@ function settings(
   };
 }
 
+const locationOf = (v: MonitorFormValues): MonitorLocationInput =>
+  v.speculaId ? { type: "specula", speculaId: v.speculaId } : { type: "cloud" };
+
 /** The PATCH body: every field of the form, the settings in the sub-object of the type. */
 export function toMonitorRequest(v: MonitorFormValues): MonitorUpdate {
   return {
@@ -270,6 +291,8 @@ export function toMonitorRequest(v: MonitorFormValues): MonitorUpdate {
     notificationsEnabled: v.notificationsEnabled,
     channelIds: v.channelIds,
     ...(v.projectId ? { projectId: v.projectId } : {}),
+    // Heartbeats have no location.
+    ...(v.type === "http" ? { location: locationOf(v) } : {}),
     ...settings(v),
   };
 }
@@ -298,6 +321,7 @@ export function toCreateRequest(v: MonitorFormValues): MonitorCreate {
     notificationsEnabled: v.notificationsEnabled,
     channelIds: v.channelIds,
     ...(v.projectId ? { projectId: v.projectId } : {}),
+    ...(v.type === "http" && v.speculaId ? { location: locationOf(v) } : {}),
     ...settings(v),
   };
 }

@@ -49,6 +49,8 @@ combos=(
   "example-external-secrets|-f $example $tag $eso --set secrets.admin.source=externalSecret --set secrets.crypto.source=externalSecret"
   "example-admin-external|-f $example $tag $eso --set secrets.admin.source=externalSecret"
   "example-crypto-external|-f $example $tag $eso --set secrets.crypto.source=externalSecret"
+  "example-speculagw|-f $example $tag --set speculagw.enabled=true"
+  "example-speculagw-netpol|-f $example $tag --set speculagw.enabled=true --set networkPolicy.enabled=true --set serviceMonitor.enabled=true"
   "example-request-external|-f $example $tag $eso --set secrets.request.source=externalSecret"
   "example-no-statuspage|-f $example $tag --set statuspage.enabled=false"
   "example-statuspage-external|-f $example $tag $eso --set statuspage.enabled=true --set secrets.statuspage.source=externalSecret"
@@ -168,6 +170,8 @@ expect_fail "invalid request key id" --set "secrets.request.keyId=r 1"
 expect_fail "request key externalSecret without remote key" "${eso_args[@]}" --set secrets.request.source=externalSecret --set secrets.request.remoteKey=
 expect_fail "externalSecret without remote key" "${eso_args[@]}" --set secrets.crypto.source=externalSecret --set secrets.crypto.remoteKey=
 expect_fail "statuspage cookie key externalSecret without remote key" "${eso_args[@]}" --set secrets.statuspage.source=externalSecret --set secrets.statuspage.remoteKey=
+expect_fail "specula path moved" --set httpRoute.speculaPathPrefix=/specula
+expect_fail "speculagw with a typo" --msg "additional properties 'replica' not allowed" --set speculagw.replica=2
 expect_fail "status path moved" --set httpRoute.statusPathPrefix=/pages
 expect_fail "password login off without an OAuth provider" --set config.passwordLoginEnabled=false
 expect_fail "passwordLoginEnabled not a boolean" --set-string config.passwordLoginEnabled=no
@@ -269,6 +273,56 @@ echo "ok"
 
 echo "== invariants on rendered manifests"
 python3 scripts/check-rendered-chart.py "${renders[@]}"
+
+echo "== Specula chart (deploy/helm/proreta-specula)"
+sp_chart=deploy/helm/proreta-specula
+sp_args="--set image.tag=sha-0000000 --set proreta.url=https://proreta.example.com --set token.existingSecret=specula-token"
+helm lint --strict "$sp_chart" $sp_args >"$out/specula.lint" 2>&1 || { cat "$out/specula.lint"; exit 1; }
+helm template specula "$sp_chart" -n specula $sp_args >"$out/specula.yaml"
+helm template specula "$sp_chart" -n specula $sp_args --set replicas=1 --set specula.concurrency=100 --set 'env[0].name=HTTPS_PROXY' --set 'env[0].value=http://proxy:3128' >"$out/specula-custom.yaml"
+helm package "$sp_chart" --version 1.2.3 --app-version 1.2.3 -d "$out/specula-pkg" >/dev/null
+helm template specula "$out/specula-pkg/proreta-specula-1.2.3.tgz" -n specula --set proreta.url=https://proreta.example.com --set token.existingSecret=specula-token >"$out/specula-packaged.yaml"
+grep -q 'image: "ghcr.io/proreta-io/proreta-backend:1.2.3"' "$out/specula-packaged.yaml" || { echo "FAIL: packaged Specula chart does not use appVersion 1.2.3" >&2; exit 1; }
+python3 - "$out/specula.yaml" "$out/specula-custom.yaml" <<'PY'
+import sys, yaml
+for path in sys.argv[1:]:
+    docs = [d for d in yaml.safe_load_all(open(path)) if d]
+    dep = next(d for d in docs if d["kind"] == "Deployment")
+    spec = dep["spec"]["template"]["spec"]
+    c = spec["containers"][0]
+    sc = c["securityContext"]
+    assert spec["automountServiceAccountToken"] is False, "the Specula pod mounts an API token"
+    assert spec["securityContext"]["runAsNonRoot"] is True, "not non-root"
+    assert sc["readOnlyRootFilesystem"] is True and sc["allowPrivilegeEscalation"] is False and sc["capabilities"]["drop"] == ["ALL"], "container hardening missing"
+    assert c["command"] == ["/app/specula"], c["command"]
+    env = {e["name"]: e for e in c["env"]}
+    ref = env["PRORETA_SPECULA_TOKEN"]["valueFrom"]["secretKeyRef"]
+    assert ref == {"name": "specula-token", "key": "token"}, ref
+    assert "value" not in env["PRORETA_SPECULA_TOKEN"], "the token is a literal value"
+    assert env["PRORETA_URL"]["value"] == "https://proreta.example.com"
+    forbidden = [n for n in env if n.startswith(("PRORETA_DATABASE", "PRORETA_ENCRYPTION", "PRORETA_REQUEST", "PRORETA_ADMIN_LOGIN"))]
+    assert not forbidden, f"the Specula pod has settings it must not have: {forbidden}"
+    assert not [d for d in docs if d["kind"] in ("Service", "Ingress", "HTTPRoute", "Role", "ClusterRole")], "the executor exposes or needs nothing inbound"
+print("ok")
+PY
+sp_fail() {
+  local label=$1 pattern=$2
+  shift 2
+  if helm template specula "$sp_chart" -n specula "$@" >"$out/specula-fail.log" 2>&1; then
+    echo "FAIL: Specula chart: $label rendered but must be rejected" >&2
+    exit 1
+  fi
+  grep -qF -- "$pattern" "$out/specula-fail.log" || { echo "FAIL: Specula chart: $label rejected without ($pattern):" >&2; cat "$out/specula-fail.log" >&2; exit 1; }
+  echo "rejected as expected: Specula chart $label"
+}
+sp_fail "no URL" "proreta.url is required" --set image.tag=sha-0000000 --set token.existingSecret=t
+sp_fail "no token Secret" "token.existingSecret is required" --set image.tag=sha-0000000 --set proreta.url=https://p.example.com
+sp_fail "no image tag from a git checkout" "image.tag is required" --set proreta.url=https://p.example.com --set token.existingSecret=t
+sp_fail "http URL" "/proreta/url" --set image.tag=sha-0000000 --set proreta.url=http://p.example.com --set token.existingSecret=t
+sp_fail "trailing slash" "/proreta/url" --set image.tag=sha-0000000 --set proreta.url=https://p.example.com/ --set token.existingSecret=t
+sp_fail "unknown key" "additional properties 'replica' not allowed" $sp_args --set replica=2
+sp_fail "chart-owned variable" "/env/0/name" $sp_args --set 'env[0].name=PRORETA_SPECULA_TOKEN' --set 'env[0].value=x'
+renders+=("$out/specula.yaml" "$out/specula-custom.yaml")
 
 echo "== kubeconform"
 if ! command -v kubeconform >/dev/null 2>&1; then

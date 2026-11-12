@@ -4,8 +4,8 @@ name: release
 # publishes images after a squash merge to main or a tag. It does not depend on ci.yml.
 # Builds and pushes the multi-arch backend and web images to ghcr.io.
 # - push to main: tags `sha-<7 hex>` and `main`.
-# - tag vX.Y.Z: tags `X.Y.Z`, `X.Y` and `X` (semver, no `latest`; no moving `X` while X is 0), and the Helm chart as the OCI
-#   artifact oci://ghcr.io/proreta-io/charts/proreta, version X.Y.Z (job `chart`, tags only; a
+# - tag vX.Y.Z: tags `X.Y.Z`, `X.Y` and `X` (semver, no `latest`; no moving `X` while X is 0), and the Helm charts as the OCI
+#   artifacts oci://ghcr.io/proreta-io/charts/proreta and .../proreta-specula, version X.Y.Z (job `chart`, tags only; a
 #   prerelease tag vX.Y.Z-rc.1 gives the chart version X.Y.Z-rc.1).
 # Every image carries the labels org.opencontainers.image.revision (the commit) and
 # org.opencontainers.image.source. The workflow only publishes images; it never commits.
@@ -130,6 +130,10 @@ jobs:
           # The chart has no defaults for config.publicUrl and the Gateway: lint with the example values.
           helm lint --strict deploy/helm/proreta -f deploy/helm/proreta/values.example.yaml --set image.tag="$version"
           helm package deploy/helm/proreta --version "$version" --app-version "$version" -d "$RUNNER_TEMP/chart"
+          # The Specula executor chart: it needs the URL and the token Secret.
+          helm lint --strict deploy/helm/proreta-specula --set image.tag="$version" --set proreta.url=https://proreta.example.com --set token.existingSecret=specula-token
+          helm package deploy/helm/proreta-specula --version "$version" --app-version "$version" -d "$RUNNER_TEMP/chart"
           printf '%s' "$REGISTRY_PASSWORD" | helm registry login ghcr.io --username "$REGISTRY_USER" --password-stdin
           helm push "$RUNNER_TEMP/chart/proreta-${version}.tgz" oci://ghcr.io/proreta-io/charts
+          helm push "$RUNNER_TEMP/chart/proreta-specula-${version}.tgz" oci://ghcr.io/proreta-io/charts
           helm registry logout ghcr.io

@@ -674,3 +674,71 @@ func TestSameHostRedirects(t *testing.T) {
 		}
 	})
 }
+
+// NewPrivateClient has no address guard: only the Specula executor may build one.
+func TestPrivateClientOnlyInSpecula(t *testing.T) {
+	root := filepath.Join("..", "..")
+	var offenders []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return err
+		}
+		slash := filepath.ToSlash(path)
+		if strings.HasSuffix(slash, "internal/safehttp/private.go") || strings.Contains(slash, "cmd/specula/") {
+			return nil
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(b), "NewPrivateClient") {
+			offenders = append(offenders, slash)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(offenders) > 0 {
+		t.Fatalf("NewPrivateClient (no SSRF guard) is used outside cmd/specula: %v", offenders)
+	}
+}
+
+func TestPrivateClientReachesPrivateTargets(t *testing.T) {
+	var seen string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.Method + " " + r.Header.Get("X-Key")
+		if r.URL.Path == "/away" {
+			http.Redirect(w, r, "http://localhost:"+strings.Split(r.Host, ":")[1]+"/landed", http.StatusTemporaryRedirect)
+		}
+	}))
+	defer srv.Close()
+	c := NewPrivateClient(Options{MaxRedirects: 3})
+	// Loopback, plain http and a non-443 port: all refused by the guarded client, fine here.
+	req, _ := http.NewRequest(http.MethodPut, srv.URL+"/x", strings.NewReader("b"))
+	req.Header.Set("X-Key", "k")
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if seen != "PUT k" {
+		t.Fatalf("server saw %q", seen)
+	}
+	// A request with custom headers or a body does not follow a redirect to another host name.
+	req, _ = http.NewRequestWithContext(WithSameHostRedirects(context.Background()), http.MethodPut, srv.URL+"/away", strings.NewReader("b"))
+	req.Header.Set("X-Key", "k")
+	resp, err = c.Do(req)
+	if err == nil {
+		_ = resp.Body.Close()
+	}
+	if !errors.Is(err, ErrRedirectCrossHost) {
+		t.Fatalf("cross host redirect: %v", err)
+	}
+	// Plain GET follows it.
+	if resp, err := c.Get(srv.URL + "/away"); err != nil {
+		t.Fatalf("plain redirect: %v", err)
+	} else {
+		_ = resp.Body.Close()
+	}
+}

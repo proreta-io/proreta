@@ -182,3 +182,37 @@ func TestValidateExpectedStatus(t *testing.T) {
 		}
 	}
 }
+
+func TestValidatePrivateURL(t *testing.T) {
+	good := [][2]string{
+		{"http://orders.shop.svc.cluster.local:8080/health", "http://orders.shop.svc.cluster.local:8080/health"},
+		{"HTTP://Orders:8080", "http://orders:8080"},
+		{"https://10.1.2.3/ping", "https://10.1.2.3/ping"},
+		{"http://[fd00::1]:9000/", "http://[fd00::1]:9000/"},
+		{"http://localhost:3000", "http://localhost:3000"},
+		{"https://example.com/x?token=1", "https://example.com/x?token=1"},
+	}
+	for _, c := range good {
+		in, want := c[0], c[1]
+		if got, msg := ValidatePrivateURL(in); msg != "" || got != want {
+			t.Errorf("%s: got %q, %q; want %q", in, got, msg, want)
+		}
+	}
+	for in, want := range map[string]string{
+		"":                     "is required",
+		"ftp://svc":            "must use http or https",
+		"http://":              "must have a host",
+		"http://user:pw@svc/":  "must not contain a user name or password",
+		"http://svc:0/":        "has an invalid port",
+		"http://svc:70000/":    "has an invalid port",
+		"http://bad host/":     "is not a valid URL",
+		"http://2130706433/":   "IP addresses must be written as four decimal numbers (a.b.c.d)",
+		"http://0x7f.1/":       "IP addresses must be written as four decimal numbers (a.b.c.d)",
+		"http://[::1%25eth0]/": "host is not a valid IPv6 address",
+		"http://" + strings.Repeat("a", 64) + ".example.com/": "host is not a valid domain name",
+	} {
+		if _, msg := ValidatePrivateURL(in); msg != want {
+			t.Errorf("%q: message %q, want %q", in, msg, want)
+		}
+	}
+}

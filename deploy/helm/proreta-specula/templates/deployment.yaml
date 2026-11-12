@@ -1,0 +1,90 @@
+{{- /* The executor makes outbound calls only and needs no Kubernetes API token. */ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "proreta-specula.fullname" . }}
+  labels:
+    {{- include "proreta-specula.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      {{- include "proreta-specula.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "proreta-specula.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "proreta-specula.fullname" . }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: specula
+          image: {{ include "proreta-specula.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/app/specula"]
+          env:
+            - name: PRORETA_URL
+              value: {{ required "proreta.url is required: the address of your Proreta installation, for example https://proreta.example.com" .Values.proreta.url | quote }}
+            - name: PRORETA_SPECULA_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "token.existingSecret is required: the name of the Secret that holds the token shown when the Specula was registered" .Values.token.existingSecret }}
+                  key: {{ .Values.token.key }}
+            - name: PRORETA_SPECULA_CONCURRENCY
+              value: {{ .Values.specula.concurrency | quote }}
+            - name: PRORETA_SPECULA_POLL_INTERVAL
+              value: {{ .Values.specula.pollInterval | quote }}
+            - name: PRORETA_LOG_LEVEL
+              value: {{ .Values.specula.logLevel | quote }}
+            - name: PRORETA_ADMIN_ADDR
+              value: {{ printf ":%d" (int .Values.specula.adminPort) | quote }}
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: admin
+              containerPort: {{ .Values.specula.adminPort }}
+              protocol: TCP
+          livenessProbe:
+            httpGet: {path: /healthz, port: admin}
+            periodSeconds: 10
+          readinessProbe:
+            httpGet: {path: /readyz, port: admin}
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

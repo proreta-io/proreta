@@ -2,6 +2,7 @@
 {{- /* Requires Prometheus Operator CRDs. Services expose only the admin port. */}}
 {{- $components := list "api" "worker" "jobs" }}
 {{- if .Values.statuspage.enabled }}{{ $components = append $components "statuspage" }}{{ end }}
+{{- if .Values.speculagw.enabled }}{{ $components = append $components "speculagw" }}{{ end }}
 {{- range $c := $components }}
 ---
 apiVersion: v1

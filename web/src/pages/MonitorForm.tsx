@@ -7,10 +7,12 @@ import {
   createMonitor,
   getMonitor,
   listChannels,
+  listSpecula,
   queryKeys,
   updateMonitor,
   type Channel,
   type MonitorDetail,
+  type Specula,
 } from "../api/endpoints";
 import HeartbeatUrlPanel from "../components/HeartbeatUrlPanel";
 import MonitorNotFound from "../components/MonitorNotFound";
@@ -235,6 +237,21 @@ function MonitorFormBody({
     queryFn: () => listChannels(pickerProject),
   });
 
+  // The Specula executors a monitor of the chosen project may run at.
+  const speculaList = useQuery({
+    queryKey: queryKeys.speculaFor(pickerProject),
+    queryFn: () => listSpecula(pickerProject),
+  });
+  // After the project changes, a Specula the new project may not use is dropped (derived, not
+  // stored, so it comes back if the project is changed back).
+  const speculaId =
+    speculaList.data &&
+    values.speculaId &&
+    values.projectId !== initial.projectId &&
+    !speculaList.data.items.some((x) => x.id === values.speculaId)
+      ? ""
+      : values.speculaId;
+
   const save = useMutation({
     mutationFn: (v: MonitorFormValues) => {
       const saved = keepLiveChannels(v, channels.data?.items);
@@ -268,12 +285,19 @@ function MonitorFormBody({
     setValues((v) => ({ ...v, [key]: value }));
     const field: FormField =
       key === "expectedMode" || key === "expectedCode" ? "expectedStatus" : (key as FormField);
-    setErrors((e) => (e[field] ? { ...e, [field]: undefined } : e));
+    // The URL is checked with the rules of where the monitor runs, so a new location voids its error.
+    const stale: FormField[] = key === "speculaId" ? [field, "url"] : [field];
+    setErrors((e) =>
+      stale.some((f) => e[f])
+        ? { ...e, ...Object.fromEntries(stale.map((f) => [f, undefined])) }
+        : e,
+    );
   }
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const found = validateMonitorForm(values);
+    const current = { ...values, speculaId };
+    const found = validateMonitorForm(current);
     setErrors(found);
     setGeneral(undefined);
     if (Object.keys(found).length > 0) {
@@ -281,6 +305,7 @@ function MonitorFormBody({
       const first = (
         [
           "name",
+          "speculaId",
           "url",
           "method",
           "headers",
@@ -296,7 +321,7 @@ function MonitorFormBody({
       if (first) document.querySelector<HTMLElement>(`[data-field="${first}"]`)?.focus();
       return;
     }
-    save.mutate(values);
+    save.mutate(current);
   }
 
   if (created?.heartbeat?.pingUrl) {
@@ -354,9 +379,21 @@ function MonitorFormBody({
           <HeartbeatFields values={values} update={update} errors={errors} />
         ) : (
           <>
+            <RunFrom
+              value={speculaId}
+              specula={speculaList.data?.items}
+              loading={speculaList.isPending}
+              error={errors.speculaId}
+              onChange={(id) => update("speculaId", id)}
+            />
+
             <Field
               label="URL"
-              hint="HTTPS only. Private and internal addresses are not allowed."
+              hint={
+                speculaId
+                  ? "http or https, any port. Addresses inside your network are fine: the Specula checks from there."
+                  : "HTTPS only. Private and internal addresses are not allowed."
+              }
               error={errors.url}
             >
               {(c) => (
@@ -895,6 +932,53 @@ function BodyField({
             update("bodyDirty", true);
           }}
         />
+      )}
+    </Field>
+  );
+}
+
+/** Where the check runs: Proreta's own worker, or a Specula inside your network. */
+function RunFrom({
+  value,
+  specula,
+  loading,
+  error,
+  onChange,
+}: {
+  value: string;
+  specula: Specula[] | undefined;
+  loading: boolean;
+  error?: string;
+  onChange: (speculaId: string) => void;
+}) {
+  const items = specula ?? [];
+  // Nothing to choose: stay quiet, unless the monitor already runs somewhere else.
+  if (!loading && items.length === 0 && !value) return null;
+  const known = items.some((x) => x.id === value);
+  return (
+    <Field
+      label="Run from"
+      hint="Proreta cloud checks public HTTPS addresses. A Specula checks from inside your own network."
+      error={error}
+      className="sm:max-w-80"
+    >
+      {(c) => (
+        <Select
+          {...c}
+          data-field="speculaId"
+          name="speculaId"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          <option value="">Proreta cloud</option>
+          {value && !known && !loading && <option value={value}>Unavailable Specula</option>}
+          {items.map((x) => (
+            <option key={x.id} value={x.id}>
+              {x.name}
+              {x.status === "offline" ? " (offline)" : ""}
+            </option>
+          ))}
+        </Select>
       )}
     </Field>
   );
