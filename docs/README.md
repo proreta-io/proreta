@@ -9,6 +9,9 @@ Operator and contributor documentation for Proreta.
 - [Running locally](development.md): throwaway database in Docker, all processes with `go run`, no Kubernetes
 - [Contributing](../CONTRIBUTING.md): development setup, conventions, tests, migrations
 
+## Using Proreta
+- [Monitor requests](monitor-requests.md): method, headers and body of an HTTP check, what is stored and what is never shown
+
 ## Runbooks
 | Runbook | Covers |
 |---|---|
