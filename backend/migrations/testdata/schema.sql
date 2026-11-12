@@ -408,7 +408,7 @@ incidents incidents_check CHECK (((resolved_at IS NULL) = (resolve_reason IS NUL
 incidents incidents_monitor_fkey FOREIGN KEY (tenant_id, monitor_id) REFERENCES monitors(tenant_id, id)
 incidents incidents_pkey PRIMARY KEY (id)
 incidents incidents_reason_check CHECK (((length(reason) >= 1) AND (length(reason) <= 64)))
-incidents incidents_resolve_reason_check CHECK ((resolve_reason = ANY (ARRAY['recovered'::text, 'paused'::text, 'deleted'::text, 'url_changed'::text])))
+incidents incidents_resolve_reason_check CHECK ((resolve_reason = ANY (ARRAY['recovered'::text, 'paused'::text, 'deleted'::text, 'url_changed'::text, 'location_changed'::text])))
 incidents incidents_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id)
 incidents incidents_tenant_id_id_key UNIQUE (tenant_id, id)
 invitations invitations_accepted_by_fkey FOREIGN KEY (accepted_by) REFERENCES users(id)
@@ -820,6 +820,7 @@ heartbeat_ping(bytea) owner=proreta_owner definer=true acl=proreta_api=X/proreta
 list_droppable_partitions() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 list_due_heartbeats(integer) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 mail_pending() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+monitor_set_location(uuid,uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 org_delete_tenant(uuid,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 outbox_pending() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 platform_registration_override() owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
@@ -2323,6 +2324,47 @@ CREATE OR REPLACE FUNCTION public.mail_pending()
  SET search_path TO 'public', 'pg_temp'
 AS $function$
     SELECT count(*) FROM mail_outbox WHERE status = 'pending'
+$function$
+CREATE OR REPLACE FUNCTION public.monitor_set_location(p_monitor_id uuid, p_location_id uuid)
+ RETURNS text
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    caller_tenant uuid := NULLIF(current_setting('app.tenant_id', true), '')::uuid;
+    mon_project   uuid;
+    loc_kind      text;
+BEGIN
+    IF caller_tenant IS NULL THEN
+        RAISE EXCEPTION 'monitor_set_location: app.tenant_id is not set' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    SELECT project_id INTO mon_project FROM monitors
+    WHERE tenant_id = caller_tenant AND id = p_monitor_id AND deleted_at IS NULL AND type = 'http';
+    IF mon_project IS NULL THEN
+        RETURN 'no_monitor';
+    END IF;
+    SELECT kind INTO loc_kind FROM probe_locations WHERE id = p_location_id AND status = 'active';
+    IF loc_kind IS NULL THEN
+        RETURN 'bad_location';
+    END IF;
+    IF loc_kind = 'agent' AND NOT EXISTS (
+        SELECT 1 FROM specula_agents AS a
+        WHERE a.tenant_id = caller_tenant AND a.location_id = p_location_id AND a.revoked_at IS NULL
+          AND (a.all_projects OR EXISTS (
+                SELECT 1 FROM specula_projects AS sp WHERE sp.specula_id = a.id AND sp.project_id = mon_project)))
+    THEN
+        RETURN 'bad_location';
+    END IF;
+    DELETE FROM monitor_location_state
+    WHERE tenant_id = caller_tenant AND monitor_id = p_monitor_id AND location_id <> p_location_id;
+    INSERT INTO monitor_locations (tenant_id, monitor_id, location_id)
+    VALUES (caller_tenant, p_monitor_id, p_location_id) ON CONFLICT DO NOTHING;
+    INSERT INTO monitor_location_state (tenant_id, monitor_id, location_id, next_run_at)
+    VALUES (caller_tenant, p_monitor_id, p_location_id, now() + random() * interval '30 seconds')
+    ON CONFLICT DO NOTHING;
+    RETURN 'ok';
+END
 $function$
 CREATE OR REPLACE FUNCTION public.org_delete_tenant(p_actor uuid, p_audit_id uuid, p_ip inet)
  RETURNS boolean

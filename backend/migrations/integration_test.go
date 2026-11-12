@@ -75,7 +75,9 @@ var definerAllowList = map[string][]string{
 	"specula_authenticate":         {"proreta_worker"},
 	"specula_hello":                {"proreta_worker"},
 	"specula_agents_sync_location": {},
-	"compute_rollups":              {"proreta_worker"},
+	// Runs a monitor at the worker or at a Specula of its organization.
+	"monitor_set_location": {"proreta_api"},
+	"compute_rollups":      {"proreta_worker"},
 	// Rollups from the watermark in rollup_state.
 	"compute_rollups_catch_up": {"proreta_worker"},
 	// Retention in three steps driven by jobs.

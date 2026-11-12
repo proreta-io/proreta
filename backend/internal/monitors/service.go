@@ -134,6 +134,14 @@ type CreateInput struct {
 	// ChannelIDs selects notification channels of the project or organization-wide ones (none:
 	// the active channels of the project).
 	ChannelIDs *[]uuid.UUID
+	// SpeculaID runs the monitor at a Specula of the organization that the project may use; nil
+	// runs it from Proreta's own worker. Only for http monitors.
+	SpeculaID *uuid.UUID
+}
+
+// Location is where an http monitor runs: SpeculaID nil is Proreta's own worker.
+type Location struct {
+	SpeculaID *uuid.UUID
 }
 
 // HTTPSettings are the settings of an http monitor; nil fields take their defaults on create
@@ -168,6 +176,9 @@ type UpdateInput struct {
 	ProjectID *uuid.UUID
 	// ChannelIDs replaces the channel selection.
 	ChannelIDs *[]uuid.UUID
+	// Location moves an http monitor; the target is checked again with the rules of the new
+	// location and an open incident ends.
+	Location *Location
 }
 
 // httpConfig is monitors.config for type http.
@@ -189,6 +200,7 @@ type heartbeatConfig struct {
 
 // Field names of validation errors and audit records: the API's, with the sub-object prefix.
 const (
+	fieldSpeculaID               = "speculaId"
 	fieldHTTP                    = "http"
 	fieldHeartbeat               = "heartbeat"
 	fieldURL                     = "http.url"
@@ -247,7 +259,7 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 			if in.HTTP != nil {
 				verr.Add(fieldURL, "is required")
 			}
-		} else if target, msg = ValidateURL(*h.URL); msg != "" {
+		} else if target, msg = validateTarget(*h.URL, in.SpeculaID != nil); msg != "" {
 			verr.Add(fieldURL, msg)
 		}
 		checkFixed(&verr, fieldIntervalSeconds, h.IntervalSeconds, IntervalSeconds)
@@ -267,6 +279,9 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 		row.IntervalSeconds, row.FailureThreshold = IntervalSeconds, int32(threshold) //nolint:gosec // validated 1..3
 	case TypeHeartbeat:
 		row.Type, resource = TypeHeartbeat, plans.ResourceHeartbeat
+		if in.SpeculaID != nil {
+			verr.Add(fieldSpeculaID, msgHTTPOnly)
+		}
 		if in.HTTP != nil {
 			verr.Add(fieldHTTP, msgHTTPOnly)
 		}
@@ -336,6 +351,11 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 		if err != nil {
 			return err
 		}
+		if in.SpeculaID != nil {
+			if location, err = s.speculaLocation(ctx, tx, a.TenantID, *in.SpeculaID, project); err != nil {
+				return err
+			}
+		}
 		if err := q.InsertMonitor(ctx, row); err != nil {
 			return fmt.Errorf("insert monitor: %w", err)
 		}
@@ -393,6 +413,17 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 		}
 		name, interval, threshold, notificationsEnabled := cur.Name, int(cur.IntervalSeconds), int(cur.FailureThreshold), cur.NotificationsEnabled
 
+		// Where the monitor runs now and where it should run after this change.
+		curSpecula, err := currentSpecula(ctx, tx, a.TenantID, id)
+		if err != nil {
+			return err
+		}
+		wantSpecula := curSpecula
+		if in.Location != nil {
+			wantSpecula = in.Location.SpeculaID
+		}
+		locChanged := cur.Type == TypeHTTP && !sameID(curSpecula, wantSpecula)
+
 		var verr validation.Error
 		var changed []string
 		if in.Name != nil {
@@ -411,6 +442,9 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 			var cfg heartbeatConfig
 			if err := json.Unmarshal(cur.Config, &cfg); err != nil {
 				return fmt.Errorf("monitor config: %w", err)
+			}
+			if in.Location != nil {
+				verr.Add(fieldSpeculaID, msgHTTPOnly)
 			}
 			if in.HTTP != nil {
 				verr.Add(fieldHTTP, msgHTTPOnly)
@@ -438,11 +472,19 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 			if in.Heartbeat != nil {
 				verr.Add(fieldHeartbeat, msgHeartbeatOnly)
 			}
+			if locChanged && (in.HTTP == nil || in.HTTP.URL == nil) {
+				// The target stays but must satisfy the rules of the new location.
+				v, msg := validateTarget(cfg.URL, wantSpecula != nil)
+				if msg != "" {
+					verr.Add(fieldURL, msg)
+				}
+				cfg.URL = v
+			}
 			if h := in.HTTP; h != nil {
 				checkFixed(&verr, fieldIntervalSeconds, h.IntervalSeconds, int(cur.IntervalSeconds))
 				checkFixed(&verr, fieldTimeoutSeconds, h.TimeoutSeconds, int(cur.TimeoutSeconds))
 				if h.URL != nil {
-					v, msg := ValidateURL(*h.URL)
+					v, msg := validateTarget(*h.URL, wantSpecula != nil)
 					if msg != "" {
 						verr.Add(fieldURL, msg)
 					}
@@ -510,13 +552,42 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 			}
 			changed = appendIf(changed, "channelIds", selected)
 		}
-		if slices.Contains(changed, fieldURL) {
-			// A new URL is a new target: its history says nothing about it. Restart like resume
-			// and end an open incident without a notification.
+		// A moved project must still be allowed to use the Specula the monitor runs at.
+		if wantSpecula != nil && project != cur.ProjectID && !locChanged {
+			if _, err := s.speculaLocation(ctx, tx, a.TenantID, *wantSpecula, project); err != nil {
+				return err
+			}
+		}
+		if locChanged {
+			locID, err := s.sched.DefaultLocation(ctx, tx)
+			if err != nil {
+				return err
+			}
+			if wantSpecula != nil {
+				if locID, err = s.speculaLocation(ctx, tx, a.TenantID, *wantSpecula, project); err != nil {
+					return err
+				}
+			}
+			var result string
+			if err := tx.QueryRow(ctx, `SELECT monitor_set_location($1, $2)`, id, locID).Scan(&result); err != nil {
+				return fmt.Errorf("set location: %w", err)
+			}
+			if result != "ok" {
+				return speculaFieldError()
+			}
+			changed = append(changed, fieldSpeculaID)
+		}
+		if slices.Contains(changed, fieldURL) || locChanged {
+			// A new target (URL or location): its history says nothing about it. Restart like
+			// resume and end an open incident without a notification.
 			if err := s.restart(ctx, tx, q, a.TenantID, id, true); err != nil {
 				return err
 			}
-			if err := s.incidents.ResolveOpen(ctx, tx, a.TenantID, id, incidents.ReasonURLChanged); err != nil {
+			reason := incidents.ReasonURLChanged
+			if locChanged {
+				reason = incidents.ReasonLocationChanged
+			}
+			if err := s.incidents.ResolveOpen(ctx, tx, a.TenantID, id, reason); err != nil {
 				return err
 			}
 		}
@@ -749,4 +820,59 @@ func orDefault[T any](p *T, def T) T {
 		return def
 	}
 	return *p
+}
+
+// validateTarget checks a monitor's URL with the rules of where it runs: public https for
+// Proreta's own worker, the customer's network for a Specula.
+func validateTarget(raw string, specula bool) (string, string) {
+	if specula {
+		return ValidatePrivateURL(raw)
+	}
+	return ValidateURL(raw)
+}
+
+// speculaLocation returns the location of a Specula that the project may use. Anything else (it
+// does not exist, belongs to another organization, is revoked, or is not shared with the
+// project) is the same field error.
+func (s *Service) speculaLocation(ctx context.Context, tx pgx.Tx, tenantID, speculaID, project uuid.UUID) (uuid.UUID, error) {
+	var loc uuid.UUID
+	err := tx.QueryRow(ctx, `SELECT a.location_id FROM specula_agents AS a
+		WHERE a.tenant_id = $1 AND a.id = $2 AND a.revoked_at IS NULL
+		  AND (a.all_projects OR EXISTS (SELECT 1 FROM specula_projects AS sp WHERE sp.specula_id = a.id AND sp.project_id = $3))`,
+		tenantID, speculaID, project).Scan(&loc)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, speculaFieldError()
+	}
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("specula location: %w", err)
+	}
+	return loc, nil
+}
+
+// currentSpecula returns the Specula a monitor runs at, nil for Proreta's own worker.
+func currentSpecula(ctx context.Context, tx pgx.Tx, tenantID, monitorID uuid.UUID) (*uuid.UUID, error) {
+	var id uuid.UUID
+	err := tx.QueryRow(ctx, `SELECT a.id FROM monitor_location_state AS s
+		JOIN specula_agents AS a ON a.location_id = s.location_id AND a.tenant_id = s.tenant_id
+		WHERE s.tenant_id = $1 AND s.monitor_id = $2 LIMIT 1`, tenantID, monitorID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("current specula: %w", err)
+	}
+	return &id, nil
+}
+
+func sameID(a, b *uuid.UUID) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+func speculaFieldError() error {
+	var verr validation.Error
+	verr.Add(fieldSpeculaID, "does not exist or is not available to this project")
+	return &verr
 }
