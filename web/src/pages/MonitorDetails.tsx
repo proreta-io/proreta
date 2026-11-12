@@ -68,6 +68,7 @@ import {
 } from "../lib/heartbeat";
 import {
   checkSettings,
+  requestSummary,
   downReason,
   failureStreak,
   monitorState,
@@ -301,6 +302,11 @@ function Header({
           {monitor.http && (
             <span className="text-caption text-muted-foreground">
               {checkSettings(monitor.http)}
+            </span>
+          )}
+          {monitor.http && requestSummary(monitor.http) && (
+            <span className="text-caption text-muted-foreground">
+              Request: {requestSummary(monitor.http)}
             </span>
           )}
         </div>

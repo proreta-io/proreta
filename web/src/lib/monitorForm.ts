@@ -11,12 +11,41 @@ import {
 
 export type MonitorKind = "http" | "heartbeat";
 
+export const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] as const;
+export type Method = (typeof METHODS)[number];
+/** Methods that may carry a body; the others are read-only by convention. */
+export const BODY_METHODS: readonly Method[] = ["POST", "PUT", "PATCH", "DELETE"];
+export const isSafeMethod = (m: Method) => m === "GET" || m === "HEAD";
+export const MAX_HEADERS = 10;
+export const BODY_MAX_BYTES = 64 * 1024;
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+const DENIED_HEADER =
+  /^(host|content-length|transfer-encoding|connection|upgrade|te|trailer|expect|proxy-.*)$/i;
+
+/**
+ * One custom header row. A stored header keeps its secret value on the server: its `value` stays
+ * empty unless the user types a new one.
+ */
+export interface HeaderRow {
+  name: string;
+  value: string;
+  /** The monitor already has a value stored for this header name. */
+  stored: boolean;
+}
+
 export interface MonitorFormValues {
   type: MonitorKind;
   name: string;
   url: string;
   expectedMode: "2xx" | "exact";
   expectedCode: string;
+  method: Method;
+  headers: HeaderRow[];
+  /** The request body as typed; only sent when `bodyDirty`. */
+  body: string;
+  /** The monitor stores a body (hidden); it is kept unless `bodyDirty`. */
+  bodyStored: boolean;
+  bodyDirty: boolean;
   failureThreshold: number;
   notificationsEnabled: boolean;
   /** Selected notification channels; none means the active channels of the project. */
@@ -33,6 +62,9 @@ export const formFields = [
   "name",
   "url",
   "expectedStatus",
+  "method",
+  "headers",
+  "body",
   "failureThreshold",
   "notificationsEnabled",
   "channelIds",
@@ -47,6 +79,9 @@ export type MonitorFormErrors = Partial<Record<FormField, string>>;
 const serverFields: Record<string, FormField> = {
   "http.url": "url",
   "http.expectedStatus": "expectedStatus",
+  "http.method": "method",
+  "http.headers": "headers",
+  "http.body": "body",
   "http.failureThreshold": "failureThreshold",
   "heartbeat.expectedIntervalSeconds": "expectedIntervalSeconds",
   "heartbeat.graceSeconds": "graceSeconds",
@@ -65,6 +100,11 @@ export const emptyMonitorForm: MonitorFormValues = {
   url: "",
   expectedMode: "2xx",
   expectedCode: "200",
+  method: "GET",
+  headers: [],
+  body: "",
+  bodyStored: false,
+  bodyDirty: false,
   failureThreshold: 2,
   notificationsEnabled: true,
   channelIds: [],
@@ -82,6 +122,11 @@ export function valuesFromMonitor(m: MonitorDetail): MonitorFormValues {
     url: m.http?.url ?? "",
     expectedMode: exact ? "exact" : "2xx",
     expectedCode: exact ? expected : "200",
+    method: m.http?.method ?? "GET",
+    headers: (m.http?.headerNames ?? []).map((name) => ({ name, value: "", stored: true })),
+    body: "",
+    bodyStored: m.http?.bodySet ?? false,
+    bodyDirty: false,
     failureThreshold: m.http?.failureThreshold ?? emptyMonitorForm.failureThreshold,
     notificationsEnabled: m.notificationsEnabled,
     channelIds: m.channelIds,
@@ -153,7 +198,38 @@ export function validateMonitorForm(v: MonitorFormValues): MonitorFormErrors {
   if (![1, 2, 3].includes(v.failureThreshold)) {
     errors.failureThreshold = "Choose 1, 2 or 3 failed checks.";
   }
+  const headersError = validateHeaders(v.headers);
+  if (headersError) errors.headers = headersError;
+  const allowsBody = BODY_METHODS.includes(v.method);
+  if (!allowsBody && (v.bodyDirty ? v.body !== "" : v.bodyStored || v.body !== "")) {
+    errors.body = `A ${v.method} request cannot have a body. Choose another method or remove the body.`;
+  } else if (new TextEncoder().encode(v.body).length > BODY_MAX_BYTES) {
+    errors.body = "Use 64 KiB or less.";
+  }
   return errors;
+}
+
+/** Mirrors the server's header rules that can be checked without it. */
+export function validateHeaders(rows: HeaderRow[]): string | undefined {
+  if (rows.length > MAX_HEADERS) return `Use at most ${MAX_HEADERS} headers.`;
+  const seen = new Set<string>();
+  for (const [i, r] of rows.entries()) {
+    const name = r.name.trim();
+    const n = i + 1;
+    if (!name || name.length > 64 || !HEADER_NAME.test(name)) {
+      return `Header ${n}: enter a valid header name, such as Authorization.`;
+    }
+    if (DENIED_HEADER.test(name)) return `Header ${n}: ${name} cannot be set.`;
+    if (seen.has(name.toLowerCase())) return `Header ${n}: ${name} is already set.`;
+    seen.add(name.toLowerCase());
+    if (!r.stored && r.value === "") return `Header ${n}: enter a value.`;
+    if (r.value.length > 2048) return `Header ${n}: use 2048 characters or fewer for the value.`;
+    // eslint-disable-next-line no-control-regex -- the server refuses control characters in values.
+    if (/[\u0000-\u0008\u000a-\u001f\u007f]/.test(r.value)) {
+      return `Header ${n}: the value must not contain line breaks or control characters.`;
+    }
+  }
+  return undefined;
 }
 
 /** The settings sub-object of the form's type, as create and PATCH send it. */
@@ -168,11 +244,21 @@ function settings(
       },
     };
   }
+  const send: Pick<NonNullable<MonitorCreate["http"]>, "method" | "headers" | "body"> = {
+    method: v.method,
+    headers: v.headers.map((h) => {
+      const name = h.name.trim();
+      // A stored header with no new value keeps what the server has.
+      return h.stored && h.value === "" ? { name } : { name, value: h.value };
+    }),
+  };
+  if (v.bodyDirty || (!v.bodyStored && v.body !== "")) send.body = v.body;
   return {
     http: {
       url: v.url.trim(),
       expectedStatus: v.expectedMode === "2xx" ? "2xx" : v.expectedCode.trim(),
       failureThreshold: v.failureThreshold,
+      ...send,
     },
   };
 }
@@ -228,6 +314,11 @@ export function mapServerErrors(err: unknown): {
   const fields: MonitorFormErrors = {};
   const other: string[] = [];
   for (const fe of err.fieldErrors) {
+    const header = /^http\.headers\[(\d+)\]\.(name|value)$/.exec(fe.field);
+    if (header) {
+      fields.headers ??= `Header ${Number(header[1]) + 1}: ${fe.message}`;
+      continue;
+    }
     const field = Object.hasOwn(serverFields, fe.field)
       ? serverFields[fe.field]
       : formFields.find((f) => f === fe.field);
@@ -278,7 +369,7 @@ export function describeSetup(v: MonitorFormValues): { text: string; blank?: boo
   const host = withoutHttps(v.url.trim()).replace(/\/$/, "");
   const exact = v.expectedMode === "exact";
   return [
-    { text: "Checks " },
+    { text: v.method === "GET" ? "Checks " : `Sends ${v.method} to ` },
     host ? { text: host } : { text: "your URL", blank: true },
     { text: " every minute" },
     ...(exact
