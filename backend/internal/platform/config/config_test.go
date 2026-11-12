@@ -577,3 +577,39 @@ func TestRequestSeal(t *testing.T) {
 		t.Fatalf("short key: %v", err)
 	}
 }
+
+func TestLoadSpecula(t *testing.T) {
+	e := map[string]string{"PRORETA_URL": "https://proreta.example.com", "PRORETA_SPECULA_TOKEN": "spc_abc"}
+	cfg, err := LoadSpecula(env(e))
+	if err != nil || cfg.URL != "https://proreta.example.com" || cfg.Token.Value() != "spc_abc" || cfg.Concurrency != 20 || cfg.PollInterval != 5*time.Second {
+		t.Fatalf("defaults: %+v %v", cfg, err)
+	}
+	if fmt.Sprint(cfg.Token) != "[redacted]" {
+		t.Fatalf("token printed: %v", cfg.Token)
+	}
+	e["PRORETA_SPECULA_CONCURRENCY"], e["PRORETA_SPECULA_POLL_INTERVAL"] = "50", "2s"
+	if cfg, err := LoadSpecula(env(e)); err != nil || cfg.Concurrency != 50 || cfg.PollInterval != 2*time.Second {
+		t.Fatalf("custom: %+v %v", cfg, err)
+	}
+	for name, mutate := range map[string]func(){
+		"PRORETA_URL":                   func() { delete(e, "PRORETA_URL") },
+		"PRORETA_SPECULA_TOKEN":         func() { e["PRORETA_SPECULA_TOKEN"] = "plain" },
+		"PRORETA_SPECULA_CONCURRENCY":   func() { e["PRORETA_SPECULA_CONCURRENCY"] = "0" },
+		"PRORETA_SPECULA_POLL_INTERVAL": func() { e["PRORETA_SPECULA_POLL_INTERVAL"] = "1ms" },
+	} {
+		bad := map[string]string{}
+		for k, v := range e {
+			bad[k] = v
+		}
+		saved := e
+		e = bad
+		mutate()
+		if _, err := LoadSpecula(env(e)); err == nil || !strings.Contains(err.Error(), name) {
+			t.Errorf("%s: %v", name, err)
+		}
+		e = saved
+	}
+	if _, err := LoadSpecula(env(map[string]string{"PRORETA_URL": "http://proreta.example.com", "PRORETA_SPECULA_TOKEN": "spc_x"})); err == nil {
+		t.Error("plain http accepted for a remote host")
+	}
+}
