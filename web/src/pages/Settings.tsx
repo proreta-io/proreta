@@ -1,6 +1,5 @@
-import { useAbilities } from "../lib/useAbilities";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { ApiError, errorMessage } from "../api/client";
 import {
@@ -14,8 +13,11 @@ import {
   type Usage,
 } from "../api/endpoints";
 import { useAuth } from "../auth/AuthProvider";
+import SettingsSection from "../components/SettingsSection";
 import SignInDomains from "../components/SignInDomains";
-import { abilities, canManageOwned, ROLE_HINTS } from "../lib/roles";
+import SettingsAreas from "./SettingsAreas";
+import { canManageChannelOf, usePermissions } from "../lib/permissions";
+import { ROLE_HINTS } from "../lib/roles";
 import { useToast } from "../components/Toasts";
 import {
   Alert,
@@ -63,6 +65,7 @@ import { countOf, useUsage } from "../lib/usage";
 
 export default function Settings() {
   const auth = useAuth();
+  const can = usePermissions();
   const { hash } = useLocation();
   // Links such as /settings#sign-in-domains-heading land on that section: scroll to its heading and
   // move the focus there, on the first render and on every hash change.
@@ -72,25 +75,19 @@ export default function Settings() {
     if (!target) return;
     target.scrollIntoView?.({ block: "start" });
     target.focus({ preventScroll: true });
-  }, [hash]);
+  }, [hash, can.ready]);
   return (
     <section className="flex max-w-[960px] flex-col">
       <h1 className="pt-6 pb-6 text-headline leading-[1.1] font-semibold tracking-[-0.02em] sm:pt-10 sm:pb-9 sm:text-display">
         Settings
       </h1>
-      {abilities(auth.session).seeUsage && (
+      <SettingsAreas />
+      {can.org("usage.read") && (
         <SettingsSection id="plan" title="Plan">
           <PlanUsage />
         </SettingsSection>
       )}
-      <SettingsSection
-        id="channels"
-        title="Notification channels"
-        description="Slack channels Proreta posts to through Incoming Webhooks. Each channel chooses its events, an optional mention for down alerts and an optional reminder while an incident stays open."
-      >
-        <NotificationChannels />
-      </SettingsSection>
-      {auth.session?.role === "owner" && (
+      {can.org("organization.domains.manage") && (
         <SettingsSection
           id="sign-in-domains"
           title="Sign-in domains"
@@ -115,35 +112,14 @@ export default function Settings() {
             </Link>{" "}
             lists the providers you sign in with.
           </p>
+          <p>
+            <Link to="/members" className="underline underline-offset-3">
+              Leave this organization
+            </Link>
+            .
+          </p>
         </div>
       </SettingsSection>
-    </section>
-  );
-}
-
-function SettingsSection({
-  id,
-  title,
-  description,
-  children,
-}: {
-  id: string;
-  title: string;
-  description?: string;
-  children: ReactNode;
-}) {
-  return (
-    <section
-      aria-labelledby={`${id}-heading`}
-      className="grid gap-4 border-t border-border pt-6 pb-7 sm:grid-cols-[220px_minmax(0,1fr)] sm:gap-12 sm:pt-8 sm:pb-10"
-    >
-      <div className="flex flex-col gap-1.5">
-        <h2 id={`${id}-heading`} tabIndex={-1} className="text-lead font-semibold">
-          {title}
-        </h2>
-        {description && <p className="text-[13px] text-muted-foreground">{description}</p>}
-      </div>
-      <div className="flex min-w-0 max-w-[560px] flex-col">{children}</div>
     </section>
   );
 }
@@ -207,9 +183,9 @@ type TestResult = { channel: Channel } & (
   { ok: true; at: number } | { ok: false; message: string }
 );
 
-function NotificationChannels() {
-  const canManage = useAbilities().manageChannels;
-  const session = useAuth().session;
+export function NotificationChannels() {
+  const can = usePermissions();
+  const canManage = can.anywhere("channel.manage");
   const queryClient = useQueryClient();
   const toast = useToast();
   const usage = useUsage();
@@ -330,7 +306,7 @@ function NotificationChannels() {
                 {canManage && (
                   <Td>
                     <div className="flex justify-end gap-1">
-                      {canManageOwned(session, projects, c.projectId) && (
+                      {canManageChannelOf(can, c.projectId) && (
                         <>
                           <Button
                             variant="ghost"
@@ -450,7 +426,7 @@ function ChannelForm({
   const queryClient = useQueryClient();
   const creating = channel === undefined;
   const scope = useProjectScope();
-  const session = useAuth().session;
+  const can = usePermissions();
   const projects = scope.projects.data?.items;
   // A new channel starts in the project the shell is filtered to, or the Default project.
   const defaultProject = scope.projectId ?? projects?.find((p) => p.isDefault)?.id ?? "";
@@ -620,13 +596,13 @@ function ChannelForm({
                 onChange={(e) => update("project", e.target.value)}
               >
                 {(projects ?? [])
-                  .filter((p) => canManageOwned(session, projects, p.id))
+                  .filter((p) => canManageChannelOf(can, p.id))
                   .map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name}
                     </option>
                   ))}
-                {canManageOwned(session, projects, null) && (
+                {canManageChannelOf(can, null) && (
                   <option value={ORGANIZATION_WIDE}>Organization-wide</option>
                 )}
               </Select>

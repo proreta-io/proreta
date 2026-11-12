@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { ApiError, errorMessage } from "../api/client";
 import {
   createInvitation,
@@ -42,7 +42,6 @@ import {
 } from "../components/ui";
 import { formatDate, formatDateTime } from "../lib/format";
 import {
-  abilities,
   assignableRoles,
   canManageMember,
   ROLE_DESCRIPTIONS,
@@ -53,13 +52,16 @@ import {
 } from "../lib/roles";
 import { absoluteLink } from "../lib/inviteLink";
 import { memberLabel } from "../lib/members";
+import { usePermissions } from "../lib/permissions";
 
 /** Members, roles and invitations of the organization. */
 export default function Members() {
   const auth = useAuth();
-  const can = abilities(auth.session);
+  const can = usePermissions();
+  const role = can.organizationRole;
   const org = auth.session?.organization.name ?? "this organization";
-  if (!can.hasOrganizationRole) {
+  if (!can.ready) return null;
+  if (!can.org("organization.members.read")) {
     return (
       <section className="flex max-w-[960px] flex-col">
         <h1 className="pt-6 pb-2 text-headline leading-[1.1] font-semibold tracking-[-0.02em] sm:pt-10 sm:text-display">
@@ -79,9 +81,12 @@ export default function Members() {
       </h1>
       <p className="pb-6 text-muted-foreground sm:pb-9">
         People in <strong className="font-medium text-foreground">{org}</strong>. You are{" "}
-        {can.role ? `${article(can.role)} ${ROLE_LABELS[can.role].toLowerCase()}` : "a member"}:{" "}
-        {can.role ? ROLE_DESCRIPTIONS[can.role].toLowerCase() : ""} A role here applies to every
-        project; a role in a project can only raise it there.
+        {role ? `${article(role)} ${ROLE_LABELS[role].toLowerCase()}` : "a member"}:{" "}
+        {role ? ROLE_DESCRIPTIONS[role].toLowerCase() : ""} A role here applies to every project; a
+        role in a project can only raise it there.{" "}
+        <Link to="/help/roles" className="underline underline-offset-3">
+          What each role may do
+        </Link>
       </p>
       <Section id="members" title="People">
         <MemberList />
@@ -91,7 +96,7 @@ export default function Members() {
         title="Invitations"
         description="A link joins one person with the role you choose. It works once and for 7 days. No email is sent: hand it over yourself."
       >
-        {can.manageMembers ? (
+        {can.org("organization.members.manage") ? (
           <Invitations />
         ) : (
           <p className="text-muted-foreground">{ROLE_HINTS.manageMembers}</p>
@@ -152,6 +157,7 @@ function MemberList() {
     onSuccess: (updated) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.members });
       if (updated.userId === me) void queryClient.invalidateQueries({ queryKey: queryKeys.me });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.permissions });
       toast(
         updated.role
           ? `${memberLabel(updated)} is now ${ROLE_LABELS[updated.role].toLowerCase()}`
@@ -577,7 +583,7 @@ function LeaveOrDelete() {
   const auth = useAuth();
   const navigate = useNavigate();
   const toast = useToast();
-  const can = abilities(auth.session);
+  const can = usePermissions();
   const org = auth.session?.organization;
   const [confirm, setConfirm] = useState<"leave" | "delete" | null>(null);
 
@@ -620,7 +626,7 @@ function LeaveOrDelete() {
           </Button>
         </div>
       </div>
-      {can.deleteOrganization && !isDefault && (
+      {can.org("organization.delete") && !isDefault && (
         <div className="flex flex-col gap-2 border-t border-border-faint pt-4">
           <p className="text-muted-foreground">
             Deleting stops every monitor and alert of {org.name} and signs every member out of it.
@@ -633,7 +639,7 @@ function LeaveOrDelete() {
           </div>
         </div>
       )}
-      {can.deleteOrganization && isDefault && (
+      {can.org("organization.delete") && isDefault && (
         <p className="text-caption text-muted-foreground">
           This is the platform&apos;s own organization: it cannot be deleted.
         </p>

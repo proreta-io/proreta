@@ -10,7 +10,7 @@ import type {
 } from "../api/endpoints";
 import { json, mockApi, problem, renderApp, session } from "../test/utils";
 
-const as = (role: string) => ({
+const as = (role: string | null) => ({
   "GET /api/v1/auth/me": () => json({ ...session, role }),
 });
 
@@ -429,7 +429,7 @@ describe("monitor form with projects", () => {
 
   it("offers only projects the user may edit and loads that project's channels", async () => {
     const fetchMock = mockApi({
-      ...as("member"),
+      ...as(null),
       "GET /api/v1/projects": () =>
         json({
           items: [

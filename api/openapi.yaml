@@ -1300,6 +1300,29 @@ paths:
           $ref: "#/components/responses/Forbidden"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/permissions:
+    get:
+      operationId: getPermissions
+      summary: Permissions of the current person
+      description: |
+        What the signed-in person may do in the organization of the session, and the catalogue of
+        roles and permissions. `organization` lists the permissions held through the organization role, which for a
+        project permission means in every project (only `account.use` for a person who belongs
+        through projects only); `projects` lists every project the person sees with the permissions
+        held there (the higher of the organization role and the direct project role). Any role,
+        including a person without an organization role.
+      tags: [members]
+      responses:
+        "200":
+          description: Permissions of the person and the catalogue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PermissionsInfo"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/channels:
     get:
       operationId: listChannels
@@ -4796,6 +4819,66 @@ components:
           $ref: "#/components/schemas/ChannelMention"
         reminderMinutes:
           $ref: "#/components/schemas/ReminderMinutes"
+    PermissionsInfo:
+      type: object
+      additionalProperties: false
+      required: [organizationRole, organization, projects, catalogue]
+      properties:
+        organizationRole:
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs through projects only
+        organization:
+          type: array
+          items:
+            type: string
+          description: Permissions held through the organization role (every project permission of the role applies in every project), plus the account permissions of anybody who belongs
+          example: [account.use, organization.members.read]
+        projects:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectPermissions"
+        catalogue:
+          type: array
+          description: Every permission in the order of the role documentation, with the roles that hold it
+          items:
+            $ref: "#/components/schemas/PermissionDefinition"
+    ProjectPermissions:
+      type: object
+      additionalProperties: false
+      required: [projectId, name, role, permissions]
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        role:
+          $ref: "#/components/schemas/MembershipRole"
+        permissions:
+          type: array
+          items:
+            type: string
+          description: Project permissions held in this project
+    PermissionDefinition:
+      type: object
+      additionalProperties: false
+      required: [name, level, description, roles]
+      properties:
+        name:
+          type: string
+          example: channel.manage
+        level:
+          type: string
+          enum: [account, organization, project]
+        description:
+          type: string
+        roles:
+          type: array
+          items:
+            $ref: "#/components/schemas/MembershipRole"
+          description: The roles that hold the permission, highest first
     Usage:
       type: object
       additionalProperties: false

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { ApiError, errorMessage, errorMeta, planLimitMessage } from "../api/client";
 import {
   createProject,
@@ -14,7 +15,6 @@ import {
   type ProjectMember,
   type ProjectRole,
 } from "../api/endpoints";
-import { useAuth } from "../auth/AuthProvider";
 import { useToast } from "../components/Toasts";
 import {
   Alert,
@@ -33,15 +33,9 @@ import {
   Th,
   Tr,
 } from "../components/ui";
+import { usePermissions } from "../lib/permissions";
 import { countOf } from "../lib/usage";
-import {
-  abilities,
-  assignableRoles,
-  canManageMember,
-  ROLE_LABELS,
-  roleAtLeast,
-  roleLabel,
-} from "../lib/roles";
+import { assignableRoles, canManageMember, ROLE_LABELS, roleLabel } from "../lib/roles";
 import { useProjectScope } from "../lib/useProjectScope";
 import { memberLabel } from "../lib/members";
 import ProjectInvitations from "../components/ProjectInvitations";
@@ -50,9 +44,11 @@ const NAME_MAX = 60;
 
 /** Projects of the organization and who belongs to them. */
 export default function Projects() {
-  const can = abilities(useAuth().session);
+  const can = usePermissions();
   const { projects } = useProjectScope();
-  const [open, setOpen] = useState<string | null>(null);
+  // The settings area links here with ?project= to open the people of one project.
+  const [params] = useSearchParams();
+  const [open, setOpen] = useState<string | null>(params.get("project"));
   const items = projects.data?.items ?? [];
   const shown = items.find((p) => p.id === open);
 
@@ -66,11 +62,14 @@ export default function Projects() {
           Projects split the monitors and notification channels of the organization. A role on the
           organization applies to every project; a role in a project applies there only and can
           raise the organization role but never lowers it. People without an organization role see
-          only the projects they have a role in.
+          only the projects they have a role in.{" "}
+          <Link to="/help/roles" className="underline underline-offset-3">
+            What each role may do
+          </Link>
         </p>
       </div>
 
-      {can.manageMembers && <NewProject />}
+      {can.org("project.create") && <NewProject />}
 
       {projects.isPending ? (
         <Loading label="Loading projects…">
@@ -91,7 +90,7 @@ export default function Projects() {
       )}
 
       {shown && <ProjectMembers key={shown.id} project={shown} />}
-      {shown && roleAtLeast(shown.role, "maintainer") && (
+      {shown && can.inProject(shown.id, "project.members.manage") && (
         <ProjectInvitations key={`invitations-${shown.id}`} project={shown} />
       )}
     </section>
@@ -108,6 +107,7 @@ function NewProject() {
     onSuccess: (p) => {
       setName("");
       void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.permissions });
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
       toast(`Project ${p.name} created`);
     },
@@ -170,6 +170,7 @@ function ProjectTable({
 }) {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const can = usePermissions();
   const [renaming, setRenaming] = useState<Project | null>(null);
   const [deleting, setDeleting] = useState<Project | null>(null);
 
@@ -178,6 +179,7 @@ function ProjectTable({
     onSuccess: (_, p) => {
       setDeleting(null);
       void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.permissions });
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
       toast(`Project ${p.name} deleted`);
     },
@@ -228,7 +230,7 @@ function ProjectTable({
                   >
                     People
                   </Button>
-                  {roleAtLeast(p.role, "maintainer") && (
+                  {can.inProject(p.id, "project.update") && (
                     <Button
                       variant="ghost"
                       size="small"
@@ -238,7 +240,7 @@ function ProjectTable({
                       Rename
                     </Button>
                   )}
-                  {p.role === "owner" && (
+                  {can.inProject(p.id, "project.delete") && (
                     <Button
                       variant="ghost-destructive"
                       size="small"
@@ -293,6 +295,7 @@ function RenameForm({ project, onDone }: { project: Project; onDone: () => void 
     mutationFn: (n: string) => renameProject(project.id, n),
     onSuccess: (p) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.permissions });
       toast(`Renamed to ${p.name}`);
       onDone();
     },
@@ -349,9 +352,9 @@ function accessLabel(m: ProjectMember): string {
 function ProjectMembers({ project }: { project: Project }) {
   const queryClient = useQueryClient();
   const toast = useToast();
-  const can = abilities(useAuth().session);
-  // Maintainers and owners of the project manage its people; nobody grants above their own role there.
-  const manage = roleAtLeast(project.role, "maintainer");
+  const can = usePermissions();
+  // Who manages the people of the project is decided by the server; nobody grants above their own role there.
+  const manage = can.inProject(project.id, "project.members.manage");
   const roles = assignableRoles(project.role);
   const members = useQuery({
     queryKey: queryKeys.projectMembers(project.id),
@@ -361,13 +364,14 @@ function ProjectMembers({ project }: { project: Project }) {
   const org = useQuery({
     queryKey: queryKeys.members,
     queryFn: listMembers,
-    enabled: manage && can.hasOrganizationRole,
+    enabled: manage && can.org("organization.members.read"),
   });
   const [adding, setAdding] = useState("");
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.projectMembers(project.id) });
     void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.permissions });
   };
   const put = useMutation({
     mutationFn: ({ userId, role }: { userId: string; role: ProjectRole }) =>
@@ -504,7 +508,7 @@ function ProjectMembers({ project }: { project: Project }) {
           </tbody>
         </Table>
       )}
-      {manage && can.hasOrganizationRole && (
+      {manage && can.org("organization.members.read") && (
         <form
           aria-label={`Add someone to ${project.name}`}
           className="flex flex-col gap-2 sm:flex-row sm:items-end"

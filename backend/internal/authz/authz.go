@@ -313,6 +313,7 @@ var operations = map[string]Permission{
 	// The session itself and the user's own organizations: any role.
 	"logout":                  "account.use",
 	"getme":                   "account.use",
+	"getpermissions":          "account.use",
 	"resendemailverification": "account.use",
 	"listorganizations":       "account.use",
 	"switchorganization":      "account.use",

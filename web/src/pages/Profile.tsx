@@ -22,6 +22,7 @@ import {
   Skeleton,
 } from "../components/ui";
 import { formatDateTime } from "../lib/format";
+import { usePermissions } from "../lib/permissions";
 import {
   goToProvider,
   LAST_LOGIN_METHOD_PROBLEM_TYPE,
@@ -44,7 +45,7 @@ export default function Profile() {
   const auth = useAuth();
   const [params] = useSearchParams();
   const callbackError = oauthErrorMessage(params.get("error"));
-  const isOwner = auth.session?.role === "owner";
+  const manageDomains = usePermissions().org("organization.domains.manage");
   // Shares the list query of SignInMethods (one request).
   const identities = useQuery({ queryKey: queryKeys.identities, queryFn: listIdentities });
   // ?linked= is only a hint from the callback redirect: it is believed for a known provider that
@@ -72,7 +73,7 @@ export default function Profile() {
       {linked && !callbackError && (
         <Alert tone="neutral" title={`${PROVIDER_NAMES[linked]} linked.`}>
           You can now sign in with it.
-          {isOwner && linked === "google" && (
+          {manageDomains && linked === "google" && (
             <>
               {" "}
               Claiming a sign-in domain? Continue in{" "}
