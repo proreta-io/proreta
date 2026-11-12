@@ -9,9 +9,9 @@ export default function Channels() {
           Notification channels
         </h1>
         <p className="max-w-[560px] text-muted-foreground">
-          Slack channels Proreta posts to through Incoming Webhooks. Each channel chooses its
-          events, an optional mention for down alerts and an optional reminder while an incident
-          stays open.
+          Slack channels Proreta posts to through Incoming Webhooks, and webhooks that receive a
+          message of your own template. Each channel chooses its events, an optional mention for
+          down alerts and an optional reminder while an incident stays open.
         </p>
       </div>
       <div className="flex max-w-[560px] flex-col">

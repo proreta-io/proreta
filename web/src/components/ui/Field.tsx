@@ -4,7 +4,6 @@ import {
   type InputHTMLAttributes,
   type ReactNode,
   type SelectHTMLAttributes,
-  type TextareaHTMLAttributes,
 } from "react";
 import { cx, TriangleShape } from "./shapes";
 
@@ -120,7 +119,7 @@ function Affix({ className, children }: { className: string; children: ReactNode
   );
 }
 
-export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+export function Textarea({ className, ...props }: ComponentProps<"textarea">) {
   return <textarea className={cx(CONTROL, "h-auto px-2.5 py-2 sm:h-auto", className)} {...props} />;
 }
 

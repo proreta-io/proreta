@@ -93,6 +93,7 @@ Operations marked `public` need no session. Operations marked `platform admin` a
 | `VerifyEmail` | `POST /api/v1/auth/verify-email` | `public` |
 | `ListChannels` | `GET /api/v1/channels` | `channel.read` |
 | `CreateChannel` | `POST /api/v1/channels` | `channel.manage` |
+| `PreviewChannelTemplate` | `POST /api/v1/channels/preview-template` | `channel.manage` |
 | `DeleteChannel` | `DELETE /api/v1/channels/{channelId}` | `channel.manage` |
 | `GetChannel` | `GET /api/v1/channels/{channelId}` | `channel.read` |
 | `UpdateChannel` | `PATCH /api/v1/channels/{channelId}` | `channel.manage` |

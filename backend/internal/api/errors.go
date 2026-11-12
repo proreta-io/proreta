@@ -236,9 +236,15 @@ func writeError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 		secs := int(math.Ceil(sendErr.RetryAfter.Seconds()))
 		w.Header().Set("Retry-After", strconv.Itoa(max(secs, 1)))
 		p.Type, p.Title, p.Status = problemRateLimited, "Slack is rate-limiting this webhook, try again later", http.StatusTooManyRequests
+		if sendErr.Generic {
+			p.Title = "The webhook endpoint is rate-limiting requests, try again later"
+		}
 	case errors.As(err, &sendErr):
 		// Only the kind is shown: Slack's answer and transport errors are never echoed.
 		p.Type, p.Title, p.Status, p.Detail = problemChannelFailed, "Slack did not accept the message", http.StatusBadGateway, slackFailureDetail(sendErr)
+		if sendErr.Generic {
+			p.Title, p.Detail = "The webhook endpoint did not accept the message", webhookFailureDetail(sendErr)
+		}
 	case errors.Is(err, scheduler.ErrNoLocation):
 		// Operational, not the caller's fault: the location that runs new monitors is missing or
 		// disabled.
@@ -303,6 +309,20 @@ func requestFieldErrors(e *openapi3filter.RequestError) []httpx.FieldError {
 		return nil
 	}
 	return []httpx.FieldError{{Field: strings.Join(ptr, "."), Message: se.Reason}}
+}
+
+func webhookFailureDetail(e *notify.SendError) string {
+	switch e.Kind {
+	case notify.KindNotFound:
+		return "The endpoint answered HTTP " + fmt.Sprint(e.Status) + " (not found or gone); check the URL."
+	case notify.KindHTTPStatus:
+		return fmt.Sprintf("The endpoint answered HTTP %d.", e.Status)
+	case notify.KindTimeout:
+		return "The endpoint did not answer in time."
+	case notify.KindBlockedAddress:
+		return "The endpoint resolves to an address Proreta does not connect to."
+	}
+	return "The endpoint could not be reached (" + e.Kind + ")."
 }
 
 func slackFailureDetail(e *notify.SendError) string {

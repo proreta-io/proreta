@@ -42,9 +42,11 @@ import {
   Segmented,
   Select,
 } from "../components/ui";
+import WebhookFields from "./WebhookFields";
 import {
   CHANNEL_NAME_MAX,
   channelEvents,
+  channelTypeLabel,
   emptyChannelForm,
   ORGANIZATION_WIDE,
   eventsLabel,
@@ -252,12 +254,13 @@ export function NotificationChannels() {
   return (
     <div className="flex flex-col gap-6">
       {items.length === 0 ? (
-        <EmptyNote>No notification channels yet. Slack notifications are off.</EmptyNote>
+        <EmptyNote>No notification channels yet. Notifications are off.</EmptyNote>
       ) : (
         <Table>
           <thead>
             <tr>
               <Th>Name</Th>
+              <Th>Type</Th>
               {multiProject && <Th>Project</Th>}
               <Th>Events</Th>
               <Th>Mention</Th>
@@ -276,6 +279,7 @@ export function NotificationChannels() {
                 <Td>
                   <span className="font-medium break-words">{c.name}</span>
                 </Td>
+                <Td className="text-caption">{channelTypeLabel[c.type]}</Td>
                 {multiProject && (
                   <Td className="text-caption">{channelScopeLabel(c.projectId, projects)}</Td>
                 )}
@@ -287,7 +291,11 @@ export function NotificationChannels() {
                   <>
                     <Td className="text-caption">{eventsLabel(c.events)}</Td>
                     <Td className="font-mono text-caption">
-                      {c.mention.length > 0 ? c.mention.join(" ") : "None"}
+                      {c.mention.length > 0
+                        ? c.mention.join(" ")
+                        : c.type === "webhook"
+                          ? "n/a"
+                          : "None"}
                     </Td>
                     <Td className="text-caption whitespace-nowrap">
                       {reminderLabel(c.reminderMinutes)}
@@ -347,16 +355,18 @@ export function NotificationChannels() {
 
       {items.some((c) => c.status === "failed") && (
         <p className="text-caption text-down">
-          A failed channel&apos;s webhook was refused by Slack (probably removed there). Nothing is
-          sent to it until you edit it and store a new webhook URL.
+          A failed channel&apos;s webhook was refused by the service behind it (probably removed
+          there). Nothing is sent to it until you edit it and store a new webhook URL.
         </p>
       )}
 
       {result?.ok && (
         <span role="status" className="flex items-center gap-2 text-[13px]">
           <DotShape size="large" className="text-success" />
-          Test message sent to {result.channel.name} at {formatClock(result.at)}. Look for it in
-          your Slack channel.
+          Test message sent to {result.channel.name} at {formatClock(result.at)}.{" "}
+          {result.channel.type === "webhook"
+            ? "Check what your endpoint received."
+            : "Look for it in your Slack channel."}
         </span>
       )}
       {result && !result.ok && (
@@ -478,9 +488,19 @@ function ChannelForm({
   });
 
   function update<K extends keyof ChannelFormValues>(key: K, value: ChannelFormValues[K]) {
-    setValues((v) => ({ ...v, [key]: value }));
-    setErrors((e) => (e[key] ? { ...e, [key]: undefined } : e));
+    patch({ [key]: value } as Partial<ChannelFormValues>);
   }
+
+  function patch(changes: Partial<ChannelFormValues>) {
+    setValues((v) => ({ ...v, ...changes }));
+    setErrors((e) => {
+      const next = { ...e };
+      for (const key of Object.keys(changes) as (keyof ChannelFormValues)[]) delete next[key];
+      return next;
+    });
+  }
+
+  const webhook = values.type === "webhook";
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -502,9 +522,26 @@ function ChannelForm({
       </h3>
       {general && <Alert title="Could not save the channel.">{general}</Alert>}
       <fieldset disabled={save.isPending} className="flex min-w-0 flex-col gap-5">
+        {creating && (
+          <Segmented
+            label="Channel type"
+            name="type"
+            value={values.type}
+            onChange={(type) => patch({ type, webhookUrl: "" })}
+            options={[
+              { value: "slack_webhook", label: "Slack" },
+              { value: "webhook", label: "Webhook" },
+            ]}
+          />
+        )}
+
         <Field
           label="Name"
-          hint="Usually the Slack channel, such as #ops-alerts."
+          hint={
+            webhook
+              ? "A label for this endpoint, such as Incident tool."
+              : "Usually the Slack channel, such as #ops-alerts."
+          }
           error={errors.name}
         >
           {(c) => (
@@ -514,7 +551,7 @@ function ChannelForm({
               name="name"
               autoComplete="off"
               maxLength={CHANNEL_NAME_MAX * 2}
-              placeholder="#ops-alerts"
+              placeholder={webhook ? "Incident tool" : "#ops-alerts"}
               value={values.name}
               onChange={(e) => update("name", e.target.value)}
             />
@@ -523,11 +560,23 @@ function ChannelForm({
 
         {replacing ? (
           <Field
-            label={creating ? "Slack webhook URL" : "New Slack webhook URL"}
+            label={
+              webhook
+                ? creating
+                  ? "Webhook URL"
+                  : "New webhook URL"
+                : creating
+                  ? "Slack webhook URL"
+                  : "New Slack webhook URL"
+            }
             hint={
-              creating
-                ? "Create an Incoming Webhook in Slack and paste its URL. It is stored encrypted and never shown again after saving."
-                : "Replaces the stored webhook and reactivates a failed channel."
+              webhook
+                ? creating
+                  ? "An https URL on a public host (port 443). It is stored encrypted and never shown again after saving."
+                  : "Replaces the stored URL and reactivates a failed channel."
+                : creating
+                  ? "Create an Incoming Webhook in Slack and paste its URL. It is stored encrypted and never shown again after saving."
+                  : "Replaces the stored webhook and reactivates a failed channel."
             }
             error={errors.webhookUrl}
           >
@@ -542,7 +591,9 @@ function ChannelForm({
                 autoComplete="off"
                 spellCheck={false}
                 autoCapitalize="off"
-                placeholder="https://hooks.slack.com/services/…"
+                placeholder={
+                  webhook ? "https://example.com/hooks/…" : "https://hooks.slack.com/services/…"
+                }
                 value={values.webhookUrl}
                 onChange={(e) => update("webhookUrl", e.target.value)}
               />
@@ -555,6 +606,8 @@ function ChannelForm({
             onReplace={() => setReplacing(true)}
           />
         )}
+
+        {webhook && <WebhookFields values={values} errors={errors} onChange={patch} />}
 
         <fieldset className="flex flex-col gap-1">
           <legend className="pb-1.5 text-caption font-medium">Events</legend>
@@ -610,25 +663,27 @@ function ChannelForm({
           </Field>
         )}
 
-        <Field
-          label="Mention (optional)"
-          hint="Up to 3 of @here, @channel, <!subteam^ID> (a user group) or <@UID> (a user), separated by spaces. Used in down alerts and reminders only."
-          error={errors.mention}
-        >
-          {(c) => (
-            <Input
-              {...c}
-              name="mention"
-              mono
-              autoComplete="off"
-              spellCheck={false}
-              autoCapitalize="off"
-              placeholder="@here"
-              value={values.mention}
-              onChange={(e) => update("mention", e.target.value)}
-            />
-          )}
-        </Field>
+        {!webhook && (
+          <Field
+            label="Mention (optional)"
+            hint="Up to 3 of @here, @channel, <!subteam^ID> (a user group) or <@UID> (a user), separated by spaces. Used in down alerts and reminders only."
+            error={errors.mention}
+          >
+            {(c) => (
+              <Input
+                {...c}
+                name="mention"
+                mono
+                autoComplete="off"
+                spellCheck={false}
+                autoCapitalize="off"
+                placeholder="@here"
+                value={values.mention}
+                onChange={(e) => update("mention", e.target.value)}
+              />
+            )}
+          </Field>
+        )}
 
         <Field
           label="Reminder every (minutes)"

@@ -54,6 +54,7 @@ var definerCalls = map[string]string{
 	"list_due_heartbeats":               `SELECT * FROM list_due_heartbeats(1)`,
 	"fail_deleted_channel_deliveries":   `SELECT fail_deleted_channel_deliveries(gen_random_uuid())`,
 	"enqueue_incident_reminders":        `SELECT enqueue_incident_reminders(1)`,
+	"webhook_delivery_context":          `SELECT * FROM webhook_delivery_context(gen_random_uuid())`,
 	// Executable by proreta_api, which gets the in-function refusal (PRA01) for an unknown actor.
 	"auth_sync_platform_admin":    `SELECT auth_sync_platform_admin(gen_random_uuid())`,
 	"admin_list_tenants":          `SELECT * FROM admin_list_tenants(gen_random_uuid(), '', false, 1, 0)`,

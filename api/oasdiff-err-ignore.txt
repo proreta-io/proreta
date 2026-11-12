@@ -55,3 +55,9 @@ POST /api/v1/admin/organizations/{organizationId}/invitations added the new `own
 GET /api/v1/invitations added the new `owner` enum value to the `items/items/role` response property for the response status `200`
 POST /api/v1/invitations added the new `owner` enum value to the `invitation/role` response property for the response status `201`
 POST /api/v1/invitations/lookup added the new `owner` enum value to the `role` response property for the response status `200`
+
+# A second channel type, webhook. Before the first stable release there is no compatibility with older clients (the web app changes in the same release).
+GET /api/v1/channels added the new `webhook` enum value to the `items/items/type` response property for the response status `200`
+POST /api/v1/channels added the new `webhook` enum value to the `type` response property for the response status `201`
+GET /api/v1/channels/{channelId} added the new `webhook` enum value to the `type` response property for the response status `200`
+PATCH /api/v1/channels/{channelId} added the new `webhook` enum value to the `type` response property for the response status `200`

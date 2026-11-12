@@ -1,11 +1,11 @@
 -- name: ListChannels :many
-SELECT id, name, type, events, mention, reminder_minutes, status, created_at, updated_at, project_id
+SELECT id, name, type, events, mention, reminder_minutes, status, created_at, updated_at, project_id, content_type, body_template
 FROM notification_channels
 WHERE tenant_id = @tenant_id AND deleted_at IS NULL
 ORDER BY created_at, id;
 
 -- name: GetChannelInfo :one
-SELECT id, name, type, events, mention, reminder_minutes, status, created_at, updated_at, project_id
+SELECT id, name, type, events, mention, reminder_minutes, status, created_at, updated_at, project_id, content_type, body_template
 FROM notification_channels
 WHERE tenant_id = @tenant_id AND id = @id AND deleted_at IS NULL;
 
@@ -13,18 +13,19 @@ WHERE tenant_id = @tenant_id AND id = @id AND deleted_at IS NULL;
 -- Serialises changes of one channel (patch, delete, test outcome). NO KEY UPDATE: the key never
 -- changes, so inserts into monitor_channels and notification_deliveries (FOR KEY SHARE on the
 -- referenced row) are not blocked by it.
-SELECT id, config_encrypted, status, project_id
+SELECT id, type, config_encrypted, status, project_id, content_type, body_template
 FROM notification_channels
 WHERE tenant_id = @tenant_id AND id = @id AND deleted_at IS NULL
 FOR NO KEY UPDATE;
 
 -- name: InsertChannel :exec
-INSERT INTO notification_channels (id, tenant_id, type, name, config_encrypted, events, mention, reminder_minutes, project_id)
-VALUES (@id, @tenant_id, 'slack_webhook', @name, @config_encrypted, @events, @mention, @reminder_minutes, sqlc.narg('project_id'));
+INSERT INTO notification_channels (id, tenant_id, type, name, config_encrypted, events, mention, reminder_minutes, project_id, content_type, body_template)
+VALUES (@id, @tenant_id, @type, @name, @config_encrypted, @events, @mention, @reminder_minutes, sqlc.narg('project_id'), sqlc.narg('content_type'), sqlc.narg('body_template'));
 
 -- name: UpdateChannel :exec
 UPDATE notification_channels
-SET name = @name, events = @events, mention = @mention, reminder_minutes = @reminder_minutes, updated_at = now()
+SET name = @name, events = @events, mention = @mention, reminder_minutes = @reminder_minutes,
+    content_type = sqlc.narg('content_type'), body_template = sqlc.narg('body_template'), updated_at = now()
 WHERE tenant_id = @tenant_id AND id = @id AND deleted_at IS NULL;
 
 -- name: ReplaceChannelConfig :exec
@@ -50,7 +51,7 @@ SELECT fail_deleted_channel_deliveries(@channel_id::uuid)::integer;
 -- name: GetChannel :one
 -- Delivery lookup in jobs: deleted channels are returned too, so their deliveries fail with a
 -- clear reason.
-SELECT type, config_encrypted, status, mention, (deleted_at IS NOT NULL)::boolean AS deleted
+SELECT type, config_encrypted, status, mention, content_type, body_template, (deleted_at IS NOT NULL)::boolean AS deleted
 FROM notification_channels
 WHERE tenant_id = @tenant_id AND id = @id;
 

@@ -851,8 +851,14 @@ export interface paths {
     put?: never;
     /**
      * Create a notification channel
-     * @description Creates a Slack channel. `webhookUrl` must match `https://hooks.slack.com/services/...`
-     *     and is stored encrypted; it is write-only. `events` defaults to every event. `mention`
+     * @description Creates a channel of `type` `slack_webhook` (the default) or `webhook`. For Slack,
+     *     `webhookUrl` must match `https://hooks.slack.com/services/...`; for `webhook` it is an
+     *     `https` URL of a public host on port 443 (private, loopback and other internal addresses
+     *     are 422). It is stored encrypted and is write-only. A `webhook` channel also has a
+     *     `contentType` (`json`, the default, or `text`) and a `bodyTemplate` (a default for the
+     *     content type when omitted; 422 with a field error on `bodyTemplate` for an unknown
+     *     placeholder or, with `json`, a template that does not render to valid JSON); it has no
+     *     `mention`. `events` defaults to every event. `mention`
      *     holds at most three of `@here`, `@channel`, `<!subteam^ID>` (a user group) and `<@UID>` (a
      *     user), case-sensitive, and is used only in `down` and reminder messages.
      *     `reminderMinutes` is 0 (no reminders, the default) or 5 to 1440: while an incident stays
@@ -921,9 +927,32 @@ export interface paths {
     put?: never;
     /**
      * Send a test message to a channel
-     * @description Sends a test message to the channel's webhook. Fails with 404 for an unknown channel, 429 when the organization tested a channel within the last 5 seconds or when Slack rate-limits the webhook (both with Retry-After), and 502 `urn:proreta:problem:channel-delivery-failed` when Slack does not accept the message (Slack's answer is never returned). A removed or revoked webhook (Slack answers 404 or 410) marks the channel `failed`.
+     * @description Sends a test message to the channel's webhook (for a `webhook` channel, its template rendered with sample data and event `test`). Fails with 404 for an unknown channel, 429 when the organization tested a channel within the last 5 seconds or when Slack rate-limits the webhook (both with Retry-After), and 502 `urn:proreta:problem:channel-delivery-failed` when Slack does not accept the message (Slack's answer is never returned). A removed or revoked webhook (Slack answers 404 or 410) marks the channel `failed`.
      */
     post: operations["testChannel"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/channels/preview-template": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Preview a webhook message template
+     * @description Renders a template with sample data and returns the body, without sending anything and
+     *     without touching the network. 422 with `fieldErrors` on `contentType` or `bodyTemplate`
+     *     when the template is not acceptable (unknown placeholder, invalid JSON). Needs the
+     *     permission to manage channels.
+     */
+    post: operations["previewChannelTemplate"];
     delete?: never;
     options?: never;
     head?: never;
@@ -2667,10 +2696,10 @@ export interface components {
       items: components["schemas"]["Incident"][];
     };
     /**
-     * @description `slack_webhook`: a Slack Incoming Webhook
+     * @description `slack_webhook`: a Slack Incoming Webhook; `webhook`: any https endpoint, which receives the channel's message template as a POST
      * @enum {string}
      */
-    ChannelType: "slack_webhook";
+    ChannelType: "slack_webhook" | "webhook";
     /**
      * @description `down`: a monitor went down (and reminders while it stays down); `recovered`: it is back up; `tls_expiring`: its TLS certificate expires within 14 days
      * @enum {string}
@@ -2678,7 +2707,7 @@ export interface components {
     ChannelEvent: "down" | "recovered" | "tls_expiring";
     ChannelEvents: components["schemas"]["ChannelEvent"][];
     /**
-     * @description Slack mentions put in front of `down` and reminder messages; each is `@here`, `@channel`, `<!subteam^ID>` or `<@UID>` (400 otherwise)
+     * @description Slack mentions put in front of `down` and reminder messages (Slack channels only; a `webhook` channel must have none); each is `@here`, `@channel`, `<!subteam^ID>` or `<@UID>` (400 otherwise)
      * @example [
      *       "@here"
      *     ]
@@ -2704,7 +2733,14 @@ export interface components {
       mention: components["schemas"]["ChannelMention"];
       reminderMinutes: components["schemas"]["ReminderMinutes"];
       /**
-       * @description `failed` means Slack answered 404 or 410 (the webhook was revoked); nothing is sent until a new webhook URL is stored.
+       * @description Of a `webhook` channel; absent for Slack channels and when `configHidden` is true
+       * @enum {string}
+       */
+      contentType?: "json" | "text";
+      /** @description The message template of a `webhook` channel (not a secret); absent for Slack channels and when `configHidden` is true */
+      bodyTemplate?: string;
+      /**
+       * @description `failed` means the endpoint answered 404 or 410 (a Slack webhook was revoked); nothing is sent until a new webhook URL is stored.
        * @enum {string}
        */
       status: "active" | "failed";
@@ -2712,6 +2748,30 @@ export interface components {
       createdAt: string;
       /** Format: date-time */
       updatedAt: string;
+    };
+    /**
+     * @description `json`: the body is `application/json` and every placeholder value is JSON-string-escaped; `text`: the body is `text/plain` and values are inserted verbatim
+     * @enum {string}
+     */
+    WebhookContentType: "json" | "text";
+    /**
+     * @description The body of the message a `webhook` channel sends, with placeholders written `{{name}}`.
+     *     Known names: `event` (`opened`, `resolved`, `reminder`, `tls_expiring`, `test`), `status`
+     *     (`down` or `up`), `monitor.id`, `monitor.name`, `monitor.url`, `monitor.type`,
+     *     `project.name`, `organization.name`, `incident.id`, `incident.startedAt` and
+     *     `incident.resolvedAt` (RFC 3339, UTC), `incident.duration` (for example `5m`),
+     *     `error.kind`, `tls.expiresAt`, `tls.daysLeft` and `link` (the monitor in the dashboard). A
+     *     value that does not exist for the event is empty. An unknown name is 422. With `json` the
+     *     template rendered with sample data must be one valid JSON document.
+     */
+    WebhookBodyTemplate: string;
+    ChannelTemplatePreviewRequest: {
+      contentType: components["schemas"]["WebhookContentType"];
+      bodyTemplate: components["schemas"]["WebhookBodyTemplate"];
+    };
+    ChannelTemplatePreview: {
+      /** @description The template rendered with sample data */
+      body: string;
     };
     ChannelList: {
       items: components["schemas"]["Channel"][];
@@ -2729,9 +2789,11 @@ export interface components {
       organizationWide?: boolean;
       /**
        * Format: password
-       * @description Slack Incoming Webhook URL, `https://hooks.slack.com/services/...`; write-only
+       * @description Slack Incoming Webhook URL, `https://hooks.slack.com/services/...`, or for a `webhook` channel an `https` URL of a public host (port 443); write-only
        */
       webhookUrl: string;
+      contentType?: components["schemas"]["WebhookContentType"];
+      bodyTemplate?: components["schemas"]["WebhookBodyTemplate"];
       events?: components["schemas"]["ChannelEvents"];
       mention?: components["schemas"]["ChannelMention"];
       reminderMinutes?: components["schemas"]["ReminderMinutes"];
@@ -2748,9 +2810,11 @@ export interface components {
       organizationWide?: boolean;
       /**
        * Format: password
-       * @description A new Slack Incoming Webhook URL; write-only
+       * @description A new Slack Incoming Webhook URL, or for a `webhook` channel a new `https` URL; write-only
        */
       webhookUrl?: string;
+      contentType?: components["schemas"]["WebhookContentType"];
+      bodyTemplate?: components["schemas"]["WebhookBodyTemplate"];
       events?: components["schemas"]["ChannelEvents"];
       mention?: components["schemas"]["ChannelMention"];
       reminderMinutes?: components["schemas"]["ReminderMinutes"];
@@ -4913,6 +4977,38 @@ export interface operations {
           "application/problem+json": components["schemas"]["Problem"];
         };
       };
+      default: components["responses"]["Error"];
+    };
+  };
+  previewChannelTemplate: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ChannelTemplatePreviewRequest"];
+      };
+    };
+    responses: {
+      /** @description The rendered sample */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ChannelTemplatePreview"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      422: components["responses"]["UnprocessableEntity"];
       default: components["responses"]["Error"];
     };
   };

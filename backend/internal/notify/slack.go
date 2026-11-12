@@ -81,15 +81,17 @@ type SendError struct {
 	Status int
 	// Permanent means retrying cannot help (revoked webhook, invalid URL).
 	Permanent bool
+	// Generic is true for a failure of a webhook channel (not Slack), whose wording differs.
+	Generic bool
 	// RetryAfter is Slack's Retry-After on 429, 0 when absent.
 	RetryAfter time.Duration
 }
 
 func (e *SendError) Error() string {
 	if e.Status != 0 {
-		return "notify: slack send failed: " + e.Kind + " (HTTP " + strconv.Itoa(e.Status) + ")"
+		return "notify: send failed: " + e.Kind + " (HTTP " + strconv.Itoa(e.Status) + ")"
 	}
-	return "notify: slack send failed: " + e.Kind
+	return "notify: send failed: " + e.Kind
 }
 
 // Doer sends an HTTP request. In production it is the guarded client from NewSlackClient;
@@ -99,7 +101,7 @@ type Doer interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-// NewSlackClient returns the SSRF-guarded client for Slack: no redirects, no proxy,
+// NewSlackClient returns the SSRF-guarded client for Slack and webhooks: no redirects, no proxy,
 // connect-time address validation with the operator's extra blocked ranges.
 func NewSlackClient(blocked []netip.Prefix) *http.Client {
 	return safehttp.NewClient(safehttp.Options{Timeout: SendTimeout, MaxRedirects: 0, BlockedPrefixes: blocked})
@@ -128,20 +130,25 @@ func (n *SlackNotifier) Send(ctx context.Context, webhookURL, text string) error
 	if err != nil {
 		return &SendError{Kind: KindOther}
 	}
+	return post(ctx, n.client, n.now, webhookURL, "application/json", body)
+}
+
+// post sends body to rawURL and reduces the answer to a *SendError. The answer's body is never
+// shown or stored; a little of it is read so the connection closes cleanly.
+func post(ctx context.Context, client Doer, now func() time.Time, rawURL, contentType string, body []byte) error {
 	ctx, cancel := context.WithTimeout(ctx, SendTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhookURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, bytes.NewReader(body))
 	if err != nil {
 		return &SendError{Kind: KindInvalidURL, Permanent: true}
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("User-Agent", "Proreta/1 (+notifications)")
 
-	resp, err := n.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return &SendError{Kind: classify(ctx, err)}
 	}
-	// Slack's answer is never shown or stored; read a little so the connection closes cleanly.
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
 	_ = resp.Body.Close()
 
@@ -151,7 +158,7 @@ func (n *SlackNotifier) Send(ctx context.Context, webhookURL, text string) error
 	case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone:
 		return &SendError{Kind: KindNotFound, Status: resp.StatusCode, Permanent: true}
 	case resp.StatusCode == http.StatusTooManyRequests:
-		return &SendError{Kind: KindRateLimited, Status: resp.StatusCode, RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), n.now())}
+		return &SendError{Kind: KindRateLimited, Status: resp.StatusCode, RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), now())}
 	}
 	return &SendError{Kind: KindHTTPStatus, Status: resp.StatusCode}
 }
