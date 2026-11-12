@@ -197,6 +197,8 @@ notification_channels.10 mention text[] not null default '{}'::text[]
 notification_channels.11 reminder_minutes integer not null default 0
 notification_channels.12 deleted_at timestamp with time zone
 notification_channels.13 project_id uuid
+notification_channels.14 content_type text
+notification_channels.15 body_template text
 notification_deliveries.1 id uuid not null
 notification_deliveries.2 tenant_id uuid not null
 notification_deliveries.3 kind text not null
@@ -452,8 +454,10 @@ monitors monitors_project_fkey FOREIGN KEY (tenant_id, project_id) REFERENCES pr
 monitors monitors_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id)
 monitors monitors_tenant_id_id_key UNIQUE (tenant_id, id)
 monitors monitors_type_check CHECK ((type = ANY (ARRAY['http'::text, 'heartbeat'::text])))
+notification_channels notification_channels_body_template_check CHECK ((char_length(body_template) <= 8192))
 notification_channels notification_channels_config_encrypted_check CHECK (((length(config_encrypted) >= 1) AND (length(config_encrypted) <= 4096)))
 notification_channels notification_channels_config_present CHECK (((deleted_at IS NOT NULL) OR (config_encrypted IS NOT NULL)))
+notification_channels notification_channels_content_type_check CHECK ((content_type = ANY (ARRAY['json'::text, 'text'::text])))
 notification_channels notification_channels_events_check CHECK ((((cardinality(events) >= 1) AND (cardinality(events) <= 3)) AND (events <@ ARRAY['down'::text, 'recovered'::text, 'tls_expiring'::text])))
 notification_channels notification_channels_mention_check CHECK (((cardinality(mention) <= 3) AND (array_to_string(mention, ' '::text) ~ '^((@here|@channel|<!subteam\^[A-Z0-9]{2,20}>|<@[UW][A-Z0-9]{2,20}>)( |$))*$'::text)))
 notification_channels notification_channels_name_check CHECK (((length(name) >= 1) AND (length(name) <= 60)))
@@ -463,7 +467,8 @@ notification_channels notification_channels_reminder_minutes_check CHECK (((remi
 notification_channels notification_channels_status_check CHECK ((status = ANY (ARRAY['active'::text, 'failed'::text])))
 notification_channels notification_channels_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id)
 notification_channels notification_channels_tenant_id_id_key UNIQUE (tenant_id, id)
-notification_channels notification_channels_type_check CHECK ((type = 'slack_webhook'::text))
+notification_channels notification_channels_type_check CHECK ((type = ANY (ARRAY['slack_webhook'::text, 'webhook'::text])))
+notification_channels notification_channels_webhook_shape CHECK ((((type = 'webhook'::text) AND (content_type IS NOT NULL) AND (body_template IS NOT NULL) AND (mention = '{}'::text[])) OR ((type = 'slack_webhook'::text) AND (content_type IS NULL) AND (body_template IS NULL))))
 notification_deliveries notification_deliveries_attempts_check CHECK ((attempts >= 0))
 notification_deliveries notification_deliveries_check CHECK (((status = 'in_progress'::text) = (lease_until IS NOT NULL)))
 notification_deliveries notification_deliveries_check1 CHECK (((status = 'sent'::text) = (sent_at IS NOT NULL)))
@@ -784,6 +789,7 @@ status_page_slug_held(text) owner=proreta_owner definer=true acl=proreta_api=X/p
 status_page_snapshot(text) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_statuspage=X/proreta_owner
 tenants_create_default_project() owner=proreta_owner definer=false acl=proreta_owner=X/proreta_owner
 uuidv7_now() owner=proreta_owner definer=false acl=proreta_owner=X/proreta_owner
+webhook_delivery_context(uuid) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 
 -- default privileges
 proreta_owner * f proreta_owner=X/proreta_owner
@@ -2466,4 +2472,17 @@ AS $function$
     SELECT encode(set_bit(set_bit(overlay(uuid_send(gen_random_uuid())
                PLACING substring(int8send(floor(extract(epoch FROM clock_timestamp()) * 1000)::bigint) FROM 3)
                FROM 1 FOR 6), 52, 1), 53, 1), 'hex')::uuid
+$function$
+CREATE OR REPLACE FUNCTION public.webhook_delivery_context(p_monitor_id uuid)
+ RETURNS TABLE(monitor_type text, project_name text, organization_name text)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    SELECT m.type, p.name, t.name
+    FROM monitors AS m
+    JOIN projects AS p ON p.tenant_id = m.tenant_id AND p.id = m.project_id
+    JOIN tenants AS t ON t.id = m.tenant_id
+    WHERE m.tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid
+      AND m.id = p_monitor_id
 $function$

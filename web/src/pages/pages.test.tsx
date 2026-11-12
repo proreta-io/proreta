@@ -790,11 +790,11 @@ describe("settings", () => {
     });
     renderApp("/channels");
     const oncall = await screen.findByRole("row", { name: /#on-call/ });
-    expect(oncall).toHaveTextContent("#on-callDown@hereEvery 1 hFailed");
+    expect(oncall).toHaveTextContent("#on-callSlackDown@hereEvery 1 hFailed");
     expect(screen.getByRole("row", { name: /#ops/ })).toHaveTextContent(
-      "#opsDown, Recovered, TLS certificate expiringNoneOffActive",
+      "#opsSlackDown, Recovered, TLS certificate expiringNoneOffActive",
     );
-    expect(screen.getByText(/refused by Slack/)).toBeInTheDocument();
+    expect(screen.getByText(/was refused by/)).toBeInTheDocument();
   });
 
   it("shows project-only maintainers an organization-wide channel without settings or actions", async () => {

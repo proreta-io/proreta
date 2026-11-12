@@ -1355,8 +1355,14 @@ paths:
       operationId: createChannel
       summary: Create a notification channel
       description: |
-        Creates a Slack channel. `webhookUrl` must match `https://hooks.slack.com/services/...`
-        and is stored encrypted; it is write-only. `events` defaults to every event. `mention`
+        Creates a channel of `type` `slack_webhook` (the default) or `webhook`. For Slack,
+        `webhookUrl` must match `https://hooks.slack.com/services/...`; for `webhook` it is an
+        `https` URL of a public host on port 443 (private, loopback and other internal addresses
+        are 422). It is stored encrypted and is write-only. A `webhook` channel also has a
+        `contentType` (`json`, the default, or `text`) and a `bodyTemplate` (a default for the
+        content type when omitted; 422 with a field error on `bodyTemplate` for an unknown
+        placeholder or, with `json`, a template that does not render to valid JSON); it has no
+        `mention`. `events` defaults to every event. `mention`
         holds at most three of `@here`, `@channel`, `<!subteam^ID>` (a user group) and `<@UID>` (a
         user), case-sensitive, and is used only in `down` and reminder messages.
         `reminderMinutes` is 0 (no reminders, the default) or 5 to 1440: while an incident stays
@@ -1492,7 +1498,7 @@ paths:
     post:
       operationId: testChannel
       summary: Send a test message to a channel
-      description: Sends a test message to the channel's webhook. Fails with 404 for an unknown channel, 429 when the organization tested a channel within the last 5 seconds or when Slack rate-limits the webhook (both with Retry-After), and 502 `urn:proreta:problem:channel-delivery-failed` when Slack does not accept the message (Slack's answer is never returned). A removed or revoked webhook (Slack answers 404 or 410) marks the channel `failed`.
+      description: Sends a test message to the channel's webhook (for a `webhook` channel, its template rendered with sample data and event `test`). Fails with 404 for an unknown channel, 429 when the organization tested a channel within the last 5 seconds or when Slack rate-limits the webhook (both with Retry-After), and 502 `urn:proreta:problem:channel-delivery-failed` when Slack does not accept the message (Slack's answer is never returned). A removed or revoked webhook (Slack answers 404 or 410) marks the channel `failed`.
       tags: [channels]
       security:
         - cookieAuth: []
@@ -1518,6 +1524,44 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/channels/preview-template:
+    post:
+      operationId: previewChannelTemplate
+      summary: Preview a webhook message template
+      description: |
+        Renders a template with sample data and returns the body, without sending anything and
+        without touching the network. 422 with `fieldErrors` on `contentType` or `bodyTemplate`
+        when the template is not acceptable (unknown placeholder, invalid JSON). Needs the
+        permission to manage channels.
+      tags: [channels]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChannelTemplatePreviewRequest"
+      responses:
+        "200":
+          description: The rendered sample
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelTemplatePreview"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         default:
           $ref: "#/components/responses/Error"
   /api/v1/projects:
@@ -4686,8 +4730,8 @@ components:
             $ref: "#/components/schemas/Incident"
     ChannelType:
       type: string
-      description: "`slack_webhook`: a Slack Incoming Webhook"
-      enum: [slack_webhook]
+      description: "`slack_webhook`: a Slack Incoming Webhook; `webhook`: any https endpoint, which receives the channel's message template as a POST"
+      enum: [slack_webhook, webhook]
     ChannelEvent:
       type: string
       description: "`down`: a monitor went down (and reminders while it stays down); `recovered`: it is back up; `tls_expiring`: its TLS certificate expires within 14 days"
@@ -4701,7 +4745,7 @@ components:
         $ref: "#/components/schemas/ChannelEvent"
     ChannelMention:
       type: array
-      description: Slack mentions put in front of `down` and reminder messages; each is `@here`, `@channel`, `<!subteam^ID>` or `<@UID>` (400 otherwise)
+      description: Slack mentions put in front of `down` and reminder messages (Slack channels only; a `webhook` channel must have none); each is `@here`, `@channel`, `<!subteam^ID>` or `<@UID>` (400 otherwise)
       maxItems: 3
       items:
         type: string
@@ -4741,16 +4785,56 @@ components:
           $ref: "#/components/schemas/ChannelMention"
         reminderMinutes:
           $ref: "#/components/schemas/ReminderMinutes"
+        contentType:
+          type: string
+          enum: [json, text]
+          description: Of a `webhook` channel; absent for Slack channels and when `configHidden` is true
+        bodyTemplate:
+          type: string
+          description: The message template of a `webhook` channel (not a secret); absent for Slack channels and when `configHidden` is true
         status:
           type: string
           enum: [active, failed]
-          description: "`failed` means Slack answered 404 or 410 (the webhook was revoked); nothing is sent until a new webhook URL is stored."
+          description: "`failed` means the endpoint answered 404 or 410 (a Slack webhook was revoked); nothing is sent until a new webhook URL is stored."
         createdAt:
           type: string
           format: date-time
         updatedAt:
           type: string
           format: date-time
+    WebhookContentType:
+      type: string
+      description: "`json`: the body is `application/json` and every placeholder value is JSON-string-escaped; `text`: the body is `text/plain` and values are inserted verbatim"
+      enum: [json, text]
+    WebhookBodyTemplate:
+      type: string
+      description: |
+        The body of the message a `webhook` channel sends, with placeholders written `{{name}}`.
+        Known names: `event` (`opened`, `resolved`, `reminder`, `tls_expiring`, `test`), `status`
+        (`down` or `up`), `monitor.id`, `monitor.name`, `monitor.url`, `monitor.type`,
+        `project.name`, `organization.name`, `incident.id`, `incident.startedAt` and
+        `incident.resolvedAt` (RFC 3339, UTC), `incident.duration` (for example `5m`),
+        `error.kind`, `tls.expiresAt`, `tls.daysLeft` and `link` (the monitor in the dashboard). A
+        value that does not exist for the event is empty. An unknown name is 422. With `json` the
+        template rendered with sample data must be one valid JSON document.
+      maxLength: 8192
+    ChannelTemplatePreviewRequest:
+      type: object
+      additionalProperties: false
+      required: [contentType, bodyTemplate]
+      properties:
+        contentType:
+          $ref: "#/components/schemas/WebhookContentType"
+        bodyTemplate:
+          $ref: "#/components/schemas/WebhookBodyTemplate"
+    ChannelTemplatePreview:
+      type: object
+      additionalProperties: false
+      required: [body]
+      properties:
+        body:
+          type: string
+          description: The template rendered with sample data
     ChannelList:
       type: object
       additionalProperties: false
@@ -4782,9 +4866,13 @@ components:
         webhookUrl:
           type: string
           format: password
-          description: Slack Incoming Webhook URL, `https://hooks.slack.com/services/...`; write-only
+          description: Slack Incoming Webhook URL, `https://hooks.slack.com/services/...`, or for a `webhook` channel an `https` URL of a public host (port 443); write-only
           minLength: 1
           maxLength: 2048
+        contentType:
+          $ref: "#/components/schemas/WebhookContentType"
+        bodyTemplate:
+          $ref: "#/components/schemas/WebhookBodyTemplate"
         events:
           $ref: "#/components/schemas/ChannelEvents"
         mention:
@@ -4810,9 +4898,13 @@ components:
         webhookUrl:
           type: string
           format: password
-          description: A new Slack Incoming Webhook URL; write-only
+          description: A new Slack Incoming Webhook URL, or for a `webhook` channel a new `https` URL; write-only
           minLength: 1
           maxLength: 2048
+        contentType:
+          $ref: "#/components/schemas/WebhookContentType"
+        bodyTemplate:
+          $ref: "#/components/schemas/WebhookBodyTemplate"
         events:
           $ref: "#/components/schemas/ChannelEvents"
         mention:

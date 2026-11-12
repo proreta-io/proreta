@@ -63,6 +63,12 @@ func (f *fakeSlack) Send(_ context.Context, u, _ string) error {
 // newSlackServer is newServer with the notification channels wired and the log captured.
 func newSlackServer(t *testing.T, env *pgtest.Env, sender *fakeSlack, logs *lockedBuffer, clk clock.Clock) *client {
 	t.Helper()
+	return newChannelServer(t, env, sender, nil, logs, clk)
+}
+
+// newChannelServer is newSlackServer with the sender of webhook channels given too.
+func newChannelServer(t *testing.T, env *pgtest.Env, sender *fakeSlack, hook *fakeWebhook, logs *lockedBuffer, clk clock.Clock) *client {
+	t.Helper()
 	ctx := context.Background()
 	pool := env.Pool(t, env.APIURL, 4)
 	log := slog.New(slog.NewJSONHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
@@ -83,9 +89,13 @@ func newSlackServer(t *testing.T, env *pgtest.Env, sender *fakeSlack, logs *lock
 		t.Fatal(err)
 	}
 	sched := scheduler.New()
+	channels := notify.NewService(pool, keys, sender, "https://proreta.example.com")
+	if hook != nil {
+		channels.WithWebhook(hook)
+	}
 	h, err := api.NewHandler(api.Config{Version: "test", Commit: "test", CookieSecure: true, TrustedProxyHops: 1}, api.Deps{
 		Auth: svc, Monitors: monitors.NewService(pool, sched, incidents.NewService(sched)),
-		Queries: queries.New(pool, nil), Channels: notify.NewService(pool, keys, sender, "https://proreta.example.com"), Plans: plans.NewService(pool), Projects: projects.NewService(pool),
+		Queries: queries.New(pool, nil), Channels: channels, Plans: plans.NewService(pool), Projects: projects.NewService(pool),
 		Logger: log, Clock: clk,
 	})
 	if err != nil {

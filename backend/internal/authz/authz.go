@@ -352,6 +352,8 @@ var operations = map[string]Permission{
 	"updatechannel": "channel.manage",
 	"deletechannel": "channel.manage",
 	"testchannel":   "channel.manage",
+	// Renders a template with sample data; it touches no channel, so the permission alone decides.
+	"previewchanneltemplate": "channel.manage",
 	// Organization-wide usage counts: members and viewers learn about a reached limit
 	// from the 409 of the create that hits it.
 	"getusage": "usage.read",

@@ -23,10 +23,16 @@ import (
 )
 
 // Notifier sends one message to a webhook; *notify.SlackNotifier implements it. It is the seam of
-// the channel type slack_webhook, the only one so far. Failures must
+// the channel type slack_webhook. Failures must
 // be *notify.SendError (anything else is treated as a retryable "other").
 type Notifier interface {
 	Send(ctx context.Context, webhookURL, text string) error
+}
+
+// WebhookNotifier is the seam of the channel type webhook; *notify.WebhookNotifier implements it,
+// with the same rules for failures as Notifier.
+type WebhookNotifier interface {
+	Send(ctx context.Context, webhookURL, contentType, body string) error
 }
 
 // Defaults of DeliveryConfig.
@@ -60,9 +66,11 @@ type DeliveryDeps struct {
 	Pool     *db.Pool
 	Channels *notify.Service
 	Notifier Notifier
-	Metrics  *Metrics
-	Log      *slog.Logger
-	Clock    clock.Clock
+	// Webhook sends to channels of type webhook; deliveries to them fail while it is nil.
+	Webhook WebhookNotifier
+	Metrics *Metrics
+	Log     *slog.Logger
+	Clock   clock.Clock
 	// Sleep waits d or until ctx ends; tests replace it.
 	Sleep func(ctx context.Context, d time.Duration) error
 }
@@ -223,6 +231,11 @@ func (r *Deliverer) deliver(ctx context.Context, dl delivery) {
 		if target, err = r.d.Channels.DeliveryTarget(ctx, tx, dl.TenantID, dl.ChannelID); err != nil {
 			return err
 		}
+		if target.Type == notify.TypeWebhook && !target.Deleted {
+			if target.Hook, err = r.d.Channels.LoadWebhookContext(ctx, tx, dl.MonitorID); err != nil {
+				return err
+			}
+		}
 		routed, err = incidents.StillRouted(ctx, tx, dl.TenantID, dl.MonitorID, dl.ChannelID)
 		return err
 	})
@@ -234,6 +247,8 @@ func (r *Deliverer) deliver(ctx context.Context, dl delivery) {
 		reason = "channel_missing"
 	case errors.Is(err, notify.ErrUndecryptable):
 		reason = "channel_undecryptable"
+	case errors.Is(err, notify.ErrBadTemplate):
+		reason = "bad_template"
 	case err != nil:
 		log.ErrorContext(ctx, "reading the delivery channel failed; the lease will expire", "error", err)
 		return
@@ -253,9 +268,23 @@ func (r *Deliverer) deliver(ctx context.Context, dl delivery) {
 		r.finish(ctx, log, dl, channelType, outcome{status: statusFailed, errKind: reason})
 		return
 	}
-	text, err := notify.Message(dl.Kind, dl.Payload, r.cfg.PublicURL, target.Mention)
+	var text, body string
+	isWebhook := target.Type == notify.TypeWebhook
+	if isWebhook {
+		if r.d.Webhook == nil {
+			r.finish(ctx, log, dl, channelType, outcome{status: statusFailed, errKind: "channel_unsupported"})
+			return
+		}
+		body, err = target.WebhookBody(dl.Kind, dl.Payload, r.cfg.PublicURL)
+	} else {
+		text, err = notify.Message(dl.Kind, dl.Payload, r.cfg.PublicURL, target.Mention)
+	}
 	if err != nil {
-		r.finish(ctx, log, dl, channelType, outcome{status: statusFailed, errKind: "bad_payload"})
+		kind := "bad_payload"
+		if errors.Is(err, notify.ErrBadTemplate) {
+			kind = "bad_template"
+		}
+		r.finish(ctx, log, dl, channelType, outcome{status: statusFailed, errKind: kind})
 		return
 	}
 
@@ -265,7 +294,12 @@ func (r *Deliverer) deliver(ctx context.Context, dl delivery) {
 		}
 	}
 	start := time.Now()
-	sendErr := r.d.Notifier.Send(ctx, target.WebhookURL, text)
+	var sendErr error
+	if isWebhook {
+		sendErr = r.d.Webhook.Send(ctx, target.WebhookURL, target.ContentType, body)
+	} else {
+		sendErr = r.d.Notifier.Send(ctx, target.WebhookURL, text)
+	}
 	r.d.Metrics.duration.WithLabelValues(channelType).Observe(time.Since(start).Seconds())
 	if sendErr != nil && ctx.Err() != nil {
 		return // abandoned at shutdown: not a real failure
@@ -293,7 +327,7 @@ func (r *Deliverer) finish(ctx context.Context, log *slog.Logger, dl delivery, c
 		if recorded && o.failChannel {
 			changed, err := r.d.Channels.MarkFailed(ctx, tx, dl.TenantID, dl.ChannelID)
 			if changed {
-				log.WarnContext(ctx, "slack webhook revoked; channel marked failed", "channel_id", dl.ChannelID)
+				log.WarnContext(ctx, "webhook revoked; channel marked failed", "channel_id", dl.ChannelID)
 			}
 			return err
 		}

@@ -220,16 +220,16 @@ kubectl -n proreta delete secret proreta-db-admin-login
 ```
 The Secret `proreta-db` (the role passwords) stays; it is not managed by Helm. If a later run needs the login again (a new or empty database, a missing or outdated `proreta-db`), the Job fails with `the database is not ready and no database admin login is available`: create the admin Secret again (step 2) and rerun the upgrade. To rotate the role passwords or add a role on a working installation, set `database.bootstrap.force: true` together with the admin Secret, upgrade, then set it back to `false` ([database bootstrap](runbooks/database-bootstrap.md)). You can still set `database.bootstrap.enabled: false` after the first install if you prefer not to run the Job at all.
 
-**Back up the encryption key.** Do this now, once. The Secret `proreta-crypto` holds the keys that encrypt the Slack webhook URLs stored in the database. Without it the webhook URLs in the database (and in any backup of it) cannot be decrypted: they are lost and each Slack channel must be entered again. The Secret `proreta-statuspage` (the cookie signing key of the status page) is less critical: losing it only signs visitors of password-protected pages out, but it is cheap to keep with the other one. [Back up the secrets](#back-up-the-secrets) shows how.
+**Back up the encryption key.** Do this now, once. The Secret `proreta-crypto` holds the keys that encrypt the Slack and webhook URLs stored in the database. Without it the webhook URLs in the database (and in any backup of it) cannot be decrypted: they are lost and each channel must be entered again. The Secret `proreta-statuspage` (the cookie signing key of the status page) is less critical: losing it only signs visitors of password-protected pages out, but it is cheap to keep with the other one. [Back up the secrets](#back-up-the-secrets) shows how.
 
-**Optional next steps:** Slack channels in the app, [outgoing email](runbooks/email.md) (configured after your first sign-in under **Admin → Email**: an SMTP server, a test message and three switches; everything is off by default, and nothing is emailed until you turn it on), [sign-in with Google or GitHub](runbooks/oauth.md), [status pages](runbooks/status-page.md), [Alertmanager watchdog](runbooks/heartbeat-alertmanager.md), [metrics and alerts](runbooks/observability.md). Add the CIDRs of your cluster and VPC to `config.blockedCIDRs` so monitors cannot probe internal addresses ([chart README](../deploy/helm/proreta/README.md)).
+**Optional next steps:** Slack and [webhook](runbooks/alerts-webhook.md) channels in the app, [outgoing email](runbooks/email.md) (configured after your first sign-in under **Admin → Email**: an SMTP server, a test message and three switches; everything is off by default, and nothing is emailed until you turn it on), [sign-in with Google or GitHub](runbooks/oauth.md), [status pages](runbooks/status-page.md), [Alertmanager watchdog](runbooks/heartbeat-alertmanager.md), [metrics and alerts](runbooks/observability.md). Add the CIDRs of your cluster and VPC to `config.blockedCIDRs` so monitors cannot probe internal addresses ([chart README](../deploy/helm/proreta/README.md)).
 
 ## Back up the secrets
 The database backup alone is not enough to restore an installation. Two Secrets are generated in the cluster and exist nowhere else (with `secrets.*.source: externalSecret` your secret store is the copy, and you can skip this):
 
 | Secret (release `proreta`) | Keys | What it protects | If it is lost |
 |---|---|---|---|
-| `proreta-crypto` | `keys` (JSON `{"<keyId>":"<base64 of 32 bytes>"}`, for example `{"k1":"..."}`), `active_key_id` | AES-256-GCM encryption of the Slack webhook URLs in the database (each stored value names the key id that sealed it) | The stored webhook URLs cannot be decrypted and are lost. Monitors, incidents and users are unaffected; Slack channels must be created again. |
+| `proreta-crypto` | `keys` (JSON `{"<keyId>":"<base64 of 32 bytes>"}`, for example `{"k1":"..."}`), `active_key_id` | AES-256-GCM encryption of the Slack and webhook URLs in the database (each stored value names the key id that sealed it) | The stored webhook URLs cannot be decrypted and are lost. Monitors, incidents and users are unaffected; Slack and webhook channels must be created again. |
 | `proreta-statuspage` | `cookie_key` | Signature of the cookie that records a visitor's password unlock on a protected status page | Visitors of protected pages enter the password again. Nothing is lost. |
 
 **Export.** Print the data of each Secret without the cluster-specific metadata (name, namespace, uid, resource version) and store the output in a password manager or an external secret store, never in Git or in the same place as the database backup:
@@ -246,7 +246,7 @@ Without `yq`, copy the two `data` entries: `kubectl -n proreta get secret proret
 kubectl create namespace proreta
 kubectl -n proreta apply -f proreta-crypto.yaml -f proreta-statuspage.yaml   # the saved files, with metadata.name and no namespace or uid
 ```
-Then install with the same `secrets.crypto.keyId`, restore the database, and check that a Slack channel can send a test message. If the Secrets already exist with other content, apply the saved files over them and restart `api` and `jobs` (`kubectl -n proreta rollout restart deploy/proreta-api deploy/proreta-jobs`) and the `statuspage` Deployment, which read the Secrets only at start.
+Then install with the same `secrets.crypto.keyId`, restore the database, and check that a channel can send a test message. If the Secrets already exist with other content, apply the saved files over them and restart `api` and `jobs` (`kubectl -n proreta rollout restart deploy/proreta-api deploy/proreta-jobs`) and the `statuspage` Deployment, which read the Secrets only at start.
 
 **Rotation.** Add a second entry to `keys` and point `active_key_id` at it; never remove an old entry while stored webhook URLs may still be sealed with it, because there is no re-encryption tool and a webhook URL is re-sealed only when its channel is saved again:
 ```sh
@@ -296,7 +296,7 @@ The defaults fit a single-company installation with a few hundred monitors on a 
 |---|---|---|---|
 | `api` | 2 | 50m / 96Mi | Stateless; add replicas for load. Login and status page rate limits are counted per replica. |
 | `worker` | 2 | 50m / 96Mi | Runs the checks. Replicas share the due checks through database leases (`FOR UPDATE SKIP LOCKED`), so more replicas add capacity; also see `worker.concurrency`. |
-| `jobs` | 1 | 25m / 64Mi | Slack delivery and housekeeping. The chart allows only 0 or 1; keep 1 (0 stops alerts). |
+| `jobs` | 1 | 25m / 64Mi | Slack and webhook delivery and housekeeping. The chart allows only 0 or 1; keep 1 (0 stops alerts). |
 | `statuspage` | 1 | 10m / 48Mi | Caches per replica; more replicas multiply the per-replica rate limits. |
 | `web` | 2 | 10m / 32Mi | Static files served by nginx. |
 

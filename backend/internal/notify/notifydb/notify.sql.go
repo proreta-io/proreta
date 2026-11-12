@@ -104,7 +104,7 @@ func (q *Queries) FailDeletedChannelDeliveries(ctx context.Context, channelID uu
 }
 
 const getChannel = `-- name: GetChannel :one
-SELECT type, config_encrypted, status, mention, (deleted_at IS NOT NULL)::boolean AS deleted
+SELECT type, config_encrypted, status, mention, content_type, body_template, (deleted_at IS NOT NULL)::boolean AS deleted
 FROM notification_channels
 WHERE tenant_id = $1 AND id = $2
 `
@@ -119,6 +119,8 @@ type GetChannelRow struct {
 	ConfigEncrypted []byte
 	Status          string
 	Mention         []string
+	ContentType     *string
+	BodyTemplate    *string
 	Deleted         bool
 }
 
@@ -132,13 +134,15 @@ func (q *Queries) GetChannel(ctx context.Context, arg GetChannelParams) (GetChan
 		&i.ConfigEncrypted,
 		&i.Status,
 		&i.Mention,
+		&i.ContentType,
+		&i.BodyTemplate,
 		&i.Deleted,
 	)
 	return i, err
 }
 
 const getChannelInfo = `-- name: GetChannelInfo :one
-SELECT id, name, type, events, mention, reminder_minutes, status, created_at, updated_at, project_id
+SELECT id, name, type, events, mention, reminder_minutes, status, created_at, updated_at, project_id, content_type, body_template
 FROM notification_channels
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
 `
@@ -159,6 +163,8 @@ type GetChannelInfoRow struct {
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	ProjectID       *uuid.UUID
+	ContentType     *string
+	BodyTemplate    *string
 }
 
 func (q *Queries) GetChannelInfo(ctx context.Context, arg GetChannelInfoParams) (GetChannelInfoRow, error) {
@@ -175,36 +181,44 @@ func (q *Queries) GetChannelInfo(ctx context.Context, arg GetChannelInfoParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ProjectID,
+		&i.ContentType,
+		&i.BodyTemplate,
 	)
 	return i, err
 }
 
 const insertChannel = `-- name: InsertChannel :exec
-INSERT INTO notification_channels (id, tenant_id, type, name, config_encrypted, events, mention, reminder_minutes, project_id)
-VALUES ($1, $2, 'slack_webhook', $3, $4, $5, $6, $7, $8)
+INSERT INTO notification_channels (id, tenant_id, type, name, config_encrypted, events, mention, reminder_minutes, project_id, content_type, body_template)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 `
 
 type InsertChannelParams struct {
 	ID              uuid.UUID
 	TenantID        uuid.UUID
+	Type            string
 	Name            string
 	ConfigEncrypted []byte
 	Events          []string
 	Mention         []string
 	ReminderMinutes int32
 	ProjectID       *uuid.UUID
+	ContentType     *string
+	BodyTemplate    *string
 }
 
 func (q *Queries) InsertChannel(ctx context.Context, arg InsertChannelParams) error {
 	_, err := q.db.Exec(ctx, insertChannel,
 		arg.ID,
 		arg.TenantID,
+		arg.Type,
 		arg.Name,
 		arg.ConfigEncrypted,
 		arg.Events,
 		arg.Mention,
 		arg.ReminderMinutes,
 		arg.ProjectID,
+		arg.ContentType,
+		arg.BodyTemplate,
 	)
 	return err
 }
@@ -226,7 +240,7 @@ func (q *Queries) InsertMonitorChannel(ctx context.Context, arg InsertMonitorCha
 }
 
 const listChannels = `-- name: ListChannels :many
-SELECT id, name, type, events, mention, reminder_minutes, status, created_at, updated_at, project_id
+SELECT id, name, type, events, mention, reminder_minutes, status, created_at, updated_at, project_id, content_type, body_template
 FROM notification_channels
 WHERE tenant_id = $1 AND deleted_at IS NULL
 ORDER BY created_at, id
@@ -243,6 +257,8 @@ type ListChannelsRow struct {
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	ProjectID       *uuid.UUID
+	ContentType     *string
+	BodyTemplate    *string
 }
 
 func (q *Queries) ListChannels(ctx context.Context, tenantID uuid.UUID) ([]ListChannelsRow, error) {
@@ -265,6 +281,8 @@ func (q *Queries) ListChannels(ctx context.Context, tenantID uuid.UUID) ([]ListC
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ProjectID,
+			&i.ContentType,
+			&i.BodyTemplate,
 		); err != nil {
 			return nil, err
 		}
@@ -309,7 +327,7 @@ func (q *Queries) ListMonitorChannelIDs(ctx context.Context, arg ListMonitorChan
 }
 
 const lockChannel = `-- name: LockChannel :one
-SELECT id, config_encrypted, status, project_id
+SELECT id, type, config_encrypted, status, project_id, content_type, body_template
 FROM notification_channels
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
 FOR NO KEY UPDATE
@@ -322,9 +340,12 @@ type LockChannelParams struct {
 
 type LockChannelRow struct {
 	ID              uuid.UUID
+	Type            string
 	ConfigEncrypted []byte
 	Status          string
 	ProjectID       *uuid.UUID
+	ContentType     *string
+	BodyTemplate    *string
 }
 
 // Serialises changes of one channel (patch, delete, test outcome). NO KEY UPDATE: the key never
@@ -335,9 +356,12 @@ func (q *Queries) LockChannel(ctx context.Context, arg LockChannelParams) (LockC
 	var i LockChannelRow
 	err := row.Scan(
 		&i.ID,
+		&i.Type,
 		&i.ConfigEncrypted,
 		&i.Status,
 		&i.ProjectID,
+		&i.ContentType,
+		&i.BodyTemplate,
 	)
 	return i, err
 }
@@ -529,8 +553,9 @@ func (q *Queries) SoftDeleteChannel(ctx context.Context, arg SoftDeleteChannelPa
 
 const updateChannel = `-- name: UpdateChannel :exec
 UPDATE notification_channels
-SET name = $1, events = $2, mention = $3, reminder_minutes = $4, updated_at = now()
-WHERE tenant_id = $5 AND id = $6 AND deleted_at IS NULL
+SET name = $1, events = $2, mention = $3, reminder_minutes = $4,
+    content_type = $5, body_template = $6, updated_at = now()
+WHERE tenant_id = $7 AND id = $8 AND deleted_at IS NULL
 `
 
 type UpdateChannelParams struct {
@@ -538,6 +563,8 @@ type UpdateChannelParams struct {
 	Events          []string
 	Mention         []string
 	ReminderMinutes int32
+	ContentType     *string
+	BodyTemplate    *string
 	TenantID        uuid.UUID
 	ID              uuid.UUID
 }
@@ -548,6 +575,8 @@ func (q *Queries) UpdateChannel(ctx context.Context, arg UpdateChannelParams) er
 		arg.Events,
 		arg.Mention,
 		arg.ReminderMinutes,
+		arg.ContentType,
+		arg.BodyTemplate,
 		arg.TenantID,
 		arg.ID,
 	)

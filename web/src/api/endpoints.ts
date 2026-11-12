@@ -18,6 +18,7 @@ export type Channel = Schemas["Channel"];
 export type ChannelCreate = Schemas["ChannelCreate"];
 export type ChannelUpdate = Schemas["ChannelUpdate"];
 export type ChannelEvent = Schemas["ChannelEvent"];
+export type ChannelTemplatePreviewRequest = Schemas["ChannelTemplatePreviewRequest"];
 export type Usage = Schemas["Usage"];
 export type PermissionsInfo = Schemas["PermissionsInfo"];
 export type ProjectPermissions = Schemas["ProjectPermissions"];
@@ -241,6 +242,9 @@ export const updateChannel = (channelId: string, body: ChannelUpdate) =>
 
 export const deleteChannel = (channelId: string) =>
   unwrap(client.DELETE("/api/v1/channels/{channelId}", channelPath(channelId)));
+
+export const previewChannelTemplate = (body: ChannelTemplatePreviewRequest) =>
+  unwrap(client.POST("/api/v1/channels/preview-template", { body }));
 
 export const testChannel = (channelId: string) =>
   unwrap(client.POST("/api/v1/channels/{channelId}/test", channelPath(channelId)));

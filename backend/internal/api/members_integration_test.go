@@ -121,6 +121,7 @@ var roleCalls = map[string]struct {
 	"updateChannel":            {authz.Maintainer, http.MethodPatch, "/api/v1/channels/{id}", `{"name":"x"}`},
 	"deleteChannel":            {authz.Maintainer, http.MethodDelete, "/api/v1/channels/{id}", ""},
 	"testChannel":              {authz.Maintainer, http.MethodPost, "/api/v1/channels/{id}/test", ""},
+	"previewChannelTemplate":   {authz.Maintainer, http.MethodPost, "/api/v1/channels/preview-template", `{"contentType":"text","bodyTemplate":"{{event}}"}`},
 	"listMembers":              {authz.Viewer, http.MethodGet, "/api/v1/members", ""},
 	"updateMember":             {authz.Maintainer, http.MethodPatch, "/api/v1/members/{id}", `{"role":"viewer"}`},
 	"removeMember":             {authz.Maintainer, http.MethodDelete, "/api/v1/members/{id}", ""},

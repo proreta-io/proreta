@@ -45,7 +45,7 @@ No metric is labelled per organization, monitor, incident, user, channel, URL, h
 ### jobs
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
-| `proreta_jobs_deliveries_total` | counter | `channel_type` (`slack_webhook`, or `unknown` when the channel could not be read), `result` (`sent`, `retry`, `failed`) | Delivery outcomes recorded by `finish_delivery` |
+| `proreta_jobs_deliveries_total` | counter | `channel_type` (`slack_webhook`, `webhook`, or `unknown` when the channel could not be read), `result` (`sent`, `retry`, `failed`) | Delivery outcomes recorded by `finish_delivery` |
 | `proreta_jobs_delivery_duration_seconds` | histogram | `channel_type` | One send to a notification channel |
 | `proreta_jobs_outbox_pending` | gauge | | Outbox rows waiting (including retries), all organizations; refreshed every 15 s |
 | `proreta_jobs_claim_errors_total` | counter | | Failed `claim_deliveries` calls |
@@ -85,7 +85,7 @@ Request log (api, `msg="http request"`, one per request):
 
 Other lines of a request carry the same `request_id` and `tenant_id`. The worker and jobs log ids (`tenant_id`, `monitor_id`, `location_id`, `delivery_id`, `channel_id`) and error kinds.
 
-Never logged, by design and by test (`TestIntegrationRequestLogsCarryNoSecrets` in `internal/api`, the log assertions of `internal/e2e` and of the worker and jobs tests): passwords, session tokens, CSRF tokens, monitor URLs (they can carry credentials in the query), Slack webhook URLs (rejected values included), raw paths and query strings, request and response bodies, and raw errors of the SSRF guard (they contain resolved addresses and the URL; only error kinds such as `blocked_address` or `timeout` are logged and stored).
+Never logged, by design and by test (`TestIntegrationRequestLogsCarryNoSecrets` in `internal/api`, the log assertions of `internal/e2e` and of the worker and jobs tests): passwords, session tokens, CSRF tokens, monitor URLs (they can carry credentials in the query), Slack and webhook URLs (rejected values included), raw paths and query strings, request and response bodies, and raw errors of the SSRF guard (they contain resolved addresses and the URL; only error kinds such as `blocked_address` or `timeout` are logged and stored).
 
 ## Suggested alert rules (not deployed)
 Written in PromQL for any Prometheus-compatible stack with Alertmanager; thresholds are first guesses.

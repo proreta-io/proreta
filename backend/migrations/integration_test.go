@@ -113,6 +113,9 @@ var definerAllowList = map[string][]string{
 	// the caller's tenant, and jobs queues reminders of open incidents across tenants.
 	"fail_deleted_channel_deliveries": {"proreta_api"},
 	"enqueue_incident_reminders":      {"proreta_worker"},
+	// jobs reads the monitor type and the names of its project and organization to render a
+	// webhook body.
+	"webhook_delivery_context": {"proreta_worker"},
 	// Members and invitations: an invitation token is looked up before the
 	// tenant is known, the organization switcher lists the user's own memberships, and an owner
 	// soft-deletes the organization of its own transaction.

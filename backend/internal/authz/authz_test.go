@@ -41,7 +41,7 @@ var expectedMinimum = map[Role][]string{
 		"regenerateHeartbeatToken",
 	},
 	Maintainer: {
-		"createChannel", "updateChannel", "deleteChannel", "testChannel", "getUsage",
+		"createChannel", "updateChannel", "deleteChannel", "testChannel", "previewChannelTemplate", "getUsage",
 		"listInvitations", "createInvitation", "revokeInvitation", "updateMember", "removeMember",
 		"createProject", "updateProject", "putProjectMember", "removeProjectMember",
 		"createStatusPage", "updateStatusPage", "deleteStatusPage", "setStatusPagePassword",
@@ -395,7 +395,7 @@ func TestProjectOnlyReachesOperations(t *testing.T) {
 		}
 		// Project operations pass the table exactly when the role holds the permission.
 		for op, p := range map[string]Permission{"listMonitors": "monitor.read", "createMonitor": "monitor.create",
-			"createChannel": "channel.manage", "putProjectMember": "project.members.manage", "deleteProject": "project.delete",
+			"createChannel": "channel.manage", "previewChannelTemplate": "channel.manage", "putProjectMember": "project.members.manage", "deleteProject": "project.delete",
 			"updateProject": "project.update", "getProject": "project.read",
 			// People: the list is narrowed to the person's projects by the service, invitations
 			// into a project follow the project role (organization ones are refused by the service).

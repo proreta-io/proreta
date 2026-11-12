@@ -1,5 +1,11 @@
 import type { Channel, ChannelCreate, ChannelEvent, ChannelUpdate } from "../api/endpoints";
 import { validateSlackUrl } from "./slack";
+import {
+  defaultTemplates,
+  validateTemplate,
+  validateWebhookUrl,
+  type WebhookContentType,
+} from "./webhookTemplate";
 
 export const CHANNEL_NAME_MAX = 60;
 export const MENTIONS_MAX = 3;
@@ -16,7 +22,18 @@ export const channelEvents: { value: ChannelEvent; label: string }[] = [
 export const MENTION_PATTERN =
   /^(@here|@channel|<!subteam\^[A-Z0-9]{2,20}>|<@[UW][A-Z0-9]{2,20}>)$/;
 
+export type ChannelType = Channel["type"];
+
+export const channelTypeLabel: Record<ChannelType, string> = {
+  slack_webhook: "Slack",
+  webhook: "Webhook",
+};
+
 export interface ChannelFormValues {
+  /** Fixed once the channel exists. */
+  type: ChannelType;
+  contentType: WebhookContentType;
+  bodyTemplate: string;
   name: string;
   /** Empty when editing: the stored webhook is kept. */
   webhookUrl: string;
@@ -35,6 +52,9 @@ export const ORGANIZATION_WIDE = "organization";
 export type ChannelFormErrors = Partial<Record<keyof ChannelFormValues, string>>;
 
 export const emptyChannelForm: ChannelFormValues = {
+  type: "slack_webhook",
+  contentType: "json",
+  bodyTemplate: defaultTemplates.json,
   name: "",
   webhookUrl: "",
   events: ["down", "recovered", "tls_expiring"],
@@ -44,7 +64,11 @@ export const emptyChannelForm: ChannelFormValues = {
 };
 
 export function valuesFromChannel(c: Channel): ChannelFormValues {
+  const contentType = c.contentType ?? "json";
   return {
+    type: c.type,
+    contentType,
+    bodyTemplate: c.bodyTemplate ?? defaultTemplates[contentType],
     name: c.name,
     webhookUrl: "",
     events: c.events,
@@ -72,20 +96,26 @@ export function validateChannelForm(
   requireWebhook: boolean,
 ): ChannelFormErrors {
   const errors: ChannelFormErrors = {};
+  const webhook = v.type === "webhook";
   const name = v.name.trim();
   if (!name) errors.name = "Enter a name.";
   else if ([...name].length > CHANNEL_NAME_MAX)
     errors.name = `Use ${CHANNEL_NAME_MAX} characters or fewer.`;
   if (requireWebhook || v.webhookUrl.trim() !== "") {
-    const urlError = validateSlackUrl(v.webhookUrl);
+    const urlError = webhook ? validateWebhookUrl(v.webhookUrl) : validateSlackUrl(v.webhookUrl);
     if (urlError) errors.webhookUrl = urlError;
   }
   if (v.events.length === 0) errors.events = "Choose at least one event.";
-  const mentions = parseMention(v.mention);
-  if (mentions.some((m) => !MENTION_PATTERN.test(m))) {
-    errors.mention = "Use @here, @channel, <!subteam^ID> or <@UID>, separated by spaces.";
-  } else if (new Set(mentions).size > MENTIONS_MAX) {
-    errors.mention = `Use at most ${MENTIONS_MAX} mentions.`;
+  if (webhook) {
+    const templateError = validateTemplate(v.bodyTemplate);
+    if (templateError) errors.bodyTemplate = templateError;
+  } else {
+    const mentions = parseMention(v.mention);
+    if (mentions.some((m) => !MENTION_PATTERN.test(m))) {
+      errors.mention = "Use @here, @channel, <!subteam^ID> or <@UID>, separated by spaces.";
+    } else if (new Set(mentions).size > MENTIONS_MAX) {
+      errors.mention = `Use at most ${MENTIONS_MAX} mentions.`;
+    }
   }
   if (reminderOf(v.reminderMinutes) === undefined) {
     errors.reminderMinutes = `Enter 0 (off) or whole minutes from ${REMINDER_MIN} to ${REMINDER_MAX}.`;
@@ -100,19 +130,29 @@ export function toChannelCreate(v: ChannelFormValues): ChannelCreate {
       : v.project
         ? { projectId: v.project }
         : {};
-  return {
+  const common = {
     name: v.name.trim(),
     webhookUrl: v.webhookUrl.trim(),
     events: v.events,
-    mention: [...new Set(parseMention(v.mention))],
     reminderMinutes: reminderOf(v.reminderMinutes) ?? 0,
     ...scope,
   };
+  if (v.type === "webhook") {
+    return {
+      type: "webhook",
+      ...common,
+      contentType: v.contentType,
+      bodyTemplate: v.bodyTemplate,
+    };
+  }
+  return { ...common, mention: [...new Set(parseMention(v.mention))] };
 }
 
 /** The PATCH body; the webhook is sent only when a new one was typed. */
 export function toChannelUpdate(v: ChannelFormValues): ChannelUpdate {
+  // The type cannot change after creation.
   const { webhookUrl, ...rest } = toChannelCreate(v);
+  delete rest.type;
   return webhookUrl ? { ...rest, webhookUrl } : rest;
 }
 
