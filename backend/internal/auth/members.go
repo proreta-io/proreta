@@ -132,10 +132,12 @@ func lockTarget(ctx context.Context, q *authdb.Queries, tenantID, userID uuid.UU
 	return m, nil
 }
 
-// ChangeRole gives a member another role (maintainer or owner only; a maintainer never touches an owner
-// and nobody grants a role above their own, authz.CanManage).
+// ChangeRole gives a member another organization role, or none (role "": the person then belongs to
+// the organization only through projects). Maintainers and owners only; a maintainer never touches
+// an owner and nobody grants a role above their own (authz.CanManage). Taking the role away from the
+// last owner is refused like a demotion.
 func (s *Service) ChangeRole(ctx context.Context, a Actor, userID uuid.UUID, role string) (Member, error) {
-	if !authz.Valid(authz.Role(role)) {
+	if role != "" && !authz.Valid(authz.Role(role)) {
 		return Member{}, fmt.Errorf("%w: unknown role", authz.ErrForbidden)
 	}
 	var out Member
@@ -181,7 +183,7 @@ func changeRole(ctx context.Context, tx pgx.Tx, a Actor, actor authz.Actor, user
 	return out, true, audit.Record(ctx, tx, audit.Entry{
 		TenantID: a.TenantID, ActorUserID: &a.UserID, Action: a.action(ActionMemberRoleChanged),
 		EntityType: "user", EntityID: userID.String(), IP: a.IP,
-		Metadata: map[string]any{"from": m.Role, "to": role},
+		Metadata: map[string]any{"from": roleLabel(m.Role), "to": roleLabel(role)},
 	})
 }
 
@@ -230,7 +232,7 @@ func (s *Service) deleteMembership(ctx context.Context, tx pgx.Tx, a Actor, user
 	if _, err := q.DeleteMembership(ctx, authdb.DeleteMembershipParams{TenantID: a.TenantID, UserID: userID}); err != nil {
 		return fmt.Errorf("delete membership: %w", err)
 	}
-	meta := map[string]any{"role": m.Role}
+	meta := map[string]any{"role": roleLabel(m.Role)}
 	if !a.platform {
 		meta["self"] = self
 	}
@@ -238,6 +240,14 @@ func (s *Service) deleteMembership(ctx context.Context, tx pgx.Tx, a Actor, user
 		TenantID: a.TenantID, ActorUserID: &a.UserID, Action: a.action(ActionMemberRemoved),
 		EntityType: "user", EntityID: userID.String(), IP: a.IP, Metadata: meta,
 	})
+}
+
+// roleLabel names an organization role in audit metadata; "none" is a person without one.
+func roleLabel(role string) string {
+	if role == "" {
+		return "none"
+	}
+	return role
 }
 
 func wrapMemberErr(op string, err error) error {
@@ -288,7 +298,7 @@ type Organization struct {
 func (s *Service) Organizations(ctx context.Context, userID uuid.UUID) ([]Organization, error) {
 	var out []Organization
 	err := db.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT tenant_id, slug, name, status, role FROM auth_user_organizations($1)`, userID)
+		rows, err := tx.Query(ctx, `SELECT tenant_id, slug, name, status, coalesce(role, '') FROM auth_user_organizations($1)`, userID)
 		if err != nil {
 			return err
 		}

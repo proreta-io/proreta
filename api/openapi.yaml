@@ -41,19 +41,24 @@ info:
     - Operations marked `x-experimental: true` (the platform admin API) may change in any
       release.
 
-    Roles: every operation that needs a session has a minimum role of the session's
-    membership in its organization. `viewer` reads; `member` also creates, edits,
-    pauses and deletes monitors; `maintainer` also manages notification channels, members,
-    invitations, projects and the status page; `owner` also deletes the organization, manages its sign-in domains and grants or revokes `owner`. A role below
-    the minimum gets 403 `urn:proreta:problem:forbidden`. A role change applies on the next request.
+    Roles: the same four roles exist at two levels. A role on the organization applies to every
+    project of it; a direct role on a project applies to that project only; the effective role in
+    a project is the higher of the two. A person may have no organization role and belong to the
+    organization only through projects (`role` null). `viewer` reads; `member` also creates, edits,
+    pauses and deletes monitors; `maintainer` also manages the notification channels, the people and
+    the settings of a project and, on the organization, members, invitations, projects and the
+    status page; `owner` also deletes projects and the organization, manages its sign-in domains and
+    grants or revokes `owner`. Every operation needs a permission (`docs/roles.md` lists them); one
+    that names a project is judged with the effective role there, one that does not is judged on the
+    organization role. A missing permission gets 403 `urn:proreta:problem:forbidden`; a project the
+    caller has no role in is 404. A role change applies on the next request.
 
     Projects: monitors (heartbeats included) and notification channels belong to
     a project of the organization; a channel may instead be organization-wide (`projectId` null).
-    Owners and admins see every project. Members and viewers see the projects they belong to (the
-    Default project includes every member) and only their monitors, checks, statistics,
-    incidents and channels, plus organization-wide channels; anything else is answered 404 as if it
-    did not exist. Inside a project a member may have a `viewer` override, which makes it
-    read-only there (403 on changes).
+    A person with an organization role sees every project. A person without one sees the projects
+    they belong to and only their monitors, checks, statistics, incidents and channels, plus
+    organization-wide channels; anything else is answered 404 as if it did not exist. A direct
+    project role can raise the organization role inside that project and never lowers it.
   contact:
     name: Proreta maintainers
     url: https://github.com/proreta-io/proreta
@@ -81,7 +86,8 @@ tags:
   - name: projects
     description: |
       Projects of the organization and their members. Every organization has a
-      Default project that includes all its members. Owners and admins manage projects.
+      Default project that cannot be deleted. Organization owners and maintainers create projects;
+      project owners and maintainers manage the people and settings of their project.
   - name: monitors
     description: HTTPS and heartbeat (watchdog) monitors, their status, statistics, checks and incidents
   - name: heartbeat
@@ -91,7 +97,7 @@ tags:
   - name: status-page
     description: |
       The organization's public status page: configuration, components, password and
-      a preview. Owners and admins change it; every role reads the page settings and its link.
+      a preview. Organization owners and maintainers change it; every organization role reads the page settings and its link.
       The public page itself is served by the separate statuspage process under `/status/<slug>`.
   - name: plan
     description: The organization's plan, its limits and the current usage
@@ -829,7 +835,7 @@ paths:
         its first ping (then `up`) or until its first deadline passes (then `down`).
 
         `projectId` is the monitor's project (the Default project when omitted); the caller needs
-        the `member` role in it (403 with a viewer override, 422 for a project it does not see).
+        the `member` role in it (403 with the `viewer` role there, 422 for a project it does not see).
         `channelIds` selects the notification channels of the monitor (at most 10, each a channel
         of the monitor's project or an organization-wide one, 422 otherwise); with no selection,
         `notificationsEnabled` sends to the active channels of the monitor's own project only
@@ -1642,10 +1648,9 @@ paths:
       operationId: listProjectMembers
       summary: Members of a project
       description: |
-        The people with access to the project: owners and maintainers (they see every project,
-        `allProjects` true), the explicit members with their optional role override, and for a
-        project with `allMembers` (the Default project) every other member of the organization.
-        404 when the caller does not see the project.
+        The people with a role in the project: everyone with an organization role (`allProjects`
+        true, the role applies here) and everyone with a direct role (`explicit` true), with the
+        higher of the two as `effectiveRole`. 404 when the caller has no role in the project.
       tags: [projects]
       responses:
         "200":
@@ -1668,12 +1673,14 @@ paths:
       - $ref: "#/components/parameters/MemberUserId"
     put:
       operationId: putProjectMember
-      summary: Add a member to a project or change its override
+      summary: Give a person a direct role in a project
       description: |
-        Admin or owner. Makes a member of the organization a member of the project. `role`
-        `viewer` makes it read-only in this project; omitted (or `member`) keeps its organization
-        role. An override never raises the organization role: a viewer stays a viewer. In a project
-        with `allMembers` the row only carries the override. Audited as `project.member_changed`.
+        Project owner or maintainer, or an organization owner or maintainer. The person must
+        already belong to the organization (with or without an organization role). `role` is the
+        direct role in this project: it raises the organization role there and never lowers it.
+        Nobody grants a role above their own and a maintainer does not change an owner (403). A
+        project has no last-owner rule: organization owners always control every project. Audited
+        as `project.member_changed`.
       tags: [projects]
       security:
         - cookieAuth: []
@@ -1705,10 +1712,11 @@ paths:
           $ref: "#/components/responses/Error"
     delete:
       operationId: removeProjectMember
-      summary: Remove a member from a project
+      summary: Remove a person's direct role from a project
       description: |
-        Admin or owner. The member loses access to the project at its next request (in a project
-        with `allMembers` only the override is removed). Audited as `project.member_changed`.
+        Project owner or maintainer, or an organization owner or maintainer, under the rules of the
+        role change. The person keeps any organization role, and loses access to the project at its
+        next request when it has none. Audited as `project.member_changed`.
       tags: [projects]
       security:
         - cookieAuth: []
@@ -1755,9 +1763,11 @@ paths:
       operationId: updateMember
       summary: Change a member's role
       description: |
-        Maintainer or owner. A maintainer may change only maintainers, members and viewers and may not grant
-        `owner` (403 `urn:proreta:problem:forbidden`). The organization always keeps an active
-        owner: demoting the last one is 409 `urn:proreta:problem:last-owner`. The system admin's
+        Maintainer or owner. A maintainer may change only maintainers, members, viewers and people
+        without an organization role, and may not grant `owner` (403 `urn:proreta:problem:forbidden`).
+        `role` null takes the organization role away: the person then belongs to the organization
+        only through projects. The organization always keeps an active owner: demoting the last
+        one, or taking its role away, is 409 `urn:proreta:problem:last-owner`. The system admin's
         role in the default organization cannot be changed (409 `urn:proreta:problem:system-admin`).
         Audited as `member.role_changed`. The new role applies on the member's next request.
       tags: [members]
@@ -3472,14 +3482,14 @@ paths:
     put:
       operationId: adminPutOrganizationProjectMember
       x-experimental: true
-      summary: Add a member to a project or change its override
+      summary: Give a person a direct role in a project
       description: |
-        Makes a member of the organization a member of the project, with an optional `role`
-        override (`viewer` makes it read-only there; an override never raises the organization role).
-        A user who is not a member of the organization is 422 on `userId`. A deleted organization
-        cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in the organization
-        as `admin.project_member.added`, or `admin.project_member.updated` (`from`, `to`) when the
-        override changes; saving the same override again writes nothing. Platform admins only.
+        Gives a member of the organization (with or without an organization role) a direct `role`
+        in the project. A user who is not a member of the organization is 422 on `userId`. A
+        deleted organization cannot be changed (409 `urn:proreta:problem:organization-deleted`).
+        Audited in the organization as `admin.project_member.added`, or
+        `admin.project_member.updated` (`from`, `to`) when the role changes; saving the same role
+        again writes nothing. Platform admins only.
       tags: [admin]
       security:
         - cookieAuth: []
@@ -3518,8 +3528,8 @@ paths:
       x-experimental: true
       summary: Remove a member from a project
       description: |
-        The member loses access to the project at its next request (in a project with `allMembers`
-        only the override is removed). 404 when the user is not listed on the project. A deleted
+        The direct role is removed; the person loses access to the project at its next request
+        unless it has an organization role. 404 when the user has no direct role in the project. A deleted
         organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in the
         organization as `admin.project_member.removed`. Platform admins only.
       tags: [admin]
@@ -4044,7 +4054,10 @@ components:
         organization:
           $ref: "#/components/schemas/OrganizationRef"
         role:
-          $ref: "#/components/schemas/MembershipRole"
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs to the organization only through projects
         emailInvitations:
           type: boolean
           description: |
@@ -4885,7 +4898,10 @@ components:
           type: string
           enum: [active, disabled]
         role:
-          $ref: "#/components/schemas/MembershipRole"
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs to the organization only through projects
         createdAt:
           type: string
           format: date-time
@@ -4957,7 +4973,10 @@ components:
           type: string
           enum: [active, suspended, deleted]
         role:
-          $ref: "#/components/schemas/MembershipRole"
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs to the organization only through projects
         joinedAt:
           type: string
           format: date-time
@@ -5193,7 +5212,10 @@ components:
         displayName:
           type: string
         role:
-          $ref: "#/components/schemas/MembershipRole"
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs to the organization only through projects
         status:
           type: string
           enum: [active, disabled]
@@ -5226,7 +5248,10 @@ components:
           maxLength: 254
           description: Email address of an existing account
         role:
-          $ref: "#/components/schemas/MembershipRole"
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs to the organization only through projects
     AdminProject:
       type: object
       additionalProperties: false
@@ -5244,7 +5269,7 @@ components:
           description: The Default project of the organization; it cannot be deleted
         allMembers:
           type: boolean
-          description: Every member of the organization belongs to it without being listed (the Default project)
+          description: Marks the Default project; it no longer changes who has access, because an organization role covers every project
         memberCount:
           type: integer
           minimum: 0
@@ -5326,7 +5351,10 @@ components:
         name:
           type: string
         role:
-          $ref: "#/components/schemas/MembershipRole"
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs to the organization only through projects
         status:
           $ref: "#/components/schemas/OrganizationStatus"
         current:
@@ -5364,7 +5392,10 @@ components:
         displayName:
           type: string
         role:
-          $ref: "#/components/schemas/MembershipRole"
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs to the organization only through projects
         joinedAt:
           type: string
           format: date-time
@@ -5389,7 +5420,10 @@ components:
       required: [role]
       properties:
         role:
-          $ref: "#/components/schemas/MembershipRole"
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs to the organization only through projects
     InvitationRole:
       type: string
       enum: [maintainer, member, viewer]
@@ -5533,8 +5567,8 @@ components:
           format: date-time
     ProjectRole:
       type: string
-      description: A project role override; `viewer` makes a member read-only in the project
-      enum: [member, viewer]
+      description: A direct role in one project; the same four roles as in the organization
+      enum: [owner, maintainer, member, viewer]
     Project:
       type: object
       additionalProperties: false
@@ -5554,7 +5588,7 @@ components:
           description: The Default project of the organization; it cannot be deleted
         allMembers:
           type: boolean
-          description: Every member of the organization belongs to it without being listed (the Default project)
+          description: Marks the Default project; it no longer changes who has access, because an organization role covers every project
         role:
           $ref: "#/components/schemas/MembershipRole"
         monitorCount:
@@ -5620,20 +5654,23 @@ components:
         displayName:
           type: string
         organizationRole:
-          $ref: "#/components/schemas/MembershipRole"
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role, which applies to every project; null for a person who belongs only through projects
         projectRole:
           allOf:
             - $ref: "#/components/schemas/ProjectRole"
           nullable: true
-          description: The override in this project; null keeps the organization role
+          description: The direct role in this project; null when the person is here only through the organization role
         effectiveRole:
           $ref: "#/components/schemas/MembershipRole"
         explicit:
           type: boolean
-          description: Listed as a member of the project (false for owners, maintainers and members through `allMembers`)
+          description: Has a direct role in the project
         allProjects:
           type: boolean
-          description: An owner or maintainer, who sees every project
+          description: Has an organization role, which gives a role in every project
     ProjectMemberList:
       type: object
       additionalProperties: false
@@ -5646,6 +5683,7 @@ components:
     ProjectMemberPut:
       type: object
       additionalProperties: false
+      required: [role]
       properties:
         role:
           $ref: "#/components/schemas/ProjectRole"

@@ -117,7 +117,11 @@ func (s *server) notifyActor(ctx context.Context) (notify.Actor, error) {
 	if err != nil {
 		return notify.Actor{}, err
 	}
-	return notify.Actor{TenantID: p.TenantID, UserID: p.UserID, IP: httpx.ClientIP(httpRequest(ctx), s.cfg.TrustedProxyHops)}, nil
+	access, err := s.access(ctx)
+	if err != nil {
+		return notify.Actor{}, err
+	}
+	return notify.Actor{TenantID: p.TenantID, UserID: p.UserID, IP: httpx.ClientIP(httpRequest(ctx), s.cfg.TrustedProxyHops), Access: access}, nil
 }
 
 func toChannel(c notify.Channel) gen.Channel {

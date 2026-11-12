@@ -132,7 +132,7 @@ var roleCalls = map[string]struct {
 	"createProject":            {authz.Maintainer, http.MethodPost, "/api/v1/projects", `{"name":"role matrix"}`},
 	"getProject":               {authz.Viewer, http.MethodGet, "/api/v1/projects/{id}", ""},
 	"updateProject":            {authz.Maintainer, http.MethodPatch, "/api/v1/projects/{id}", `{"name":"x"}`},
-	"deleteProject":            {authz.Maintainer, http.MethodDelete, "/api/v1/projects/{id}", ""},
+	"deleteProject":            {authz.Owner, http.MethodDelete, "/api/v1/projects/{id}", ""},
 	"listProjectMembers":       {authz.Viewer, http.MethodGet, "/api/v1/projects/{id}/members", ""},
 	"putProjectMember":         {authz.Maintainer, http.MethodPut, "/api/v1/projects/{id}/members/{id}", `{"role":"viewer"}`},
 	"removeProjectMember":      {authz.Maintainer, http.MethodDelete, "/api/v1/projects/{id}/members/{id}", ""},
@@ -160,6 +160,32 @@ func TestIntegrationRoleMatrix(t *testing.T) {
 	for _, role := range []authz.Role{authz.Maintainer, authz.Member, authz.Viewer} {
 		token, _ := invite(t, c, owner, string(role))
 		sessions[role], _ = joinByRegister(t, c, token, string(role)+"@example.com")
+	}
+	// People without an organization role who hold one direct role in a project.
+	pr := c.do(http.MethodPost, "/api/v1/projects", `{"name":"Matrix"}`, owner)
+	if pr.code != http.StatusCreated {
+		t.Fatalf("project: %d %s", pr.code, pr.raw)
+	}
+	projectOnly := map[authz.Role]map[string]string{}
+	for _, role := range []authz.Role{authz.Viewer, authz.Member, authz.Maintainer, authz.Owner} {
+		token, _ := invite(t, c, owner, "viewer")
+		hdr, _ := joinByRegister(t, c, token, "only-"+string(role)+"@example.com")
+		id := userIDOf(t, c, hdr)
+		if r := c.do(http.MethodPatch, "/api/v1/members/"+id, `{"role":null}`, owner); r.code != http.StatusOK {
+			t.Fatalf("project-only %s: %d %s", role, r.code, r.raw)
+		}
+		if r := c.do(http.MethodPut, "/api/v1/projects/"+pr.body["id"].(string)+"/members/"+id, `{"role":"`+string(role)+`"}`, owner); r.code != http.StatusOK {
+			t.Fatalf("project role %s: %d %s", role, r.code, r.raw)
+		}
+		projectOnly[role] = hdr
+	}
+	// Organization-scope operations, written down by hand: a direct project role never reaches them.
+	orgScoped := map[string]bool{}
+	for _, op := range []string{"listMembers", "updateMember", "removeMember", "listInvitations", "createInvitation", "revokeInvitation",
+		"getUsage", "createProject", "deleteOrganization", "listAuthDomains", "createAuthDomain", "updateAuthDomain", "deleteAuthDomain",
+		"listStatusPages", "createStatusPage", "getStatusPage", "updateStatusPage", "deleteStatusPage", "setStatusPagePassword",
+		"clearStatusPagePassword", "listStatusPageComponents", "putStatusPageComponents", "previewStatusPage"} {
+		orgScoped[strings.ToLower(op)] = true
 	}
 
 	_, ops := specOpsForTest(t)
@@ -198,6 +224,22 @@ func TestIntegrationRoleMatrix(t *testing.T) {
 				t.Errorf("%s as %s: unexpected %d %s", op.id, role, r.code, r.raw)
 			}
 		}
+		// A person without an organization role: organization-scope operations are refused whatever
+		// the project role; account operations are open; the others follow the project role.
+		for _, role := range []authz.Role{authz.Viewer, authz.Member, authz.Maintainer, authz.Owner} {
+			allowed := !orgScoped[strings.ToLower(op.id)] && role.AtLeast(min)
+			if allowed && (strings.EqualFold(op.id, "logout") || strings.EqualFold(op.id, "leaveOrganization")) {
+				continue
+			}
+			r := c.do(call.method, path, call.body, projectOnly[role])
+			forbidden := r.code == http.StatusForbidden && r.body["type"] == "urn:proreta:problem:forbidden"
+			if forbidden == allowed {
+				t.Errorf("%s as a project-only %s: %d %s (min role %s)", op.id, role, r.code, r.raw, min)
+			}
+			if r.code == http.StatusBadRequest || r.code == http.StatusUnauthorized || r.code >= 500 {
+				t.Errorf("%s as a project-only %s: unexpected %d %s", op.id, role, r.code, r.raw)
+			}
+		}
 		checked++
 	}
 	if checked < 30 {
@@ -207,6 +249,11 @@ func TestIntegrationRoleMatrix(t *testing.T) {
 	for role, hdr := range sessions {
 		if r := meOf(t, c, hdr); r.code != http.StatusOK || r.body["role"] != string(role) {
 			t.Fatalf("%s after the matrix: %d %s", role, r.code, r.raw)
+		}
+	}
+	for role, hdr := range projectOnly {
+		if r := meOf(t, c, hdr); r.code != http.StatusOK || r.body["role"] != nil {
+			t.Fatalf("project-only %s after the matrix: %d %s", role, r.code, r.raw)
 		}
 	}
 }

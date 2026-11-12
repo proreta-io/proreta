@@ -67,13 +67,14 @@ WHERE id = @id;
 
 -- name: UpsertMembership :exec
 INSERT INTO memberships (tenant_id, user_id, role)
-VALUES (@tenant_id, @user_id, @role)
+VALUES (@tenant_id, @user_id, nullif(@role::text, ''))
 ON CONFLICT (tenant_id, user_id) DO UPDATE
 SET role = EXCLUDED.role
-WHERE memberships.role <> EXCLUDED.role;
+WHERE memberships.role IS DISTINCT FROM EXCLUDED.role;
 
 -- name: GetMembershipRole :one
-SELECT role
+-- The organization role; empty for a person who belongs only through projects.
+SELECT coalesce(role, '')::text AS role
 FROM memberships
 WHERE tenant_id = @tenant_id AND user_id = @user_id;
 
@@ -116,8 +117,9 @@ INSERT INTO users (id, email, password_hash, display_name)
 VALUES (@id, @email, @password_hash, @display_name);
 
 -- name: InsertMembership :exec
+-- An empty role stores NULL: no organization role.
 INSERT INTO memberships (tenant_id, user_id, role)
-VALUES (@tenant_id, @user_id, @role);
+VALUES (@tenant_id, @user_id, nullif(@role::text, ''));
 
 -- name: TouchMembership :exec
 -- The organization a login enters next (auth_login_tenant).

@@ -56,11 +56,43 @@ type sender interface {
 	Send(ctx context.Context, webhookURL, text string) error
 }
 
-// Actor is who changes channels; it scopes every operation to one tenant.
+// Actor is who changes channels; it scopes every operation to one tenant, and Access to the
+// projects whose channels the user may manage.
 type Actor struct {
 	TenantID uuid.UUID
 	UserID   uuid.UUID
 	IP       netip.Addr
+	Access   authz.Actor
+}
+
+// canManage checks that the actor may change a channel of a project (nil = organization-wide).
+// An organization-wide channel needs the permission through the organization role. A project the
+// actor has no role in is reported as a missing channel, so ids of other projects reveal nothing.
+func (a Actor) canManage(project *uuid.UUID) error {
+	if project == nil {
+		if !a.Access.Holds("channel.manage") {
+			return authz.ErrForbidden
+		}
+		return nil
+	}
+	if !a.Access.Sees(*project) {
+		return ErrChannelNotFound
+	}
+	if !a.Access.CanIn(*project, "channel.manage") {
+		return authz.ErrProjectForbidden
+	}
+	return nil
+}
+
+// canUse checks the project a channel is created in or moved to: unknown to the actor is a
+// validation error like a project that does not exist.
+func (a Actor) canUse(project *uuid.UUID) error {
+	if project != nil && !a.Access.Sees(*project) {
+		var verr validation.Error
+		verr.Add("projectId", "does not exist")
+		return &verr
+	}
+	return a.canManage(project)
 }
 
 // Channel is what the api may show about a channel: never the webhook URL.
@@ -277,6 +309,9 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Channel,
 		if err != nil {
 			return err
 		}
+		if err := a.canUse(project); err != nil {
+			return err
+		}
 		if err := q.InsertChannel(ctx, notifydb.InsertChannelParams{
 			ID: id, TenantID: a.TenantID, Name: f.name, ConfigEncrypted: sealed, ProjectID: project,
 			Events: f.events, Mention: f.mention, ReminderMinutes: int32(f.reminder), //nolint:gosec // validated 0..1440
@@ -322,6 +357,9 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 		if err != nil {
 			return err
 		}
+		if err := a.canManage(cur.ProjectID); err != nil {
+			return err
+		}
 		f := channelFields{name: cur.Name, events: cur.Events, mention: cur.Mention, reminder: cur.ReminderMinutes}
 		if in.Name != nil {
 			f.name = upd.name
@@ -363,6 +401,9 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 				return err
 			}
 			if !sameProject(project, cur.ProjectID) {
+				if err := a.canUse(project); err != nil {
+					return err
+				}
 				if err := q.SetChannelProject(ctx, notifydb.SetChannelProjectParams{TenantID: a.TenantID, ID: id, ProjectID: project}); err != nil {
 					return fmt.Errorf("notify: move channel: %w", err)
 				}
@@ -409,7 +450,11 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 func (s *Service) Delete(ctx context.Context, a Actor, id uuid.UUID) error {
 	return db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
 		q := notifydb.New(tx)
-		if _, err := lock(ctx, q, a.TenantID, id); err != nil {
+		ch, err := lock(ctx, q, a.TenantID, id)
+		if err != nil {
+			return err
+		}
+		if err := a.canManage(ch.ProjectID); err != nil {
 			return err
 		}
 		detached, err := q.DetachChannel(ctx, notifydb.DetachChannelParams{TenantID: a.TenantID, ChannelID: id})
@@ -446,6 +491,9 @@ func (s *Service) Test(ctx context.Context, a Actor, id uuid.UUID) error {
 	err := db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
 		ch, err := lock(ctx, notifydb.New(tx), a.TenantID, id)
 		if err != nil {
+			return err
+		}
+		if err := a.canManage(ch.ProjectID); err != nil {
 			return err
 		}
 		target, err = s.open(id, ch.Status, ch.ConfigEncrypted)

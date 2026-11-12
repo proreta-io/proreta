@@ -1,6 +1,6 @@
 import { useCallback, useSyncExternalStore } from "react";
-import type { MembershipRole, Project } from "../api/endpoints";
-import { roleAtLeast } from "./roles";
+import type { Project } from "../api/endpoints";
+import { roleAtLeast, type OptionalRole } from "./roles";
 
 /**
  * The project the shell is filtered to: one project or "all" (every project the
@@ -73,9 +73,9 @@ export function editableProjects(projects: Project[] | undefined): Project[] {
   return (projects ?? []).filter((p) => canEditIn(p));
 }
 
-/** The label of the "every project" entry: admins see the whole organization. */
-export function allProjectsLabel(role: MembershipRole | undefined): string {
-  return roleAtLeast(role, "maintainer") ? "All projects" : "All my projects";
+/** The label of the "every project" entry: an organization role covers the whole organization. */
+export function allProjectsLabel(role: OptionalRole): string {
+  return roleAtLeast(role, "viewer") ? "All projects" : "All my projects";
 }
 
 /** The default project of a new monitor: the shell's project when the user may edit there. */

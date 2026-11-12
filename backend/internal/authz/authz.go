@@ -1,6 +1,8 @@
 // Package authz is the one place that decides what a role may do. It is pure: the
-// api resolves the actor (user and role of the session's membership) per request and asks this
-// package; services ask it again for decisions that depend on the target (member management).
+// api resolves the actor (user, organization role and direct project roles) per request and asks
+// this package; services ask it again for decisions that depend on the target (a project, a
+// person). The same four roles exist on the organization and on a project; the role in a project is
+// the higher of the two, and organization-scope permissions are held only through an organization role.
 //
 // Operations are the operation ids of api/openapi.yaml. An operation missing from the table is
 // denied, and a test in internal/api fails when the spec has an operation the table does not list.
@@ -49,42 +51,45 @@ func Valid(r Role) bool { return rank(r) > 0 }
 // AtLeast reports whether r is min or higher.
 func (r Role) AtLeast(min Role) bool { return rank(r) > 0 && rank(r) >= rank(min) }
 
-// Actor is the user of a request and its role in the session's organization.
+// Actor is the user of a request: the role of its membership in the session's organization (empty
+// when the person belongs to the organization only through projects) and the direct roles it
+// holds in projects.
 type Actor struct {
 	UserID uuid.UUID
-	Role   Role
-	// Projects is the effective role in each project the actor belongs to.
-	// Owners and maintainers see every project and need no entries.
+	// Role is the organization role; it applies to every project of the organization.
+	Role Role
+	// Projects are the direct roles in projects, not yet combined with Role.
 	Projects map[uuid.UUID]Role
 }
 
 // ErrProjectForbidden means the actor sees the project but its role there does not allow the
-// change (a member with the viewer override).
+// change (a member or viewer where a maintainer is needed, a viewer editing a monitor).
 var ErrProjectForbidden = errors.New("authz: forbidden in this project")
 
-// ProjectRole is the role of a member or viewer inside a project: the organization role, lowered
-// by the project's override when there is one (an override never raises the organization role).
-func ProjectRole(org Role, override *Role) Role {
-	if override != nil && Valid(*override) && rank(*override) < rank(org) {
-		return *override
+// Higher returns the higher of two roles; an invalid role ranks below every valid one.
+func Higher(a, b Role) Role {
+	if rank(b) > rank(a) {
+		return b
 	}
-	return org
+	if rank(a) == 0 {
+		return ""
+	}
+	return a
 }
 
-// AllProjects reports whether the actor sees every project of the organization.
-func (a Actor) AllProjects() bool { return a.Role.AtLeast(Maintainer) }
+// Belongs reports whether the actor is a person of the organization at all, with or without an
+// organization role.
+func (a Actor) Belongs() bool { return Valid(a.Role) || a.UserID != uuid.Nil || len(a.Projects) > 0 }
 
-// RoleIn returns the actor's effective role in a project and whether it sees the project at all.
+// AllProjects reports whether the actor holds an organization role, which covers every project.
+func (a Actor) AllProjects() bool { return Valid(a.Role) }
+
+// RoleIn returns the actor's effective role in a project (the higher of the organization role and
+// the direct project role) and whether it has any role there. An organization role covers any
+// project id, existing or not: callers resolve the project itself.
 func (a Actor) RoleIn(project uuid.UUID) (Role, bool) {
-	if a.AllProjects() {
-		return a.Role, true
-	}
-	r, ok := a.Projects[project]
-	if !ok || !Valid(r) || !a.Role.AtLeast(Viewer) {
-		return "", false
-	}
-	// Defence in depth: a project role never exceeds the organization role.
-	return ProjectRole(a.Role, &r), true
+	r := Higher(a.Role, a.Projects[project])
+	return r, Valid(r)
 }
 
 // Sees reports whether the actor may read a project and what belongs to it.
@@ -93,10 +98,43 @@ func (a Actor) Sees(project uuid.UUID) bool {
 	return ok
 }
 
-// CanEditIn reports whether the actor may create, change, pause and delete monitors in a project.
-func (a Actor) CanEditIn(project uuid.UUID) bool {
+// CanIn reports whether the actor holds a project-scope permission in one project. An
+// organization-scope permission is never held through a project role, so it is false here.
+func (a Actor) CanIn(project uuid.UUID, p Permission) bool {
+	if levelOf(p) != LevelProject {
+		return false
+	}
 	r, ok := a.RoleIn(project)
-	return ok && r.AtLeast(Member)
+	return ok && Has(r, p)
+}
+
+// CanEditIn reports whether the actor may create, change, pause and delete monitors in a project.
+func (a Actor) CanEditIn(project uuid.UUID) bool { return a.CanIn(project, "monitor.update") }
+
+// Holds reports whether the actor holds the permission through its organization role. For a
+// project-scope permission that means in every project.
+func (a Actor) Holds(p Permission) bool { return Has(a.Role, p) }
+
+// HoldsAnywhere reports whether the actor may reach an operation that needs p: an organization-
+// scope permission only through the organization role, a project-scope one through the
+// organization role or in at least one project; the service then checks the concrete project.
+func (a Actor) HoldsAnywhere(p Permission) bool {
+	switch levelOf(p) {
+	case LevelAccount:
+		return a.Belongs()
+	case LevelOrganization:
+		return a.Holds(p)
+	case LevelProject:
+		if a.Holds(p) {
+			return true
+		}
+		for _, r := range a.Projects {
+			if Has(r, p) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Scope is the set of projects whose data a list may show: every project, or the listed ones.
@@ -105,14 +143,22 @@ type Scope struct {
 	IDs []uuid.UUID
 }
 
-// Scope returns the projects the actor sees.
-func (a Actor) Scope() Scope {
-	if a.AllProjects() {
+// Scope returns the projects the actor may read.
+func (a Actor) Scope() Scope { return a.ScopeFor("project.read") }
+
+// ScopeFor returns the projects in which the actor holds a project-scope permission.
+func (a Actor) ScopeFor(p Permission) Scope {
+	if levelOf(p) != LevelProject {
+		return Scope{IDs: []uuid.UUID{}}
+	}
+	if a.Holds(p) {
 		return Scope{All: true}
 	}
 	ids := make([]uuid.UUID, 0, len(a.Projects))
-	for id := range a.Projects {
-		ids = append(ids, id)
+	for id, r := range a.Projects {
+		if Has(r, p) {
+			ids = append(ids, id)
+		}
 	}
 	return Scope{IDs: ids}
 }
@@ -151,6 +197,9 @@ const (
 	LevelOrganization Level = "organization"
 	// LevelProject permissions apply inside one project.
 	LevelProject Level = "project"
+	// LevelAccount permissions concern the person's own account and are held by everybody who
+	// belongs to the organization, with or without an organization role.
+	LevelAccount Level = "account"
 )
 
 // Marks for operations that no role decides: no session at all, or the platform-admin flag
@@ -174,7 +223,7 @@ type Definition struct {
 func Permissions() []Definition { return slices.Clone(permissions) }
 
 var permissions = []Definition{
-	{"account.use", LevelOrganization, "Use the session, switch and leave organizations, link sign-in identities"},
+	{"account.use", LevelAccount, "Use the session, switch and leave organizations, link sign-in identities"},
 	{"organization.delete", LevelOrganization, "Delete the organization"},
 	{"organization.domains.manage", LevelOrganization, "Manage the sign-in domains of the organization"},
 	{"organization.members.read", LevelOrganization, "List the members of the organization"},
@@ -194,11 +243,11 @@ var permissions = []Definition{
 	{"heartbeat.manage", LevelProject, "Regenerate heartbeat tokens"},
 	{"channel.read", LevelProject, "List and read notification channels"},
 	{"channel.manage", LevelProject, "Create, change, test and delete notification channels"},
-	{"statuspage.read", LevelProject, "Read the status page settings and link"},
-	{"statuspage.manage", LevelProject, "Configure, protect and publish status pages"},
+	{"statuspage.read", LevelOrganization, "Read the status page settings and link"},
+	{"statuspage.manage", LevelOrganization, "Configure, protect and publish status pages"},
 }
 
-// roles is the one role table: each role is the set of permissions it holds, listed in full.
+// grants is the one role table: each role is the set of permissions it holds, listed in full.
 var grants = map[Role][]Permission{
 	Owner: {
 		"account.use", "organization.delete", "organization.domains.manage",
@@ -210,7 +259,7 @@ var grants = map[Role][]Permission{
 	Maintainer: {
 		"account.use",
 		"organization.members.read", "organization.members.manage", "usage.read", "project.create",
-		"project.read", "project.update", "project.delete", "project.members.read", "project.members.manage",
+		"project.read", "project.update", "project.members.read", "project.members.manage",
 		"monitor.read", "monitor.create", "monitor.update", "monitor.delete", "incident.read", "heartbeat.manage",
 		"channel.read", "channel.manage", "statuspage.read", "statuspage.manage",
 	},
@@ -423,8 +472,30 @@ func Operations() []string {
 	return out
 }
 
-// Can reports whether the actor may call the operation. Unknown operations and unknown roles
-// are denied; Public operations are allowed to anyone.
+// LevelOfOperation returns the level of the permission an operation needs; operations that no
+// role decides (public, platform admin) and unknown ones have none.
+func LevelOfOperation(operationID string) Level {
+	p, ok := PermissionOf(operationID)
+	if !ok {
+		return ""
+	}
+	return levelOf(p)
+}
+
+// levelOf returns the level of a permission; an undefined permission has none.
+func levelOf(p Permission) Level {
+	for _, d := range permissions {
+		if d.Name == p {
+			return d.Level
+		}
+	}
+	return ""
+}
+
+// Can reports whether the actor may call the operation at all: it holds the permission through its
+// organization role or, for a project-scope permission, in at least one project. Operations that
+// name a project are checked again for that project by the service (CanIn). Unknown operations
+// and unknown roles are denied; Public operations are allowed to anyone.
 func Can(a Actor, operationID string) bool {
 	p, ok := PermissionOf(operationID)
 	if !ok {
@@ -434,18 +505,19 @@ func Can(a Actor, operationID string) bool {
 	case NoSession:
 		return true
 	case PlatformAdmin:
-		return Valid(a.Role)
+		return a.Belongs()
 	}
-	return Has(a.Role, p)
+	return a.HoldsAnywhere(p)
 }
 
-// CanManage reports whether the actor may change or remove a member whose role is target, and
-// (for a role change) give it the role to (pass "" for a removal). Only maintainers and owners manage
-// members; a maintainer never touches an owner and never grants owner: nobody grants a
-// role above their own. Guard rails that need the database (the last owner, the platform admin)
-// are checked by the caller.
+// CanManage reports whether the actor may change or remove an organization member whose role is
+// target ("" = no organization role), and (for a role change) give it the role to (pass "" for a
+// removal or for taking the organization role away). Only maintainers and owners manage members;
+// a maintainer never touches an owner and never grants owner: nobody grants a role above their
+// own. Guard rails that need the database (the last owner, the platform admin) are checked by
+// the caller.
 func CanManage(a Actor, target, to Role) bool {
-	if !a.Role.AtLeast(Maintainer) || !Valid(target) {
+	if !a.Role.AtLeast(Maintainer) || (target != "" && !Valid(target)) {
 		return false
 	}
 	if rank(target) > rank(a.Role) {
@@ -455,6 +527,26 @@ func CanManage(a Actor, target, to Role) bool {
 		return false
 	}
 	return true
+}
+
+// CanManageIn reports whether the actor may change or remove a person in one project: it needs
+// project.members.manage there, never touches a person whose effective role in the project is
+// above its own (target, "" for a person not yet in the project) and never grants a role above
+// its own (to, "" for a removal). So only an owner of the project, or an organization owner,
+// handles project owners. No last-owner rule exists at this level: organization owners always
+// control every project.
+func CanManageIn(a Actor, project uuid.UUID, target, to Role) bool {
+	if !a.CanIn(project, "project.members.manage") {
+		return false
+	}
+	mine, _ := a.RoleIn(project)
+	if target != "" && !Valid(target) {
+		return false
+	}
+	if rank(target) > rank(mine) {
+		return false
+	}
+	return to == "" || (Valid(to) && rank(to) <= rank(mine))
 }
 
 // CanInvite reports whether the actor may create an invitation with the role: maintainers and owners,

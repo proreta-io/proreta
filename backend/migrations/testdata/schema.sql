@@ -140,7 +140,7 @@ mail_outbox.11 expires_at timestamp with time zone not null
 mail_outbox.12 finished_at timestamp with time zone
 memberships.1 tenant_id uuid not null
 memberships.2 user_id uuid not null
-memberships.3 role text not null
+memberships.3 role text
 memberships.4 created_at timestamp with time zone not null default now()
 memberships.5 last_used_at timestamp with time zone
 monitor_channels.1 tenant_id uuid not null
@@ -245,7 +245,7 @@ probe_locations.8 created_at timestamp with time zone not null default now()
 project_members.1 tenant_id uuid not null
 project_members.2 project_id uuid not null
 project_members.3 user_id uuid not null
-project_members.4 role text
+project_members.4 role text not null
 project_members.5 created_at timestamp with time zone not null default now()
 project_members.6 updated_at timestamp with time zone not null default now()
 projects.1 id uuid not null
@@ -502,7 +502,7 @@ probe_locations probe_locations_provider_check CHECK (((length(provider) >= 1) A
 probe_locations probe_locations_region_check CHECK (((length(region) >= 1) AND (length(region) <= 100)))
 probe_locations probe_locations_status_check CHECK ((status = ANY (ARRAY['active'::text, 'disabled'::text])))
 project_members project_members_pkey PRIMARY KEY (tenant_id, project_id, user_id)
-project_members project_members_role_check CHECK ((role = ANY (ARRAY['member'::text, 'viewer'::text])))
+project_members project_members_role_check CHECK ((role = ANY (ARRAY['owner'::text, 'maintainer'::text, 'member'::text, 'viewer'::text])))
 project_members project_members_tenant_id_project_id_fkey FOREIGN KEY (tenant_id, project_id) REFERENCES projects(tenant_id, id)
 project_members project_members_tenant_id_user_id_fkey FOREIGN KEY (tenant_id, user_id) REFERENCES memberships(tenant_id, user_id) ON DELETE CASCADE
 projects projects_default_live CHECK (((NOT is_default) OR (deleted_at IS NULL)))

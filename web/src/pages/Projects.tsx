@@ -12,6 +12,7 @@ import {
   renameProject,
   type Project,
   type ProjectMember,
+  type ProjectRole,
 } from "../api/endpoints";
 import { useAuth } from "../auth/AuthProvider";
 import { useToast } from "../components/Toasts";
@@ -33,7 +34,14 @@ import {
   Tr,
 } from "../components/ui";
 import { countOf } from "../lib/usage";
-import { abilities, ROLE_LABELS } from "../lib/roles";
+import {
+  abilities,
+  assignableRoles,
+  canManageMember,
+  ROLE_LABELS,
+  roleAtLeast,
+  roleLabel,
+} from "../lib/roles";
 import { useProjectScope } from "../lib/useProjectScope";
 import { memberLabel } from "../lib/members";
 
@@ -42,7 +50,6 @@ const NAME_MAX = 60;
 /** Projects of the organization and who belongs to them. */
 export default function Projects() {
   const can = abilities(useAuth().session);
-  const manage = can.manageMembers;
   const { projects } = useProjectScope();
   const [open, setOpen] = useState<string | null>(null);
   const items = projects.data?.items ?? [];
@@ -55,13 +62,14 @@ export default function Projects() {
           Projects
         </h1>
         <p className="text-muted-foreground">
-          Projects split the monitors and notification channels of the organization. Owners and
-          admins see every project; members and viewers see the projects they belong to. Everyone
-          belongs to the Default project.
+          Projects split the monitors and notification channels of the organization. A role on the
+          organization applies to every project; a role in a project applies there only and can
+          raise the organization role but never lowers it. People without an organization role see
+          only the projects they have a role in.
         </p>
       </div>
 
-      {manage && <NewProject />}
+      {can.manageMembers && <NewProject />}
 
       {projects.isPending ? (
         <Loading label="Loading projects…">
@@ -78,15 +86,10 @@ export default function Projects() {
       ) : items.length === 0 ? (
         <EmptyNote>No projects to show.</EmptyNote>
       ) : (
-        <ProjectTable
-          items={items}
-          manage={manage}
-          open={open}
-          onOpen={(id) => setOpen(open === id ? null : id)}
-        />
+        <ProjectTable items={items} open={open} onOpen={(id) => setOpen(open === id ? null : id)} />
       )}
 
-      {shown && <ProjectMembers key={shown.id} project={shown} manage={manage} />}
+      {shown && <ProjectMembers key={shown.id} project={shown} />}
     </section>
   );
 }
@@ -154,12 +157,10 @@ function NewProject() {
 
 function ProjectTable({
   items,
-  manage,
   open,
   onOpen,
 }: {
   items: Project[];
-  manage: boolean;
   open: string | null;
   onOpen: (id: string) => void;
 }) {
@@ -211,7 +212,7 @@ function ProjectTable({
               </Td>
               <Td className="font-mono text-caption">{p.monitorCount}</Td>
               <Td className="font-mono text-caption max-sm:hidden">{p.channelCount}</Td>
-              <Td className="text-caption max-sm:hidden">{ROLE_LABELS[p.role]}</Td>
+              <Td className="text-caption max-sm:hidden">{roleLabel(p.role)}</Td>
               <Td>
                 <div className="flex justify-end gap-1">
                   <Button
@@ -223,26 +224,26 @@ function ProjectTable({
                   >
                     People
                   </Button>
-                  {manage && (
-                    <>
-                      <Button
-                        variant="ghost"
-                        size="small"
-                        aria-label={`Rename ${p.name}`}
-                        onClick={() => setRenaming(p)}
-                      >
-                        Rename
-                      </Button>
-                      <Button
-                        variant="ghost-destructive"
-                        size="small"
-                        aria-label={`Delete ${p.name}`}
-                        disabled={p.isDefault}
-                        onClick={() => setDeleting(p)}
-                      >
-                        Delete
-                      </Button>
-                    </>
+                  {roleAtLeast(p.role, "maintainer") && (
+                    <Button
+                      variant="ghost"
+                      size="small"
+                      aria-label={`Rename ${p.name}`}
+                      onClick={() => setRenaming(p)}
+                    >
+                      Rename
+                    </Button>
+                  )}
+                  {p.role === "owner" && (
+                    <Button
+                      variant="ghost-destructive"
+                      size="small"
+                      aria-label={`Delete ${p.name}`}
+                      disabled={p.isDefault}
+                      onClick={() => setDeleting(p)}
+                    >
+                      Delete
+                    </Button>
                   )}
                 </div>
               </Td>
@@ -335,22 +336,29 @@ function RenameForm({ project, onDone }: { project: Project; onDone: () => void 
   );
 }
 
-/** Where a person's access to a project comes from. */
-function accessLabel(m: ProjectMember, project: Project): string {
-  if (m.allProjects) return "Every project";
-  if (m.projectRole === "viewer" && m.organizationRole !== "viewer") return "Read-only here";
-  if (m.explicit) return "Listed";
-  return project.allMembers ? "Everyone" : "Listed";
+/** Where a person's role in the project comes from. */
+function accessLabel(m: ProjectMember): string {
+  if (m.organizationRole && m.effectiveRole === m.organizationRole) return "Organization role";
+  return "Project role";
 }
 
-function ProjectMembers({ project, manage }: { project: Project; manage: boolean }) {
+function ProjectMembers({ project }: { project: Project }) {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const can = abilities(useAuth().session);
+  // Maintainers and owners of the project manage its people; nobody grants above their own role there.
+  const manage = roleAtLeast(project.role, "maintainer");
+  const roles = assignableRoles(project.role);
   const members = useQuery({
     queryKey: queryKeys.projectMembers(project.id),
     queryFn: () => listProjectMembers(project.id),
   });
-  const org = useQuery({ queryKey: queryKeys.members, queryFn: listMembers, enabled: manage });
+  // Only people with an organization role may read the member list of the organization.
+  const org = useQuery({
+    queryKey: queryKeys.members,
+    queryFn: listMembers,
+    enabled: manage && can.hasOrganizationRole,
+  });
   const [adding, setAdding] = useState("");
 
   const refresh = () => {
@@ -358,8 +366,8 @@ function ProjectMembers({ project, manage }: { project: Project; manage: boolean
     void queryClient.invalidateQueries({ queryKey: queryKeys.projects });
   };
   const put = useMutation({
-    mutationFn: ({ userId, readOnly }: { userId: string; readOnly: boolean }) =>
-      putProjectMember(project.id, userId, readOnly ? "viewer" : undefined),
+    mutationFn: ({ userId, role }: { userId: string; role: ProjectRole }) =>
+      putProjectMember(project.id, userId, role),
     onSuccess: (m) => {
       refresh();
       setAdding("");
@@ -372,7 +380,7 @@ function ProjectMembers({ project, manage }: { project: Project; manage: boolean
     onSuccess: (_, m) => {
       refresh();
       toast(
-        project.allMembers
+        m.organizationRole
           ? `${memberLabel(m)} keeps the organization role in ${project.name}`
           : `${memberLabel(m)} removed from ${project.name}`,
       );
@@ -380,11 +388,11 @@ function ProjectMembers({ project, manage }: { project: Project; manage: boolean
     onError: (err) => toast(errorMessage(err), "error"),
   });
 
-  const listed = new Set((members.data?.items ?? []).map((m) => m.userId));
-  // Owners and admins see every project already; only members and viewers can be added.
-  const candidates = (org.data?.items ?? []).filter(
-    (m) => !listed.has(m.userId) && (m.role === "member" || m.role === "viewer"),
+  const direct = new Set(
+    (members.data?.items ?? []).filter((m) => m.explicit).map((m) => m.userId),
   );
+  const candidates = (org.data?.items ?? []).filter((m) => !direct.has(m.userId));
+  const [newRole, setNewRole] = useState<ProjectRole>("member");
 
   return (
     <section
@@ -396,9 +404,8 @@ function ProjectMembers({ project, manage }: { project: Project; manage: boolean
           People in {project.name}
         </h2>
         <p className="text-[13px] text-muted-foreground">
-          {project.allMembers
-            ? "Every member of the organization belongs to this project. A member can be made read-only here."
-            : "Owners and admins see every project. Add members and viewers to give them access; a member can be read-only here."}
+          Everyone with an organization role is here with that role. A role given here applies to
+          this project only and can raise the organization role, never lower it.
         </p>
       </div>
       {members.isPending ? (
@@ -429,7 +436,7 @@ function ProjectMembers({ project, manage }: { project: Project; manage: boolean
           </thead>
           <tbody>
             {members.data.items.map((m) => {
-              const adjustable = manage && !m.allProjects && m.organizationRole === "member";
+              const adjustable = manage && canManageMember(project.role, m.effectiveRole);
               return (
                 <Tr key={m.userId}>
                   <Td>
@@ -441,20 +448,30 @@ function ProjectMembers({ project, manage }: { project: Project; manage: boolean
                       {memberLabel(m)}
                     </span>
                   </Td>
-                  <Td className="text-caption">{ROLE_LABELS[m.organizationRole]}</Td>
-                  <Td className="text-caption">{accessLabel(m, project)}</Td>
+                  <Td className="text-caption">
+                    {m.organizationRole ? roleLabel(m.organizationRole) : "None"}
+                  </Td>
+                  <Td className="text-caption">{accessLabel(m)}</Td>
                   <Td className="text-caption">
                     {adjustable ? (
                       <Select
                         aria-label={`Role of ${memberLabel(m)} in ${project.name}`}
-                        value={m.projectRole === "viewer" ? "viewer" : "member"}
+                        value={m.projectRole ?? ""}
                         disabled={put.isPending}
                         onChange={(e) =>
-                          put.mutate({ userId: m.userId, readOnly: e.target.value === "viewer" })
+                          put.mutate({ userId: m.userId, role: e.target.value as ProjectRole })
                         }
                       >
-                        <option value="member">Member</option>
-                        <option value="viewer">Viewer (read-only)</option>
+                        {!m.projectRole && (
+                          <option value="" disabled>
+                            Inherited: {ROLE_LABELS[m.effectiveRole]}
+                          </option>
+                        )}
+                        {roles.map((r) => (
+                          <option key={r} value={r}>
+                            {ROLE_LABELS[r]}
+                          </option>
+                        ))}
                       </Select>
                     ) : (
                       ROLE_LABELS[m.effectiveRole]
@@ -462,7 +479,7 @@ function ProjectMembers({ project, manage }: { project: Project; manage: boolean
                   </Td>
                   {manage && (
                     <Td>
-                      {m.explicit && (
+                      {m.explicit && adjustable && (
                         <div className="flex justify-end">
                           <Button
                             variant="ghost-destructive"
@@ -471,7 +488,7 @@ function ProjectMembers({ project, manage }: { project: Project; manage: boolean
                             busy={remove.isPending && remove.variables?.userId === m.userId}
                             onClick={() => remove.mutate(m)}
                           >
-                            {project.allMembers ? "Reset" : "Remove"}
+                            {m.organizationRole ? "Reset" : "Remove"}
                           </Button>
                         </div>
                       )}
@@ -483,13 +500,13 @@ function ProjectMembers({ project, manage }: { project: Project; manage: boolean
           </tbody>
         </Table>
       )}
-      {manage && !project.allMembers && (
+      {manage && can.hasOrganizationRole && (
         <form
           aria-label={`Add someone to ${project.name}`}
           className="flex flex-col gap-2 sm:flex-row sm:items-end"
           onSubmit={(e) => {
             e.preventDefault();
-            if (adding) put.mutate({ userId: adding, readOnly: false });
+            if (adding) put.mutate({ userId: adding, role: newRole });
           }}
         >
           <Field label="Add someone" className="sm:w-80">
@@ -505,7 +522,22 @@ function ProjectMembers({ project, manage }: { project: Project; manage: boolean
                 </option>
                 {candidates.map((m) => (
                   <option key={m.userId} value={m.userId}>
-                    {memberLabel(m)} · {ROLE_LABELS[m.role]}
+                    {memberLabel(m)} · {roleLabel(m.role)}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+          <Field label="Role" className="sm:w-40">
+            {(c) => (
+              <Select
+                {...c}
+                value={newRole}
+                onChange={(e) => setNewRole(e.target.value as ProjectRole)}
+              >
+                {roles.map((r) => (
+                  <option key={r} value={r}>
+                    {ROLE_LABELS[r]}
                   </option>
                 ))}
               </Select>

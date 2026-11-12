@@ -13,7 +13,7 @@ WHERE tenant_id = @tenant_id AND id = @id AND deleted_at IS NULL;
 -- Serialises changes of one channel (patch, delete, test outcome). NO KEY UPDATE: the key never
 -- changes, so inserts into monitor_channels and notification_deliveries (FOR KEY SHARE on the
 -- referenced row) are not blocked by it.
-SELECT id, config_encrypted, status
+SELECT id, config_encrypted, status, project_id
 FROM notification_channels
 WHERE tenant_id = @tenant_id AND id = @id AND deleted_at IS NULL
 FOR NO KEY UPDATE;

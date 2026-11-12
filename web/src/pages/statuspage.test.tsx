@@ -99,7 +99,9 @@ describe("status page settings", () => {
     expect(await screen.findByLabelText("Public link")).toHaveValue(
       "https://proreta.example.com/status/acme",
     );
-    expect(screen.getByText(/Only admins and owners can change or publish/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Only organization maintainers and owners can change or publish/),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Publish/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("complementary", { name: "Live preview" })).not.toBeInTheDocument();
   });

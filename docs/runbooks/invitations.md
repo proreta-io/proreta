@@ -3,14 +3,18 @@
 This page is the practical side of organizations, roles and invitations for the people who run Proreta and help its users.
 
 ## Roles
-| Role | May |
-|---|---|
-| `owner` | everything a maintainer may, plus grant and revoke `owner` and delete the organization |
-| `maintainer` | invite people, change and remove maintainers, members and viewers (never owners), notification channels, every monitor |
-| `member` | create, edit, pause and delete monitors and heartbeats |
-| `viewer` | read monitors, incidents, channels, members and the plan |
+The same four roles exist on the organization and on a project. A role on the organization applies to every project of it; a direct role on a project applies to that project only; the role someone has in a project is the higher of the two, so a project role can raise an organization role there and never lowers it. [roles.md](../roles.md) lists every permission of every role.
 
-The API refuses anything above a role with 403 `urn:proreta:problem:forbidden`; the web hides those controls and says who can do it. A role change applies on the member's next request. Every organization keeps at least one active owner: the last one cannot step down, be removed or leave (409 `urn:proreta:problem:last-owner`). Ownership transfer is "make someone owner, then step down".
+| Role | On the organization | In a project |
+|---|---|---|
+| `owner` | everything a maintainer may, plus grant and revoke `owner`, delete projects and the organization, manage sign-in domains | delete the project, grant and revoke `owner` in it, and everything a maintainer may |
+| `maintainer` | invite people, change and remove maintainers, members and viewers (never owners), create projects, manage the status page, notification channels and the people of every project | manage the people (up to `maintainer`), the settings and the notification channels of the project |
+| `member` | create, edit, pause and delete monitors and heartbeats in every project | the same in the project |
+| `viewer` | read every project's monitors, incidents and channels, the member names and the status page settings | read the project |
+
+A person can also have no organization role. They belong to the organization only through projects: they see the organization in the switcher, count against the plan's member limit, see only the projects they have a role in and nothing at the organization level (members, invitations, plan, status page, sign-in domains). They can leave the organization. To make someone project-only, change their role to "No organization role (projects only)" under **Members**; to give them a project role use the **People** panel of the project. Someone with no organization role and no project role sees nothing and can only switch or leave.
+
+The API refuses anything above a role with 403 `urn:proreta:problem:forbidden` and answers 404 for a project the caller has no role in; the web hides those controls and says who can do it. A role change applies on the member's next request. Nobody grants a role above their own, and a maintainer never changes an owner. Every organization keeps at least one active owner: the last one cannot step down, lose the role, be removed or leave (409 `urn:proreta:problem:last-owner`). Ownership transfer is "make someone owner, then step down". A project has no last-owner rule: organization owners always control every project. Organization-wide notification channels are managed by organization owners and maintainers only.
 
 ## Inviting someone
 1. A maintainer or owner opens **Members**, chooses **Invite someone**, picks the role and optionally a note for themselves (for example the person's name). When the platform admin has set up and tested [outgoing email](email.md) the dialog also offers an optional **Email** field and a **Send by email** checkbox, pre-checked when the admin turned on "Send invitation links by email".

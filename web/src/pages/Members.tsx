@@ -47,7 +47,9 @@ import {
   canManageMember,
   ROLE_DESCRIPTIONS,
   ROLE_HINTS,
+  NO_ROLE_LABEL,
   ROLE_LABELS,
+  roleLabel,
 } from "../lib/roles";
 import { memberLabel } from "../lib/members";
 
@@ -56,6 +58,19 @@ export default function Members() {
   const auth = useAuth();
   const can = abilities(auth.session);
   const org = auth.session?.organization.name ?? "this organization";
+  if (!can.hasOrganizationRole) {
+    return (
+      <section className="flex max-w-[960px] flex-col">
+        <h1 className="pt-6 pb-2 text-headline leading-[1.1] font-semibold tracking-[-0.02em] sm:pt-10 sm:text-display">
+          Members
+        </h1>
+        <p className="pb-6 text-muted-foreground sm:pb-9">{ROLE_HINTS.organizationLevel}</p>
+        <Section id="leave" title="Leave">
+          <LeaveOrDelete />
+        </Section>
+      </section>
+    );
+  }
   return (
     <section className="flex max-w-[960px] flex-col">
       <h1 className="pt-6 pb-2 text-headline leading-[1.1] font-semibold tracking-[-0.02em] sm:pt-10 sm:text-display">
@@ -64,7 +79,8 @@ export default function Members() {
       <p className="pb-6 text-muted-foreground sm:pb-9">
         People in <strong className="font-medium text-foreground">{org}</strong>. You are{" "}
         {can.role ? `${article(can.role)} ${ROLE_LABELS[can.role].toLowerCase()}` : "a member"}:{" "}
-        {can.role ? ROLE_DESCRIPTIONS[can.role].toLowerCase() : ""}
+        {can.role ? ROLE_DESCRIPTIONS[can.role].toLowerCase() : ""} A role here applies to every
+        project; a role in a project can only raise it there.
       </p>
       <Section id="members" title="People">
         <MemberList />
@@ -86,6 +102,8 @@ export default function Members() {
     </section>
   );
 }
+
+const NONE = "none";
 
 function article(role: MembershipRole) {
   return role === "owner" ? "an" : "a";
@@ -128,12 +146,16 @@ function MemberList() {
   const [removing, setRemoving] = useState<Member | null>(null);
 
   const change = useMutation({
-    mutationFn: ({ member, role }: { member: Member; role: MembershipRole }) =>
+    mutationFn: ({ member, role }: { member: Member; role: MembershipRole | null }) =>
       updateMember(member.userId, role),
     onSuccess: (updated) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.members });
       if (updated.userId === me) void queryClient.invalidateQueries({ queryKey: queryKeys.me });
-      toast(`${memberLabel(updated)} is now ${ROLE_LABELS[updated.role].toLowerCase()}`);
+      toast(
+        updated.role
+          ? `${memberLabel(updated)} is now ${ROLE_LABELS[updated.role].toLowerCase()}`
+          : `${memberLabel(updated)} now belongs through projects only`,
+      );
     },
     onError: (err) => toast(errorMessage(err), "error"),
   });
@@ -208,13 +230,17 @@ function MemberList() {
                   {manageable ? (
                     <Select
                       aria-label={`Role of ${memberLabel(m)}`}
-                      className="w-[130px]"
-                      value={m.role}
+                      className="w-[250px] max-w-full"
+                      value={m.role ?? NONE}
                       disabled={change.isPending}
                       onChange={(e) =>
-                        change.mutate({ member: m, role: e.target.value as MembershipRole })
+                        change.mutate({
+                          member: m,
+                          role: e.target.value === NONE ? null : (e.target.value as MembershipRole),
+                        })
                       }
                     >
+                      <option value={NONE}>{NO_ROLE_LABEL}</option>
                       {roles.map((r) => (
                         <option key={r} value={r}>
                           {ROLE_LABELS[r]}
@@ -222,7 +248,7 @@ function MemberList() {
                       ))}
                     </Select>
                   ) : (
-                    <span aria-describedby={note ? noteId : undefined}>{ROLE_LABELS[m.role]}</span>
+                    <span aria-describedby={note ? noteId : undefined}>{roleLabel(m.role)}</span>
                   )}
                   {note && (
                     <span id={noteId} className="mt-1 block text-caption text-muted-foreground">

@@ -73,7 +73,7 @@ type Actor struct {
 
 // checkAccess refuses a change of a monitor in project: ErrNotFound when the actor does not see
 // the project (so ids of other projects reveal nothing), authz.ErrProjectForbidden when its role
-// there is below member.
+// there is below member (a viewer).
 func (a Actor) checkAccess(project uuid.UUID) error {
 	if !a.Access.Sees(project) {
 		return ErrNotFound

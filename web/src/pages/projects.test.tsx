@@ -137,21 +137,26 @@ describe("projects page", () => {
       "GET /api/v1/members": () => json({ items: orgMembers }),
       "GET /api/v1/projects/w/members": () => json({ items: people }),
       "PUT /api/v1/projects/w/members/u2": async (r) => {
-        const body = (await r.json()) as { role?: "viewer" };
+        const body = (await r.json()) as { role: "member" | "viewer" | "maintainer" };
         bodies.push(body);
-        const m = pm({ projectRole: body.role ?? null, effectiveRole: body.role ?? "member" });
+        const m = pm({
+          projectRole: body.role,
+          effectiveRole: body.role === "maintainer" ? "maintainer" : "member",
+        });
         people = [people[0]!, m];
         return json(m);
       },
     });
     renderApp("/projects");
     await userEvent.click(await screen.findByRole("button", { name: "People in Web" }));
-    expect(await screen.findByRole("row", { name: /admin/ })).toHaveTextContent("Every project");
+    expect(await screen.findByRole("row", { name: /admin/ })).toHaveTextContent(
+      "Organization role",
+    );
     await userEvent.selectOptions(screen.getByLabelText("Add someone"), "u2");
     await userEvent.click(screen.getByRole("button", { name: "Add to project" }));
     const role = await screen.findByRole("combobox", { name: "Role of bob@example.com in Web" });
     await userEvent.selectOptions(role, "viewer");
-    await waitFor(() => expect(bodies).toEqual([{}, { role: "viewer" }]));
+    await waitFor(() => expect(bodies).toEqual([{ role: "member" }, { role: "viewer" }]));
   });
 
   it("shows members a read-only list without management controls", async () => {
@@ -169,6 +174,85 @@ describe("projects page", () => {
     expect(await screen.findByRole("row", { name: /Web/ })).toHaveTextContent("Viewer");
     expect(screen.queryByLabelText("New project")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete Web" })).not.toBeInTheDocument();
+  });
+});
+
+describe("projects page with two-level roles", () => {
+  it("lets a project maintainer without an organization role manage their project only", async () => {
+    const bodies: unknown[] = [];
+    const people = [
+      pm({
+        userId: "u1",
+        login: null,
+        displayName: "Dana",
+        organizationRole: null,
+        projectRole: "maintainer",
+        effectiveRole: "maintainer",
+      }),
+      pm({
+        userId: "u2",
+        organizationRole: "viewer",
+        effectiveRole: "viewer",
+        explicit: false,
+        allProjects: true,
+      }),
+      pm({
+        userId: "u3",
+        login: null,
+        displayName: "Olga",
+        organizationRole: null,
+        projectRole: "owner",
+        effectiveRole: "owner",
+      }),
+    ];
+    mockApi({
+      "GET /api/v1/auth/me": () => json({ ...session, role: null }),
+      "GET /api/v1/projects": () =>
+        json({
+          items: [
+            { ...web, role: "maintainer" },
+            project({ id: "x", name: "Other", role: "viewer" }),
+          ],
+        }),
+      "GET /api/v1/projects/w/members": () => json({ items: people }),
+      "PUT /api/v1/projects/w/members/u2": async (r) => {
+        bodies.push(await r.json());
+        return json({
+          ...people[1]!,
+          projectRole: "maintainer",
+          effectiveRole: "maintainer",
+          explicit: true,
+        });
+      },
+    });
+    renderApp("/projects");
+    // Organization-level controls are not offered; the project's own are.
+    expect(await screen.findByRole("row", { name: /Web/ })).toHaveTextContent("Maintainer");
+    expect(screen.queryByLabelText("New project")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Rename Web" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete Web" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Rename Other" })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "People in Web" }));
+    // The inherited organization role shows; a maintainer grants up to maintainer, never owner,
+    // and cannot touch the project owner.
+    const viewerRole = await screen.findByRole("combobox", {
+      name: "Role of bob@example.com in Web",
+    });
+    expect(
+      within(viewerRole)
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual(["Inherited: Viewer", "Maintainer", "Member", "Viewer"]);
+    expect(screen.queryByRole("combobox", { name: "Role of Olga in Web" })).not.toBeInTheDocument();
+    expect(screen.getByRole("row", { name: /Olga/ })).toHaveTextContent("Owner");
+    expect(screen.getByRole("row", { name: /bob@example.com/ })).toHaveTextContent(
+      "Organization role",
+    );
+    // No organization member list for a person without an organization role: no add form.
+    expect(screen.queryByLabelText("Add someone")).not.toBeInTheDocument();
+    await userEvent.selectOptions(viewerRole, "maintainer");
+    await waitFor(() => expect(bodies).toEqual([{ role: "maintainer" }]));
   });
 });
 
@@ -218,7 +302,7 @@ describe("project switcher", () => {
     });
     const view = renderApp("/");
     const select = await screen.findByRole("combobox", { name: "Project filter" });
-    expect(within(select).getByRole("option", { name: "All my projects" })).toBeInTheDocument();
+    expect(within(select).getByRole("option", { name: "All projects" })).toBeInTheDocument();
     expect(await screen.findByText("in-default")).toBeInTheDocument();
     await userEvent.selectOptions(select, "w");
     await waitFor(() => expect(screen.queryByText("in-default")).not.toBeInTheDocument());

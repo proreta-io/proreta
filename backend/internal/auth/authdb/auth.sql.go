@@ -77,7 +77,7 @@ func (q *Queries) DisableUser(ctx context.Context, id uuid.UUID) error {
 }
 
 const getMembershipRole = `-- name: GetMembershipRole :one
-SELECT role
+SELECT coalesce(role, '')::text AS role
 FROM memberships
 WHERE tenant_id = $1 AND user_id = $2
 `
@@ -87,6 +87,7 @@ type GetMembershipRoleParams struct {
 	UserID   uuid.UUID
 }
 
+// The organization role; empty for a person who belongs only through projects.
 func (q *Queries) GetMembershipRole(ctx context.Context, arg GetMembershipRoleParams) (string, error) {
 	row := q.db.QueryRow(ctx, getMembershipRole, arg.TenantID, arg.UserID)
 	var role string
@@ -214,7 +215,7 @@ func (q *Queries) GetUserCredential(ctx context.Context, id uuid.UUID) (GetUserC
 
 const insertMembership = `-- name: InsertMembership :exec
 INSERT INTO memberships (tenant_id, user_id, role)
-VALUES ($1, $2, $3)
+VALUES ($1, $2, nullif($3::text, ''))
 `
 
 type InsertMembershipParams struct {
@@ -223,6 +224,7 @@ type InsertMembershipParams struct {
 	Role     string
 }
 
+// An empty role stores NULL: no organization role.
 func (q *Queries) InsertMembership(ctx context.Context, arg InsertMembershipParams) error {
 	_, err := q.db.Exec(ctx, insertMembership, arg.TenantID, arg.UserID, arg.Role)
 	return err
@@ -468,10 +470,10 @@ func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) erro
 
 const upsertMembership = `-- name: UpsertMembership :exec
 INSERT INTO memberships (tenant_id, user_id, role)
-VALUES ($1, $2, $3)
+VALUES ($1, $2, nullif($3::text, ''))
 ON CONFLICT (tenant_id, user_id) DO UPDATE
 SET role = EXCLUDED.role
-WHERE memberships.role <> EXCLUDED.role
+WHERE memberships.role IS DISTINCT FROM EXCLUDED.role
 `
 
 type UpsertMembershipParams struct {

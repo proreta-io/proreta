@@ -14,8 +14,8 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/platform/logging"
 )
 
-// roleError is a request refused by the operation table because the session's role is below the
-// operation's minimum role.
+// roleError is a request refused by the operation table because no role of the actor holds the
+// permission the operation needs; required is the lowest role that does.
 type roleError struct{ required authz.Role }
 
 func (e *roleError) Error() string { return fmt.Sprintf("forbidden: needs role %s", e.required) }
@@ -25,8 +25,10 @@ var errPasswordChangeRequired = errors.New("password change required")
 
 // authorize is the strict-handler middleware that applies the operation table of internal/authz
 // to every operation by its operation id: unknown operations are refused, public ones pass, and
-// every other one needs a session whose role reaches the operation's minimum. It runs after the
-// request validator, so the session (and the CSRF token) were already checked.
+// every other one needs a session whose permissions cover the operation: through the
+// organization role or, for a project-scope permission, in at least one project. Operations that
+// name a project are checked again for that project by the service. It runs after the request
+// validator, so the session (and the CSRF token) were already checked.
 func (s *server) authorize(f gen.StrictHandlerFunc, operationID string) gen.StrictHandlerFunc {
 	min, known := authz.MinRole(operationID)
 	return func(ctx context.Context, w http.ResponseWriter, r *http.Request, req any) (any, error) {
@@ -44,7 +46,16 @@ func (s *server) authorize(f gen.StrictHandlerFunc, operationID string) gen.Stri
 		if p.MustChangePassword && !authz.AllowedWhileMustChangePassword(operationID) {
 			return nil, errPasswordChangeRequired
 		}
-		if !authz.Can(authz.Actor{UserID: p.UserID, Role: authz.Role(p.Role)}, operationID) {
+		allowed := authz.Can(authz.Actor{UserID: p.UserID, Role: authz.Role(p.Role)}, operationID)
+		if !allowed && authz.LevelOfOperation(operationID) == authz.LevelProject {
+			// Only now the direct project roles are needed (one query, cached for the request).
+			full, err := s.accessFor(r)
+			if err != nil {
+				return nil, err
+			}
+			allowed = authz.Can(full, operationID)
+		}
+		if !allowed {
 			s.log.WarnContext(ctx, "operation refused by role", "operation", operationID, "role", p.Role, "required", string(min))
 			return nil, &roleError{required: min}
 		}
@@ -83,7 +94,7 @@ func (s *server) UpdateMember(ctx context.Context, req gen.UpdateMemberRequestOb
 	if err != nil {
 		return nil, err
 	}
-	m, err := s.auth.ChangeRole(ctx, a, req.UserId, string(req.Body.Role))
+	m, err := s.auth.ChangeRole(ctx, a, req.UserId, roleString(req.Body.Role))
 	if err != nil {
 		return nil, err
 	}
@@ -212,7 +223,7 @@ func (s *server) ListOrganizations(ctx context.Context, _ gen.ListOrganizationsR
 	}
 	out := gen.ListOrganizations200JSONResponse{Items: make([]gen.Organization, len(list))}
 	for i, o := range list {
-		out.Items[i] = gen.Organization{Id: o.Tenant.ID, Slug: o.Tenant.Slug, Name: o.Tenant.Name, Role: gen.MembershipRole(o.Role),
+		out.Items[i] = gen.Organization{Id: o.Tenant.ID, Slug: o.Tenant.Slug, Name: o.Tenant.Name, Role: optRole(o.Role),
 			Status: gen.OrganizationStatus(o.Tenant.Status), Current: o.Tenant.ID == p.TenantID}
 	}
 	return out, nil
@@ -236,9 +247,26 @@ func (s *server) SwitchOrganization(ctx context.Context, req gen.SwitchOrganizat
 	}, nil
 }
 
+// optRole maps an organization role that may be empty (none) to the nullable API value.
+func optRole(r string) *gen.MembershipRole {
+	if r == "" {
+		return nil
+	}
+	v := gen.MembershipRole(r)
+	return &v
+}
+
+// roleString maps a nullable API role to the empty string for none.
+func roleString(r *gen.MembershipRole) string {
+	if r == nil {
+		return ""
+	}
+	return string(*r)
+}
+
 // toMember maps a member; showLogin is false for callers below maintainer.
 func toMember(m auth.Member, showLogin bool) gen.Member {
-	return gen.Member{UserId: m.UserID, Login: loginFor(m.Login, showLogin), DisplayName: m.DisplayName, Role: gen.MembershipRole(m.Role),
+	return gen.Member{UserId: m.UserID, Login: loginFor(m.Login, showLogin), DisplayName: m.DisplayName, Role: optRole(m.Role),
 		JoinedAt: m.JoinedAt, IsPlatformAdmin: m.IsPlatformAdmin, IsSystemAdmin: m.IsSystemAdmin}
 }
 
