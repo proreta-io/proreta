@@ -2274,7 +2274,7 @@ export interface components {
     /**
      * @description The HTTP method of the check. `POST`, `PUT`, `PATCH` and `DELETE` act on the target
      *     system once a minute; use them only against endpoints that are safe to call that often.
-     *     `GET` when omitted on create; omitted on update keeps the current method.
+     *     Defaults to `GET`; omitted on update keeps the current method.
      * @example GET
      * @enum {string}
      */
