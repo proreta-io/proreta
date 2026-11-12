@@ -68,10 +68,15 @@ type Monitor struct {
 	ID        uuid.UUID
 	ProjectID uuid.UUID
 	// Type is "http" or "heartbeat".
-	Type                 string
-	Name                 string
-	URL                  string
-	ExpectedStatus       string
+	Type           string
+	Name           string
+	URL            string
+	ExpectedStatus string
+	// Method, HeaderNames and BodySet describe the request of an http monitor; values are
+	// sealed and never read here.
+	Method               string
+	HeaderNames          []string
+	BodySet              bool
 	IntervalSeconds      int
 	TimeoutSeconds       int
 	FailureThreshold     int
@@ -114,6 +119,7 @@ type Summary struct {
 
 const monitorColumns = `
 SELECT m.id, m.project_id, m.type, m.name, COALESCE(m.config ->> 'url', ''), COALESCE(m.config ->> 'expectedStatus', '2xx'),
+       COALESCE(m.config ->> 'method', 'GET'), COALESCE(m.config -> 'headerNames', '[]'::jsonb), COALESCE((m.config ->> 'bodySet')::boolean, false),
        m.interval_seconds, m.timeout_seconds, m.failure_threshold, m.notifications_enabled, m.paused,
        m.created_at, m.updated_at,
        s.status, s.status_changed_at, s.last_error_kind, s.last_checked_at, s.tls_expires_at,
@@ -143,7 +149,7 @@ func scanMonitor(row pgx.Row) (Monitor, error) {
 	var incStarted *time.Time
 	var incReason string
 	var latency, grace *int32
-	err := row.Scan(&m.ID, &m.ProjectID, &m.Type, &m.Name, &m.URL, &m.ExpectedStatus, &interval, &timeout, &threshold, &m.NotificationsEnabled, &m.Paused,
+	err := row.Scan(&m.ID, &m.ProjectID, &m.Type, &m.Name, &m.URL, &m.ExpectedStatus, &m.Method, &m.HeaderNames, &m.BodySet, &interval, &timeout, &threshold, &m.NotificationsEnabled, &m.Paused,
 		&m.CreatedAt, &m.UpdatedAt, &m.Status, &m.StatusSince, &m.LastErrorKind, &m.LastCheckedAt, &m.TLSExpiresAt,
 		&incID, &incStarted, &incReason, &latency, &m.LastPingAt, &grace)
 	if err != nil {

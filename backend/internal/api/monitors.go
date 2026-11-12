@@ -69,7 +69,8 @@ func (s *server) CreateMonitor(ctx context.Context, req gen.CreateMonitorRequest
 	}
 	if h := b.Http; h != nil {
 		in.HTTP = &monitors.HTTPSettings{URL: &h.Url, ExpectedStatus: h.ExpectedStatus, IntervalSeconds: h.IntervalSeconds,
-			TimeoutSeconds: h.TimeoutSeconds, FailureThreshold: h.FailureThreshold}
+			TimeoutSeconds: h.TimeoutSeconds, FailureThreshold: h.FailureThreshold,
+			Method: methodOf(h.Method), Headers: headersOf(h.Headers), Body: bodyOf(h.Body)}
 	}
 	if hb := b.Heartbeat; hb != nil {
 		in.Heartbeat = &monitors.HeartbeatSettings{ExpectedIntervalSeconds: hb.ExpectedIntervalSeconds, GraceSeconds: hb.GraceSeconds}
@@ -106,7 +107,8 @@ func (s *server) UpdateMonitor(ctx context.Context, req gen.UpdateMonitorRequest
 	in := monitors.UpdateInput{Name: b.Name, NotificationsEnabled: b.NotificationsEnabled, ChannelIDs: b.ChannelIds, ProjectID: b.ProjectId}
 	if h := b.Http; h != nil {
 		in.HTTP = &monitors.HTTPSettings{URL: h.Url, ExpectedStatus: h.ExpectedStatus, IntervalSeconds: h.IntervalSeconds,
-			TimeoutSeconds: h.TimeoutSeconds, FailureThreshold: h.FailureThreshold}
+			TimeoutSeconds: h.TimeoutSeconds, FailureThreshold: h.FailureThreshold,
+			Method: methodOf(h.Method), Headers: headersOf(h.Headers), Body: bodyOf(h.Body)}
 	}
 	if hb := b.Heartbeat; hb != nil {
 		in.Heartbeat = &monitors.HeartbeatSettings{ExpectedIntervalSeconds: hb.ExpectedIntervalSeconds, GraceSeconds: hb.GraceSeconds}
@@ -269,8 +271,13 @@ func monitorSettings(m queries.Monitor) (*gen.HttpMonitor, *gen.HeartbeatMonitor
 	if m.Type == monitors.TypeHeartbeat {
 		return nil, &gen.HeartbeatMonitor{ExpectedIntervalSeconds: m.IntervalSeconds, GraceSeconds: deref(m.GraceSeconds), LastPingAt: m.LastPingAt}
 	}
-	return &gen.HttpMonitor{Url: m.URL, ExpectedStatus: m.ExpectedStatus, IntervalSeconds: m.IntervalSeconds,
-		TimeoutSeconds: m.TimeoutSeconds, FailureThreshold: m.FailureThreshold, TlsExpiresAt: m.TLSExpiresAt,
+	names := m.HeaderNames
+	if names == nil {
+		names = []string{}
+	}
+	return &gen.HttpMonitor{Url: m.URL, ExpectedStatus: m.ExpectedStatus, Method: gen.HttpMethod(m.Method), HeaderNames: names, BodySet: m.BodySet,
+		IntervalSeconds: m.IntervalSeconds,
+		TimeoutSeconds:  m.TimeoutSeconds, FailureThreshold: m.FailureThreshold, TlsExpiresAt: m.TLSExpiresAt,
 		LastResponseMs: m.LastResponseMs}, nil
 }
 
@@ -279,4 +286,31 @@ func toOngoing(in *queries.Incident) *gen.OngoingIncident {
 		return nil
 	}
 	return &gen.OngoingIncident{Id: in.ID, StartedAt: in.StartedAt, Reason: in.Reason}
+}
+
+func methodOf(m *gen.HttpMethod) *string {
+	if m == nil {
+		return nil
+	}
+	v := string(*m)
+	return &v
+}
+
+func bodyOf(b *gen.HttpBody) *string {
+	if b == nil {
+		return nil
+	}
+	v := string(*b)
+	return &v
+}
+
+func headersOf(h *[]gen.HttpHeaderInput) *[]monitors.HeaderInput {
+	if h == nil {
+		return nil
+	}
+	out := make([]monitors.HeaderInput, len(*h))
+	for i, x := range *h {
+		out[i] = monitors.HeaderInput{Name: x.Name, Value: x.Value}
+	}
+	return &out
 }
