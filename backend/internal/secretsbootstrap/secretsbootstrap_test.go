@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"log/slog"
 	"strings"
 	"sync"
@@ -491,4 +492,56 @@ func TestStatuspageCookieKey(t *testing.T) {
 	if _, err := LoadConfig(func(k string) (string, bool) { return "maybe", k == "PRORETA_SECRETS_STATUSPAGE_MODE" }); err == nil {
 		t.Fatal("bad mode accepted")
 	}
+}
+
+func TestRequestKeyring(t *testing.T) {
+	f := pgtest.NewFakeSecrets()
+	log, buf := captureLog()
+	o := Options{Namespace: ns, AdminMode: ModeSkip, CryptoMode: ModeSkip, RequestMode: ModeGenerate,
+		RequestSecretName: "proreta-request", RequestKeyID: "r1", Secrets: f, Logger: log}
+	res, err := Run(context.Background(), o)
+	if err != nil || !res.RequestCreated || res.CryptoCreated {
+		t.Fatalf("run: %+v %v", res, err)
+	}
+	d, found, _ := f.Get(context.Background(), ns, "proreta-request")
+	if !found || string(d[KeyActiveKeyID]) != "r1" || len(d) != 2 {
+		t.Fatalf("secret: %v", d)
+	}
+	var keys map[string]string
+	if err := json.Unmarshal(d[KeyKeys], &keys); err != nil || len(keys) != 1 {
+		t.Fatalf("keys: %s %v", d[KeyKeys], err)
+	}
+	// The generated value is what the api and the worker load.
+	if _, err := crypto.NewKeyring(decodeKeys(t, keys), "r1"); err != nil {
+		t.Fatalf("keyring: %v", err)
+	}
+	if strings.Contains(buf.String(), keys["r1"]) {
+		t.Fatal("key logged")
+	}
+	if res, err := Run(context.Background(), o); err != nil || res.RequestCreated {
+		t.Fatalf("rerun: %+v %v", res, err)
+	}
+	f.Put(ns, "proreta-request", map[string][]byte{"other": []byte("x")})
+	if _, err := Run(context.Background(), o); err == nil || !strings.Contains(err.Error(), KeyKeys) {
+		t.Fatalf("incomplete: %v", err)
+	}
+	c, err := LoadConfig(func(k string) (string, bool) {
+		return map[string]string{"PRORETA_SECRETS_REQUEST_MODE": "generate", "PRORETA_SECRETS_REQUEST_KEY_ID": "r2"}[k], k == "PRORETA_SECRETS_REQUEST_MODE" || k == "PRORETA_SECRETS_REQUEST_KEY_ID"
+	})
+	if err != nil || c.Options.RequestMode != ModeGenerate || c.Options.RequestSecretName != "proreta-request" || c.Options.RequestKeyID != "r2" {
+		t.Fatalf("config: %+v %v", c.Options, err)
+	}
+}
+
+func decodeKeys(t *testing.T, in map[string]string) map[string][]byte {
+	t.Helper()
+	out := map[string][]byte{}
+	for id, b64 := range in {
+		k, err := base64.StdEncoding.DecodeString(b64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[id] = k
+	}
+	return out
 }

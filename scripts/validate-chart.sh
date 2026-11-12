@@ -49,6 +49,7 @@ combos=(
   "example-external-secrets|-f $example $tag $eso --set secrets.admin.source=externalSecret --set secrets.crypto.source=externalSecret"
   "example-admin-external|-f $example $tag $eso --set secrets.admin.source=externalSecret"
   "example-crypto-external|-f $example $tag $eso --set secrets.crypto.source=externalSecret"
+  "example-request-external|-f $example $tag $eso --set secrets.request.source=externalSecret"
   "example-no-statuspage|-f $example $tag --set statuspage.enabled=false"
   "example-statuspage-external|-f $example $tag $eso --set statuspage.enabled=true --set secrets.statuspage.source=externalSecret"
   "defaults-no-statuspage|$min --set statuspage.enabled=false"
@@ -135,6 +136,7 @@ expect_fail "non-boolean bootstrap force" --set database.bootstrap.force=sometim
 expect_fail "invalid database Secret name" --set database.secretName=Proreta_DB
 expect_fail "OAuth without existingSecret and without External Secrets" -f "$example" --set oauth.github.enabled=true
 expect_fail "admin source externalSecret without External Secrets" -f "$example" --set secrets.admin.source=externalSecret
+expect_fail "request source externalSecret without External Secrets" -f "$example" --set secrets.request.source=externalSecret
 expect_fail "statuspage source externalSecret without External Secrets" -f "$example" --set secrets.statuspage.source=externalSecret
 expect_fail "External Secrets without a store" -f "$example" "${eso_args[@]}" --set externalSecrets.secretStoreRef=null
 expect_fail "External Secrets without a store name" --msg "externalSecrets.secretStoreRef.name" -f "$example" --set externalSecrets.enabled=true
@@ -162,6 +164,8 @@ expect_fail "registrationEnabled not a boolean" --set-string config.registration
 expect_fail "empty admin login in generate mode" --set secrets.admin.login=
 expect_fail "admin login removed in generate mode" -f "$example" --set secrets.admin.login=null
 expect_fail "invalid crypto key id" --set "secrets.crypto.keyId=k 1"
+expect_fail "invalid request key id" --set "secrets.request.keyId=r 1"
+expect_fail "request key externalSecret without remote key" "${eso_args[@]}" --set secrets.request.source=externalSecret --set secrets.request.remoteKey=
 expect_fail "externalSecret without remote key" "${eso_args[@]}" --set secrets.crypto.source=externalSecret --set secrets.crypto.remoteKey=
 expect_fail "statuspage cookie key externalSecret without remote key" "${eso_args[@]}" --set secrets.statuspage.source=externalSecret --set secrets.statuspage.remoteKey=
 expect_fail "status path moved" --set httpRoute.statusPathPrefix=/pages

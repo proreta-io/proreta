@@ -74,6 +74,7 @@ not contain `proreta` (`fullnameOverride` replaces it).
 | `database.bootstrap.backoffLimit`, `.activeDeadlineSeconds`, `.ttlSecondsAfterFinished`, `.resources` | `2`, `300`, `600`, 50m/64Mi | Job settings. |
 | `secrets.admin.source`, `.login`, `.remoteKey` | `generate`, `admin`, `proreta/admin` | Platform admin Secret `<fullname>-admin`. |
 | `secrets.crypto.source`, `.keyId`, `.remoteKey` | `generate`, `k1`, `proreta/crypto` | Encryption key Secret `<fullname>-crypto`. |
+| `secrets.request.source`, `.keyId`, `.remoteKey` | `generate`, `r1`, `proreta/request` | Request key Secret `<fullname>-request`: seals the header values and bodies of monitor requests. |
 | `secrets.statuspage.source`, `.remoteKey` | `generate`, `proreta/statuspage` | Status page cookie key Secret `<fullname>-statuspage`. |
 | `secrets.oauth.existingSecret`, `.remoteKey` | `""`, `proreta/oauth` | OAuth client credentials. |
 | `secrets.bootstrap.backoffLimit`, `.activeDeadlineSeconds`, `.ttlSecondsAfterFinished`, `.resources` | `2`, `300`, `600`, 50m/96Mi | Secrets bootstrap Job settings. |
@@ -204,7 +205,7 @@ Secret you create. `externalSecrets.enabled` is `false` by default; set it to `t
 `externalSecrets.secretStoreRef.name`) to read any of the Secrets below from your secret store instead.
 
 Workloads always read `<fullname>-admin` (`login`, `password_hash`) and `<fullname>-crypto` (`keys`,
-`active_key_id`). `secrets.admin.source` and `secrets.crypto.source` choose, per Secret, who creates them:
+`active_key_id`). `secrets.admin.source`, `secrets.crypto.source` and `secrets.request.source` choose, per Secret, who creates them:
 
 - `generate` (default): the secrets bootstrap hook Job (`/app/proretactl secrets bootstrap`) creates the Secret
   in the cluster when it is absent and never overwrites it (an incomplete existing Secret fails the Job).
@@ -214,6 +215,9 @@ Workloads always read `<fullname>-admin` (`login`, `password_hash`) and `<fullna
     `<fullname>-admin-initial` (always safe, nothing reads it; its password no longer works). It is never recreated.
   - crypto: one random 32-byte key with id `secrets.crypto.keyId` (default `k1`). It lives only in the cluster;
     deleting the namespace loses it (it encrypts the Slack webhook URLs and the SMTP password, which can be re-entered, and the queued emails, which are lost with it). Export it first: [docs/install.md](../../../docs/install.md#back-up-the-secrets).
+  - request: one random 32-byte key with id `secrets.request.keyId` (default `r1`) in `<fullname>-request`. The api
+    seals the header values and bodies of monitor requests with it and the worker opens them; the worker holds no
+    other key. Losing it loses those stored values (they can be entered again).
 - `externalSecret`: an ExternalSecret (`externalSecrets.secretStoreRef`, wave -2) materialises it. Needs
   `externalSecrets.enabled: true`; rendering fails otherwise.
 
@@ -227,6 +231,7 @@ Rendering fails when neither is configured. See [docs/runbooks/oauth.md](../../.
 |---|---|---|
 | `secrets.admin.remoteKey` (`proreta/admin`) | `login`, `password_hash` | `<fullname>-admin` |
 | `secrets.crypto.remoteKey` (`proreta/crypto`) | `keys` (JSON string), `active_key_id` | `<fullname>-crypto` |
+| `secrets.request.remoteKey` (`proreta/request`) | `keys` (JSON string), `active_key_id` | `<fullname>-request` |
 | `secrets.statuspage.remoteKey` (`proreta/statuspage`) | `cookie_key` | `<fullname>-statuspage` |
 | `secrets.oauth.remoteKey` (`proreta/oauth`, when `secrets.oauth.existingSecret` is empty) | `google_client_id`, `google_client_secret`, `github_client_id`, `github_client_secret` (only those of enabled providers) | `<fullname>-oauth` |
 | `database.bootstrap.adminSecret.remoteKey` (`proreta/db-admin`, when `database.bootstrap.adminSecret.existingSecret` is empty) | `usernameKey`, `passwordKey` (default `username`, `password`) | `<database Secret>-admin` (hook, deleted after success) |

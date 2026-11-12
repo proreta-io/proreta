@@ -16,6 +16,10 @@
 // Crypto: one 32-byte key in the formats config.LoadAPI parses (PRORETA_ENCRYPTION_KEYS and
 // PRORETA_ENCRYPTION_ACTIVE_KEY_ID).
 //
+// Request: the same key format, separate Secret and key id, for the headers and bodies of monitor
+// requests (PRORETA_REQUEST_KEYS and PRORETA_REQUEST_ACTIVE_KEY_ID). The api and the worker read it;
+// the worker reads nothing else of the keys.
+//
 // Statuspage: one 32-byte key (standard base64) that signs the unlock cookies of
 // password-protected status pages (PRORETA_STATUSPAGE_COOKIE_KEY). Only cmd/statuspage
 // reads it. Losing it only signs visitors of protected pages out.
@@ -74,6 +78,11 @@ type Options struct {
 	AdminInitialSecretName string
 	CryptoSecretName       string
 	CryptoKeyID            string
+	// RequestMode, RequestSecretName and RequestKeyID: the keyring of monitor request secrets.
+	// An empty mode means skip, so callers that do not set it keep working.
+	RequestMode       string
+	RequestSecretName string
+	RequestKeyID      string
 	// StatuspageMode and StatuspageSecretName: the status page cookie key. An empty
 	// mode means skip, so callers that do not set it keep working.
 	StatuspageMode       string
@@ -93,6 +102,7 @@ type Result struct {
 	AdminCreated        bool
 	AdminInitialCreated bool
 	CryptoCreated       bool
+	RequestCreated      bool
 	StatuspageCreated   bool
 }
 
@@ -124,6 +134,24 @@ func Run(ctx context.Context, o Options) (Result, error) {
 		}
 	} else {
 		o.Logger.Info("crypto secret skipped (mode skip)", "secret", o.CryptoSecretName)
+	}
+	if o.RequestMode == "" {
+		o.RequestMode = ModeSkip
+	}
+	if err := checkMode(o.RequestMode); err != nil {
+		return res, err
+	}
+	if o.RequestMode == ModeGenerate {
+		if o.RequestSecretName == "" {
+			return res, errors.New("secretsbootstrap: request secret name is required")
+		}
+		created, err := o.ensureKeys(ctx, o.RequestSecretName, o.RequestKeyID)
+		if err != nil {
+			return res, err
+		}
+		res.RequestCreated = created
+	} else {
+		o.Logger.Info("request secret skipped (mode skip)", "secret", o.RequestSecretName)
 	}
 	if o.StatuspageMode == "" {
 		o.StatuspageMode = ModeSkip
@@ -161,42 +189,48 @@ func checkMode(m string) error {
 }
 
 func (o *Options) ensureCrypto(ctx context.Context, res *Result) error {
-	name := o.CryptoSecretName
+	created, err := o.ensureKeys(ctx, o.CryptoSecretName, o.CryptoKeyID)
+	res.CryptoCreated = created
+	return err
+}
+
+// ensureKeys creates a Secret holding one generated 32-byte key in the format of
+// PRORETA_ENCRYPTION_KEYS / PRORETA_REQUEST_KEYS, unless it exists; an incomplete one is an error.
+func (o *Options) ensureKeys(ctx context.Context, name, keyID string) (bool, error) {
 	for range maxAttempts {
 		data, found, err := o.Secrets.Get(ctx, o.Namespace, name)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if found {
 			if err := complete(name, data, KeyKeys, KeyActiveKeyID); err != nil {
-				return err
+				return false, err
 			}
 			o.Logger.Info("secret exists, left untouched", "secret", name, "keys", sortedKeys(data))
-			return nil
+			return false, nil
 		}
 		key := make([]byte, 32)
 		if _, err := io.ReadFull(o.Rand, key); err != nil {
-			return fmt.Errorf("secretsbootstrap: random key: %w", err)
+			return false, fmt.Errorf("secretsbootstrap: random key: %w", err)
 		}
-		keys, err := json.Marshal(map[string]string{o.CryptoKeyID: base64.StdEncoding.EncodeToString(key)})
+		keys, err := json.Marshal(map[string]string{keyID: base64.StdEncoding.EncodeToString(key)})
 		if err != nil {
-			return err
+			return false, err
 		}
 		err = o.Secrets.CreateAnnotated(ctx, o.Namespace, name, map[string][]byte{
 			KeyKeys:        keys,
-			KeyActiveKeyID: []byte(o.CryptoKeyID),
+			KeyActiveKeyID: []byte(keyID),
 		}, nil)
 		if errors.Is(err, dbbootstrap.ErrSecretExists) {
 			continue // a concurrent run won; validate what it stored
 		}
 		if err != nil {
-			return err
+			return false, err
 		}
-		res.CryptoCreated = true
-		o.Logger.Info("secret created", "secret", name, "keys", []string{KeyActiveKeyID, KeyKeys}, "key_id", o.CryptoKeyID)
-		return nil
+		o.Logger.Info("secret created", "secret", name, "keys", []string{KeyActiveKeyID, KeyKeys}, "key_id", keyID)
+		return true, nil
 	}
-	return fmt.Errorf("secretsbootstrap: secret %s/%s keeps changing; giving up", o.Namespace, name)
+	return false, fmt.Errorf("secretsbootstrap: secret %s/%s keeps changing; giving up", o.Namespace, name)
 }
 
 func (o *Options) ensureStatuspage(ctx context.Context, res *Result) error {

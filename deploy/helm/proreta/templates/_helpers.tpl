@@ -73,6 +73,8 @@ plus owner_password, api_password, worker_password, statuspage_password.
 {{/* One-time plaintext admin password, created by the secrets bootstrap Job, never by Helm. */}}
 {{- define "proreta.secret.adminInitial" -}}{{ include "proreta.secret.admin" . }}-initial{{- end }}
 {{- define "proreta.secret.crypto" -}}{{ include "proreta.fullname" . }}-crypto{{- end }}
+{{/* Keyring of monitor request secrets (header values, bodies). */}}
+{{- define "proreta.secret.request" -}}{{ include "proreta.fullname" . }}-request{{- end }}
 {{/* Cookie key of the status page renderer. */}}
 {{- define "proreta.secret.statuspage" -}}{{ include "proreta.fullname" . }}-statuspage{{- end }}
 {{/* OAuth client credentials: a Secret you created (secrets.oauth.existingSecret) or the ExternalSecret target. */}}
@@ -126,7 +128,7 @@ helm.sh/hook-delete-policy: {{ ternary "before-hook-creation" "before-hook-creat
 
 {{/* True when the secrets bootstrap Job is needed (any secrets.*.source is generate). Arg: root context */}}
 {{- define "proreta.secrets.generate" -}}
-{{- if or (eq .Values.secrets.admin.source "generate") (eq .Values.secrets.crypto.source "generate") (include "proreta.statuspage.generate" .) }}true{{ end }}
+{{- if or (eq .Values.secrets.admin.source "generate") (eq .Values.secrets.crypto.source "generate") (eq .Values.secrets.request.source "generate") (include "proreta.statuspage.generate" .) }}true{{ end }}
 {{- end }}
 
 {{/* True when the secrets bootstrap Job must create the status page cookie key. Arg: root context */}}
@@ -148,8 +150,8 @@ helm.sh/hook-delete-policy: {{ ternary "before-hook-creation" "before-hook-creat
 {{- end }}
 
 {{/*
-Encryption keys (config.Encryption). Only api and jobs include this: the worker never gets the
-keys. Arg: root context
+Encryption keys (config.Encryption). Only api and jobs include this: the worker never gets these
+keys (it gets the request keyring instead). Arg: root context
 */}}
 {{- define "proreta.env.encryption" -}}
 - name: PRORETA_ENCRYPTION_KEYS
@@ -161,6 +163,23 @@ keys. Arg: root context
   valueFrom:
     secretKeyRef:
       name: {{ include "proreta.secret.crypto" . }}
+      key: active_key_id
+{{- end }}
+
+{{/*
+Request keyring (config.RequestSeal): the api seals the header values and bodies of monitor requests
+with it and the worker opens them. The worker's only key. Arg: root context
+*/}}
+{{- define "proreta.env.request" -}}
+- name: PRORETA_REQUEST_KEYS
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "proreta.secret.request" . }}
+      key: keys
+- name: PRORETA_REQUEST_ACTIVE_KEY_ID
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "proreta.secret.request" . }}
       key: active_key_id
 {{- end }}
 
