@@ -54,7 +54,8 @@ describe("project choice", () => {
 
   it("labels the whole scope by role", () => {
     expect(allProjectsLabel("maintainer")).toBe("All projects");
-    expect(allProjectsLabel("member")).toBe("All my projects");
+    expect(allProjectsLabel("member")).toBe("All projects");
+    expect(allProjectsLabel(null)).toBe("All my projects");
   });
 });
 

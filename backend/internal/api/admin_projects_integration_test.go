@@ -60,7 +60,7 @@ func TestIntegrationAdminOrganizationProjects(t *testing.T) {
 	var projectID string
 	t.Run("create, rename, slug conflict", func(t *testing.T) {
 		r := c.do(http.MethodPost, base, `{"name":"Payments"}`, ah)
-		if r.code != http.StatusCreated || r.body["slug"] != "payments" || r.body["memberCount"] != float64(1) || r.body["isDefault"] != false {
+		if r.code != http.StatusCreated || r.body["slug"] != "payments" || r.body["memberCount"] != float64(3) || r.body["isDefault"] != false {
 			t.Fatalf("create: %d %s", r.code, r.raw)
 		}
 		projectID = r.body["id"].(string)
@@ -99,31 +99,34 @@ func TestIntegrationAdminOrganizationProjects(t *testing.T) {
 		mp := base + "/" + projectID + "/members"
 		r := c.do(http.MethodGet, mp, "", ah)
 		items, _ := r.body["items"].([]any)
-		if r.code != http.StatusOK || len(items) != 1 {
-			t.Fatalf("initial members: %d %s", r.code, r.raw)
+		if r.code != http.StatusOK || len(items) != 3 {
+			t.Fatalf("initial members (everyone with an organization role): %d %s", r.code, r.raw)
 		}
-		r = c.do(http.MethodPut, mp+"/"+member, `{}`, ah)
-		if r.code != http.StatusOK || r.body["explicit"] != true || r.body["effectiveRole"] != "member" || r.body["projectRole"] != nil {
+		// A direct role never lowers the organization role and raises it where it is higher.
+		r = c.do(http.MethodPut, mp+"/"+member, `{"role":"viewer"}`, ah)
+		if r.code != http.StatusOK || r.body["explicit"] != true || r.body["effectiveRole"] != "member" || r.body["projectRole"] != "viewer" {
 			t.Fatalf("add: %d %s", r.code, r.raw)
 		}
 		// Saving the same thing again writes nothing.
-		c.do(http.MethodPut, mp+"/"+member, `{}`, ah)
-		r = c.do(http.MethodPut, mp+"/"+member, `{"role":"viewer"}`, ah)
-		if r.code != http.StatusOK || r.body["projectRole"] != "viewer" || r.body["effectiveRole"] != "viewer" {
-			t.Fatalf("override: %d %s", r.code, r.raw)
+		c.do(http.MethodPut, mp+"/"+member, `{"role":"viewer"}`, ah)
+		r = c.do(http.MethodPut, mp+"/"+member, `{"role":"maintainer"}`, ah)
+		if r.code != http.StatusOK || r.body["projectRole"] != "maintainer" || r.body["effectiveRole"] != "maintainer" || r.body["organizationRole"] != "member" {
+			t.Fatalf("raise: %d %s", r.code, r.raw)
 		}
-		// An override never raises the organization role.
-		r = c.do(http.MethodPut, mp+"/"+viewer, `{"role":"member"}`, ah)
-		if r.code != http.StatusOK || r.body["effectiveRole"] != "viewer" {
-			t.Fatalf("override on a viewer: %d %s", r.code, r.raw)
+		r = c.do(http.MethodPut, mp+"/"+viewer, `{"role":"owner"}`, ah)
+		if r.code != http.StatusOK || r.body["effectiveRole"] != "owner" || r.body["allProjects"] != true {
+			t.Fatalf("owner on a viewer: %d %s", r.code, r.raw)
 		}
-		r = c.do(http.MethodPut, mp+"/"+outsider, `{}`, ah)
+		r = c.do(http.MethodPut, mp+"/"+outsider, `{"role":"member"}`, ah)
 		fe, _ := r.body["fieldErrors"].([]any)
 		if r.code != http.StatusUnprocessableEntity || len(fe) == 0 || fe[0].(map[string]any)["field"] != "userId" {
 			t.Fatalf("non-member: %d %s", r.code, r.raw)
 		}
-		if r := c.do(http.MethodPut, mp+"/"+member, `{"role":"maintainer"}`, ah); r.code != http.StatusBadRequest {
+		if r := c.do(http.MethodPut, mp+"/"+member, `{"role":"admin"}`, ah); r.code != http.StatusBadRequest {
 			t.Fatalf("bad role: %d %s", r.code, r.raw)
+		}
+		if r := c.do(http.MethodPut, mp+"/"+member, `{}`, ah); r.code != http.StatusBadRequest {
+			t.Fatalf("missing role: %d %s", r.code, r.raw)
 		}
 		r = c.do(http.MethodGet, mp, "", ah)
 		items, _ = r.body["items"].([]any)
@@ -136,16 +139,19 @@ func TestIntegrationAdminOrganizationProjects(t *testing.T) {
 		if r := c.do(http.MethodDelete, mp+"/"+viewer, "", ah); r.code != http.StatusNoContent {
 			t.Fatalf("remove: %d %s", r.code, r.raw)
 		}
+		if r := c.do(http.MethodDelete, mp+"/"+viewer, "", ah); r.code != http.StatusNotFound {
+			t.Fatalf("remove the direct role twice: %d", r.code)
+		}
 		if r := c.do(http.MethodGet, base+"/0192b9c4-7c5e-7000-8000-000000000999/members", "", ah); r.code != http.StatusNotFound {
 			t.Fatalf("members of unknown project: %d", r.code)
 		}
-		// member added, viewer added; member override; viewer removed.
+		// member added, viewer added; member raised; viewer removed.
 		if adminAudit("admin.project_member.added") != 2 || adminAudit("admin.project_member.updated") != 1 || adminAudit("admin.project_member.removed") != 1 {
 			t.Fatalf("member audit = %d/%d/%d", adminAudit("admin.project_member.added"), adminAudit("admin.project_member.updated"), adminAudit("admin.project_member.removed"))
 		}
 		var meta string
 		if err := env.AdminConn(t).QueryRow(ctx, `SELECT metadata::text FROM audit_log WHERE action = 'admin.project_member.updated'`).Scan(&meta); err != nil ||
-			!strings.Contains(meta, `"from": "organization"`) || !strings.Contains(meta, `"to": "viewer"`) {
+			!strings.Contains(meta, `"from": "viewer"`) || !strings.Contains(meta, `"to": "maintainer"`) {
 			t.Fatalf("updated metadata %q: %v", meta, err)
 		}
 	})
@@ -202,7 +208,7 @@ func TestIntegrationAdminOrganizationProjects(t *testing.T) {
 			{http.MethodPost, base, `{"name":"Late"}`},
 			{http.MethodPatch, base + "/" + defaultID, `{"name":"Late"}`},
 			{http.MethodDelete, base + "/" + defaultID, ""},
-			{http.MethodPut, base + "/" + defaultID + "/members/" + member, `{}`},
+			{http.MethodPut, base + "/" + defaultID + "/members/" + member, `{"role":"member"}`},
 			{http.MethodDelete, base + "/" + defaultID + "/members/" + member, ""},
 		} {
 			r := c.do(call.method, call.path, call.body, ah)

@@ -130,10 +130,10 @@ func writeError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 		p.Detail = fmt.Sprintf("The plan of this organization does not include the %q feature.", featureErr.feature)
 	case errors.As(err, &roleErr):
 		p.Type, p.Title, p.Status = problemForbidden, "Not allowed", http.StatusForbidden
-		p.Detail = fmt.Sprintf("This needs the %s role or higher in this organization.", roleErr.required)
+		p.Detail = fmt.Sprintf("Your role does not allow this: it needs the %s role or higher.", roleErr.required)
 	case errors.Is(err, authz.ErrProjectForbidden):
 		p.Type, p.Title, p.Status = problemForbidden, "Not allowed", http.StatusForbidden
-		p.Detail = "Your role in this project is viewer: you can read its monitors but not change them."
+		p.Detail = "Your role in this project does not allow this change."
 	case errors.Is(err, projects.ErrSlugTaken):
 		p.Type, p.Title, p.Status = problemSlugTaken, "This slug is already used by another project", http.StatusConflict
 	case errors.Is(err, statuspages.ErrSlugTaken):

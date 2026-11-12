@@ -34,12 +34,13 @@ import {
   Tr,
 } from "../../components/ui";
 import { formatDate } from "../../lib/format";
-import { ROLE_LABELS } from "../../lib/roles";
+import { NO_ROLE_LABEL, ROLE_LABELS, roleLabel } from "../../lib/roles";
 
 const ROLES: MembershipRole[] = ["owner", "maintainer", "member", "viewer"];
+const NONE = "none";
 
 type Pending =
-  | { kind: "role"; member: AdminMember; role: MembershipRole }
+  | { kind: "role"; member: AdminMember; role: MembershipRole | null }
   | { kind: "remove"; member: AdminMember }
   | { kind: "reset"; member: AdminMember };
 
@@ -63,7 +64,7 @@ export default function AdminOrganizationMembers({
   const [search, setSearch] = useState("");
   const [term, setTerm] = useState("");
   const [picked, setPicked] = useState<AdminUserSummary | null>(null);
-  const [role, setRole] = useState<MembershipRole>("member");
+  const [role, setRole] = useState<MembershipRole | typeof NONE>("member");
   const [addError, setAddError] = useState<string | undefined>();
   // The temporary password lives only here: never in storage, gone when hidden or the page is
   // left. The mutation keeps no copy: gcTime 0 and reset() right after copying it.
@@ -86,12 +87,16 @@ export default function AdminOrganizationMembers({
   }
 
   const change = useMutation({
-    mutationFn: ({ member, role }: { member: AdminMember; role: MembershipRole }) =>
+    mutationFn: ({ member, role }: { member: AdminMember; role: MembershipRole | null }) =>
       setAdminMember(organization.id, member.userId, role),
     onSuccess: (updated) => {
       setPending(null);
       refresh();
-      toast(`${updated.login} is now ${ROLE_LABELS[updated.role].toLowerCase()}`);
+      toast(
+        updated.role
+          ? `${updated.login} is now ${ROLE_LABELS[updated.role].toLowerCase()}`
+          : `${updated.login} now belongs through projects only`,
+      );
     },
     onError: (err) => {
       setPending(null);
@@ -113,14 +118,15 @@ export default function AdminOrganizationMembers({
   });
 
   const add = useMutation({
-    mutationFn: (user: AdminUserSummary) => setAdminMember(organization.id, user.id, role),
+    mutationFn: (user: AdminUserSummary) =>
+      setAdminMember(organization.id, user.id, role === NONE ? null : role),
     onSuccess: (added) => {
       setPicked(null);
       setSearch("");
       setTerm("");
       setAddError(undefined);
       refresh();
-      toast(`${added.login} is ${ROLE_LABELS[added.role].toLowerCase()} now`);
+      toast(`${added.login} is ${roleLabel(added.role).toLowerCase()} now`);
     },
     onError: (err) => setAddError(errorMessage(err)),
   });
@@ -146,7 +152,7 @@ export default function AdminOrganizationMembers({
     add.mutate(picked);
   }
 
-  function onRoleChange(member: AdminMember, next: MembershipRole) {
+  function onRoleChange(member: AdminMember, next: MembershipRole | null) {
     // Owner changes are confirmed; the others apply at once.
     if (next === "owner" || member.role === "owner")
       setPending({ kind: "role", member, role: next });
@@ -218,15 +224,21 @@ export default function AdminOrganizationMembers({
                 </Td>
                 <Td>
                   {deleted || m.isSystemAdmin ? (
-                    ROLE_LABELS[m.role]
+                    roleLabel(m.role)
                   ) : (
                     <Select
                       aria-label={`Role of ${m.login}`}
-                      className="w-[130px]"
-                      value={m.role}
+                      className="w-[250px] max-w-full"
+                      value={m.role ?? NONE}
                       disabled={change.isPending}
-                      onChange={(e) => onRoleChange(m, e.target.value as MembershipRole)}
+                      onChange={(e) =>
+                        onRoleChange(
+                          m,
+                          e.target.value === NONE ? null : (e.target.value as MembershipRole),
+                        )
+                      }
                     >
+                      <option value={NONE}>{NO_ROLE_LABEL}</option>
                       {ROLES.map((r) => (
                         <option key={r} value={r}>
                           {ROLE_LABELS[r]}
@@ -330,10 +342,11 @@ export default function AdminOrganizationMembers({
               {(c) => (
                 <Select
                   {...c}
-                  className="w-[130px]"
+                  className="w-[250px] max-w-full"
                   value={role}
-                  onChange={(e) => setRole(e.target.value as MembershipRole)}
+                  onChange={(e) => setRole(e.target.value as MembershipRole | typeof NONE)}
                 >
+                  <option value={NONE}>{NO_ROLE_LABEL}</option>
                   {ROLES.map((r) => (
                     <option key={r} value={r}>
                       {ROLE_LABELS[r]}
@@ -360,7 +373,7 @@ export default function AdminOrganizationMembers({
 
       {pending?.kind === "role" && (
         <ConfirmDialog
-          title={`Make ${pending.member.login} ${ROLE_LABELS[pending.role].toLowerCase()}?`}
+          title={`Make ${pending.member.login} ${pending.role ? ROLE_LABELS[pending.role].toLowerCase() : "project-only"}?`}
           confirmLabel="Change role"
           confirmVariant="primary"
           busy={change.isPending}

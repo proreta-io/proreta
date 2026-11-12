@@ -155,7 +155,7 @@ func (s *server) AdminListOrganizationUsers(ctx context.Context, req gen.AdminLi
 		Limit: effectiveLimit(pg.Limit), Offset: pg.Offset}
 	for _, u := range list.Items {
 		out.Items = append(out.Items, gen.AdminUser{Id: u.ID, Login: u.Login, Status: gen.AdminUserStatus(u.Status),
-			Role: gen.MembershipRole(u.Role), CreatedAt: u.CreatedAt, IsPlatformAdmin: u.IsPlatformAdmin})
+			Role: optRole(u.Role), CreatedAt: u.CreatedAt, IsPlatformAdmin: u.IsPlatformAdmin})
 	}
 	return out, nil
 }

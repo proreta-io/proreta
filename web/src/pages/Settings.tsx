@@ -1,3 +1,4 @@
+import { useAbilities } from "../lib/useAbilities";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
@@ -207,7 +208,7 @@ type TestResult = { channel: Channel } & (
 );
 
 function NotificationChannels() {
-  const canManage = abilities(useAuth().session).manageChannels;
+  const canManage = useAbilities().manageChannels;
   const queryClient = useQueryClient();
   const toast = useToast();
   const usage = useUsage();

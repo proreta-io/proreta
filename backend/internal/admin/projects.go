@@ -126,9 +126,9 @@ func (s *Service) ProjectMembers(ctx context.Context, a Actor, tenantID, id uuid
 	return s.projects.Members(ctx, s.projectActor(a, tenantID), id)
 }
 
-// PutProjectMember adds a member of the organization to a project or changes its override (nil
-// keeps the organization role). A user who is not a member of the organization is a 422 on userId.
-func (s *Service) PutProjectMember(ctx context.Context, a Actor, tenantID, id, userID uuid.UUID, role *authz.Role) (projects.Member, error) {
+// PutProjectMember gives a member of the organization a direct role in a project or changes it.
+// A user who is not a member of the organization is a 422 on userId.
+func (s *Service) PutProjectMember(ctx context.Context, a Actor, tenantID, id, userID uuid.UUID, role authz.Role) (projects.Member, error) {
 	if err := s.projectTenant(ctx, a, tenantID, true); err != nil {
 		return projects.Member{}, err
 	}
@@ -152,7 +152,7 @@ func (s *Service) PutProjectMember(ctx context.Context, a Actor, tenantID, id, u
 			prev = &before[i]
 		}
 	}
-	if prev == nil || !prev.Explicit || !sameRole(prev.ProjectRole, role) {
+	if prev == nil || !prev.Explicit || *prev.ProjectRole != role {
 		action := projects.AdminActionMemberUpdated
 		if prev == nil || !prev.Explicit {
 			action = projects.AdminActionMemberAdded
@@ -160,13 +160,6 @@ func (s *Service) PutProjectMember(ctx context.Context, a Actor, tenantID, id, u
 		s.recorded(ctx, action, "tenant_id", tenantID, "project_id", id, "user_id", userID)
 	}
 	return m, nil
-}
-
-func sameRole(a, b *authz.Role) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return *a == *b
 }
 
 // RemoveProjectMember takes a member off a project.

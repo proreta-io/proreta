@@ -135,7 +135,7 @@ func (q *Queries) ListInvitations(ctx context.Context, tenantID uuid.UUID) ([]Li
 
 const listMembers = `-- name: ListMembers :many
 
-SELECT m.user_id, u.email, u.display_name, u.status, u.is_platform_admin, u.is_system_admin, m.role, m.created_at
+SELECT m.user_id, u.email, u.display_name, u.status, u.is_platform_admin, u.is_system_admin, coalesce(m.role, '')::text AS role, m.created_at
 FROM memberships AS m
 JOIN users AS u ON u.id = m.user_id
 WHERE m.tenant_id = $1
@@ -250,7 +250,7 @@ func (q *Queries) LockInvitationByHash(ctx context.Context, arg LockInvitationBy
 }
 
 const lockMember = `-- name: LockMember :one
-SELECT m.role, m.created_at, u.email, u.display_name, u.status, u.is_platform_admin, u.is_system_admin
+SELECT coalesce(m.role, '')::text AS role, m.created_at, u.email, u.display_name, u.status, u.is_platform_admin, u.is_system_admin
 FROM memberships AS m
 JOIN users AS u ON u.id = m.user_id
 WHERE m.tenant_id = $1 AND m.user_id = $2
@@ -336,7 +336,7 @@ func (q *Queries) RevokeInvitation(ctx context.Context, arg RevokeInvitationPara
 
 const updateMembershipRole = `-- name: UpdateMembershipRole :execrows
 UPDATE memberships
-SET role = $1
+SET role = nullif($1::text, '')
 WHERE tenant_id = $2 AND user_id = $3
 `
 

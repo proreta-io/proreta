@@ -1,3 +1,4 @@
+import { useAbilities } from "../lib/useAbilities";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -76,8 +77,7 @@ import {
 } from "../lib/monitors";
 import { axisLabels, incidentSpans, seriesSpan } from "../lib/ribbon";
 import { useNow } from "../lib/useNow";
-import { useAuth } from "../auth/AuthProvider";
-import { abilities, ROLE_HINTS } from "../lib/roles";
+import { ROLE_HINTS } from "../lib/roles";
 
 const RANGES: { value: StatsRange; label: string; name: string; bucket: string }[] = [
   { value: "24h", label: "24h", name: "24 hours", bucket: "15 min" },
@@ -240,7 +240,7 @@ function Header({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const canEdit = abilities(useAuth().session).editMonitors;
+  const canEdit = useAbilities().editMonitors;
   const [confirming, setConfirming] = useState(false);
   const heartbeat = isHeartbeat(monitor);
 
@@ -578,7 +578,7 @@ function IncidentLane({
 
 function HeartbeatSection({ monitor, now }: { monitor: MonitorDetail; now: number }) {
   const toast = useToast();
-  const canEdit = abilities(useAuth().session).editMonitors;
+  const canEdit = useAbilities().editMonitors;
   const [regenerating, setRegenerating] = useState(false);
   const [newUrl, setNewUrl] = useState<string | undefined>();
   const deadline = heartbeatDeadline(monitor);

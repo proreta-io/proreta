@@ -14,6 +14,7 @@ import {
   type AdminOrganization,
   type AdminProject,
   type ProjectMember,
+  type ProjectRole,
 } from "../../api/endpoints";
 import { useToast } from "../../components/Toasts";
 import {
@@ -33,7 +34,7 @@ import {
   Tr,
 } from "../../components/ui";
 import { memberLabel } from "../../lib/members";
-import { ROLE_LABELS } from "../../lib/roles";
+import { ROLE_LABELS, roleLabel } from "../../lib/roles";
 import { countOf } from "../../lib/usage";
 
 const NAME_MAX = 60;
@@ -356,12 +357,12 @@ function RenameForm({
   );
 }
 
-function accessLabel(m: ProjectMember, project: AdminProject): string {
-  if (m.allProjects) return "Every project";
-  if (m.projectRole === "viewer" && m.organizationRole !== "viewer") return "Read-only here";
-  if (m.explicit) return "Listed";
-  return project.allMembers ? "Everyone" : "Listed";
+function accessLabel(m: ProjectMember): string {
+  if (m.organizationRole && m.effectiveRole === m.organizationRole) return "Organization role";
+  return "Project role";
 }
+
+const PROJECT_ROLES: ProjectRole[] = ["owner", "maintainer", "member", "viewer"];
 
 function ProjectMembers({
   organizationId,
@@ -392,8 +393,8 @@ function ProjectMembers({
     void queryClient.invalidateQueries({ queryKey: queryKeys.adminProjects(organizationId) });
   };
   const put = useMutation({
-    mutationFn: ({ userId, readOnly: viewer }: { userId: string; readOnly: boolean }) =>
-      putAdminProjectMember(organizationId, project.id, userId, viewer ? "viewer" : undefined),
+    mutationFn: ({ userId, role }: { userId: string; role: ProjectRole }) =>
+      putAdminProjectMember(organizationId, project.id, userId, role),
     onSuccess: (m) => {
       refresh();
       setAdding("");
@@ -407,7 +408,7 @@ function ProjectMembers({
     onSuccess: (_, m) => {
       refresh();
       toast(
-        project.allMembers
+        m.organizationRole
           ? `${memberLabel(m)} keeps the organization role in ${project.name}`
           : `${memberLabel(m)} removed from ${project.name}`,
       );
@@ -415,11 +416,11 @@ function ProjectMembers({
     onError: (err) => toast(errorMessage(err), "error"),
   });
 
-  const listed = new Set((members.data?.items ?? []).map((m) => m.userId));
-  // Owners and admins see every project already; only members and viewers can be added.
-  const candidates = (org.data?.items ?? []).filter(
-    (u) => !listed.has(u.id) && (u.role === "member" || u.role === "viewer"),
+  const direct = new Set(
+    (members.data?.items ?? []).filter((m) => m.explicit).map((m) => m.userId),
   );
+  const candidates = (org.data?.items ?? []).filter((u) => !direct.has(u.id));
+  const [newRole, setNewRole] = useState<ProjectRole>("member");
 
   return (
     <section
@@ -431,9 +432,8 @@ function ProjectMembers({
           People in {project.name}
         </h3>
         <p className="text-[13px] text-muted-foreground">
-          {project.allMembers
-            ? "Every member of the organization belongs to this project. A member can be made read-only here."
-            : "Owners and admins see every project. Add members and viewers to give them access; a member can be read-only here."}
+          Everyone with an organization role is here with that role. A role given here applies to
+          this project only and can raise the organization role, never lower it.
         </p>
       </div>
       {members.isPending ? (
@@ -465,26 +465,36 @@ function ProjectMembers({
           </thead>
           <tbody>
             {members.data.items.map((m) => {
-              const adjustable = !readOnly && !m.allProjects && m.organizationRole === "member";
+              const adjustable = !readOnly;
               return (
                 <Tr key={m.userId}>
                   <Td>
                     <span className="font-mono text-caption break-all">{memberLabel(m)}</span>
                   </Td>
-                  <Td className="text-caption">{ROLE_LABELS[m.organizationRole]}</Td>
-                  <Td className="text-caption">{accessLabel(m, project)}</Td>
+                  <Td className="text-caption">
+                    {m.organizationRole ? roleLabel(m.organizationRole) : "None"}
+                  </Td>
+                  <Td className="text-caption">{accessLabel(m)}</Td>
                   <Td className="text-caption">
                     {adjustable ? (
                       <Select
                         aria-label={`Role of ${memberLabel(m)} in ${project.name}`}
-                        value={m.projectRole === "viewer" ? "viewer" : "member"}
+                        value={m.projectRole ?? ""}
                         disabled={put.isPending}
                         onChange={(e) =>
-                          put.mutate({ userId: m.userId, readOnly: e.target.value === "viewer" })
+                          put.mutate({ userId: m.userId, role: e.target.value as ProjectRole })
                         }
                       >
-                        <option value="member">Member</option>
-                        <option value="viewer">Viewer (read-only)</option>
+                        {!m.projectRole && (
+                          <option value="" disabled>
+                            Inherited: {ROLE_LABELS[m.effectiveRole]}
+                          </option>
+                        )}
+                        {PROJECT_ROLES.map((r) => (
+                          <option key={r} value={r}>
+                            {ROLE_LABELS[r]}
+                          </option>
+                        ))}
                       </Select>
                     ) : (
                       ROLE_LABELS[m.effectiveRole]
@@ -501,7 +511,7 @@ function ProjectMembers({
                             busy={remove.isPending && remove.variables?.userId === m.userId}
                             onClick={() => remove.mutate(m)}
                           >
-                            {project.allMembers ? "Reset" : "Remove"}
+                            {m.organizationRole ? "Reset" : "Remove"}
                           </Button>
                         </div>
                       )}
@@ -513,13 +523,13 @@ function ProjectMembers({
           </tbody>
         </Table>
       )}
-      {!readOnly && !project.allMembers && (
+      {!readOnly && (
         <form
           aria-label={`Add someone to ${project.name}`}
           className="flex flex-col gap-2 sm:flex-row sm:items-end"
           onSubmit={(e) => {
             e.preventDefault();
-            if (adding) put.mutate({ userId: adding, readOnly: false });
+            if (adding) put.mutate({ userId: adding, role: newRole });
           }}
         >
           <Field label="Add someone" className="sm:w-80">
@@ -535,7 +545,22 @@ function ProjectMembers({
                 </option>
                 {candidates.map((u) => (
                   <option key={u.id} value={u.id}>
-                    {u.login} · {ROLE_LABELS[u.role]}
+                    {u.login} · {roleLabel(u.role)}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+          <Field label="Role" className="sm:w-40">
+            {(c) => (
+              <Select
+                {...c}
+                value={newRole}
+                onChange={(e) => setNewRole(e.target.value as ProjectRole)}
+              >
+                {PROJECT_ROLES.map((r) => (
+                  <option key={r} value={r}>
+                    {ROLE_LABELS[r]}
                   </option>
                 ))}
               </Select>

@@ -1,6 +1,6 @@
 # Runbook: public status page
 
-Organizations configure the page in the app (**Status page**, owners and maintainers); visitors open `https://<host>/status/<slug>`, served by the `statuspage` process (chart value `statuspage.enabled`).
+Organizations configure the page in the app (**Status page**, organization owners and maintainers); visitors open `https://<host>/status/<slug>`, served by the `statuspage` process (chart value `statuspage.enabled`).
 
 ## Enabling it together with the db bootstrap (preferred)
 On an empty or an existing database, set `database.bootstrap.enabled: true` and `statuspage.enabled: true` in one change: the sync waves run the bootstrap (-3, creates `proreta_statuspage` and adds `statuspage_url`) and the migration (-1, grants `status_page_snapshot`) before the renderer starts (0). The bootstrap does not skip while `proreta-db` lacks the status page keys, so provide the admin login for this change; afterwards it may stay on and delete the admin Secret. The two-step order below is equally valid.

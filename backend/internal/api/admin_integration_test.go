@@ -83,7 +83,7 @@ func adminCalls(t *testing.T, tenantID, userID string) []struct{ method, path, b
 				case http.MethodPost, http.MethodPatch:
 					body = `{"name":"Payments"}`
 				case http.MethodPut:
-					body = `{}`
+					body = `{"role":"member"}`
 				}
 			case method == http.MethodPatch:
 				body = `{"status":"suspended"}`

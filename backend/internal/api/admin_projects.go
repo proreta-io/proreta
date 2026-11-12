@@ -87,12 +87,7 @@ func (s *server) AdminPutOrganizationProjectMember(ctx context.Context, req gen.
 	if err != nil {
 		return nil, err
 	}
-	var role *authz.Role
-	if req.Body.Role != nil {
-		r := authz.Role(*req.Body.Role)
-		role = &r
-	}
-	m, err := s.admin.PutProjectMember(ctx, a, req.OrganizationId, req.ProjectId, req.UserId, role)
+	m, err := s.admin.PutProjectMember(ctx, a, req.OrganizationId, req.ProjectId, req.UserId, authz.Role(req.Body.Role))
 	if err != nil {
 		return nil, err
 	}

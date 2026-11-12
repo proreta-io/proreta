@@ -137,7 +137,7 @@ describe("admin organization projects", () => {
     expect(requests(fetchMock, "DELETE", `${base}/projects/b`)).toHaveLength(0);
   });
 
-  it("adds a member, makes it read-only and removes it", async () => {
+  it("adds a member, changes the project role and removes it", async () => {
     let listed: ProjectMember[] = [pm({})];
     const fetchMock = mockApi({
       ...organizationRoutes(organization(), () => [def, web]),
@@ -167,14 +167,14 @@ describe("admin organization projects", () => {
         }),
       [`GET ${base}/projects/w/members`]: () => json({ items: listed }),
       [`PUT ${base}/projects/w/members/u-bob`]: async (r) => {
-        const body = (await r.json()) as { role?: "viewer" };
+        const body = (await r.json()) as { role: "member" | "viewer" };
         sent.push(body);
         const member = pm({
           userId: "u-bob",
           login: "bob@alpha.example",
           organizationRole: "member",
-          projectRole: body.role ?? null,
-          effectiveRole: body.role ?? "member",
+          projectRole: body.role,
+          effectiveRole: "member",
           explicit: true,
           allProjects: false,
         });
@@ -193,13 +193,13 @@ describe("admin organization projects", () => {
     await userEvent.selectOptions(await screen.findByLabelText("Add someone"), "u-bob");
     await userEvent.click(screen.getByRole("button", { name: "Add to project" }));
     const role = await screen.findByLabelText("Role of bob@alpha.example in Web");
-    expect(sent).toEqual([{}]);
+    expect(sent).toEqual([{ role: "member" }]);
 
     await userEvent.selectOptions(role, "viewer");
     await waitFor(() =>
       expect(requests(fetchMock, "PUT", `${base}/projects/w/members/u-bob`)).toHaveLength(2),
     );
-    expect(sent).toEqual([{}, { role: "viewer" }]);
+    expect(sent).toEqual([{ role: "member" }, { role: "viewer" }]);
 
     await userEvent.click(
       screen.getByRole("button", { name: "Remove bob@alpha.example from Web" }),

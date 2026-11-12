@@ -290,7 +290,11 @@ export const listAdminMembers = (organizationId: string) =>
   );
 
 /** Adds an existing user to the organization or changes their role (any of the four roles). */
-export const setAdminMember = (organizationId: string, userId: string, role: MembershipRole) =>
+export const setAdminMember = (
+  organizationId: string,
+  userId: string,
+  role: MembershipRole | null,
+) =>
   unwrap(
     client.PUT("/api/v1/admin/organizations/{organizationId}/members/{userId}", {
       params: { path: { organizationId, userId } },
@@ -424,7 +428,8 @@ export const listMembers = () => unwrap(client.GET("/api/v1/members"));
 
 const memberPath = (userId: string) => ({ params: { path: { userId } } });
 
-export const updateMember = (userId: string, role: MembershipRole) =>
+/** Gives a member another organization role; null leaves them with their projects only. */
+export const updateMember = (userId: string, role: MembershipRole | null) =>
   unwrap(client.PATCH("/api/v1/members/{userId}", { ...memberPath(userId), body: { role } }));
 
 export const removeMember = (userId: string) =>
@@ -510,12 +515,12 @@ export const deleteProject = (projectId: string) =>
 export const listProjectMembers = (projectId: string) =>
   unwrap(client.GET("/api/v1/projects/{projectId}/members", projectPath(projectId)));
 
-/** Adds a member to a project; "viewer" makes it read-only there, undefined keeps its role. */
-export const putProjectMember = (projectId: string, userId: string, role?: ProjectRole) =>
+/** Gives a member of the organization a direct role in a project (never lowers its inherited role). */
+export const putProjectMember = (projectId: string, userId: string, role: ProjectRole) =>
   unwrap(
     client.PUT("/api/v1/projects/{projectId}/members/{userId}", {
       params: { path: { projectId, userId } },
-      body: role ? { role } : {},
+      body: { role },
     }),
   );
 
@@ -661,17 +666,17 @@ export const listAdminProjectMembers = (organizationId: string, projectId: strin
     ),
   );
 
-/** Adds a member of the organization to a project; "viewer" makes it read-only there. */
+/** Gives a member of the organization a direct role in a project. */
 export const putAdminProjectMember = (
   organizationId: string,
   projectId: string,
   userId: string,
-  role?: ProjectRole,
+  role: ProjectRole,
 ) =>
   unwrap(
     client.PUT(
       "/api/v1/admin/organizations/{organizationId}/projects/{projectId}/members/{userId}",
-      { params: { path: { organizationId, projectId, userId } }, body: role ? { role } : {} },
+      { params: { path: { organizationId, projectId, userId } }, body: { role } },
     ),
   );
 

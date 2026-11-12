@@ -128,7 +128,7 @@ func getAccount(ctx context.Context, tx pgx.Tx, actor Actor, id uuid.UUID) (Acco
 		Scan(append(d.dest(), &d.OpenSessions)...); err != nil {
 		return AccountDetail{}, err
 	}
-	rows, err := tx.Query(ctx, `SELECT organization_id, organization_name, organization_slug, organization_status, role, joined_at
+	rows, err := tx.Query(ctx, `SELECT organization_id, organization_name, organization_slug, organization_status, coalesce(role, ''), joined_at
 		FROM admin_list_user_memberships($1, $2)`, actor.UserID, id)
 	if err != nil {
 		return AccountDetail{}, err

@@ -8,7 +8,7 @@ import (
 )
 
 func toAdminMember(m auth.Member) gen.AdminMember {
-	return gen.AdminMember{UserId: m.UserID, Login: m.Login, DisplayName: m.DisplayName, Role: gen.MembershipRole(m.Role),
+	return gen.AdminMember{UserId: m.UserID, Login: m.Login, DisplayName: m.DisplayName, Role: optRole(m.Role),
 		Status: gen.AdminMemberStatus(m.Status), JoinedAt: m.JoinedAt, IsPlatformAdmin: m.IsPlatformAdmin, IsSystemAdmin: m.IsSystemAdmin}
 }
 
@@ -33,7 +33,7 @@ func (s *server) AdminAddOrganizationMember(ctx context.Context, req gen.AdminAd
 	if err != nil {
 		return nil, err
 	}
-	m, err := s.admin.AddMemberByEmail(ctx, a, req.OrganizationId, req.Body.Email, string(req.Body.Role))
+	m, err := s.admin.AddMemberByEmail(ctx, a, req.OrganizationId, req.Body.Email, roleString(req.Body.Role))
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +45,7 @@ func (s *server) AdminSetOrganizationMember(ctx context.Context, req gen.AdminSe
 	if err != nil {
 		return nil, err
 	}
-	m, err := s.admin.SetMember(ctx, a, req.OrganizationId, req.UserId, string(req.Body.Role))
+	m, err := s.admin.SetMember(ctx, a, req.OrganizationId, req.UserId, roleString(req.Body.Role))
 	if err != nil {
 		return nil, err
 	}

@@ -309,7 +309,7 @@ func (q *Queries) ListMonitorChannelIDs(ctx context.Context, arg ListMonitorChan
 }
 
 const lockChannel = `-- name: LockChannel :one
-SELECT id, config_encrypted, status
+SELECT id, config_encrypted, status, project_id
 FROM notification_channels
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
 FOR NO KEY UPDATE
@@ -324,6 +324,7 @@ type LockChannelRow struct {
 	ID              uuid.UUID
 	ConfigEncrypted []byte
 	Status          string
+	ProjectID       *uuid.UUID
 }
 
 // Serialises changes of one channel (patch, delete, test outcome). NO KEY UPDATE: the key never
@@ -332,7 +333,12 @@ type LockChannelRow struct {
 func (q *Queries) LockChannel(ctx context.Context, arg LockChannelParams) (LockChannelRow, error) {
 	row := q.db.QueryRow(ctx, lockChannel, arg.TenantID, arg.ID)
 	var i LockChannelRow
-	err := row.Scan(&i.ID, &i.ConfigEncrypted, &i.Status)
+	err := row.Scan(
+		&i.ID,
+		&i.ConfigEncrypted,
+		&i.Status,
+		&i.ProjectID,
+	)
 	return i, err
 }
 

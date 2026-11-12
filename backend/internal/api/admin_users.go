@@ -19,7 +19,7 @@ func toAdminUserDetail(d admin.AccountDetail) gen.AdminUserDetail {
 	for _, m := range d.Memberships {
 		out.Memberships = append(out.Memberships, gen.AdminUserMembership{OrganizationId: m.OrganizationID, OrganizationName: m.OrganizationName,
 			OrganizationSlug: m.OrganizationSlug, OrganizationStatus: gen.AdminUserMembershipOrganizationStatus(m.OrganizationStatus),
-			Role: gen.MembershipRole(m.Role), JoinedAt: m.JoinedAt})
+			Role: optRole(m.Role), JoinedAt: m.JoinedAt})
 	}
 	return out
 }

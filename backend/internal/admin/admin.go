@@ -389,7 +389,7 @@ func (s *Service) ListUsers(ctx context.Context, actor Actor, tenantID uuid.UUID
 	list := UserList{Items: []User{}}
 	err := db.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		list.Items, list.Total = []User{}, 0
-		rows, err := tx.Query(ctx, `SELECT id, login, status, created_at, is_platform_admin, role, total_count
+		rows, err := tx.Query(ctx, `SELECT id, login, status, created_at, is_platform_admin, coalesce(role, ''), total_count
 			FROM admin_list_users($1, $2, $3, $4, $5)`, actor.UserID, tenantID, page.Query, page.Limit, page.Offset)
 		if err != nil {
 			return err
