@@ -7,7 +7,7 @@ Everything else stays in Proreta: the schedule, incidents, notifications and the
 ## What you need
 - A Specula token (below).
 - The executor running where it can reach both your services and your Proreta address over HTTPS. How the network is arranged (peering, VPN, a public name) is up to you. Proreta itself must be reachable on its public URL from the executor.
-- The Specula gateway enabled in your Proreta installation (`speculagw`). Without it the executor cannot connect and shows as *Waiting*.
+- The Specula gateway enabled in your Proreta installation (operators: [turn it on](#enable-the-gateway)). Without it the executor cannot connect and shows as *Waiting*.
 
 ## Register a Specula
 Owners and maintainers: **Specula → Register a Specula**.
@@ -17,7 +17,14 @@ Owners and maintainers: **Specula → Register a Specula**.
 3. Copy the token. It starts with `spc_` and is shown **once**; Proreta keeps only a hash. If you lose it, revoke the Specula and register a new one. Treat it like a password: whoever has it can claim this Specula's checks and receives the headers and bodies of those monitors.
 
 ## Run the executor
-The executor reads two environment variables:
+**In Kubernetes**, use the [Specula chart](../../deploy/helm/proreta-specula/README.md): put the token in a Secret, then
+```sh
+helm upgrade --install specula oci://ghcr.io/proreta-io/charts/proreta-specula --version <release> \
+  --namespace proreta-specula --create-namespace \
+  --set proreta.url=https://proreta.example.com --set token.existingSecret=proreta-specula-token
+```
+
+**Anywhere else**, run the `/app/specula` binary of the Proreta image (for example with Docker, systemd or a plain process manager). It reads two environment variables:
 
 | Variable | Meaning |
 |---|---|
@@ -26,9 +33,12 @@ The executor reads two environment variables:
 
 Optional: `PRORETA_SPECULA_CONCURRENCY` (checks in flight, default 20), `PRORETA_SPECULA_POLL_INTERVAL` (how often it asks for work, default 5s), `PRORETA_ADMIN_ADDR` (metrics, default `:9090`), `PRORETA_LOG_LEVEL`.
 
-The binary is `/app/specula` in the Proreta image. It has no database and keeps nothing on disk; run two replicas with the same token if you want it to survive a restart without a gap (a check is leased to one of them at a time).
+It has no database and keeps nothing on disk; run two replicas with the same token if you want it to survive a restart without a gap (a check is leased to one of them at a time).
 
 The executor stops with an error when Proreta rejects its token: the token is wrong or the Specula was revoked.
+
+## Enable the gateway
+Operators: the gateway is a separate Deployment of the Proreta chart, off by default. Turn it on with `speculagw.enabled: true`. It is routed at `/specula/v1` on the same host as the app (the app's own Specula page is `/specula`), uses the worker's database role and the request keys (`secrets.request`) to hand decrypted monitor requests to an executor, and makes no outbound calls. Check that executors can reach `config.publicUrl` over HTTPS from their networks. See the [chart README](../../deploy/helm/proreta/README.md).
 
 ## Use it in a monitor
 When a project may use at least one Specula, the monitor form has a **Run from** field: *Proreta cloud* or one of them.

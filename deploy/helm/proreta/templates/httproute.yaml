@@ -49,6 +49,21 @@ spec:
           port: {{ .Values.statuspage.service.port }}
           weight: 1
     {{- end }}
+    {{- if .Values.speculagw.enabled }}
+    {{- /* The Specula API: executors in customer networks call it. The app's own /specula page is the web app's. */}}
+    - matches:
+        - path:
+            type: PathPrefix
+            value: {{ .Values.httpRoute.speculaPathPrefix }}
+      timeouts:
+        request: 30s
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: {{ include "proreta.componentName" (dict "ctx" . "component" "speculagw") }}
+          port: {{ .Values.speculagw.service.port }}
+          weight: 1
+    {{- end }}
     {{- /* Catch-all only when the frontend is deployed; otherwise unmatched paths 404 at the gateway. */}}
     {{- if .Values.web.enabled }}
     - matches:

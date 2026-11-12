@@ -18,6 +18,8 @@ ADMIN_SECRET_KEYS = {"PRORETA_ADMIN_LOGIN": "login", "PRORETA_ADMIN_PASSWORD_HAS
 ENCRYPTION_COMPONENTS = {"api", "jobs"}
 # The request keyring (header values and bodies of monitor requests): the api seals, the worker opens.
 REQUEST_COMPONENTS = {"api", "worker"}
+# The Specula gateway also opens sealed requests, but only when it is deployed.
+OPTIONAL_REQUEST_COMPONENTS = {"speculagw"}
 ENV_NAMES_REQUEST = {"PRORETA_REQUEST_KEYS", "PRORETA_REQUEST_ACTIVE_KEY_ID"}
 # The only components whose ServiceAccount and pod mount an API token (they create Secrets).
 TOKEN_COMPONENTS = {"db-bootstrap", "secrets-bootstrap"}
@@ -27,7 +29,7 @@ SECRETS_BOOTSTRAP_SUFFIXES = ("admin", "admin-initial", "crypto", "request")
 # Plus the status page cookie key when the renderer is enabled and the key is generated.
 STATUSPAGE_SUFFIX = "statuspage"
 # Fixed keys of the database Secret per consumer (the contract with the database bootstrap Job).
-DB_URL_KEYS = {"api": "api_url", "worker": "worker_url", "jobs": "worker_url", "statuspage": "statuspage_url", "migrate": "owner_url"}
+DB_URL_KEYS = {"api": "api_url", "worker": "worker_url", "jobs": "worker_url", "statuspage": "statuspage_url", "migrate": "owner_url", "speculagw": "worker_url"}
 # The only env the public status page renderer may get (config.Statuspage): no encryption keys, no
 # admin credentials, no SSRF guard settings, and only its own database URL key.
 STATUSPAGE_ENV = {"PRORETA_LOG_LEVEL", "PRORETA_ADMIN_ADDR", "PRORETA_DATABASE_URL", "PRORETA_PUBLIC_URL",
@@ -172,9 +174,10 @@ def check(path):
     if not worker:
         fail("no worker Deployment")
     request_users = {comp for comp in deployments if ENV_NAMES_REQUEST & set(env_of(comp))}
-    if request_users != REQUEST_COMPONENTS:
-        fail(f"PRORETA_REQUEST_* present in {sorted(request_users)}, want exactly {sorted(REQUEST_COMPONENTS)}")
-    for comp in REQUEST_COMPONENTS:
+    want_request = REQUEST_COMPONENTS | (OPTIONAL_REQUEST_COMPONENTS & set(deployments))
+    if request_users != want_request:
+        fail(f"PRORETA_REQUEST_* present in {sorted(request_users)}, want exactly {sorted(want_request)}")
+    for comp in want_request:
         for n, key in (("PRORETA_REQUEST_KEYS", "keys"), ("PRORETA_REQUEST_ACTIVE_KEY_ID", "active_key_id")):
             ref = env_of(comp).get(n, {}).get("valueFrom", {}).get("secretKeyRef", {})
             if ref != {"name": f"{fullname}-request", "key": key}:
@@ -245,6 +248,17 @@ def check(path):
         grace = d["spec"]["template"]["spec"].get("terminationGracePeriodSeconds")
         if comp in ("worker", "jobs") and grace != 45:
             fail(f"{comp}: terminationGracePeriodSeconds is {grace}, want 45")
+
+    # Specula gateway: the worker's database role and the request keyring, nothing else.
+    gw = env_of("speculagw")
+    if gw:
+        allowed = {"PRORETA_LOG_LEVEL", "PRORETA_ADMIN_ADDR", "PRORETA_DATABASE_URL", "PRORETA_HTTP_ADDR"} | ENV_NAMES_REQUEST
+        extra = set(gw) - allowed
+        if extra:
+            fail(f"speculagw env has {sorted(extra)}; it may only have {sorted(allowed)} (no data keys, admin credentials or SSRF settings)")
+        db_ref = gw.get("PRORETA_DATABASE_URL", {}).get("valueFrom", {}).get("secretKeyRef", {})
+        if db_ref.get("key") != "worker_url":
+            fail(f"speculagw must use the worker_url key, got {db_ref}")
 
     # Status page renderer: least privilege.
     sp = env_of("statuspage")
