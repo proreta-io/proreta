@@ -93,7 +93,12 @@ func TestIntegrationSpeculaFlow(t *testing.T) {
 	runCtx, stop := context.WithCancel(ctx)
 	done := make(chan error, 1)
 	go func() { done <- exec.Run(runCtx) }()
-	defer func() { stop(); <-done }()
+	defer func() {
+		stop()
+		if err := <-done; err != nil {
+			t.Logf("executor stopped: %v", err)
+		}
+	}()
 
 	waitFor := func(what string, cond func() bool) {
 		t.Helper()

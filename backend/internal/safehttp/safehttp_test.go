@@ -728,7 +728,11 @@ func TestPrivateClientReachesPrivateTargets(t *testing.T) {
 	// A request with custom headers or a body does not follow a redirect to another host name.
 	req, _ = http.NewRequestWithContext(WithSameHostRedirects(context.Background()), http.MethodPut, srv.URL+"/away", strings.NewReader("b"))
 	req.Header.Set("X-Key", "k")
-	if _, err := c.Do(req); !errors.Is(err, ErrRedirectCrossHost) {
+	resp, err = c.Do(req)
+	if err == nil {
+		_ = resp.Body.Close()
+	}
+	if !errors.Is(err, ErrRedirectCrossHost) {
 		t.Fatalf("cross host redirect: %v", err)
 	}
 	// Plain GET follows it.
