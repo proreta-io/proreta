@@ -184,15 +184,16 @@ func TestValidateExpectedStatus(t *testing.T) {
 }
 
 func TestValidatePrivateURL(t *testing.T) {
-	good := map[string]string{
-		"http://orders.shop.svc.cluster.local:8080/health": "http://orders.shop.svc.cluster.local:8080/health",
-		"HTTP://Orders:8080":                               "http://orders:8080",
-		"https://10.1.2.3/ping":                            "https://10.1.2.3/ping",
-		"http://[fd00::1]:9000/":                           "http://[fd00::1]:9000/",
-		"http://localhost:3000":                            "http://localhost:3000",
-		"https://example.com/x?token=1":                    "https://example.com/x?token=1",
+	good := [][2]string{
+		{"http://orders.shop.svc.cluster.local:8080/health", "http://orders.shop.svc.cluster.local:8080/health"},
+		{"HTTP://Orders:8080", "http://orders:8080"},
+		{"https://10.1.2.3/ping", "https://10.1.2.3/ping"},
+		{"http://[fd00::1]:9000/", "http://[fd00::1]:9000/"},
+		{"http://localhost:3000", "http://localhost:3000"},
+		{"https://example.com/x?token=1", "https://example.com/x?token=1"},
 	}
-	for in, want := range good {
+	for _, c := range good {
+		in, want := c[0], c[1]
 		if got, msg := ValidatePrivateURL(in); msg != "" || got != want {
 			t.Errorf("%s: got %q, %q; want %q", in, got, msg, want)
 		}
