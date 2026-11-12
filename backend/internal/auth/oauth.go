@@ -311,7 +311,8 @@ func (s *Service) oauthJoinInvitation(ctx context.Context, in OAuthLoginInput, u
 func (s *Service) oauthJoinDomain(ctx context.Context, in OAuthLoginInput, tenantID uuid.UUID) (LoginResult, error) {
 	var res LoginResult
 	err := db.WithTenantTx(ctx, s.pool, tenantID, func(tx pgx.Tx) error {
-		if err := plans.CheckJoin(ctx, tx, tenantID, plans.ResourceMember); err != nil {
+		// Unlike an invitation, a domain join holds no place yet, so it needs a free one.
+		if err := plans.CheckCreate(ctx, tx, tenantID, plans.ResourceMember); err != nil {
 			var limit *plans.LimitError
 			if errors.As(err, &limit) {
 				return refuse(err, "plan_limit", tenantID, nil)
