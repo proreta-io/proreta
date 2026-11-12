@@ -1,6 +1,6 @@
 # Runbook: public status page
 
-Organizations configure the page in the app (**Status page**, owners and admins); visitors open `https://<host>/status/<slug>`, served by the `statuspage` process (chart value `statuspage.enabled`).
+Organizations configure the page in the app (**Status page**, owners and maintainers); visitors open `https://<host>/status/<slug>`, served by the `statuspage` process (chart value `statuspage.enabled`).
 
 ## Enabling it together with the db bootstrap (preferred)
 On an empty or an existing database, set `database.bootstrap.enabled: true` and `statuspage.enabled: true` in one change: the sync waves run the bootstrap (-3, creates `proreta_statuspage` and adds `statuspage_url`) and the migration (-1, grants `status_page_snapshot`) before the renderer starts (0). The bootstrap does not skip while `proreta-db` lacks the status page keys, so provide the admin login for this change; afterwards it may stay on and delete the admin Secret. The two-step order below is equally valid.
@@ -40,7 +40,7 @@ A deleted page's address, and the old address after a rename, stay reserved for 
 - Limits trust `X-Forwarded-For` as the api does: requests without it all share one `unknown` bucket, and a pod inside the cluster can reach the `statuspage` Service directly (unless an enforced NetworkPolicy prevents it) and send a forged `X-Forwarded-For` to get a fresh bucket for every request. The limits therefore only hold for traffic through the gateway; treat them as a cost bound, not a protection against in-cluster clients.
 
 ## Abuse
-- A page shows only what its admin published: public names, groups, states, daily bars and generated incident titles. Ask the organization's admin to rename or remove a component, or unpublish the page. As a last resort the platform admin suspends the organization (its page then answers 404).
+- A page shows only what its maintainers published: public names, groups, states, daily bars and generated incident titles. Ask a maintainer of the organization to rename or remove a component, or unpublish the page. As a last resort the platform admin suspends the organization (its page then answers 404).
 - Request floods are limited per client IP and per replica; more replicas multiply the effective limits.
 
 ## Not available yet

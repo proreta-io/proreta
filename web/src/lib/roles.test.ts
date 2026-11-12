@@ -5,7 +5,7 @@ const as = (role: SessionInfo["role"]) => ({ role }) as SessionInfo;
 
 describe("roles", () => {
   it("orders the roles", () => {
-    expect(roleAtLeast("owner", "admin")).toBe(true);
+    expect(roleAtLeast("owner", "maintainer")).toBe(true);
     expect(roleAtLeast("member", "member")).toBe(true);
     expect(roleAtLeast("viewer", "member")).toBe(false);
     expect(roleAtLeast(undefined, "viewer")).toBe(false);
@@ -19,7 +19,7 @@ describe("roles", () => {
       deleteOrganization: false,
     });
     expect(abilities(as("member"))).toMatchObject({ editMonitors: true, manageChannels: false });
-    expect(abilities(as("admin"))).toMatchObject({
+    expect(abilities(as("maintainer"))).toMatchObject({
       manageChannels: true,
       manageMembers: true,
       deleteOrganization: false,
@@ -29,14 +29,14 @@ describe("roles", () => {
   });
 
   it("never offers a role above the actor's own", () => {
-    expect(assignableRoles("owner")).toEqual(["owner", "admin", "member", "viewer"]);
-    expect(assignableRoles("admin")).toEqual(["admin", "member", "viewer"]);
+    expect(assignableRoles("owner")).toEqual(["owner", "maintainer", "member", "viewer"]);
+    expect(assignableRoles("maintainer")).toEqual(["maintainer", "member", "viewer"]);
     expect(assignableRoles("member")).toEqual([]);
   });
 
   it("keeps admins away from owners", () => {
-    expect(canManageMember("admin", "owner")).toBe(false);
-    expect(canManageMember("admin", "admin")).toBe(true);
+    expect(canManageMember("maintainer", "owner")).toBe(false);
+    expect(canManageMember("maintainer", "maintainer")).toBe(true);
     expect(canManageMember("owner", "owner")).toBe(true);
     expect(canManageMember("member", "viewer")).toBe(false);
   });

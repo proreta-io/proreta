@@ -106,9 +106,9 @@ type Service struct {
 func NewService(pool *db.Pool) *Service { return &Service{pool: pool} }
 
 // Access returns the effective role of a member or viewer in every project it belongs to. Owners
-// and admins see every project and get nil. The api calls it once per request.
+// and maintainers see every project and get nil. The api calls it once per request.
 func (s *Service) Access(ctx context.Context, tenantID, userID uuid.UUID, role authz.Role) (map[uuid.UUID]authz.Role, error) {
-	if role.AtLeast(authz.Admin) || !authz.Valid(role) {
+	if role.AtLeast(authz.Maintainer) || !authz.Valid(role) {
 		return nil, nil
 	}
 	out := map[uuid.UUID]authz.Role{}
@@ -467,7 +467,7 @@ func (s *Service) Members(ctx context.Context, a Actor, id uuid.UUID) ([]Member,
 func memberFromRow(r projectsdb.ListProjectMembersRow) Member {
 	org := authz.Role(r.OrganizationRole)
 	m := Member{UserID: r.UserID, Login: r.Login, DisplayName: r.DisplayName, OrganizationRole: org, Explicit: r.Explicit,
-		AllProjects: org.AtLeast(authz.Admin)}
+		AllProjects: org.AtLeast(authz.Maintainer)}
 	if r.ProjectRole != nil {
 		pr := authz.Role(*r.ProjectRole)
 		m.ProjectRole = &pr

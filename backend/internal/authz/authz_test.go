@@ -1,12 +1,13 @@
 package authz
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 )
 
-var roles = []Role{Owner, Admin, Member, Viewer}
+var roles = []Role{Owner, Maintainer, Member, Viewer}
 
 func TestCanDeniesUnknown(t *testing.T) {
 	for _, r := range roles {
@@ -25,23 +26,122 @@ func TestCanDeniesUnknown(t *testing.T) {
 	}
 }
 
+// expectedMinimum is written by hand, independently of the tables in authz.go: the lowest role
+// that may call each operation.
+var expectedMinimum = map[Role][]string{
+	Viewer: {
+		"logout", "getMe", "resendEmailVerification", "listOrganizations", "switchOrganization",
+		"changePassword", "acceptInvitation", "leaveOrganization", "listIdentities", "unlinkIdentity",
+		"listMonitors", "getMonitor", "getMonitorStats", "listMonitorChecks", "listMonitorIncidents",
+		"listChannels", "getChannel", "listMembers", "listProjects", "getProject", "listProjectMembers",
+		"listStatusPages", "getStatusPage",
+	},
+	Member: {
+		"createMonitor", "updateMonitor", "deleteMonitor", "pauseMonitor", "resumeMonitor",
+		"regenerateHeartbeatToken",
+	},
+	Maintainer: {
+		"createChannel", "updateChannel", "deleteChannel", "testChannel", "getUsage",
+		"listInvitations", "createInvitation", "revokeInvitation", "updateMember", "removeMember",
+		"createProject", "updateProject", "deleteProject", "putProjectMember", "removeProjectMember",
+		"createStatusPage", "updateStatusPage", "deleteStatusPage", "setStatusPagePassword",
+		"clearStatusPagePassword", "listStatusPageComponents", "putStatusPageComponents", "previewStatusPage",
+	},
+	Owner: {
+		"deleteOrganization", "listAuthDomains", "createAuthDomain", "updateAuthDomain", "deleteAuthDomain",
+	},
+}
+
+var expectedPublic = []string{
+	"getHealth", "getPublicConfig", "login", "register", "pingHeartbeat", "pingHeartbeatPost",
+	"lookupInvitation", "verifyEmail", "requestPasswordReset", "resetPassword", "getAuthProviders",
+	"startOAuth", "oauthCallback",
+}
+
 func TestCanMatrix(t *testing.T) {
-	// One representative operation per minimum role, case as the generated server passes it.
-	cases := map[string]Role{
-		"ListMonitors":             Viewer,
-		"CreateMonitor":            Member,
-		"RegenerateHeartbeatToken": Member,
-		"CreateChannel":            Admin,
-		"TestChannel":              Admin,
-		"CreateInvitation":         Admin,
-		"UpdateMember":             Admin,
-		"DeleteOrganization":       Owner,
+	seen := map[string]bool{}
+	for min, ops := range expectedMinimum {
+		for _, op := range ops {
+			seen[strings.ToLower(op)] = true
+			for _, r := range roles {
+				want := rank(r) >= rank(min)
+				if got := Can(Actor{Role: r}, op); got != want {
+					t.Errorf("Can(%s, %s) = %v, want %v", r, op, got, want)
+				}
+			}
+			if got, _ := MinRole(op); got != min {
+				t.Errorf("MinRole(%s) = %s, want %s", op, got, min)
+			}
+		}
 	}
-	for op, min := range cases {
+	for _, op := range expectedPublic {
+		seen[strings.ToLower(op)] = true
+		if !Can(Actor{}, op) {
+			t.Errorf("public operation %s refused", op)
+		}
+	}
+	// The platform admin operations are decided by the flag: any role passes the table.
+	for _, op := range Operations() {
+		if seen[op] {
+			continue
+		}
+		if !strings.HasPrefix(op, "admin") {
+			t.Errorf("%s is in the table but not in the expected matrix", op)
+			continue
+		}
 		for _, r := range roles {
-			want := rank(r) >= rank(min)
-			if got := Can(Actor{Role: r}, op); got != want {
-				t.Errorf("Can(%s, %s) = %v, want %v", r, op, got, want)
+			if !Can(Actor{Role: r}, op) {
+				t.Errorf("Can(%s, %s) = false for a platform admin operation", r, op)
+			}
+		}
+		if Can(Actor{}, op) {
+			t.Errorf("%s allowed without a role", op)
+		}
+	}
+	for _, min := range expectedMinimum {
+		for _, op := range min {
+			if _, ok := PermissionOf(op); !ok {
+				t.Errorf("expected operation %s is not in the table", op)
+			}
+		}
+	}
+}
+
+func TestEveryPermissionIsDefinedAndHeld(t *testing.T) {
+	defined := map[Permission]bool{}
+	for _, d := range Permissions() {
+		if defined[d.Name] {
+			t.Errorf("permission %s defined twice", d.Name)
+		}
+		defined[d.Name] = true
+		if d.Level != LevelOrganization && d.Level != LevelProject {
+			t.Errorf("permission %s has level %q", d.Name, d.Level)
+		}
+		held := false
+		for _, r := range roles {
+			held = held || Has(r, d.Name)
+		}
+		if !held {
+			t.Errorf("permission %s belongs to no role", d.Name)
+		}
+	}
+	for r, list := range grants {
+		for _, p := range list {
+			if !defined[p] {
+				t.Errorf("role %s holds undefined permission %s", r, p)
+			}
+		}
+	}
+	for op, p := range operations {
+		if p != NoSession && p != PlatformAdmin && !defined[p] {
+			t.Errorf("operation %s needs undefined permission %s", op, p)
+		}
+	}
+	// A role never holds less than the role below it.
+	for i := 0; i+1 < len(roles); i++ {
+		for _, p := range grants[roles[i+1]] {
+			if !Has(roles[i], p) {
+				t.Errorf("%s lacks %s held by %s", roles[i], p, roles[i+1])
 			}
 		}
 	}
@@ -52,15 +152,15 @@ func TestCanManage(t *testing.T) {
 		actor, target, to Role
 		want              bool
 	}{
-		{Owner, Owner, Admin, true},
+		{Owner, Owner, Maintainer, true},
 		{Owner, Viewer, Owner, true},
-		{Owner, Admin, "", true},
-		{Admin, Owner, Admin, false},  // admins cannot touch owners
-		{Admin, Owner, "", false},     // nor remove them
-		{Admin, Member, Owner, false}, // nor grant owner
-		{Admin, Member, Admin, true},
-		{Admin, Admin, Viewer, true},
-		{Admin, Viewer, "", true},
+		{Owner, Maintainer, "", true},
+		{Maintainer, Owner, Maintainer, false}, // maintainers cannot touch owners
+		{Maintainer, Owner, "", false},         // nor remove them
+		{Maintainer, Member, Owner, false},     // nor grant owner
+		{Maintainer, Member, Maintainer, true},
+		{Maintainer, Maintainer, Viewer, true},
+		{Maintainer, Viewer, "", true},
 		{Member, Viewer, Member, false},
 		{Viewer, Viewer, "", false},
 		{Owner, Member, "root", false},
@@ -78,10 +178,10 @@ func TestCanInvite(t *testing.T) {
 		actor, role Role
 		want        bool
 	}{
-		{Owner, Admin, true},
+		{Owner, Maintainer, true},
 		{Owner, Owner, false},
-		{Admin, Admin, true},
-		{Admin, Viewer, true},
+		{Maintainer, Maintainer, true},
+		{Maintainer, Viewer, true},
 		{Member, Viewer, false},
 		{Viewer, Viewer, false},
 		{Owner, "root", false},
@@ -130,7 +230,7 @@ func TestProjectAccess(t *testing.T) {
 	if (Actor{Role: "nobody", Projects: map[uuid.UUID]Role{p1: Member}}).Sees(p1) {
 		t.Error("unknown role sees a project")
 	}
-	for _, r := range []Role{Owner, Admin} {
+	for _, r := range []Role{Owner, Maintainer} {
 		a := Actor{Role: r}
 		if !a.Sees(p3) || !a.CanEditIn(p3) || !a.Scope().All {
 			t.Errorf("%s does not see every project", r)

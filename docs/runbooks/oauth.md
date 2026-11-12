@@ -84,7 +84,7 @@ oauth:
 
 Then an **owner** of the organization:
 1. Opens **Settings → Sign-in domains** and chooses **Sign in with Google again**, using a Google account of that domain. This proves control for 10 minutes. If another Google account is already linked to the owner, they first unlink it under **Sign-in methods** (`/profile`), or they use that account. The proof comes back to `/profile`; the Settings link there leads back to the domains section.
-2. Enters the domain and chooses **Claim domain**. A new domain starts with the role **viewer**; the owner can raise it to member or admin afterwards.
+2. Enters the domain and chooses **Claim domain**. A new domain starts with the role **viewer**; the owner can raise it to member or maintainer afterwards.
 
 From then on, a person whose verified Google account has `hd = example.com` joins that organization on their **first** Google sign-in. Existing accounts do not join. A domain belongs to one organization only.
 

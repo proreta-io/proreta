@@ -16,7 +16,7 @@ import (
 
 // projectWorld is an organization with four projects and people in them:
 //   - Default (every member), alpha (member, viewer), beta (member with the viewer override),
-//     gamma (nobody but owners and admins);
+//     gamma (nobody but owners and maintainers);
 //   - one monitor per project, a heartbeat in gamma, one channel per project and an
 //     organization-wide channel.
 type projectWorld struct {
@@ -42,7 +42,7 @@ func newProjectWorld(t *testing.T, name string) *projectWorld {
 	owner := adminSession(c)
 	w.sessions[authz.Owner] = owner
 	w.userIDs[authz.Owner] = userIDOf(t, c, owner)
-	for _, role := range []authz.Role{authz.Admin, authz.Member, authz.Viewer} {
+	for _, role := range []authz.Role{authz.Maintainer, authz.Member, authz.Viewer} {
 		token, _ := invite(t, c, owner, string(role))
 		w.sessions[role], _ = joinByRegister(t, c, token, "p-"+string(role)+"@example.com")
 		w.userIDs[role] = userIDOf(t, c, w.sessions[role])
@@ -136,10 +136,10 @@ func TestIntegrationProjectIsolation(t *testing.T) {
 	// What each role sees in lists.
 	allMonitors := "hb-gamma,m-alpha,m-beta,m-default,m-gamma"
 	for role, want := range map[authz.Role][3]string{
-		authz.Owner:  {"Alpha,Beta,Default,Gamma", allMonitors, "c-alpha,c-beta,c-default,c-gamma,c-org"},
-		authz.Admin:  {"Alpha,Beta,Default,Gamma", allMonitors, "c-alpha,c-beta,c-default,c-gamma,c-org"},
-		authz.Member: {"Alpha,Beta,Default", "m-alpha,m-beta,m-default", "c-alpha,c-beta,c-default,c-org"},
-		authz.Viewer: {"Alpha,Default", "m-alpha,m-default", "c-alpha,c-default,c-org"},
+		authz.Owner:      {"Alpha,Beta,Default,Gamma", allMonitors, "c-alpha,c-beta,c-default,c-gamma,c-org"},
+		authz.Maintainer: {"Alpha,Beta,Default,Gamma", allMonitors, "c-alpha,c-beta,c-default,c-gamma,c-org"},
+		authz.Member:     {"Alpha,Beta,Default", "m-alpha,m-beta,m-default", "c-alpha,c-beta,c-default,c-org"},
+		authz.Viewer:     {"Alpha,Default", "m-alpha,m-default", "c-alpha,c-default,c-org"},
 	} {
 		hdr := w.sessions[role]
 		if got := w.names(t, "/api/v1/projects", hdr, "id", w.projectNames); got != want[0] {
@@ -164,12 +164,12 @@ func TestIntegrationProjectIsolation(t *testing.T) {
 	if got := w.names(t, "/api/v1/channels?projectId="+w.alpha, member, "id", w.channelName); got != "c-alpha,c-org" {
 		t.Errorf("member channel picker for alpha = %s", got)
 	}
-	if got := w.names(t, "/api/v1/monitors?projectId="+w.gamma, w.sessions[authz.Admin], "id", w.monitorName); got != "hb-gamma,m-gamma" {
-		t.Errorf("admin filter gamma = %s", got)
+	if got := w.names(t, "/api/v1/monitors?projectId="+w.gamma, w.sessions[authz.Maintainer], "id", w.monitorName); got != "hb-gamma,m-gamma" {
+		t.Errorf("maintainer filter gamma = %s", got)
 	}
 
 	// Every read and change by id of another project is 404 for a member and a viewer, exactly as
-	// for an id that does not exist; owners and admins reach it.
+	// for an id that does not exist; owners and maintainers reach it.
 	unknown := "0192b9c4-7c5e-7000-8000-0000000000ee"
 	byID := []struct{ method, path, body string }{
 		{http.MethodGet, "/api/v1/monitors?projectId={p}", ""},
@@ -216,7 +216,7 @@ func TestIntegrationProjectIsolation(t *testing.T) {
 			t.Errorf("member %s %s on beta: %d %s, want 403", call.method, call.path, r.code, r.raw)
 		}
 	}
-	for _, role := range []authz.Role{authz.Owner, authz.Admin} {
+	for _, role := range []authz.Role{authz.Owner, authz.Maintainer} {
 		for _, call := range byID {
 			r := c.do(call.method, fill(call.path, w.gamma, w.mGam, w.hbGamma, w.chGamma), call.body, w.sessions[role])
 			if r.code != http.StatusOK {
@@ -257,10 +257,10 @@ func TestIntegrationProjectIsolation(t *testing.T) {
 	}
 
 	// Usage stays per organization (quotas are shared by all projects) and is shown to owners and
-	// admins only.
+	// maintainers only.
 	for role, hdr := range w.sessions {
 		r := c.do(http.MethodGet, "/api/v1/usage", "", hdr)
-		if !authz.Role(role).AtLeast(authz.Admin) {
+		if !authz.Role(role).AtLeast(authz.Maintainer) {
 			if r.code != http.StatusForbidden {
 				t.Errorf("%s usage: %d %s, want 403", role, r.code, r.raw)
 			}
@@ -288,11 +288,11 @@ func TestIntegrationProjectsLifecycle(t *testing.T) {
 	w := newProjectWorld(t, "projectlife")
 	c := w.c
 	owner := w.sessions[authz.Owner]
-	admin := w.sessions[authz.Admin]
+	admin := w.sessions[authz.Maintainer]
 
 	// Slugs: derived, suffixed when taken, explicit ones must be free.
 	r := c.do(http.MethodPost, "/api/v1/projects", `{"name":"  Alpha  "}`, admin)
-	if r.code != http.StatusCreated || r.body["slug"] != "alpha-2" || r.body["name"] != "Alpha" || r.body["role"] != "admin" {
+	if r.code != http.StatusCreated || r.body["slug"] != "alpha-2" || r.body["name"] != "Alpha" || r.body["role"] != "maintainer" {
 		t.Fatalf("second Alpha: %d %s", r.code, r.raw)
 	}
 	second := r.body["id"].(string)
@@ -323,7 +323,7 @@ func TestIntegrationProjectsLifecycle(t *testing.T) {
 		t.Fatalf("monitor into a deleted project: %d %s", r.code, r.raw)
 	}
 
-	// Members of a project: owners and admins (all projects), explicit members, overrides.
+	// Members of a project: owners and maintainers (all projects), explicit members, overrides.
 	r = c.do(http.MethodGet, "/api/v1/projects/"+w.beta+"/members", "", owner)
 	got := []string{}
 	for _, it := range r.body["items"].([]any) {
@@ -331,7 +331,7 @@ func TestIntegrationProjectsLifecycle(t *testing.T) {
 		got = append(got, fmt.Sprintf("%s:%s/%v/%s", m["organizationRole"], m["effectiveRole"], m["projectRole"], map[bool]string{true: "all", false: "listed"}[m["allProjects"] == true]))
 	}
 	slices.Sort(got)
-	if strings.Join(got, " ") != "admin:admin/<nil>/all member:viewer/viewer/listed owner:owner/<nil>/all" {
+	if strings.Join(got, " ") != "maintainer:maintainer/<nil>/all member:viewer/viewer/listed owner:owner/<nil>/all" {
 		t.Fatalf("beta members: %v", got)
 	}
 	r = c.do(http.MethodGet, "/api/v1/projects/"+w.def+"/members", "", w.sessions[authz.Viewer])

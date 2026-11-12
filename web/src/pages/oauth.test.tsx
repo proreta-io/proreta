@@ -225,7 +225,7 @@ describe("sign-in domains", () => {
 
   it("is shown to owners only", async () => {
     mockApi({
-      "GET /api/v1/auth/me": () => json({ ...session, role: "admin" }),
+      "GET /api/v1/auth/me": () => json({ ...session, role: "maintainer" }),
       ...settingsBase,
       ...providers(),
     });

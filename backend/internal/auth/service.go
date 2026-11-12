@@ -28,10 +28,10 @@ import (
 
 // Roles of a membership.
 const (
-	RoleOwner  = "owner"
-	RoleAdmin  = "admin"
-	RoleMember = "member"
-	RoleViewer = "viewer"
+	RoleOwner      = "owner"
+	RoleMaintainer = "maintainer"
+	RoleMember     = "member"
+	RoleViewer     = "viewer"
 )
 
 // Audit actions written by this module.

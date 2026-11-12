@@ -91,7 +91,7 @@ describe("members page", () => {
       "POST /api/v1/invitations": () =>
         json(
           {
-            invitation: invitation({ id: "i2", role: "admin", label: "" }),
+            invitation: invitation({ id: "i2", role: "maintainer", label: "" }),
             inviteUrl: "https://proreta.example.com/invite#SECRET-TOKEN",
           },
           201,
@@ -105,7 +105,7 @@ describe("members page", () => {
       within(role)
         .getAllByRole("option")
         .map((o) => o.textContent),
-    ).toEqual(["Owner", "Admin", "Member", "Viewer"]);
+    ).toEqual(["Owner", "Maintainer", "Member", "Viewer"]);
     // The owner's own row: a select (owners manage owners) but no Remove for oneself.
     expect(screen.getByText("You")).toBeInTheDocument();
 
@@ -121,13 +121,13 @@ describe("members page", () => {
     // Invite: the dialog asks for the role and a note; the link appears once.
     await userEvent.click(screen.getByRole("button", { name: "Invite someone" }));
     const invite = await screen.findByRole("dialog", { name: "Invite someone" });
-    await userEvent.selectOptions(within(invite).getByLabelText("Role"), "admin");
+    await userEvent.selectOptions(within(invite).getByLabelText("Role"), "maintainer");
     await userEvent.click(within(invite).getByRole("button", { name: "Create link" }));
     const link = await screen.findByLabelText("Invitation link");
     expect(link).toHaveValue("https://proreta.example.com/invite#SECRET-TOKEN");
     expect(screen.getByText("Copy it now: it is shown only once.")).toBeInTheDocument();
     const sent = requests(fetchMock, "POST", "/api/v1/invitations")[0]!;
-    expect(await sent.clone().json()).toEqual({ role: "admin" });
+    expect(await sent.clone().json()).toEqual({ role: "maintainer" });
     await userEvent.click(screen.getByRole("button", { name: "I sent it, hide the link" }));
     expect(screen.queryByDisplayValue(/SECRET-TOKEN/)).toBeNull();
 
@@ -143,8 +143,9 @@ describe("members page", () => {
 
   it("explains a full plan when inviting", async () => {
     mockApi({
-      ...as("admin"),
-      "GET /api/v1/members": () => json({ items: [me, member({ userId: "u1", role: "admin" })] }),
+      ...as("maintainer"),
+      "GET /api/v1/members": () =>
+        json({ items: [me, member({ userId: "u1", role: "maintainer" })] }),
       "GET /api/v1/invitations": () => json({ items: [] }),
       "POST /api/v1/invitations": () =>
         problem(409, "Plan limit reached", {
@@ -156,12 +157,12 @@ describe("members page", () => {
     renderApp("/members");
     await userEvent.click(await screen.findByRole("button", { name: "Invite someone" }));
     const dialog = await screen.findByRole("dialog", { name: "Invite someone" });
-    // An admin cannot invite an owner, and the select never offers it.
+    // A maintainer cannot invite an owner, and the select never offers it.
     expect(
       within(within(dialog).getByLabelText("Role"))
         .getAllByRole("option")
         .map((o) => o.textContent),
-    ).toEqual(["Admin", "Member", "Viewer"]);
+    ).toEqual(["Maintainer", "Member", "Viewer"]);
     await userEvent.click(within(dialog).getByRole("button", { name: "Create link" }));
     expect(await within(dialog).findByText(/at most 3 members/)).toBeInTheDocument();
   });
@@ -194,7 +195,7 @@ describe("members page", () => {
       expect(within(dialog).queryByRole("checkbox", { name: "Send by email" })).toBeNull();
     });
 
-    it("leaves the box unchecked unless the admin made emailing the default", async () => {
+    it("leaves the box unchecked unless the maintainer made emailing the default", async () => {
       mockApi({ ...base(), ...providers(true) });
       renderApp("/members");
       await userEvent.click(await screen.findByRole("button", { name: "Invite someone" }));
@@ -204,7 +205,7 @@ describe("members page", () => {
       ).not.toBeChecked();
     });
 
-    it("pre-checks the box when the admin turned on emailing invitations", async () => {
+    it("pre-checks the box when the maintainer turned on emailing invitations", async () => {
       mockApi({
         ...base(),
         ...providers(true),
@@ -306,12 +307,16 @@ describe("members page", () => {
     });
   });
 
-  it("keeps admins away from owners", async () => {
+  it("keeps maintainers away from owners", async () => {
     mockApi({
-      ...as("admin", { user: { ...session.user, id: "u3" } }),
+      ...as("maintainer", { user: { ...session.user, id: "u3" } }),
       "GET /api/v1/members": () =>
         json({
-          items: [me, member(), member({ userId: "u3", login: "me@example.com", role: "admin" })],
+          items: [
+            me,
+            member(),
+            member({ userId: "u3", login: "me@example.com", role: "maintainer" }),
+          ],
         }),
       "GET /api/v1/invitations": () => json({ items: [] }),
     });
@@ -476,7 +481,7 @@ describe("organization switcher", () => {
           id: "t3",
           slug: "gone",
           name: "Gone",
-          role: "admin",
+          role: "maintainer",
           status: "suspended",
           current: false,
         },
@@ -499,7 +504,9 @@ describe("organization switcher", () => {
     await waitFor(() => expect(requests(fetchMock, "GET", "/api/v1/monitors")).toHaveLength(1));
     const banner = await screen.findByRole("banner");
     const select = await within(banner).findByLabelText("Organization");
-    expect(within(select).getByRole("option", { name: "Gone · Admin (suspended)" })).toBeDisabled();
+    expect(
+      within(select).getByRole("option", { name: "Gone · Maintainer (suspended)" }),
+    ).toBeDisabled();
     await userEvent.selectOptions(select, "t2");
     expect(await screen.findByText("Switched to Beta")).toBeInTheDocument();
     const sent = requests(fetchMock, "POST", "/api/v1/auth/switch-organization")[0]!;

@@ -88,7 +88,7 @@ export default function Members() {
 }
 
 function article(role: MembershipRole) {
-  return role === "owner" || role === "admin" ? "an" : "a";
+  return role === "owner" ? "an" : "a";
 }
 
 function Section({

@@ -60,11 +60,11 @@ const component = (over: Partial<StatusPageComponent>): StatusPageComponent => (
 });
 
 describe("status page settings", () => {
-  it("lets an admin create the page with a slug from the title", async () => {
+  it("lets a maintainer create the page with a slug from the title", async () => {
     let items: StatusPage[] = [];
     let body: unknown;
     mockApi({
-      ...as("admin"),
+      ...as("maintainer"),
       "GET /api/v1/status-pages": () => json({ items }),
       "POST /api/v1/status-pages": async (r) => {
         body = await r.json();
@@ -189,7 +189,7 @@ describe("status page settings", () => {
     { timeout: 20_000 },
     async () => {
       mockApi({
-        ...as("admin"),
+        ...as("maintainer"),
         "GET /api/v1/status-pages": () => json({ items: [page()] }),
         "GET /api/v1/status-pages/sp/preview": () => json(snapshot({ status: "partial_outage" })),
         "GET /api/v1/status-pages/sp/components": () => json({ items: [] }),
@@ -230,7 +230,7 @@ describe("status page settings", () => {
       let current = page({ published: true });
       let sent: unknown;
       mockApi({
-        ...as("admin"),
+        ...as("maintainer"),
         "GET /api/v1/status-pages": () => json({ items: [current] }),
         "GET /api/v1/status-pages/sp/preview": () => json(snapshot()),
         "GET /api/v1/status-pages/sp/components": () => json({ items: [] }),

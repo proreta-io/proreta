@@ -160,7 +160,7 @@ func (s *server) ListProjectMembers(ctx context.Context, req gen.ListProjectMemb
 	if err != nil {
 		return nil, err
 	}
-	showLogins := a.Access.Role.AtLeast(authz.Admin) // logins are visible to admins and above
+	showLogins := a.Access.Role.AtLeast(authz.Maintainer) // logins are visible to maintainers and above
 	out := gen.ListProjectMembers200JSONResponse{Items: make([]gen.ProjectMember, len(list))}
 	for i, m := range list {
 		out.Items[i] = toProjectMember(m, showLogins)
@@ -202,7 +202,7 @@ func toProject(p projects.Project) gen.Project {
 		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt}
 }
 
-// toProjectMember maps a project member; showLogin is false for callers below admin.
+// toProjectMember maps a project member; showLogin is false for callers below maintainer.
 func toProjectMember(m projects.Member, showLogin bool) gen.ProjectMember {
 	out := gen.ProjectMember{UserId: m.UserID, Login: loginFor(m.Login, showLogin), DisplayName: m.DisplayName,
 		OrganizationRole: gen.MembershipRole(m.OrganizationRole), EffectiveRole: gen.MembershipRole(m.EffectiveRole),

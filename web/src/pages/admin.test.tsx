@@ -200,7 +200,12 @@ describe("admin organization details", () => {
         json({
           items: [
             member(),
-            member({ userId: "u-admin", login: "admin", role: "admin", isPlatformAdmin: true }),
+            member({
+              userId: "u-admin",
+              login: "admin",
+              role: "maintainer",
+              isPlatformAdmin: true,
+            }),
           ],
         }),
       "PATCH /api/v1/admin/organizations/t-1": async (r) => {

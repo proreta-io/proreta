@@ -133,7 +133,7 @@ export default function MonitorForm({ mode }: { mode: "create" | "edit" }) {
       <Page back={<Link to={`/monitors/${m.id}`}>← {m.name}</Link>} title={`Edit ${m.name}`}>
         <Alert tone="neutral" title="Read only.">
           Your role in the project {ownProject?.name ?? ""} is viewer: you can see this monitor but
-          not change it. Ask an admin to change your role in the project.
+          not change it. Ask a maintainer to change your role in the project.
         </Alert>
       </Page>
     );

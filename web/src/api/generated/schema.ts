@@ -520,7 +520,7 @@ export interface paths {
     /**
      * List monitors with their current status
      * @description The monitors of the organization that are not deleted and that the caller sees (the projects it
-     *     belongs to; every project for owners and admins), with the current status and summary
+     *     belongs to; every project for owners and maintainers), with the current status and summary
      *     counts. `projectId` limits the list to one project (404 when the caller does not see it).
      *     Answered from the state tables and rollups, never by scanning raw results.
      */
@@ -794,7 +794,7 @@ export interface paths {
     /**
      * Plan, limits and usage
      * @description The organization's plan, its effective limits (the plan's limits with per-organization
-     *     overrides applied) and the current usage. Deleted monitors do not count. Owner and admin
+     *     overrides applied) and the current usage. Deleted monitors do not count. Owner and maintainer
      *     only: members and viewers get 403 and learn about a reached limit from the 409
      *     `urn:proreta:problem:plan-limit-reached` problem of the create that hits it.
      */
@@ -817,7 +817,7 @@ export interface paths {
     /**
      * List notification channels
      * @description The organization's notification channels that are not deleted and that the caller sees (the
-     *     channels of its projects and the organization-wide ones; all for owners and admins),
+     *     channels of its projects and the organization-wide ones; all for owners and maintainers),
      *     oldest first. With `projectId`, the channels a monitor of that project may select: the
      *     project's channels and the organization-wide ones (404 when the caller does not see the
      *     project). The webhook URL is a secret and is never returned.
@@ -914,7 +914,7 @@ export interface paths {
     };
     /**
      * Projects of the organization
-     * @description The projects the caller sees (every project for owners and admins), Default first, then by name.
+     * @description The projects the caller sees (every project for owners and maintainers), Default first, then by name.
      */
     get: operations["listProjects"];
     put?: never;
@@ -977,7 +977,7 @@ export interface paths {
     };
     /**
      * Members of a project
-     * @description The people with access to the project: owners and admins (they see every project,
+     * @description The people with access to the project: owners and maintainers (they see every project,
      *     `allProjects` true), the explicit members with their optional role override, and for a
      *     project with `allMembers` (the Default project) every other member of the organization.
      *     404 when the caller does not see the project.
@@ -1034,7 +1034,7 @@ export interface paths {
     /**
      * Members of the organization
      * @description Every member with display name, role and when they joined, oldest first. Any role; the
-     *     login (an email address) is shown to owners and admins only and is null for members and
+     *     login (an email address) is shown to owners and maintainers only and is null for members and
      *     viewers.
      */
     get: operations["listMembers"];
@@ -1061,7 +1061,7 @@ export interface paths {
     post?: never;
     /**
      * Remove a member
-     * @description Admin or owner, with the rules of the role change (an admin cannot remove an owner, the
+     * @description Maintainer or owner, with the rules of the role change (a maintainer cannot remove an owner, the
      *     last owner cannot be removed, nor the platform admin). The member's sessions in this
      *     organization end at once; the user and its other memberships stay. Audited as
      *     `member.removed`. To leave the organization yourself, use `POST /api/v1/organization/leave`.
@@ -1071,7 +1071,7 @@ export interface paths {
     head?: never;
     /**
      * Change a member's role
-     * @description Admin or owner. An admin may change only admins, members and viewers and may not grant
+     * @description Maintainer or owner. A maintainer may change only maintainers, members and viewers and may not grant
      *     `owner` (403 `urn:proreta:problem:forbidden`). The organization always keeps an active
      *     owner: demoting the last one is 409 `urn:proreta:problem:last-owner`. The platform admin's
      *     role in the default organization cannot be changed (409 `urn:proreta:problem:system-admin`).
@@ -1095,7 +1095,7 @@ export interface paths {
     put?: never;
     /**
      * Invite someone
-     * @description Creates a single-use invitation with the role `admin`, `member` or `viewer` (`owner` is
+     * @description Creates a single-use invitation with the role `maintainer`, `member` or `viewer` (`owner` is
      *     granted by changing a member's role). It expires after 7 days. The answer carries `inviteUrl` with
      *     the secret token in the URL fragment; it is shown only here (only its SHA-256 is stored)
      *     and must be handed over like a password. With `email` (and `sendEmail` not false) the same
@@ -1805,7 +1805,7 @@ export interface paths {
     get?: never;
     /**
      * Add a user to an organization or change their role
-     * @description Makes an existing account a member with the role (any of `owner`, `admin`, `member`,
+     * @description Makes an existing account a member with the role (any of `owner`, `maintainer`, `member`,
      *     `viewer`), or changes the role of a member; setting the role a member already has changes
      *     nothing and writes no audit row. An unknown user is 404. Adding respects the plan's member
      *     limit (409 `urn:proreta:problem:plan-limit-reached`; raise the plan first). The organization
@@ -1852,7 +1852,7 @@ export interface paths {
     /**
      * Invite someone to an organization
      * @description For a person without an account. Same rules and the same email option as
-     *     `POST /api/v1/invitations` (roles `admin`, `member`, `viewer`; the link is in the answer
+     *     `POST /api/v1/invitations` (roles `maintainer`, `member`, `viewer`; the link is in the answer
      *     only and is never logged or audited; `email` is sent only when the installation has a tested
      *     mail server and the invitations switch is on). Open invitations count toward the plan's
      *     member limit (409 `urn:proreta:problem:plan-limit-reached`). A deleted organization
@@ -2194,7 +2194,7 @@ export interface components {
       role: components["schemas"]["MembershipRole"];
       /**
        * @description Whether the invite dialog pre-checks "send by email": the platform admin turned
-       *     "Send invitation links by email" on and the role of the session may invite (`admin`
+       *     "Send invitation links by email" on and the role of the session may invite (`maintainer`
        *     or `owner`). False for everyone else and on an installation without email; an
        *     invitation can still be emailed whenever `emailEnabled` is true.
        */
@@ -2244,7 +2244,7 @@ export interface components {
       name: string;
     };
     /** @enum {string} */
-    MembershipRole: "owner" | "admin" | "member" | "viewer";
+    MembershipRole: "owner" | "maintainer" | "member" | "viewer";
     /**
      * @description Aggregated status. `unknown` until the first check after creation, resume or a URL change (for a heartbeat, until the first ping or the first missed deadline), and while the monitor is paused (`paused` is then true).
      * @enum {string}
@@ -2994,7 +2994,7 @@ export interface components {
     Member: {
       /** Format: uuid */
       userId: string;
-      /** @description The member's login (email address); null unless the caller is an owner or admin */
+      /** @description The member's login (email address); null unless the caller is an owner or maintainer */
       login: string | null;
       displayName: string;
       role: components["schemas"]["MembershipRole"];
@@ -3010,14 +3010,14 @@ export interface components {
       role: components["schemas"]["MembershipRole"];
     };
     /** @enum {string} */
-    InvitationRole: "admin" | "member" | "viewer";
+    InvitationRole: "maintainer" | "member" | "viewer";
     /** @enum {string} */
     InvitationStatus: "open" | "accepted" | "revoked" | "expired";
     Invitation: {
       /** Format: uuid */
       id: string;
       role: components["schemas"]["InvitationRole"];
-      /** @description The admin's own note about whom the link is for; empty when none */
+      /** @description The maintainer's own note about whom the link is for; empty when none */
       label: string;
       status: components["schemas"]["InvitationStatus"];
       /** Format: date-time */
@@ -3126,16 +3126,16 @@ export interface components {
     ProjectMember: {
       /** Format: uuid */
       userId: string;
-      /** @description The member's login (email address); null unless the caller is an owner or admin */
+      /** @description The member's login (email address); null unless the caller is an owner or maintainer */
       login: string | null;
       displayName: string;
       organizationRole: components["schemas"]["MembershipRole"];
       /** @description The override in this project; null keeps the organization role */
       projectRole: components["schemas"]["ProjectRole"] | null;
       effectiveRole: components["schemas"]["MembershipRole"];
-      /** @description Listed as a member of the project (false for owners, admins and members through `allMembers`) */
+      /** @description Listed as a member of the project (false for owners, maintainers and members through `allMembers`) */
       explicit: boolean;
-      /** @description An owner or admin, who sees every project */
+      /** @description An owner or maintainer, who sees every project */
       allProjects: boolean;
     };
     ProjectMemberList: {
@@ -3341,7 +3341,7 @@ export interface components {
       passwordLoginEnabled: boolean;
     };
     /** @enum {string} */
-    AuthDomainRole: "admin" | "member" | "viewer";
+    AuthDomainRole: "maintainer" | "member" | "viewer";
     AuthDomain: {
       /** Format: uuid */
       id: string;

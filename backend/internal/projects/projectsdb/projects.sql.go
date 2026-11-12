@@ -121,7 +121,7 @@ JOIN users AS u ON u.id = m.user_id
 LEFT JOIN project_members AS pm
        ON pm.tenant_id = m.tenant_id AND pm.project_id = $1 AND pm.user_id = m.user_id
 WHERE m.tenant_id = $2
-  AND ($3::boolean OR pm.user_id IS NOT NULL OR m.role IN ('owner', 'admin'))
+  AND ($3::boolean OR pm.user_id IS NOT NULL OR m.role IN ('owner', 'maintainer'))
 ORDER BY m.created_at, m.user_id
 `
 
@@ -140,7 +140,7 @@ type ListProjectMembersRow struct {
 	Explicit         bool
 }
 
-// Owners and admins (they see every project), the listed members, and for an all_members project
+// Owners and maintainers (they see every project), the listed members, and for an all_members project
 // every member of the organization. Reads memberships and users (owned by auth) read-only.
 func (q *Queries) ListProjectMembers(ctx context.Context, arg ListProjectMembersParams) ([]ListProjectMembersRow, error) {
 	rows, err := q.db.Query(ctx, listProjectMembers, arg.ProjectID, arg.TenantID, arg.AllMembers)

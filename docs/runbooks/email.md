@@ -9,7 +9,7 @@ The messages Proreta can send:
 |---|---|---|
 | Confirm your email address | A person registers with a password (their own organization or through an invitation link) and "Send email verification" is on, or asks for it again from the banner | `<PRORETA_PUBLIC_URL>/verify-email#<token>` |
 | Reset your password | Someone asks for it on the sign-in page, and "Allow password reset" is on ("Forgot your password?") | `<PRORETA_PUBLIC_URL>/reset-password#<token>` |
-| You are invited to an organization | An admin invites someone, gives their address and keeps "Send by email" checked ([invitations](invitations.md#emailing-the-link)) | `<PRORETA_PUBLIC_URL>/invite#<token>` |
+| You are invited to an organization | A maintainer invites someone, gives their address and keeps "Send by email" checked ([invitations](invitations.md#emailing-the-link)) | `<PRORETA_PUBLIC_URL>/invite#<token>` |
 
 All of them:
 
@@ -51,7 +51,7 @@ Sign in as the platform admin and open **Admin → Email**. Nothing is needed in
 1. **Connection.** Enter host, port, TLS mode, sender (`proreta@example.com` or `Proreta <proreta@example.com>`) and, if the server needs one, username and password. Saving does not send anything.
 2. **Send a test email.** The panel queues a real message to an address you give (default: your own login when it is an address). `jobs` sends it, once and without retries, through the same code that sends every other message, and records the result; the panel polls and shows the time and outcome (see [Troubleshooting](#troubleshooting)). Only a successful test of the **current** connection settings counts: changing the host, port, TLS mode, sender, username or password forgets it and turns all switches off.
 3. **Switches.** The three switches are off by default and cannot be turned on until a test succeeded:
-   - *Send invitation links by email*: the invite dialog's "Send by email" box is pre-checked. (Once the server is tested an admin can always email an invitation by checking the box; the switch only sets the default.)
+   - *Send invitation links by email*: the invite dialog's "Send by email" box is pre-checked. (Once the server is tested a maintainer can always email an invitation by checking the box; the switch only sets the default.)
    - *Send email verification*: a verification message at registration.
    - *Allow password reset*: the forgot-password flow.
 

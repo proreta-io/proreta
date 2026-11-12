@@ -91,17 +91,17 @@ var roleCalls = map[string]struct {
 	"getMe":              {authz.Viewer, http.MethodGet, "/api/v1/auth/me", ""},
 	// Any role; without email in this server it ends in 404.
 	"resendEmailVerification": {authz.Viewer, http.MethodPost, "/api/v1/auth/resend-verification", ""},
-	// Status page: settings readable by everyone, changes for admins and owners.
+	// Status page: settings readable by everyone, changes for maintainers and owners.
 	"listStatusPages":          {authz.Viewer, http.MethodGet, "/api/v1/status-pages", ""},
-	"createStatusPage":         {authz.Admin, http.MethodPost, "/api/v1/status-pages", `{"slug":"role-matrix","title":"Role matrix"}`},
+	"createStatusPage":         {authz.Maintainer, http.MethodPost, "/api/v1/status-pages", `{"slug":"role-matrix","title":"Role matrix"}`},
 	"getStatusPage":            {authz.Viewer, http.MethodGet, "/api/v1/status-pages/{id}", ""},
-	"updateStatusPage":         {authz.Admin, http.MethodPatch, "/api/v1/status-pages/{id}", `{"title":"x"}`},
-	"deleteStatusPage":         {authz.Admin, http.MethodDelete, "/api/v1/status-pages/{id}", ""},
-	"setStatusPagePassword":    {authz.Admin, http.MethodPut, "/api/v1/status-pages/{id}/password", `{"password":"twelve chars long"}`},
-	"clearStatusPagePassword":  {authz.Admin, http.MethodDelete, "/api/v1/status-pages/{id}/password", ""},
-	"listStatusPageComponents": {authz.Admin, http.MethodGet, "/api/v1/status-pages/{id}/components", ""},
-	"putStatusPageComponents":  {authz.Admin, http.MethodPut, "/api/v1/status-pages/{id}/components", `{"items":[]}`},
-	"previewStatusPage":        {authz.Admin, http.MethodGet, "/api/v1/status-pages/{id}/preview", ""},
+	"updateStatusPage":         {authz.Maintainer, http.MethodPatch, "/api/v1/status-pages/{id}", `{"title":"x"}`},
+	"deleteStatusPage":         {authz.Maintainer, http.MethodDelete, "/api/v1/status-pages/{id}", ""},
+	"setStatusPagePassword":    {authz.Maintainer, http.MethodPut, "/api/v1/status-pages/{id}/password", `{"password":"twelve chars long"}`},
+	"clearStatusPagePassword":  {authz.Maintainer, http.MethodDelete, "/api/v1/status-pages/{id}/password", ""},
+	"listStatusPageComponents": {authz.Maintainer, http.MethodGet, "/api/v1/status-pages/{id}/components", ""},
+	"putStatusPageComponents":  {authz.Maintainer, http.MethodPut, "/api/v1/status-pages/{id}/components", `{"items":[]}`},
+	"previewStatusPage":        {authz.Maintainer, http.MethodGet, "/api/v1/status-pages/{id}/preview", ""},
 	"listMonitors":             {authz.Viewer, http.MethodGet, "/api/v1/monitors", ""},
 	"createMonitor":            {authz.Member, http.MethodPost, "/api/v1/monitors", `{"type":"http","name":"role matrix","http":{"url":"https://example.com/role"}}`},
 	"getMonitor":               {authz.Viewer, http.MethodGet, "/api/v1/monitors/{id}", ""},
@@ -113,29 +113,29 @@ var roleCalls = map[string]struct {
 	"getMonitorStats":          {authz.Viewer, http.MethodGet, "/api/v1/monitors/{id}/stats", ""},
 	"listMonitorChecks":        {authz.Viewer, http.MethodGet, "/api/v1/monitors/{id}/checks", ""},
 	"listMonitorIncidents":     {authz.Viewer, http.MethodGet, "/api/v1/monitors/{id}/incidents", ""},
-	"getUsage":                 {authz.Admin, http.MethodGet, "/api/v1/usage", ""},
+	"getUsage":                 {authz.Maintainer, http.MethodGet, "/api/v1/usage", ""},
 	"listChannels":             {authz.Viewer, http.MethodGet, "/api/v1/channels", ""},
-	"createChannel":            {authz.Admin, http.MethodPost, "/api/v1/channels", `{"name":"role","webhookUrl":"https://hooks.slack.com/services/T000/B000/xyz"}`},
+	"createChannel":            {authz.Maintainer, http.MethodPost, "/api/v1/channels", `{"name":"role","webhookUrl":"https://hooks.slack.com/services/T000/B000/xyz"}`},
 	"getChannel":               {authz.Viewer, http.MethodGet, "/api/v1/channels/{id}", ""},
-	"updateChannel":            {authz.Admin, http.MethodPatch, "/api/v1/channels/{id}", `{"name":"x"}`},
-	"deleteChannel":            {authz.Admin, http.MethodDelete, "/api/v1/channels/{id}", ""},
-	"testChannel":              {authz.Admin, http.MethodPost, "/api/v1/channels/{id}/test", ""},
+	"updateChannel":            {authz.Maintainer, http.MethodPatch, "/api/v1/channels/{id}", `{"name":"x"}`},
+	"deleteChannel":            {authz.Maintainer, http.MethodDelete, "/api/v1/channels/{id}", ""},
+	"testChannel":              {authz.Maintainer, http.MethodPost, "/api/v1/channels/{id}/test", ""},
 	"listMembers":              {authz.Viewer, http.MethodGet, "/api/v1/members", ""},
-	"updateMember":             {authz.Admin, http.MethodPatch, "/api/v1/members/{id}", `{"role":"viewer"}`},
-	"removeMember":             {authz.Admin, http.MethodDelete, "/api/v1/members/{id}", ""},
-	"listInvitations":          {authz.Admin, http.MethodGet, "/api/v1/invitations", ""},
-	"createInvitation":         {authz.Admin, http.MethodPost, "/api/v1/invitations", `{"role":"viewer"}`},
-	"revokeInvitation":         {authz.Admin, http.MethodPost, "/api/v1/invitations/{id}/revoke", ""},
+	"updateMember":             {authz.Maintainer, http.MethodPatch, "/api/v1/members/{id}", `{"role":"viewer"}`},
+	"removeMember":             {authz.Maintainer, http.MethodDelete, "/api/v1/members/{id}", ""},
+	"listInvitations":          {authz.Maintainer, http.MethodGet, "/api/v1/invitations", ""},
+	"createInvitation":         {authz.Maintainer, http.MethodPost, "/api/v1/invitations", `{"role":"viewer"}`},
+	"revokeInvitation":         {authz.Maintainer, http.MethodPost, "/api/v1/invitations/{id}/revoke", ""},
 	"acceptInvitation":         {authz.Viewer, http.MethodPost, "/api/v1/invitations/accept", `{"token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}`},
 	"deleteOrganization":       {authz.Owner, http.MethodDelete, "/api/v1/organization", ""},
 	"listProjects":             {authz.Viewer, http.MethodGet, "/api/v1/projects", ""},
-	"createProject":            {authz.Admin, http.MethodPost, "/api/v1/projects", `{"name":"role matrix"}`},
+	"createProject":            {authz.Maintainer, http.MethodPost, "/api/v1/projects", `{"name":"role matrix"}`},
 	"getProject":               {authz.Viewer, http.MethodGet, "/api/v1/projects/{id}", ""},
-	"updateProject":            {authz.Admin, http.MethodPatch, "/api/v1/projects/{id}", `{"name":"x"}`},
-	"deleteProject":            {authz.Admin, http.MethodDelete, "/api/v1/projects/{id}", ""},
+	"updateProject":            {authz.Maintainer, http.MethodPatch, "/api/v1/projects/{id}", `{"name":"x"}`},
+	"deleteProject":            {authz.Maintainer, http.MethodDelete, "/api/v1/projects/{id}", ""},
 	"listProjectMembers":       {authz.Viewer, http.MethodGet, "/api/v1/projects/{id}/members", ""},
-	"putProjectMember":         {authz.Admin, http.MethodPut, "/api/v1/projects/{id}/members/{id}", `{"role":"viewer"}`},
-	"removeProjectMember":      {authz.Admin, http.MethodDelete, "/api/v1/projects/{id}/members/{id}", ""},
+	"putProjectMember":         {authz.Maintainer, http.MethodPut, "/api/v1/projects/{id}/members/{id}", `{"role":"viewer"}`},
+	"removeProjectMember":      {authz.Maintainer, http.MethodDelete, "/api/v1/projects/{id}/members/{id}", ""},
 	// Sign-in methods and domains. The owner's domain claim ends in 403
 	// domain-not-verified (no Google identity), which is not a role refusal.
 	"listIdentities":   {authz.Viewer, http.MethodGet, "/api/v1/auth/identities", ""},
@@ -150,14 +150,14 @@ var roleCalls = map[string]struct {
 }
 
 // TestIntegrationRoleMatrix calls every operation of the contract that needs a session as an
-// owner, admin, member and viewer of the same organization: a role below the operation's minimum
+// owner, maintainer, member and viewer of the same organization: a role below the operation's minimum
 // gets 403 forbidden, any other role is not refused by role.
 func TestIntegrationRoleMatrix(t *testing.T) {
 	env := pgtest.New(t, pgtest.DBName("rolematrix"))
 	c := newRegistrationServer(t, env, membersOpts(), true, &lockedBuffer{})
 	owner := adminSession(c)
 	sessions := map[authz.Role]map[string]string{authz.Owner: owner}
-	for _, role := range []authz.Role{authz.Admin, authz.Member, authz.Viewer} {
+	for _, role := range []authz.Role{authz.Maintainer, authz.Member, authz.Viewer} {
 		token, _ := invite(t, c, owner, string(role))
 		sessions[role], _ = joinByRegister(t, c, token, string(role)+"@example.com")
 	}
@@ -184,7 +184,7 @@ func TestIntegrationRoleMatrix(t *testing.T) {
 			t.Errorf("%s: minimum role in the table %s, expected %s", op.id, min, call.min)
 		}
 		path := strings.ReplaceAll(call.path, "{id}", "0192b9c4-7c5e-7000-8000-0000000000aa")
-		for _, role := range []authz.Role{authz.Viewer, authz.Member, authz.Admin, authz.Owner} {
+		for _, role := range []authz.Role{authz.Viewer, authz.Member, authz.Maintainer, authz.Owner} {
 			allowed := role.AtLeast(min)
 			if allowed && (op.id == "Logout" || op.id == "LeaveOrganization" || strings.EqualFold(op.id, "logout") || strings.EqualFold(op.id, "leaveOrganization")) {
 				continue
@@ -359,7 +359,7 @@ func TestIntegrationPlatformAdminCannotJoin(t *testing.T) {
 	env := pgtest.New(t, pgtest.DBName("invitepadmin"))
 	c := newRegistrationServer(t, env, membersOpts(), true, &lockedBuffer{})
 	ownerCookie, ownerCSRF, _ := c.register("owner@example.com")
-	tok, _ := invite(t, c, withCSRF(ownerCookie, ownerCSRF), "admin")
+	tok, _ := invite(t, c, withCSRF(ownerCookie, ownerCSRF), "maintainer")
 	r := c.do(http.MethodPost, "/api/v1/invitations/accept", `{"token":"`+tok+`"}`, adminSession(c))
 	if r.code != http.StatusConflict || r.body["type"] != "urn:proreta:problem:already-member" {
 		t.Fatalf("platform admin accept: %d %s", r.code, r.raw)
@@ -375,14 +375,14 @@ func TestIntegrationMemberManagement(t *testing.T) {
 	ownerID := userIDOf(t, c, owner)
 
 	// The only owner can neither step down nor leave.
-	if r := c.do(http.MethodPatch, "/api/v1/members/"+ownerID, `{"role":"admin"}`, owner); r.code != http.StatusConflict || r.body["type"] != "urn:proreta:problem:last-owner" {
+	if r := c.do(http.MethodPatch, "/api/v1/members/"+ownerID, `{"role":"maintainer"}`, owner); r.code != http.StatusConflict || r.body["type"] != "urn:proreta:problem:last-owner" {
 		t.Fatalf("demote last owner: %d %s", r.code, r.raw)
 	}
 	if r := c.do(http.MethodPost, "/api/v1/organization/leave", "", owner); r.code != http.StatusConflict || r.body["type"] != "urn:proreta:problem:last-owner" {
 		t.Fatalf("last owner leaves: %d %s", r.code, r.raw)
 	}
 
-	tok, _ := invite(t, c, owner, "admin")
+	tok, _ := invite(t, c, owner, "maintainer")
 	adm, _ := joinByRegister(t, c, tok, "admin@example.com")
 	admID := userIDOf(t, c, adm)
 	tok, _ = invite(t, c, owner, "member")
@@ -417,10 +417,10 @@ func TestIntegrationMemberManagement(t *testing.T) {
 	if r := c.do(http.MethodPatch, "/api/v1/members/"+admID, `{"role":"owner"}`, owner); r.code != http.StatusOK {
 		t.Fatalf("grant owner: %d %s", r.code, r.raw)
 	}
-	if r := c.do(http.MethodPatch, "/api/v1/members/"+ownerID, `{"role":"admin"}`, owner); r.code != http.StatusOK {
+	if r := c.do(http.MethodPatch, "/api/v1/members/"+ownerID, `{"role":"maintainer"}`, owner); r.code != http.StatusOK {
 		t.Fatalf("step down: %d %s", r.code, r.raw)
 	}
-	if r := c.do(http.MethodPatch, "/api/v1/members/"+admID, `{"role":"admin"}`, adm); r.code != http.StatusConflict {
+	if r := c.do(http.MethodPatch, "/api/v1/members/"+admID, `{"role":"maintainer"}`, adm); r.code != http.StatusConflict {
 		t.Fatalf("new last owner steps down: %d %s", r.code, r.raw)
 	}
 
@@ -464,10 +464,10 @@ func TestIntegrationMemberManagement(t *testing.T) {
 	// The platform admin of the default tenant cannot be demoted or removed.
 	padmin := adminSession(c)
 	padminID := userIDOf(t, c, padmin)
-	tok, _ = invite(t, c, padmin, "admin")
+	tok, _ = invite(t, c, padmin, "maintainer")
 	_, _ = joinByRegister(t, c, tok, "second-owner@example.com")
 	for _, call := range [][3]string{
-		{http.MethodPatch, "/api/v1/members/" + padminID, `{"role":"admin"}`},
+		{http.MethodPatch, "/api/v1/members/" + padminID, `{"role":"maintainer"}`},
 		{http.MethodDelete, "/api/v1/members/" + padminID, ""},
 		{http.MethodPost, "/api/v1/organization/leave", ""},
 	} {
@@ -484,7 +484,7 @@ func TestIntegrationConcurrentOwnerDemotion(t *testing.T) {
 	c := newRegistrationServer(t, env, membersOpts(), true, &lockedBuffer{})
 	oCookie, oCSRF, _ := c.register("a@example.com")
 	a := withCSRF(oCookie, oCSRF)
-	tok, _ := invite(t, c, a, "admin")
+	tok, _ := invite(t, c, a, "maintainer")
 	b, _ := joinByRegister(t, c, tok, "b@example.com")
 	aID, bID := userIDOf(t, c, a), userIDOf(t, c, b)
 	if r := c.do(http.MethodPatch, "/api/v1/members/"+bID, `{"role":"owner"}`, a); r.code != http.StatusOK {
@@ -496,11 +496,11 @@ func TestIntegrationConcurrentOwnerDemotion(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			codes[0] = c.do(http.MethodPatch, "/api/v1/members/"+bID, `{"role":"admin"}`, a).code
+			codes[0] = c.do(http.MethodPatch, "/api/v1/members/"+bID, `{"role":"maintainer"}`, a).code
 		}()
 		go func() {
 			defer wg.Done()
-			codes[1] = c.do(http.MethodPatch, "/api/v1/members/"+aID, `{"role":"admin"}`, b).code
+			codes[1] = c.do(http.MethodPatch, "/api/v1/members/"+aID, `{"role":"maintainer"}`, b).code
 		}()
 		wg.Wait()
 		if n := countRows(t, env, `SELECT count(*) FROM memberships WHERE role = 'owner' AND user_id IN ($1, $2)`, aID, bID); n != 1 {

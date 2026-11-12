@@ -36,7 +36,7 @@ import { formatDate, formatDateTime } from "../../lib/format";
 import { useEmailEnabled } from "../../lib/oauth";
 import { ROLE_DESCRIPTIONS, ROLE_LABELS } from "../../lib/roles";
 
-const INVITATION_ROLES: InvitationRole[] = ["admin", "member", "viewer"];
+const INVITATION_ROLES: InvitationRole[] = ["maintainer", "member", "viewer"];
 
 const STATUS_TONES: Record<Invitation["status"], BadgeTone> = {
   open: "neutral",

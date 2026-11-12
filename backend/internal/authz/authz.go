@@ -8,6 +8,7 @@ package authz
 
 import (
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -18,10 +19,10 @@ type Role string
 
 // Roles, highest first.
 const (
-	Owner  Role = "owner"
-	Admin  Role = "admin"
-	Member Role = "member"
-	Viewer Role = "viewer"
+	Owner      Role = "owner"
+	Maintainer Role = "maintainer"
+	Member     Role = "member"
+	Viewer     Role = "viewer"
 )
 
 // ErrForbidden means the actor's role does not allow the action.
@@ -32,7 +33,7 @@ func rank(r Role) int {
 	switch r {
 	case Owner:
 		return 4
-	case Admin:
+	case Maintainer:
 		return 3
 	case Member:
 		return 2
@@ -53,7 +54,7 @@ type Actor struct {
 	UserID uuid.UUID
 	Role   Role
 	// Projects is the effective role in each project the actor belongs to.
-	// Owners and admins see every project and need no entries.
+	// Owners and maintainers see every project and need no entries.
 	Projects map[uuid.UUID]Role
 }
 
@@ -71,7 +72,7 @@ func ProjectRole(org Role, override *Role) Role {
 }
 
 // AllProjects reports whether the actor sees every project of the organization.
-func (a Actor) AllProjects() bool { return a.Role.AtLeast(Admin) }
+func (a Actor) AllProjects() bool { return a.Role.AtLeast(Maintainer) }
 
 // RoleIn returns the actor's effective role in a project and whether it sees the project at all.
 func (a Actor) RoleIn(project uuid.UUID) (Role, bool) {
@@ -138,141 +139,234 @@ func (s Scope) Narrow(project uuid.UUID) Scope {
 	return Scope{IDs: []uuid.UUID{}}
 }
 
-// Public marks operations that need no session; their entry in the table is Public.
+// Permission is what a role may do: "<resource>.<action>". Operations are checked against
+// permissions, never against role names.
+type Permission string
+
+// Level is the part of the product a permission applies to.
+type Level string
+
+const (
+	// LevelOrganization permissions are held through an organization role.
+	LevelOrganization Level = "organization"
+	// LevelProject permissions apply inside one project.
+	LevelProject Level = "project"
+)
+
+// Marks for operations that no role decides: no session at all, or the platform-admin flag
+// (requirePlatformAdmin in internal/api) on top of any session.
+const (
+	NoSession     Permission = "public"
+	PlatformAdmin Permission = "platform.admin"
+)
+
+// Public is what MinRole reports for operations without a session.
 const Public Role = "public"
 
-// operations maps every operation id (lowercase) to the minimum role. Viewer means any member.
-// The platform admin operations need the platform-admin flag on top (requirePlatformAdmin in
-// internal/api); they are listed with Viewer because the flag, not a role, decides.
-var operations = map[string]Role{
+// Definition describes one permission.
+type Definition struct {
+	Name        Permission
+	Level       Level
+	Description string
+}
+
+// Permissions lists every permission, in the order of the generated documentation.
+func Permissions() []Definition { return slices.Clone(permissions) }
+
+var permissions = []Definition{
+	{"account.use", LevelOrganization, "Use the session, switch and leave organizations, link sign-in identities"},
+	{"organization.delete", LevelOrganization, "Delete the organization"},
+	{"organization.domains.manage", LevelOrganization, "Manage the sign-in domains of the organization"},
+	{"organization.members.read", LevelOrganization, "List the members of the organization"},
+	{"organization.members.manage", LevelOrganization, "Change and remove members, manage invitations"},
+	{"usage.read", LevelOrganization, "Read the usage counts against the plan limits"},
+	{"project.create", LevelOrganization, "Create projects"},
+	{"project.read", LevelProject, "List and read projects"},
+	{"project.update", LevelProject, "Change project settings"},
+	{"project.delete", LevelProject, "Delete a project"},
+	{"project.members.read", LevelProject, "List the members of a project"},
+	{"project.members.manage", LevelProject, "Add, change and remove project members"},
+	{"monitor.read", LevelProject, "Read monitors, their statistics and checks"},
+	{"monitor.create", LevelProject, "Create monitors"},
+	{"monitor.update", LevelProject, "Change, pause and resume monitors"},
+	{"monitor.delete", LevelProject, "Delete monitors"},
+	{"incident.read", LevelProject, "Read the incidents of a monitor"},
+	{"heartbeat.manage", LevelProject, "Regenerate heartbeat tokens"},
+	{"channel.read", LevelProject, "List and read notification channels"},
+	{"channel.manage", LevelProject, "Create, change, test and delete notification channels"},
+	{"statuspage.read", LevelProject, "Read the status page settings and link"},
+	{"statuspage.manage", LevelProject, "Configure, protect and publish status pages"},
+}
+
+// roles is the one role table: each role is the set of permissions it holds, listed in full.
+var grants = map[Role][]Permission{
+	Owner: {
+		"account.use", "organization.delete", "organization.domains.manage",
+		"organization.members.read", "organization.members.manage", "usage.read", "project.create",
+		"project.read", "project.update", "project.delete", "project.members.read", "project.members.manage",
+		"monitor.read", "monitor.create", "monitor.update", "monitor.delete", "incident.read", "heartbeat.manage",
+		"channel.read", "channel.manage", "statuspage.read", "statuspage.manage",
+	},
+	Maintainer: {
+		"account.use",
+		"organization.members.read", "organization.members.manage", "usage.read", "project.create",
+		"project.read", "project.update", "project.delete", "project.members.read", "project.members.manage",
+		"monitor.read", "monitor.create", "monitor.update", "monitor.delete", "incident.read", "heartbeat.manage",
+		"channel.read", "channel.manage", "statuspage.read", "statuspage.manage",
+	},
+	Member: {
+		"account.use",
+		"organization.members.read",
+		"project.read", "project.members.read",
+		"monitor.read", "monitor.create", "monitor.update", "monitor.delete", "incident.read", "heartbeat.manage",
+		"channel.read", "statuspage.read",
+	},
+	Viewer: {
+		"account.use",
+		"organization.members.read",
+		"project.read", "project.members.read",
+		"monitor.read", "incident.read",
+		"channel.read", "statuspage.read",
+	},
+}
+
+// Roles returns the roles, highest first.
+func Roles() []Role { return []Role{Owner, Maintainer, Member, Viewer} }
+
+// Has reports whether the role holds the permission. An unknown role holds nothing.
+func Has(r Role, p Permission) bool { return slices.Contains(grants[r], p) }
+
+// operations maps every operation id (lowercase) to the permission it needs. The platform admin
+// operations carry PlatformAdmin: the flag, not a role, decides.
+var operations = map[string]Permission{
 	// No session.
-	"gethealth":         Public,
-	"getpublicconfig":   Public,
-	"login":             Public,
-	"register":          Public,
-	"pingheartbeat":     Public,
-	"pingheartbeatpost": Public,
-	"lookupinvitation":  Public,
+	"gethealth":         NoSession,
+	"getpublicconfig":   NoSession,
+	"login":             NoSession,
+	"register":          NoSession,
+	"pingheartbeat":     NoSession,
+	"pingheartbeatpost": NoSession,
+	"lookupinvitation":  NoSession,
 	// The emailed token is the credential.
-	"verifyemail": Public,
+	"verifyemail": NoSession,
 	// Forgotten password: the emailed token is the credential.
-	"requestpasswordreset": Public,
-	"resetpassword":        Public,
+	"requestpasswordreset": NoSession,
+	"resetpassword":        NoSession,
 	// OAuth sign-in: the start of a link checks the session and CSRF token itself.
-	"getauthproviders": Public,
-	"startoauth":       Public,
-	"oauthcallback":    Public,
+	"getauthproviders": NoSession,
+	"startoauth":       NoSession,
+	"oauthcallback":    NoSession,
 
 	// The session itself and the user's own organizations: any role.
-	"logout":                  Viewer,
-	"getme":                   Viewer,
-	"resendemailverification": Viewer,
-	"listorganizations":       Viewer,
-	"switchorganization":      Viewer,
-	"changepassword":          Viewer,
-	"acceptinvitation":        Viewer,
-	"leaveorganization":       Viewer,
-	"listidentities":          Viewer,
-	"unlinkidentity":          Viewer,
+	"logout":                  "account.use",
+	"getme":                   "account.use",
+	"resendemailverification": "account.use",
+	"listorganizations":       "account.use",
+	"switchorganization":      "account.use",
+	"changepassword":          "account.use",
+	"acceptinvitation":        "account.use",
+	"leaveorganization":       "account.use",
+	"listidentities":          "account.use",
+	"unlinkidentity":          "account.use",
 
 	// Reading the organization's data.
-	"listmonitors":         Viewer,
-	"getmonitor":           Viewer,
-	"getmonitorstats":      Viewer,
-	"listmonitorchecks":    Viewer,
-	"listmonitorincidents": Viewer,
-	"listchannels":         Viewer,
-	"getchannel":           Viewer,
-	"listmembers":          Viewer,
+	"listmonitors":         "monitor.read",
+	"getmonitor":           "monitor.read",
+	"getmonitorstats":      "monitor.read",
+	"listmonitorchecks":    "monitor.read",
+	"listmonitorincidents": "incident.read",
+	"listchannels":         "channel.read",
+	"getchannel":           "channel.read",
+	"listmembers":          "organization.members.read",
 	// Projects: the list and reads show only the projects the actor sees.
-	"listprojects":       Viewer,
-	"getproject":         Viewer,
-	"listprojectmembers": Viewer,
+	"listprojects":       "project.read",
+	"getproject":         "project.read",
+	"listprojectmembers": "project.members.read",
 
 	// Monitors and heartbeats.
-	"createmonitor":            Member,
-	"updatemonitor":            Member,
-	"deletemonitor":            Member,
-	"pausemonitor":             Member,
-	"resumemonitor":            Member,
-	"regenerateheartbeattoken": Member,
+	"createmonitor":            "monitor.create",
+	"updatemonitor":            "monitor.update",
+	"deletemonitor":            "monitor.delete",
+	"pausemonitor":             "monitor.update",
+	"resumemonitor":            "monitor.update",
+	"regenerateheartbeattoken": "heartbeat.manage",
 
 	// Notification channels, members and invitations.
-	"createchannel": Admin,
-	"updatechannel": Admin,
-	"deletechannel": Admin,
-	"testchannel":   Admin,
+	"createchannel": "channel.manage",
+	"updatechannel": "channel.manage",
+	"deletechannel": "channel.manage",
+	"testchannel":   "channel.manage",
 	// Organization-wide usage counts: members and viewers learn about a reached limit
 	// from the 409 of the create that hits it.
-	"getusage":         Admin,
-	"listinvitations":  Admin,
-	"createinvitation": Admin,
-	"revokeinvitation": Admin,
-	"updatemember":     Admin,
-	"removemember":     Admin,
+	"getusage":         "usage.read",
+	"listinvitations":  "organization.members.manage",
+	"createinvitation": "organization.members.manage",
+	"revokeinvitation": "organization.members.manage",
+	"updatemember":     "organization.members.manage",
+	"removemember":     "organization.members.manage",
 
 	// Projects and their members.
-	"createproject":       Admin,
-	"updateproject":       Admin,
-	"deleteproject":       Admin,
-	"putprojectmember":    Admin,
-	"removeprojectmember": Admin,
+	"createproject":       "project.create",
+	"updateproject":       "project.update",
+	"deleteproject":       "project.delete",
+	"putprojectmember":    "project.members.manage",
+	"removeprojectmember": "project.members.manage",
 
-	// The status page: every role sees its settings and link; owners and admins
-	// configure and publish it. Components and the preview name monitors of every project.
-	"liststatuspages":          Viewer,
-	"getstatuspage":            Viewer,
-	"createstatuspage":         Admin,
-	"updatestatuspage":         Admin,
-	"deletestatuspage":         Admin,
-	"setstatuspagepassword":    Admin,
-	"clearstatuspagepassword":  Admin,
-	"liststatuspagecomponents": Admin,
-	"putstatuspagecomponents":  Admin,
-	"previewstatuspage":        Admin,
+	// The status page: every role sees its settings and link; the others configure and publish
+	// it. Components and the preview name monitors of every project.
+	"liststatuspages":          "statuspage.read",
+	"getstatuspage":            "statuspage.read",
+	"createstatuspage":         "statuspage.manage",
+	"updatestatuspage":         "statuspage.manage",
+	"deletestatuspage":         "statuspage.manage",
+	"setstatuspagepassword":    "statuspage.manage",
+	"clearstatuspagepassword":  "statuspage.manage",
+	"liststatuspagecomponents": "statuspage.manage",
+	"putstatuspagecomponents":  "statuspage.manage",
+	"previewstatuspage":        "statuspage.manage",
 
 	// The organization itself.
-	"deleteorganization": Owner,
+	"deleteorganization": "organization.delete",
 	// Google Workspace sign-in domains.
-	"listauthdomains":  Owner,
-	"createauthdomain": Owner,
-	"updateauthdomain": Owner,
-	"deleteauthdomain": Owner,
+	"listauthdomains":  "organization.domains.manage",
+	"createauthdomain": "organization.domains.manage",
+	"updateauthdomain": "organization.domains.manage",
+	"deleteauthdomain": "organization.domains.manage",
 
 	// Platform admin panel.
-	"admingetstats":                        Viewer,
-	"adminlistorganizations":               Viewer,
-	"admingetorganization":                 Viewer,
-	"adminupdateorganization":              Viewer,
-	"admindeleteorganization":              Viewer,
-	"adminlistorganizationusers":           Viewer,
-	"adminresetuserpassword":               Viewer,
-	"adminlistallusers":                    Viewer,
-	"admingetuser":                         Viewer,
-	"admindisableuser":                     Viewer,
-	"adminenableuser":                      Viewer,
-	"adminrevokeusersessions":              Viewer,
-	"admingetemailsettings":                Viewer,
-	"adminupdateemailsettings":             Viewer,
-	"admindeleteemailsettings":             Viewer,
-	"adminupdateemailfeatures":             Viewer,
-	"adminsendtestemail":                   Viewer,
-	"admingetregistration":                 Viewer,
-	"adminupdateregistration":              Viewer,
-	"adminlistorganizationmembers":         Viewer,
-	"adminaddorganizationmember":           Viewer,
-	"adminsetorganizationmember":           Viewer,
-	"adminremoveorganizationmember":        Viewer,
-	"adminlistorganizationinvitations":     Viewer,
-	"admincreateorganizationinvitation":    Viewer,
-	"adminrevokeorganizationinvitation":    Viewer,
-	"adminlistorganizationprojects":        Viewer,
-	"admincreateorganizationproject":       Viewer,
-	"adminupdateorganizationproject":       Viewer,
-	"admindeleteorganizationproject":       Viewer,
-	"adminlistorganizationprojectmembers":  Viewer,
-	"adminputorganizationprojectmember":    Viewer,
-	"adminremoveorganizationprojectmember": Viewer,
+	"admingetstats":                        PlatformAdmin,
+	"adminlistorganizations":               PlatformAdmin,
+	"admingetorganization":                 PlatformAdmin,
+	"adminupdateorganization":              PlatformAdmin,
+	"admindeleteorganization":              PlatformAdmin,
+	"adminlistorganizationusers":           PlatformAdmin,
+	"adminresetuserpassword":               PlatformAdmin,
+	"adminlistallusers":                    PlatformAdmin,
+	"admingetuser":                         PlatformAdmin,
+	"admindisableuser":                     PlatformAdmin,
+	"adminenableuser":                      PlatformAdmin,
+	"adminrevokeusersessions":              PlatformAdmin,
+	"admingetemailsettings":                PlatformAdmin,
+	"adminupdateemailsettings":             PlatformAdmin,
+	"admindeleteemailsettings":             PlatformAdmin,
+	"adminupdateemailfeatures":             PlatformAdmin,
+	"adminsendtestemail":                   PlatformAdmin,
+	"admingetregistration":                 PlatformAdmin,
+	"adminupdateregistration":              PlatformAdmin,
+	"adminlistorganizationmembers":         PlatformAdmin,
+	"adminaddorganizationmember":           PlatformAdmin,
+	"adminsetorganizationmember":           PlatformAdmin,
+	"adminremoveorganizationmember":        PlatformAdmin,
+	"adminlistorganizationinvitations":     PlatformAdmin,
+	"admincreateorganizationinvitation":    PlatformAdmin,
+	"adminrevokeorganizationinvitation":    PlatformAdmin,
+	"adminlistorganizationprojects":        PlatformAdmin,
+	"admincreateorganizationproject":       PlatformAdmin,
+	"adminupdateorganizationproject":       PlatformAdmin,
+	"admindeleteorganizationproject":       PlatformAdmin,
+	"adminlistorganizationprojectmembers":  PlatformAdmin,
+	"adminputorganizationprojectmember":    PlatformAdmin,
+	"adminremoveorganizationprojectmember": PlatformAdmin,
 }
 
 // whileMustChangePassword lists the only operations a session may call while its user has to
@@ -289,12 +383,34 @@ func AllowedWhileMustChangePassword(operationID string) bool {
 	return whileMustChangePassword[strings.ToLower(operationID)]
 }
 
-// MinRole returns the minimum role of an operation (Public for operations without a session)
-// and whether the operation is in the table. Operation ids are compared case-insensitively:
-// the generated server passes them as Go names.
+// PermissionOf returns the permission an operation needs (NoSession or PlatformAdmin for the
+// operations no role decides) and whether the operation is in the table. Operation ids are
+// compared case-insensitively: the generated server passes them as Go names.
+func PermissionOf(operationID string) (Permission, bool) {
+	p, ok := operations[strings.ToLower(operationID)]
+	return p, ok
+}
+
+// MinRole returns the lowest role that holds the permission an operation needs, for messages.
+// Public operations report Public; platform admin operations report Viewer because the flag,
+// not a role, decides.
 func MinRole(operationID string) (Role, bool) {
-	r, ok := operations[strings.ToLower(operationID)]
-	return r, ok
+	p, ok := PermissionOf(operationID)
+	if !ok {
+		return "", false
+	}
+	switch p {
+	case NoSession:
+		return Public, true
+	case PlatformAdmin:
+		return Viewer, true
+	}
+	for i := len(Roles()) - 1; i >= 0; i-- {
+		if Has(Roles()[i], p) {
+			return Roles()[i], true
+		}
+	}
+	return "", false
 }
 
 // Operations returns every operation id in the table (lowercase).
@@ -309,23 +425,26 @@ func Operations() []string {
 // Can reports whether the actor may call the operation. Unknown operations and unknown roles
 // are denied; Public operations are allowed to anyone.
 func Can(a Actor, operationID string) bool {
-	min, ok := MinRole(operationID)
+	p, ok := PermissionOf(operationID)
 	if !ok {
 		return false
 	}
-	if min == Public {
+	switch p {
+	case NoSession:
 		return true
+	case PlatformAdmin:
+		return Valid(a.Role)
 	}
-	return a.Role.AtLeast(min)
+	return Has(a.Role, p)
 }
 
 // CanManage reports whether the actor may change or remove a member whose role is target, and
-// (for a role change) give it the role to (pass "" for a removal). Only admins and owners manage
-// members; an admin never touches an owner and never grants owner: nobody grants a
+// (for a role change) give it the role to (pass "" for a removal). Only maintainers and owners manage
+// members; a maintainer never touches an owner and never grants owner: nobody grants a
 // role above their own. Guard rails that need the database (the last owner, the platform admin)
 // are checked by the caller.
 func CanManage(a Actor, target, to Role) bool {
-	if !a.Role.AtLeast(Admin) || !Valid(target) {
+	if !a.Role.AtLeast(Maintainer) || !Valid(target) {
 		return false
 	}
 	if rank(target) > rank(a.Role) {
@@ -337,8 +456,8 @@ func CanManage(a Actor, target, to Role) bool {
 	return true
 }
 
-// CanInvite reports whether the actor may create an invitation with the role: admins and owners,
-// for admin, member or viewer (owner is granted by a role change, never by a link).
+// CanInvite reports whether the actor may create an invitation with the role: maintainers and owners,
+// for maintainer, member or viewer (owner is granted by a role change, never by a link).
 func CanInvite(a Actor, role Role) bool {
-	return a.Role.AtLeast(Admin) && role != Owner && Valid(role) && rank(role) <= rank(a.Role)
+	return a.Role.AtLeast(Maintainer) && role != Owner && Valid(role) && rank(role) <= rank(a.Role)
 }

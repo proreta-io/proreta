@@ -130,7 +130,7 @@ func lockTarget(ctx context.Context, q *authdb.Queries, tenantID, userID uuid.UU
 	return m, nil
 }
 
-// ChangeRole gives a member another role (admin or owner only; an admin never touches an owner
+// ChangeRole gives a member another role (maintainer or owner only; a maintainer never touches an owner
 // and nobody grants a role above their own, authz.CanManage).
 func (s *Service) ChangeRole(ctx context.Context, a Actor, userID uuid.UUID, role string) (Member, error) {
 	if !authz.Valid(authz.Role(role)) {

@@ -288,7 +288,7 @@ func TestRegisterKillSwitchAndContract(t *testing.T) {
 	secret := strings.Repeat("s3cr3t", 200)
 	for name, body := range map[string]string{
 		"missing password":  `{"email":"a@example.com"}`,
-		"unknown field":     `{"email":"a@example.com","password":"x","role":"admin"}`,
+		"unknown field":     `{"email":"a@example.com","password":"x","role":"maintainer"}`,
 		"password too long": `{"email":"a@example.com","password":"` + secret + `"}`,
 		"email not string":  `{"email":1,"password":"x"}`,
 		"not json":          `email=a`,

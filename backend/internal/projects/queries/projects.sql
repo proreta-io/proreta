@@ -67,7 +67,7 @@ WHERE p.tenant_id = @tenant_id AND p.deleted_at IS NULL
   AND (p.all_members OR pm.user_id IS NOT NULL);
 
 -- name: ListProjectMembers :many
--- Owners and admins (they see every project), the listed members, and for an all_members project
+-- Owners and maintainers (they see every project), the listed members, and for an all_members project
 -- every member of the organization. Reads memberships and users (owned by auth) read-only.
 SELECT m.user_id, u.email::text AS login, u.display_name, m.role AS organization_role,
        pm.role AS project_role, (pm.user_id IS NOT NULL)::boolean AS explicit
@@ -76,7 +76,7 @@ JOIN users AS u ON u.id = m.user_id
 LEFT JOIN project_members AS pm
        ON pm.tenant_id = m.tenant_id AND pm.project_id = @project_id AND pm.user_id = m.user_id
 WHERE m.tenant_id = @tenant_id
-  AND (@all_members::boolean OR pm.user_id IS NOT NULL OR m.role IN ('owner', 'admin'))
+  AND (@all_members::boolean OR pm.user_id IS NOT NULL OR m.role IN ('owner', 'maintainer'))
 ORDER BY m.created_at, m.user_id;
 
 -- name: GetOrganizationRole :one

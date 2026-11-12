@@ -69,8 +69,8 @@ func (s *server) ListMembers(ctx context.Context, _ gen.ListMembersRequestObject
 	if err != nil {
 		return nil, err
 	}
-	// Logins are email addresses: owners and admins only.
-	showLogins := authz.Role(p.Role).AtLeast(authz.Admin)
+	// Logins are email addresses: owners and maintainers only.
+	showLogins := authz.Role(p.Role).AtLeast(authz.Maintainer)
 	out := gen.ListMembers200JSONResponse{Items: make([]gen.Member, len(list))}
 	for i, m := range list {
 		out.Items[i] = toMember(m, showLogins)
@@ -236,7 +236,7 @@ func (s *server) SwitchOrganization(ctx context.Context, req gen.SwitchOrganizat
 	}, nil
 }
 
-// toMember maps a member; showLogin is false for callers below admin.
+// toMember maps a member; showLogin is false for callers below maintainer.
 func toMember(m auth.Member, showLogin bool) gen.Member {
 	return gen.Member{UserId: m.UserID, Login: loginFor(m.Login, showLogin), DisplayName: m.DisplayName, Role: gen.MembershipRole(m.Role),
 		JoinedAt: m.JoinedAt, IsPlatformAdmin: m.IsPlatformAdmin}

@@ -37,7 +37,7 @@ import {
   Skeleton,
 } from "./ui";
 
-const DOMAIN_ROLES: AuthDomainRole[] = ["viewer", "member", "admin"];
+const DOMAIN_ROLES: AuthDomainRole[] = ["viewer", "member", "maintainer"];
 
 /** The message for a refused claim (not on the allow-list, no fresh proof, or the domain belongs to another organization). */
 export function claimError(err: unknown): string {

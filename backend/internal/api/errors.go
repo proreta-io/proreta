@@ -147,7 +147,7 @@ func writeError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 		p.Type, p.Title, p.Status = problemDefaultProject, "The Default project cannot be deleted", http.StatusConflict
 	case errors.Is(err, authz.ErrForbidden):
 		p.Type, p.Title, p.Status = problemForbidden, "Not allowed", http.StatusForbidden
-		p.Detail = "Your role does not allow this: admins cannot change owners, and nobody can grant a role above their own."
+		p.Detail = "Your role does not allow this: maintainers cannot change owners, and nobody can grant a role above their own."
 	case errors.Is(err, auth.ErrInvitationInvalid):
 		p.Type, p.Title, p.Status = problemInvitationInvalid, "This invitation link is not valid", http.StatusNotFound
 		p.Detail = "It may have expired, been used or been revoked. Ask for a new link."

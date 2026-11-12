@@ -110,7 +110,7 @@ describe("admin organization members", () => {
       within(select)
         .getAllByRole("option")
         .map((o) => o.textContent),
-    ).toEqual(["Owner", "Admin", "Member", "Viewer"]);
+    ).toEqual(["Owner", "Maintainer", "Member", "Viewer"]);
     await userEvent.selectOptions(select, "viewer");
     await waitFor(() => expect(requests(fetchMock, "PUT", `${base}/members/u-2`)).toHaveLength(1));
     expect(await requests(fetchMock, "PUT", `${base}/members/u-2`)[0]!.json()).toEqual({
@@ -180,7 +180,7 @@ describe("admin organization members", () => {
         });
       },
       [`PUT ${base}/members/u-3`]: () =>
-        json(member({ userId: "u-3", login: "carol@gamma.example", role: "admin" })),
+        json(member({ userId: "u-3", login: "carol@gamma.example", role: "maintainer" })),
     });
     renderApp("/admin/organizations/t-1");
     const add = await screen.findByRole("button", { name: "Add member" });
@@ -191,11 +191,14 @@ describe("admin organization members", () => {
     expect(within(list).getByText("carol@gamma.example")).toBeInTheDocument();
     await userEvent.click(within(list).getByRole("button"));
     expect(screen.queryByLabelText("Find a user")).toBeNull();
-    await userEvent.selectOptions(screen.getByLabelText("Role", { selector: "select" }), "admin");
+    await userEvent.selectOptions(
+      screen.getByLabelText("Role", { selector: "select" }),
+      "maintainer",
+    );
     await userEvent.click(screen.getByRole("button", { name: "Add member" }));
     await waitFor(() => expect(requests(fetchMock, "PUT", `${base}/members/u-3`)).toHaveLength(1));
     expect(await requests(fetchMock, "PUT", `${base}/members/u-3`)[0]!.json()).toEqual({
-      role: "admin",
+      role: "maintainer",
     });
     expect(await screen.findByLabelText("Find a user")).toBeInTheDocument();
   });
@@ -244,7 +247,7 @@ describe("admin organization invitations", () => {
       within(within(dialog).getByLabelText("Role"))
         .getAllByRole("option")
         .map((o) => o.textContent),
-    ).toEqual(["Admin", "Member", "Viewer"]);
+    ).toEqual(["Maintainer", "Member", "Viewer"]);
     await userEvent.type(within(dialog).getByLabelText("Note (optional)"), "Dan");
     await userEvent.click(within(dialog).getByRole("button", { name: "Create link" }));
     expect(await screen.findByLabelText("Invitation link")).toHaveValue(

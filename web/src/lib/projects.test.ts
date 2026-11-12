@@ -53,7 +53,7 @@ describe("project choice", () => {
   });
 
   it("labels the whole scope by role", () => {
-    expect(allProjectsLabel("admin")).toBe("All projects");
+    expect(allProjectsLabel("maintainer")).toBe("All projects");
     expect(allProjectsLabel("member")).toBe("All my projects");
   });
 });

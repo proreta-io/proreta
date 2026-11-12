@@ -5,15 +5,15 @@ This page is the practical side of organizations, roles and invitations for the 
 ## Roles
 | Role | May |
 |---|---|
-| `owner` | everything an admin may, plus grant and revoke `owner` and delete the organization |
-| `admin` | invite people, change and remove admins, members and viewers (never owners), notification channels, every monitor |
+| `owner` | everything a maintainer may, plus grant and revoke `owner` and delete the organization |
+| `maintainer` | invite people, change and remove maintainers, members and viewers (never owners), notification channels, every monitor |
 | `member` | create, edit, pause and delete monitors and heartbeats |
 | `viewer` | read monitors, incidents, channels, members and the plan |
 
 The API refuses anything above a role with 403 `urn:proreta:problem:forbidden`; the web hides those controls and says who can do it. A role change applies on the member's next request. Every organization keeps at least one active owner: the last one cannot step down, be removed or leave (409 `urn:proreta:problem:last-owner`). Ownership transfer is "make someone owner, then step down".
 
 ## Inviting someone
-1. An admin or owner opens **Members**, chooses **Invite someone**, picks the role and optionally a note for themselves (for example the person's name). When the platform admin has set up and tested [outgoing email](email.md) the dialog also offers an optional **Email** field and a **Send by email** checkbox, pre-checked when the admin turned on "Send invitation links by email".
+1. A maintainer or owner opens **Members**, chooses **Invite someone**, picks the role and optionally a note for themselves (for example the person's name). When the platform admin has set up and tested [outgoing email](email.md) the dialog also offers an optional **Email** field and a **Send by email** checkbox, pre-checked when the admin turned on "Send invitation links by email".
 2. The link (`<PRORETA_PUBLIC_URL>/invite#<token>`) is shown **once**. Proreta stores only its SHA-256. Copy it and hand it over over a channel you trust (a direct message, not a shared channel or a ticket). Without an address in the dialog, or on an installation without email, nothing is sent.
 3. The person opens it. Without an account they register on that page (this works even when `PRORETA_REGISTRATION_ENABLED=false`, because the invitation is the authorization); they get no organization of their own. With an account they sign in and choose **Join**; the session moves to the new organization. Their other organizations stay; the switcher in the top bar moves between them.
 
@@ -40,7 +40,7 @@ Revoke it at once: **Members → Invitations → Revoke**. If it was already use
 The token travels in the URL fragment, which browsers never send to a server, so it is not in the gateway's or the api's access logs. It can still be in the browser history and in whatever chat it was pasted into.
 
 ## "This invitation link is not valid"
-The answer is the same for an unknown, expired, used or revoked link, and for an organization that is suspended or deleted. Ask an admin of the organization for a new link. Too many failed attempts from one address are answered 429 for up to 15 minutes (20 failures per 15 minutes per api replica).
+The answer is the same for an unknown, expired, used or revoked link, and for an organization that is suspended or deleted. Ask a maintainer of the organization for a new link. Too many failed attempts from one address are answered 429 for up to 15 minutes (20 failures per 15 minutes per api replica).
 
 A user who is already a member gets 409 `already-member`; they switch to the organization from the top bar instead. The platform admin cannot join other organizations: use a separate normal account.
 

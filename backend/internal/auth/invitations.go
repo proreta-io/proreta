@@ -49,7 +49,7 @@ var (
 	ErrAlreadyMember = errors.New("auth: already a member")
 )
 
-// Invitation is an invitation as admins see it; the token is never part of it.
+// Invitation is an invitation as maintainers see it; the token is never part of it.
 type Invitation struct {
 	ID         uuid.UUID
 	Role       string
@@ -95,7 +95,7 @@ type InvitationInput struct {
 	SendEmail *bool
 }
 
-// Limits on invitation emails, per organization and per api replica: an admin must not be able
+// Limits on invitation emails, per organization and per api replica: a maintainer must not be able
 // to turn Proreta into a mailer for strangers. Open invitations are also capped by max_members.
 const (
 	invitationMailsPerHour      = 30
@@ -106,7 +106,7 @@ const (
 // installation without email.
 const invitationMailDisabledMessage = "this installation does not send email"
 
-// CreateInvitation creates an invitation (admin or owner, role admin, member or viewer) and
+// CreateInvitation creates an invitation (maintainer or owner, role maintainer, member or viewer) and
 // returns it with its token, which is shown once and never stored (only its SHA-256). Open
 // invitations count toward max_members, checked under the tenant row lock. No email is sent.
 func (s *Service) CreateInvitation(ctx context.Context, a Actor, role, label string) (Invitation, string, error) {
@@ -117,7 +117,7 @@ func (s *Service) CreateInvitation(ctx context.Context, a Actor, role, label str
 // CreateInvitationFor is CreateInvitation with an optional address to send the link to. The
 // email is queued in the transaction that creates the invitation, so it exists exactly when the
 // invitation does; emailed reports whether one was queued. The answer still carries the token,
-// so the admin can hand the link over as before. When the label is empty and the address is
+// so the maintainer can hand the link over as before. When the label is empty and the address is
 // short enough, the address becomes the label, so the invitations list says who was invited.
 func (s *Service) CreateInvitationFor(ctx context.Context, a Actor, in InvitationInput) (inv Invitation, token string, emailed bool, err error) {
 	label := strings.TrimSpace(in.Label)
