@@ -2,7 +2,7 @@
 # Each entry needs a design decision recorded with the change. Remove an entry when the next
 # release no longer differs there.
 
-# ADR-0118: the role admin is renamed maintainer; pre-MVP, no compatibility with older clients (the web app changes in the same release).
+# The role admin is renamed maintainer; before the first stable release there is no compatibility with older clients (the web app changes in the same release).
 GET /api/v1/admin/organizations/{organizationId}/invitations added the new `maintainer` enum value to the `items/items/role` response property for the response status `200`
 POST /api/v1/admin/organizations/{organizationId}/invitations removed the enum value `admin` of the request property `role`
 POST /api/v1/admin/organizations/{organizationId}/invitations added the new `maintainer` enum value to the `invitation/role` response property for the response status `201`

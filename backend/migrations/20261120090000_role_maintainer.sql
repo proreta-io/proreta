@@ -1,7 +1,7 @@
 -- +goose Up
 SET LOCAL lock_timeout = '5s';
 
--- The role admin is renamed maintainer (ADR-0117). Audit rows keep the old name.
+-- The role admin is renamed maintainer. Audit rows keep the old name.
 ALTER TABLE memberships DROP CONSTRAINT memberships_role_check;
 ALTER TABLE invitations DROP CONSTRAINT invitations_role_check;
 ALTER TABLE org_auth_domains DROP CONSTRAINT org_auth_domains_default_role_check;
