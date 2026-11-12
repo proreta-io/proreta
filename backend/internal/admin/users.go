@@ -32,6 +32,7 @@ type Account struct {
 	DisplayName        string
 	Status             string
 	IsPlatformAdmin    bool
+	IsSystemAdmin      bool
 	EmailVerified      bool
 	MustChangePassword bool
 	CreatedAt          time.Time
@@ -61,10 +62,10 @@ type AccountDetail struct {
 	OpenSessions int
 }
 
-const accountColumns = `id, login, display_name, status, is_platform_admin, email_verified, must_change_password, created_at, organization_count`
+const accountColumns = `id, login, display_name, status, is_platform_admin, is_system_admin, email_verified, must_change_password, created_at, organization_count`
 
 func (a *Account) dest() []any {
-	return []any{&a.ID, &a.Login, &a.DisplayName, &a.Status, &a.IsPlatformAdmin, &a.EmailVerified, &a.MustChangePassword, &a.CreatedAt, &a.OrganizationCount}
+	return []any{&a.ID, &a.Login, &a.DisplayName, &a.Status, &a.IsPlatformAdmin, &a.IsSystemAdmin, &a.EmailVerified, &a.MustChangePassword, &a.CreatedAt, &a.OrganizationCount}
 }
 
 // ListAccounts returns a page of all users, newest first. Query matches the email or the display
@@ -144,7 +145,7 @@ func getAccount(ctx context.Context, tx pgx.Tx, actor Actor, id uuid.UUID) (Acco
 }
 
 // SetAccountStatus disables or enables a user and returns the user afterwards. Disabling also
-// deletes all of the user's sessions; a platform admin is refused with ErrSystemAdmin. Setting
+// deletes all of the user's sessions; the system admin is refused with ErrSystemAdmin. Setting
 // the status the user already has changes nothing and writes no audit row.
 func (s *Service) SetAccountStatus(ctx context.Context, actor Actor, id uuid.UUID, status string) (AccountDetail, error) {
 	var d AccountDetail

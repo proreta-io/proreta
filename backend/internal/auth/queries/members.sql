@@ -1,7 +1,7 @@
 -- Members and invitations. Every query runs in a tenant transaction.
 
 -- name: ListMembers :many
-SELECT m.user_id, u.email, u.display_name, u.status, u.is_platform_admin, m.role, m.created_at
+SELECT m.user_id, u.email, u.display_name, u.status, u.is_platform_admin, u.is_system_admin, m.role, m.created_at
 FROM memberships AS m
 JOIN users AS u ON u.id = m.user_id
 WHERE m.tenant_id = @tenant_id
@@ -9,7 +9,7 @@ ORDER BY m.created_at, m.user_id;
 
 -- name: LockMember :one
 -- The membership a role change or removal acts on, locked until the end of the transaction.
-SELECT m.role, m.created_at, u.email, u.display_name, u.status, u.is_platform_admin
+SELECT m.role, m.created_at, u.email, u.display_name, u.status, u.is_platform_admin, u.is_system_admin
 FROM memberships AS m
 JOIN users AS u ON u.id = m.user_id
 WHERE m.tenant_id = @tenant_id AND m.user_id = @user_id

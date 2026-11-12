@@ -36,7 +36,7 @@ export default function VerifyEmailBanner() {
   if (
     !verificationEnabled ||
     !user ||
-    user.isPlatformAdmin ||
+    user.isSystemAdmin ||
     user.emailVerified ||
     !user.login.includes("@")
   ) {

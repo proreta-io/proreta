@@ -449,7 +449,7 @@ func (s *Service) AcceptInvitation(ctx context.Context, p Principal, token strin
 		if err != nil || u.Status != userStatusActive {
 			return ErrUnauthenticated
 		}
-		if u.IsPlatformAdmin {
+		if u.IsSystemAdmin {
 			// BootstrapAdmin refuses to start when the admin belongs to another tenant.
 			return ErrAlreadyMember
 		}

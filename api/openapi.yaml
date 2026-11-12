@@ -97,9 +97,9 @@ tags:
     description: The organization's plan, its limits and the current usage
   - name: admin
     description: |
-      Platform administration across organizations. Only the platform admin (the system
-      admin configured by `PRORETA_ADMIN_LOGIN`, `isPlatformAdmin` in the user object) may call
-      these operations; any other session gets 403 `urn:proreta:problem:forbidden`. Every
+      Platform administration across organizations. Only a platform admin (`isPlatformAdmin` in
+      the user object: the system admin configured by `PRORETA_ADMIN_LOGIN`, and users granted
+      the flag with `PUT /api/v1/admin/users/{userId}/platform-admin`) may call these operations; any other session gets 403 `urn:proreta:problem:forbidden`. Every
       operation of this tag is experimental (`x-experimental: true`): it serves the bundled admin
       panel and may change in any release without notice.
 security:
@@ -330,7 +330,7 @@ paths:
       summary: Email a link to reset a forgotten password
       description: |
         Public (no session). Sends a one-time link to the address when it belongs to an account that
-        can be reset (active, with a password, not the platform admin) and answers 202 either way, so
+        can be reset (active, with a password, not the system admin) and answers 202 either way, so
         the answer says nothing about which addresses are registered. The link is
         `PRORETA_PUBLIC_URL/reset-password#<token>`; it works once and for one hour, and only the
         newest link of an account works. A malformed address is 422 (that says nothing about
@@ -1757,7 +1757,7 @@ paths:
       description: |
         Maintainer or owner. A maintainer may change only maintainers, members and viewers and may not grant
         `owner` (403 `urn:proreta:problem:forbidden`). The organization always keeps an active
-        owner: demoting the last one is 409 `urn:proreta:problem:last-owner`. The platform admin's
+        owner: demoting the last one is 409 `urn:proreta:problem:last-owner`. The system admin's
         role in the default organization cannot be changed (409 `urn:proreta:problem:system-admin`).
         Audited as `member.role_changed`. The new role applies on the member's next request.
       tags: [members]
@@ -1796,7 +1796,7 @@ paths:
       summary: Remove a member
       description: |
         Maintainer or owner, with the rules of the role change (a maintainer cannot remove an owner, the
-        last owner cannot be removed, nor the platform admin). The member's sessions in this
+        last owner cannot be removed, nor the system admin). The member's sessions in this
         organization end at once; the user and its other memberships stay. Audited as
         `member.removed`. To leave the organization yourself, use `POST /api/v1/organization/leave`.
       tags: [members]
@@ -1975,7 +1975,7 @@ paths:
         old session is deleted). 404 `urn:proreta:problem:invitation-invalid` for an unknown,
         expired, used or revoked token (counted against the per-client-IP limit, 429); 409
         `urn:proreta:problem:already-member` when the user is already a member, or when the user is
-        the platform admin (who belongs to the default organization only); 409
+        the system admin (who belongs to the default organization only); 409
         `urn:proreta:problem:plan-limit-reached` when the organization's member limit was lowered
         below its members. Audited as `member.joined`. Any role.
       tags: [members]
@@ -2772,7 +2772,7 @@ paths:
       summary: Disable a user
       description: |
         The user can no longer sign in (password, OAuth or invitation) and all of the user's
-        sessions in every organization are deleted. Memberships stay. A platform admin cannot be
+        sessions in every organization are deleted. Memberships stay. The system admin cannot be
         disabled (409 `urn:proreta:problem:system-admin`). Disabling a user who is already
         disabled changes nothing and writes no audit row. Audited as `admin.user.disabled`
         (`sessionsRevoked`), in the user's last used organization. Platform admins only.
@@ -2834,6 +2834,56 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/users/{userId}/platform-admin:
+    parameters:
+      - $ref: "#/components/parameters/AdminUserId"
+    put:
+      operationId: adminSetPlatformAdmin
+      x-experimental: true
+      summary: Grant or revoke the platform-admin flag
+      description: |
+        `enabled` `true` makes an active user a platform admin with full control of the instance;
+        `false` removes the flag. The user keeps all sessions, memberships and organizations; the
+        flag is read on every request, so a revoked admin loses admin access at once. A request
+        that changes nothing does nothing and writes no audit row. The system admin cannot be
+        revoked (409 `urn:proreta:problem:system-admin`) and the last active platform admin
+        cannot be revoked (409 `urn:proreta:problem:last-platform-admin`). Only an active user can
+        be granted (422). Audited as `admin.user.platform_admin_granted` or
+        `admin.user.platform_admin_revoked`, in the user's last used organization. Platform admins
+        only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminPlatformAdminUpdate"
+      responses:
+        "200":
+          description: The user after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         default:
           $ref: "#/components/responses/Error"
   /api/v1/admin/users/{userId}/sessions/revoke:
@@ -3065,8 +3115,8 @@ paths:
         `viewer`), or changes the role of a member; setting the role a member already has changes
         nothing and writes no audit row. An unknown user is 404. Adding respects the plan's member
         limit (409 `urn:proreta:problem:plan-limit-reached`; raise the plan first). The organization
-        always keeps an active owner (409 `urn:proreta:problem:last-owner`). The platform admin's
-        membership of the default organization cannot be changed and the platform admin cannot be
+        always keeps an active owner (409 `urn:proreta:problem:last-owner`). The system admin's
+        membership of the default organization cannot be changed and the system admin cannot be
         added to another organization (409 `urn:proreta:problem:system-admin`). A deleted
         organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). A disabled
         account can be added but cannot sign in. A new role applies on the member's next request.
@@ -3109,7 +3159,7 @@ paths:
       summary: Remove a member from an organization
       description: |
         Ends the membership and the user's sessions in this organization at once; the user and
-        their other memberships stay. The last active owner and the platform admin cannot be
+        their other memberships stay. The last active owner and the system admin cannot be
         removed (409 `urn:proreta:problem:last-owner`, `urn:proreta:problem:system-admin`); a deleted
         organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited as
         `admin.member.removed`. Platform admins only.
@@ -4034,8 +4084,14 @@ components:
         isPlatformAdmin:
           type: boolean
           description: |
-            Whether the user is the platform admin (only the system admin configured by
-            `PRORETA_ADMIN_LOGIN`; no API grants it).
+            Whether the user is a platform admin: the system admin configured by
+            `PRORETA_ADMIN_LOGIN`, or a user granted the flag in the admin panel.
+        isSystemAdmin:
+          type: boolean
+          description: |
+            Whether the user is the system admin configured by `PRORETA_ADMIN_LOGIN`: its login is
+            a credential, not a mailbox, and its membership of the default organization comes from
+            configuration. Absent in answers of an earlier release.
         emailVerified:
           type: boolean
           description: |
@@ -4835,11 +4891,11 @@ components:
           format: date-time
         isPlatformAdmin:
           type: boolean
-          description: The system admin; its password is managed by its Secret and cannot be reset here
+          description: A platform admin; the password of a platform admin cannot be reset here
     AdminUserSummary:
       type: object
       additionalProperties: false
-      required: [id, login, displayName, status, isPlatformAdmin, emailVerified, mustChangePassword, createdAt, organizationCount]
+      required: [id, login, displayName, status, isPlatformAdmin, isSystemAdmin, emailVerified, mustChangePassword, createdAt, organizationCount]
       properties:
         id:
           type: string
@@ -4854,6 +4910,9 @@ components:
           enum: [active, disabled]
         isPlatformAdmin:
           type: boolean
+        isSystemAdmin:
+          type: boolean
+          description: The configured system admin, which cannot be revoked or disabled
         emailVerified:
           type: boolean
           description: Whether an identity provider or an emailed link confirmed the address
@@ -5112,10 +5171,18 @@ components:
           type: boolean
           nullable: true
           description: "`true` or `false` is the choice; `null` follows the environment again"
+    AdminPlatformAdminUpdate:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+          description: "`true` grants the platform-admin flag, `false` revokes it"
     AdminMember:
       type: object
       additionalProperties: false
-      required: [userId, login, displayName, role, status, joinedAt, isPlatformAdmin]
+      required: [userId, login, displayName, role, status, joinedAt, isPlatformAdmin, isSystemAdmin]
       properties:
         userId:
           type: string
@@ -5135,6 +5202,9 @@ components:
           type: string
           format: date-time
         isPlatformAdmin:
+          type: boolean
+          description: A platform admin
+        isSystemAdmin:
           type: boolean
           description: The system admin; its membership cannot be changed or removed
     AdminMemberList:
@@ -5282,7 +5352,7 @@ components:
     Member:
       type: object
       additionalProperties: false
-      required: [userId, login, displayName, role, joinedAt, isPlatformAdmin]
+      required: [userId, login, displayName, role, joinedAt, isPlatformAdmin, isSystemAdmin]
       properties:
         userId:
           type: string
@@ -5299,6 +5369,9 @@ components:
           type: string
           format: date-time
         isPlatformAdmin:
+          type: boolean
+          description: A platform admin
+        isSystemAdmin:
           type: boolean
           description: The system admin; its role cannot be changed and it cannot be removed
     MemberList:
@@ -6056,7 +6129,8 @@ components:
         | `urn:proreta:problem:plan-limit-reached` | 409 | The plan allows no more of a resource; carries `limit` and `max` |
         | `urn:proreta:problem:protected-organization` | 409 | The default organization, or the admin's own, cannot be suspended or deleted |
         | `urn:proreta:problem:organization-deleted` | 409 | A deleted organization cannot be changed |
-        | `urn:proreta:problem:system-admin` | 409 | The platform admin's membership cannot be changed through the API, nor its password reset by another admin |
+        | `urn:proreta:problem:system-admin` | 409 | The system admin's membership cannot be changed through the API, nor can it be disabled or revoked; the password of a platform admin cannot be reset by another admin |
+        | `urn:proreta:problem:last-platform-admin` | 409 | The platform-admin flag of the last active platform admin cannot be revoked |
         | `urn:proreta:problem:invitation-accepted` | 409 | The invitation was already used |
         | `urn:proreta:problem:already-member` | 409 | The user is already a member of the organization |
         | `urn:proreta:problem:last-owner` | 409 | The organization would be left without an owner |

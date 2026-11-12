@@ -42,7 +42,7 @@ The token travels in the URL fragment, which browsers never send to a server, so
 ## "This invitation link is not valid"
 The answer is the same for an unknown, expired, used or revoked link, and for an organization that is suspended or deleted. Ask a maintainer of the organization for a new link. Too many failed attempts from one address are answered 429 for up to 15 minutes (20 failures per 15 minutes per api replica).
 
-A user who is already a member gets 409 `already-member`; they switch to the organization from the top bar instead. The platform admin cannot join other organizations: use a separate normal account.
+A user who is already a member gets 409 `already-member`; they switch to the organization from the top bar instead. The system admin (`PRORETA_ADMIN_LOGIN`) cannot join other organizations: use a separate normal account, which can be granted platform admin on the user page.
 
 ## Rolling back an image
 Rolling an image back across a migration is not supported: api, worker and jobs refuse to start when the database schema is newer than their binary. Roll forward instead. Between releases with the same migrations an image rollback is fine.
@@ -51,7 +51,7 @@ Rolling an image back across a migration is not supported: api, worker and jobs 
 `GET /api/v1/auth/organizations` lists the user's organizations; switching (`POST /api/v1/auth/switch-organization`) checks the membership and that the organization is active, then replaces the session (new cookie and CSRF token; the old session is deleted). A suspended organization is listed but cannot be selected. Login still lands in the organization `auth_login_tenant` picks (`default` first, then active before suspended, then the oldest membership).
 
 ## Leaving and deleting
-- **Leave organization** (any role) ends the membership and the session. The last owner and the platform admin cannot leave.
+- **Leave organization** (any role) ends the membership and the session. The last owner and the system admin cannot leave.
 - **Delete organization** (owner only, never `default`) is the same soft delete the platform admin does: monitors stop, deliveries are dropped, every member loses access. Restoring needs SQL as `proreta_owner` (see [admin-panel.md](admin-panel.md)).
 
 ## Recovering an organization without an owner

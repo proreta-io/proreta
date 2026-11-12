@@ -162,7 +162,7 @@ func (s *Service) ChangePassword(ctx context.Context, p Principal, in ChangePass
 			return err
 		}
 		res = LoginResult{Token: sess.token, SessionInfo: SessionInfo{
-			User:   User{ID: p.UserID, Login: u.Email, DisplayName: cred.DisplayName, IsPlatformAdmin: cred.IsPlatformAdmin},
+			User:   User{ID: p.UserID, Login: u.Email, DisplayName: cred.DisplayName, IsPlatformAdmin: cred.IsPlatformAdmin, IsSystemAdmin: cred.IsSystemAdmin},
 			Tenant: t, Role: role, CSRFToken: sess.csrf, ExpiresAt: sess.expiresAt,
 		}}
 		return nil

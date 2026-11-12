@@ -14,6 +14,7 @@ const member = (over: Partial<Member> = {}): Member => ({
   role: "member",
   joinedAt: "2026-10-02T00:00:00Z",
   isPlatformAdmin: false,
+  isSystemAdmin: false,
   ...over,
 });
 

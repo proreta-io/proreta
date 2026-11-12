@@ -34,9 +34,9 @@ var (
 	ErrMemberNotFound = errors.New("auth: member not found")
 	// ErrLastOwner means the change would leave the organization without an active owner.
 	ErrLastOwner = errors.New("auth: the organization must keep an active owner")
-	// ErrSystemAdminMember means the change targets the platform admin, whose owner membership of
+	// ErrSystemAdminMember means the change targets the system admin, whose owner membership of
 	// the default tenant comes from configuration.
-	ErrSystemAdminMember = errors.New("auth: the platform admin's membership cannot be changed")
+	ErrSystemAdminMember = errors.New("auth: the system admin's membership cannot be changed")
 	// ErrProtectedOrganization means the default organization cannot be deleted.
 	ErrProtectedOrganization = errors.New("auth: the default organization cannot be deleted")
 )
@@ -60,6 +60,8 @@ type Member struct {
 	Role            string
 	JoinedAt        time.Time
 	IsPlatformAdmin bool
+	// IsSystemAdmin marks the configured admin, whose membership is never changed.
+	IsSystemAdmin bool
 	// Status is the account status (active or disabled); set by ListMembers.
 	Status string
 }
@@ -75,7 +77,7 @@ func (s *Service) ListMembers(ctx context.Context, tenantID uuid.UUID) ([]Member
 		out = make([]Member, len(rows))
 		for i, r := range rows {
 			out[i] = Member{UserID: r.UserID, Login: r.Email, DisplayName: r.DisplayName, Role: r.Role,
-				JoinedAt: r.CreatedAt, IsPlatformAdmin: r.IsPlatformAdmin, Status: r.Status}
+				JoinedAt: r.CreatedAt, IsPlatformAdmin: r.IsPlatformAdmin, IsSystemAdmin: r.IsSystemAdmin, Status: r.Status}
 		}
 		return nil
 	})
@@ -106,7 +108,7 @@ func lockActorRole(ctx context.Context, tx pgx.Tx, a Actor) (authz.Actor, error)
 }
 
 // lockTarget locks the target membership and applies the rules that need the database: the
-// platform admin is never changed and the last active owner never loses the role.
+// system admin is never changed and the last active owner never loses the role.
 func lockTarget(ctx context.Context, q *authdb.Queries, tenantID, userID uuid.UUID, losesOwner bool) (authdb.LockMemberRow, error) {
 	m, err := q.LockMember(ctx, authdb.LockMemberParams{TenantID: tenantID, UserID: userID})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -115,7 +117,7 @@ func lockTarget(ctx context.Context, q *authdb.Queries, tenantID, userID uuid.UU
 	if err != nil {
 		return m, fmt.Errorf("lock member: %w", err)
 	}
-	if m.IsPlatformAdmin {
+	if m.IsSystemAdmin {
 		return m, ErrSystemAdminMember
 	}
 	if m.Role == RoleOwner && losesOwner {
@@ -165,7 +167,7 @@ func changeRole(ctx context.Context, tx pgx.Tx, a Actor, actor authz.Actor, user
 	if !authz.CanManage(actor, authz.Role(m.Role), authz.Role(role)) {
 		return Member{}, false, authz.ErrForbidden
 	}
-	out := Member{UserID: userID, Login: m.Email, DisplayName: m.DisplayName, Role: m.Role, JoinedAt: m.CreatedAt, IsPlatformAdmin: m.IsPlatformAdmin, Status: m.Status}
+	out := Member{UserID: userID, Login: m.Email, DisplayName: m.DisplayName, Role: m.Role, JoinedAt: m.CreatedAt, IsPlatformAdmin: m.IsPlatformAdmin, IsSystemAdmin: m.IsSystemAdmin, Status: m.Status}
 	if m.Role == role {
 		return out, false, nil
 	}
@@ -345,7 +347,7 @@ func (s *Service) SwitchOrganization(ctx context.Context, p Principal, tenantID 
 			return err
 		}
 		res = LoginResult{Token: sess.token, SessionInfo: SessionInfo{
-			User:   User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, IsPlatformAdmin: u.IsPlatformAdmin, MustChangePassword: u.PasswordMustChange, EmailVerified: u.EmailVerifiedAt != nil},
+			User:   User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, IsPlatformAdmin: u.IsPlatformAdmin, IsSystemAdmin: u.IsSystemAdmin, MustChangePassword: u.PasswordMustChange, EmailVerified: u.EmailVerifiedAt != nil},
 			Tenant: t, Role: role, CSRFToken: sess.csrf, ExpiresAt: sess.expiresAt,
 		}}
 		return nil

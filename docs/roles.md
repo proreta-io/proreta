@@ -69,6 +69,7 @@ Operations marked `public` need no session. Operations marked `platform admin` a
 | `AdminGetUser` | `GET /api/v1/admin/users/{userId}` | `platform admin` |
 | `AdminDisableUser` | `POST /api/v1/admin/users/{userId}/disable` | `platform admin` |
 | `AdminEnableUser` | `POST /api/v1/admin/users/{userId}/enable` | `platform admin` |
+| `AdminSetPlatformAdmin` | `PUT /api/v1/admin/users/{userId}/platform-admin` | `platform admin` |
 | `AdminResetUserPassword` | `POST /api/v1/admin/users/{userId}/reset-password` | `platform admin` |
 | `AdminRevokeUserSessions` | `POST /api/v1/admin/users/{userId}/sessions/revoke` | `platform admin` |
 | `RequestPasswordReset` | `POST /api/v1/auth/forgot-password` | `public` |

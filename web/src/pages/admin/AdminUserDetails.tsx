@@ -8,9 +8,11 @@ import {
   getAdminUser,
   queryKeys,
   revokeAdminUserSessions,
+  setAdminPlatformAdmin,
   type AdminUserDetail,
   type AdminUserMembership,
 } from "../../api/endpoints";
+import { useAuth } from "../../auth/AuthProvider";
 import { useToast } from "../../components/Toasts";
 import {
   Badge,
@@ -90,8 +92,16 @@ function UserInfo({ detail }: { detail: AdminUserDetail }) {
   const { user, memberships, openSessions } = detail;
   const queryClient = useQueryClient();
   const toast = useToast();
-  const [confirm, setConfirm] = useState<"disable" | "enable" | "revoke" | null>(null);
+  const me = useAuth().session?.user.id;
+  const [confirm, setConfirm] = useState<
+    "disable" | "enable" | "revoke" | "grant-admin" | "revoke-admin" | null
+  >(null);
   const disabled = user.status === "disabled";
+  const revokeBlocked = user.isSystemAdmin
+    ? "The system admin is configured by the deployment and cannot be revoked here."
+    : user.id === me
+      ? "You cannot revoke your own access. Ask another platform admin."
+      : null;
 
   function refresh(updated?: AdminUserDetail) {
     if (updated) queryClient.setQueryData(queryKeys.adminUser(user.id), updated);
@@ -106,6 +116,19 @@ function UserInfo({ detail }: { detail: AdminUserDetail }) {
       setConfirm(null);
       refresh(updated);
       toast(next === "disable" ? "User disabled" : "User enabled");
+    },
+    onError: (err) => {
+      setConfirm(null);
+      toast(errorMessage(err), "error");
+    },
+  });
+
+  const setPlatformAdmin = useMutation({
+    mutationFn: (enabled: boolean) => setAdminPlatformAdmin(user.id, enabled),
+    onSuccess: (updated, enabled) => {
+      setConfirm(null);
+      refresh(updated);
+      toast(enabled ? "Platform admin granted" : "Platform admin revoked");
     },
     onError: (err) => {
       setConfirm(null);
@@ -141,7 +164,10 @@ function UserInfo({ detail }: { detail: AdminUserDetail }) {
             </h1>
             <div className="flex flex-wrap items-center gap-3">
               <UserStatusBadge status={user.status} />
-              {user.isPlatformAdmin && <Badge tone="inverse">System admin</Badge>}
+              {user.isSystemAdmin && <Badge tone="inverse">System admin</Badge>}
+              {user.isPlatformAdmin && !user.isSystemAdmin && (
+                <Badge tone="inverse">Platform admin</Badge>
+              )}
               {user.displayName && (
                 <span className="text-[13px] text-muted-foreground">{user.displayName}</span>
               )}
@@ -156,7 +182,7 @@ function UserInfo({ detail }: { detail: AdminUserDetail }) {
                 Enable
               </Button>
             ) : (
-              !user.isPlatformAdmin && (
+              !user.isSystemAdmin && (
                 <Button variant="ghost-destructive" onClick={() => setConfirm("disable")}>
                   Disable
                 </Button>
@@ -164,7 +190,7 @@ function UserInfo({ detail }: { detail: AdminUserDetail }) {
             )}
           </div>
         </div>
-        {user.isPlatformAdmin && (
+        {user.isSystemAdmin && (
           <p className="max-w-[420px] text-caption text-muted-foreground">
             The system admin cannot be disabled here.
           </p>
@@ -188,6 +214,56 @@ function UserInfo({ detail }: { detail: AdminUserDetail }) {
           </>
         )}
       </dl>
+
+      <section aria-labelledby="platform-admin-heading" className="flex flex-col gap-3">
+        <h2 id="platform-admin-heading" className="text-lead font-semibold">
+          Platform admin
+        </h2>
+        <p className="max-w-[560px] text-[13px] text-muted-foreground">
+          {user.isPlatformAdmin
+            ? "This user is a platform admin: full control of the whole instance, every organization, user and setting."
+            : "This user is not a platform admin."}
+        </p>
+        {user.isPlatformAdmin ? (
+          <div className="flex flex-col items-start gap-2">
+            <Button
+              variant="secondary"
+              disabled={revokeBlocked !== null}
+              aria-describedby={revokeBlocked ? "platform-admin-note" : undefined}
+              onClick={() => setConfirm("revoke-admin")}
+            >
+              Revoke platform admin
+            </Button>
+            {revokeBlocked && (
+              <p
+                id="platform-admin-note"
+                className="max-w-[420px] text-caption text-muted-foreground"
+              >
+                {revokeBlocked}
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-col items-start gap-2">
+            <Button
+              variant="secondary"
+              disabled={disabled}
+              aria-describedby={disabled ? "platform-admin-note" : undefined}
+              onClick={() => setConfirm("grant-admin")}
+            >
+              Grant platform admin
+            </Button>
+            {disabled && (
+              <p
+                id="platform-admin-note"
+                className="max-w-[420px] text-caption text-muted-foreground"
+              >
+                Enable the user first: only an active user can be a platform admin.
+              </p>
+            )}
+          </div>
+        )}
+      </section>
 
       <section aria-labelledby="memberships-heading" className="flex flex-col gap-3">
         <h2 id="memberships-heading" className="text-lead font-semibold">
@@ -266,6 +342,36 @@ function UserInfo({ detail }: { detail: AdminUserDetail }) {
           onConfirm={() => setStatus.mutate("enable")}
         >
           <p>The user can sign in again with the same password or provider.</p>
+        </ConfirmDialog>
+      )}
+      {confirm === "grant-admin" && (
+        <ConfirmDialog
+          title={`Make ${user.login} a platform admin?`}
+          confirmLabel="Grant platform admin"
+          confirmVariant="primary"
+          busy={setPlatformAdmin.isPending}
+          onCancel={() => setConfirm(null)}
+          onConfirm={() => setPlatformAdmin.mutate(true)}
+        >
+          <p>
+            A platform admin has full control of the whole instance: every organization, user, plan
+            and setting, and can grant or revoke the same access for others. The user keeps their
+            own organizations. The change is recorded in the audit log.
+          </p>
+        </ConfirmDialog>
+      )}
+      {confirm === "revoke-admin" && (
+        <ConfirmDialog
+          title={`Revoke platform admin from ${user.login}?`}
+          confirmLabel="Revoke platform admin"
+          busy={setPlatformAdmin.isPending}
+          onCancel={() => setConfirm(null)}
+          onConfirm={() => setPlatformAdmin.mutate(false)}
+        >
+          <p>
+            The user loses access to the Admin Area at once. Sessions, organizations and data are
+            kept. The change is recorded in the audit log.
+          </p>
         </ConfirmDialog>
       )}
       {confirm === "revoke" && (

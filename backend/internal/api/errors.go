@@ -49,6 +49,7 @@ const (
 	problemAccountSuspended   = "urn:proreta:problem:account-suspended"
 	problemProtectedOrg       = "urn:proreta:problem:protected-organization"
 	problemSystemAdmin        = "urn:proreta:problem:system-admin"
+	problemLastPlatformAdmin  = "urn:proreta:problem:last-platform-admin"
 	problemOrgDeleted         = "urn:proreta:problem:organization-deleted"
 	problemInvitationInvalid  = "urn:proreta:problem:invitation-invalid"
 	problemInvitationAccepted = "urn:proreta:problem:invitation-accepted"
@@ -178,6 +179,12 @@ func writeError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 	case errors.Is(err, admin.ErrSystemAdmin):
 		p.Type, p.Title, p.Status = problemSystemAdmin, "The system administrator's password cannot be reset here", http.StatusConflict
 		p.Detail = "The platform administrator changes its own password under Profile; see docs/runbooks/admin-panel.md for a reset."
+	case errors.Is(err, admin.ErrSystemAdminRevoke):
+		p.Type, p.Title, p.Status = problemSystemAdmin, "The system administrator cannot be revoked", http.StatusConflict
+		p.Detail = "The system administrator is configured by PRORETA_ADMIN_LOGIN and always keeps platform admin access."
+	case errors.Is(err, admin.ErrLastPlatformAdmin):
+		p.Type, p.Title, p.Status = problemLastPlatformAdmin, "The last platform administrator cannot be revoked", http.StatusConflict
+		p.Detail = "Grant platform admin access to another active user first."
 	case errors.Is(err, admin.ErrEmailNotTested):
 		p.Type, p.Title, p.Status = problemEmailConflict, "The email settings have not passed a test", http.StatusConflict
 		p.Detail = "Send a test email with the current settings first; changing any connection setting makes it necessary again."
