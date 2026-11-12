@@ -18,7 +18,7 @@ const everywhere = (role: MembershipRole) => [
 ];
 const only = (role: MembershipRole) => [{ id: "a", name: "Alpha", role }];
 
-const NAV = ["Monitors", "Status pages", "Channels", "Settings"];
+const NAV = ["Monitors", "Status pages", "Channels", "Specula", "Settings"];
 const PEOPLE = ["People", "Projects"];
 const MANAGE_ORG = [
   "People and invitations",

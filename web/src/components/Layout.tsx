@@ -46,14 +46,14 @@ export default function Layout({ children }: { children?: ReactNode }) {
           Status pages
         </NavLink>
       )}
-      {can.anywhere("specula.read") && (
-        <NavLink to="/specula" className={navClass}>
-          Specula
-        </NavLink>
-      )}
       {can.anywhere("channel.read") && (
         <NavLink to="/channels" className={navClass}>
           Channels
+        </NavLink>
+      )}
+      {can.anywhere("specula.read") && (
+        <NavLink to="/specula" className={navClass}>
+          Specula
         </NavLink>
       )}
       <NavLink to="/settings" className={navClass}>

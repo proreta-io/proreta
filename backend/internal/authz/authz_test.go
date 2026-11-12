@@ -489,8 +489,8 @@ func TestHeldAndRolesWith(t *testing.T) {
 	if got := (Actor{}).Held(); len(got) != 0 {
 		t.Errorf("nobody holds %v", got)
 	}
-	if got := (Actor{UserID: uuid.New(), Role: Member}).Held(); len(got) != 13 {
-		t.Errorf("member holds %v, want 13 permissions", got)
+	if got := (Actor{UserID: uuid.New(), Role: Member}).Held(); len(got) != 14 {
+		t.Errorf("member holds %v, want 14 permissions", got)
 	}
 	if got := ProjectPermissions("nobody"); len(got) != 0 {
 		t.Errorf("unknown role holds %v in a project", got)
