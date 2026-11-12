@@ -278,7 +278,7 @@ func (s *Service) oauthJoinInvitation(ctx context.Context, in OAuthLoginInput, u
 			if err != nil || u.Status != userStatusActive {
 				return refuse(ErrInvalidCredentials, "user_disabled", target.tenantID, &userID)
 			}
-			if u.IsPlatformAdmin {
+			if u.IsSystemAdmin {
 				// BootstrapAdmin refuses to start when the admin belongs to another tenant.
 				return refuse(ErrAlreadyMember, "already_member", target.tenantID, &userID)
 			}
@@ -495,7 +495,7 @@ func (s *Service) oauthSession(ctx context.Context, tx pgx.Tx, in OAuthLoginInpu
 		return LoginResult{}, err
 	}
 	return LoginResult{Token: sess.token, SessionInfo: SessionInfo{
-		User:   User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, IsPlatformAdmin: u.IsPlatformAdmin, MustChangePassword: u.PasswordMustChange, EmailVerified: u.EmailVerifiedAt != nil},
+		User:   User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, IsPlatformAdmin: u.IsPlatformAdmin, IsSystemAdmin: u.IsSystemAdmin, MustChangePassword: u.PasswordMustChange, EmailVerified: u.EmailVerifiedAt != nil},
 		Tenant: t, Role: role, CSRFToken: sess.csrf, ExpiresAt: sess.expiresAt,
 	}}, nil
 }

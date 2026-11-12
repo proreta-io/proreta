@@ -37,7 +37,7 @@ SELECT EXISTS (
 
 -- name: LockUserForIdentities :one
 -- Serialises link and unlink of one user, so two unlinks cannot both pass the last-method rule.
-SELECT password_hash, status, is_platform_admin, email
+SELECT password_hash, status, is_platform_admin, is_system_admin, email
 FROM users
 WHERE id = @id
 FOR UPDATE;

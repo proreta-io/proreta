@@ -18,7 +18,11 @@ export type Channel = Schemas["Channel"];
 export type ChannelCreate = Schemas["ChannelCreate"];
 export type ChannelUpdate = Schemas["ChannelUpdate"];
 export type ChannelEvent = Schemas["ChannelEvent"];
+export type ChannelTemplatePreviewRequest = Schemas["ChannelTemplatePreviewRequest"];
 export type Usage = Schemas["Usage"];
+export type PermissionsInfo = Schemas["PermissionsInfo"];
+export type ProjectPermissions = Schemas["ProjectPermissions"];
+export type PermissionDefinition = Schemas["PermissionDefinition"];
 export type PublicConfig = Schemas["PublicConfig"];
 export type AdminStats = Schemas["AdminStats"];
 export type AdminOrganization = Schemas["AdminOrganization"];
@@ -79,7 +83,9 @@ export const queryKeys = {
   channelsFor: (projectId: string | undefined) => ["channels", "for", projectId ?? "all"] as const,
   projects: ["projects"] as const,
   projectMembers: (id: string) => ["projects", id, "members"] as const,
+  projectInvitations: (id: string) => ["projects", id, "invitations"] as const,
   usage: ["usage"] as const,
+  permissions: ["permissions"] as const,
   statusPages: ["status-pages"] as const,
   statusPageComponents: (id: string) => ["status-pages", id, "components"] as const,
   statusPagePreview: (id: string) => ["status-pages", id, "preview"] as const,
@@ -237,10 +243,15 @@ export const updateChannel = (channelId: string, body: ChannelUpdate) =>
 export const deleteChannel = (channelId: string) =>
   unwrap(client.DELETE("/api/v1/channels/{channelId}", channelPath(channelId)));
 
+export const previewChannelTemplate = (body: ChannelTemplatePreviewRequest) =>
+  unwrap(client.POST("/api/v1/channels/preview-template", { body }));
+
 export const testChannel = (channelId: string) =>
   unwrap(client.POST("/api/v1/channels/{channelId}/test", channelPath(channelId)));
 
 export const getUsage = () => unwrap(client.GET("/api/v1/usage"));
+
+export const getPermissions = () => unwrap(client.GET("/api/v1/permissions"));
 
 // Platform admin panel (experimental API). Every call answers 403 to anybody but the platform
 // admin.
@@ -290,7 +301,11 @@ export const listAdminMembers = (organizationId: string) =>
   );
 
 /** Adds an existing user to the organization or changes their role (any of the four roles). */
-export const setAdminMember = (organizationId: string, userId: string, role: MembershipRole) =>
+export const setAdminMember = (
+  organizationId: string,
+  userId: string,
+  role: MembershipRole | null,
+) =>
   unwrap(
     client.PUT("/api/v1/admin/organizations/{organizationId}/members/{userId}", {
       params: { path: { organizationId, userId } },
@@ -373,6 +388,15 @@ export const disableAdminUser = (userId: string) =>
 export const enableAdminUser = (userId: string) =>
   unwrap(client.POST("/api/v1/admin/users/{userId}/enable", userPath(userId)));
 
+/** Grants or revokes the platform-admin flag; answers the user afterwards. */
+export const setAdminPlatformAdmin = (userId: string, enabled: boolean) =>
+  unwrap(
+    client.PUT("/api/v1/admin/users/{userId}/platform-admin", {
+      params: { path: { userId } },
+      body: { enabled },
+    }),
+  );
+
 /** Deletes all of the user's sessions; answers how many were open. */
 export const revokeAdminUserSessions = (userId: string) =>
   unwrap(client.POST("/api/v1/admin/users/{userId}/sessions/revoke", userPath(userId)));
@@ -415,22 +439,38 @@ export const listMembers = () => unwrap(client.GET("/api/v1/members"));
 
 const memberPath = (userId: string) => ({ params: { path: { userId } } });
 
-export const updateMember = (userId: string, role: MembershipRole) =>
+/** Gives a member another organization role; null leaves them with their projects only. */
+export const updateMember = (userId: string, role: MembershipRole | null) =>
   unwrap(client.PATCH("/api/v1/members/{userId}", { ...memberPath(userId), body: { role } }));
 
 export const removeMember = (userId: string) =>
   unwrap(client.DELETE("/api/v1/members/{userId}", memberPath(userId)));
 
-export const listInvitations = () => unwrap(client.GET("/api/v1/invitations"));
+/** The invitations the caller may see; with a project id only those into that project. */
+export const listInvitations = (projectId?: string) =>
+  unwrap(
+    client.GET("/api/v1/invitations", {
+      ...(projectId ? { params: { query: { projectId } } } : {}),
+    }),
+  );
 
-/** A new invitation; its link is in this answer only. */
-export const createInvitation = (role: InvitationRole, label: string, email = "") =>
+/**
+ * A new invitation; its link is in this answer only. With a project id it invites into that
+ * project and the role is the role there.
+ */
+export const createInvitation = (
+  role: InvitationRole,
+  label: string,
+  email = "",
+  projectId?: string,
+) =>
   unwrap(
     client.POST("/api/v1/invitations", {
       // An address is only sent when the box "Send by email" is checked, so it always asks for
       // the email explicitly.
       body: {
         role,
+        ...(projectId ? { projectId } : {}),
         ...(label ? { label } : {}),
         ...(email ? { email, sendEmail: true } : {}),
       },
@@ -501,12 +541,12 @@ export const deleteProject = (projectId: string) =>
 export const listProjectMembers = (projectId: string) =>
   unwrap(client.GET("/api/v1/projects/{projectId}/members", projectPath(projectId)));
 
-/** Adds a member to a project; "viewer" makes it read-only there, undefined keeps its role. */
-export const putProjectMember = (projectId: string, userId: string, role?: ProjectRole) =>
+/** Gives a member of the organization a direct role in a project (never lowers its inherited role). */
+export const putProjectMember = (projectId: string, userId: string, role: ProjectRole) =>
   unwrap(
     client.PUT("/api/v1/projects/{projectId}/members/{userId}", {
       params: { path: { projectId, userId } },
-      body: role ? { role } : {},
+      body: { role },
     }),
   );
 
@@ -652,17 +692,17 @@ export const listAdminProjectMembers = (organizationId: string, projectId: strin
     ),
   );
 
-/** Adds a member of the organization to a project; "viewer" makes it read-only there. */
+/** Gives a member of the organization a direct role in a project. */
 export const putAdminProjectMember = (
   organizationId: string,
   projectId: string,
   userId: string,
-  role?: ProjectRole,
+  role: ProjectRole,
 ) =>
   unwrap(
     client.PUT(
       "/api/v1/admin/organizations/{organizationId}/projects/{projectId}/members/{userId}",
-      { params: { path: { organizationId, projectId, userId } }, body: role ? { role } : {} },
+      { params: { path: { organizationId, projectId, userId } }, body: { role } },
     ),
   );
 

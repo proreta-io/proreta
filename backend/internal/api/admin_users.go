@@ -9,7 +9,7 @@ import (
 
 func toAdminUserSummary(a admin.Account) gen.AdminUserSummary {
 	return gen.AdminUserSummary{Id: a.ID, Login: a.Login, DisplayName: a.DisplayName, Status: gen.AdminUserSummaryStatus(a.Status),
-		IsPlatformAdmin: a.IsPlatformAdmin, EmailVerified: a.EmailVerified, MustChangePassword: a.MustChangePassword,
+		IsPlatformAdmin: a.IsPlatformAdmin, IsSystemAdmin: a.IsSystemAdmin, EmailVerified: a.EmailVerified, MustChangePassword: a.MustChangePassword,
 		CreatedAt: a.CreatedAt, OrganizationCount: a.OrganizationCount}
 }
 
@@ -19,7 +19,7 @@ func toAdminUserDetail(d admin.AccountDetail) gen.AdminUserDetail {
 	for _, m := range d.Memberships {
 		out.Memberships = append(out.Memberships, gen.AdminUserMembership{OrganizationId: m.OrganizationID, OrganizationName: m.OrganizationName,
 			OrganizationSlug: m.OrganizationSlug, OrganizationStatus: gen.AdminUserMembershipOrganizationStatus(m.OrganizationStatus),
-			Role: gen.MembershipRole(m.Role), JoinedAt: m.JoinedAt})
+			Role: optRole(m.Role), JoinedAt: m.JoinedAt})
 	}
 	return out
 }

@@ -325,7 +325,7 @@ func (q *Queries) LockAuthDomain(ctx context.Context, arg LockAuthDomainParams) 
 }
 
 const lockUserForIdentities = `-- name: LockUserForIdentities :one
-SELECT password_hash, status, is_platform_admin, email
+SELECT password_hash, status, is_platform_admin, is_system_admin, email
 FROM users
 WHERE id = $1
 FOR UPDATE
@@ -335,6 +335,7 @@ type LockUserForIdentitiesRow struct {
 	PasswordHash    *string
 	Status          string
 	IsPlatformAdmin bool
+	IsSystemAdmin   bool
 	Email           string
 }
 
@@ -346,6 +347,7 @@ func (q *Queries) LockUserForIdentities(ctx context.Context, id uuid.UUID) (Lock
 		&i.PasswordHash,
 		&i.Status,
 		&i.IsPlatformAdmin,
+		&i.IsSystemAdmin,
 		&i.Email,
 	)
 	return i, err

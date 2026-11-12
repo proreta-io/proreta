@@ -1,21 +1,20 @@
 import { useQuery } from "@tanstack/react-query";
 import { getUsage, POLL_MS, queryKeys, type Usage } from "../api/endpoints";
-import { useAuth } from "../auth/AuthProvider";
 import { isUnlimited } from "./limits";
-import { abilities } from "./roles";
+import { usePermissions } from "./permissions";
 
 /**
- * Plan, limits and usage of the organization, polled like the monitor list. Owners and admins only:
+ * Plan, limits and usage of the organization, polled like the monitor list. Owners and maintainers only:
  * for members and viewers it never loads, so limit hints stay off and a reached limit
  * shows up as the create's own "plan limit reached" message.
  */
 export function useUsage() {
-  const { session } = useAuth();
+  const can = usePermissions();
   return useQuery({
     queryKey: queryKeys.usage,
     queryFn: getUsage,
     refetchInterval: POLL_MS,
-    enabled: abilities(session).seeUsage,
+    enabled: can.org("usage.read"),
   });
 }
 

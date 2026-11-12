@@ -75,7 +75,7 @@ func (s *Service) RequestPasswordReset(ctx context.Context, rawEmail string, ip 
 	err := db.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		q := authdb.New(tx)
 		u, err := q.GetUserForReset(ctx, email)
-		eligible := err == nil && u.Status == userStatusActive && u.HasPassword && !u.IsPlatformAdmin && isEmailAddress(u.Email)
+		eligible := err == nil && u.Status == userStatusActive && u.HasPassword && !u.IsSystemAdmin && isEmailAddress(u.Email)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("get user: %w", err)
 		}
@@ -212,7 +212,7 @@ func (s *Service) ResetPassword(ctx context.Context, token, newPassword string, 
 		if err != nil {
 			return fmt.Errorf("lock user: %w", err)
 		}
-		if u.Status != userStatusActive || u.IsPlatformAdmin || !u.HasPassword || u.Email != row.Email {
+		if u.Status != userStatusActive || u.IsSystemAdmin || !u.HasPassword || u.Email != row.Email {
 			return ErrResetInvalid
 		}
 		// A password the user chose through the emailed link also ends a forced change.

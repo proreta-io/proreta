@@ -49,6 +49,7 @@ const (
 	problemAccountSuspended   = "urn:proreta:problem:account-suspended"
 	problemProtectedOrg       = "urn:proreta:problem:protected-organization"
 	problemSystemAdmin        = "urn:proreta:problem:system-admin"
+	problemLastPlatformAdmin  = "urn:proreta:problem:last-platform-admin"
 	problemOrgDeleted         = "urn:proreta:problem:organization-deleted"
 	problemInvitationInvalid  = "urn:proreta:problem:invitation-invalid"
 	problemInvitationAccepted = "urn:proreta:problem:invitation-accepted"
@@ -129,10 +130,10 @@ func writeError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 		p.Detail = fmt.Sprintf("The plan of this organization does not include the %q feature.", featureErr.feature)
 	case errors.As(err, &roleErr):
 		p.Type, p.Title, p.Status = problemForbidden, "Not allowed", http.StatusForbidden
-		p.Detail = fmt.Sprintf("This needs the %s role or higher in this organization.", roleErr.required)
+		p.Detail = fmt.Sprintf("Your role does not allow this: it needs the %s role or higher.", roleErr.required)
 	case errors.Is(err, authz.ErrProjectForbidden):
 		p.Type, p.Title, p.Status = problemForbidden, "Not allowed", http.StatusForbidden
-		p.Detail = "Your role in this project is viewer: you can read its monitors but not change them."
+		p.Detail = "Your role in this project does not allow this change."
 	case errors.Is(err, projects.ErrSlugTaken):
 		p.Type, p.Title, p.Status = problemSlugTaken, "This slug is already used by another project", http.StatusConflict
 	case errors.Is(err, statuspages.ErrSlugTaken):
@@ -142,7 +143,7 @@ func writeError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 		p.Detail = "Status page addresses are shared by every organization on this Proreta; choose another."
 	case errors.Is(err, projects.ErrNotEmpty):
 		p.Type, p.Title, p.Status = problemProjectNotEmpty, "The project is not empty", http.StatusConflict
-		p.Detail = "Move or delete its monitors and channels first."
+		p.Detail = "Move or delete its monitors, channels and status pages first."
 	case errors.Is(err, projects.ErrDefault):
 		p.Type, p.Title, p.Status = problemDefaultProject, "The Default project cannot be deleted", http.StatusConflict
 	case errors.Is(err, authz.ErrForbidden):
@@ -178,6 +179,12 @@ func writeError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 	case errors.Is(err, admin.ErrSystemAdmin):
 		p.Type, p.Title, p.Status = problemSystemAdmin, "The system administrator's password cannot be reset here", http.StatusConflict
 		p.Detail = "The platform administrator changes its own password under Profile; see docs/runbooks/admin-panel.md for a reset."
+	case errors.Is(err, admin.ErrSystemAdminRevoke):
+		p.Type, p.Title, p.Status = problemSystemAdmin, "The system administrator cannot be revoked", http.StatusConflict
+		p.Detail = "The system administrator is configured by PRORETA_ADMIN_LOGIN and always keeps platform admin access."
+	case errors.Is(err, admin.ErrLastPlatformAdmin):
+		p.Type, p.Title, p.Status = problemLastPlatformAdmin, "The last platform administrator cannot be revoked", http.StatusConflict
+		p.Detail = "Grant platform admin access to another active user first."
 	case errors.Is(err, admin.ErrEmailNotTested):
 		p.Type, p.Title, p.Status = problemEmailConflict, "The email settings have not passed a test", http.StatusConflict
 		p.Detail = "Send a test email with the current settings first; changing any connection setting makes it necessary again."
@@ -229,9 +236,15 @@ func writeError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 		secs := int(math.Ceil(sendErr.RetryAfter.Seconds()))
 		w.Header().Set("Retry-After", strconv.Itoa(max(secs, 1)))
 		p.Type, p.Title, p.Status = problemRateLimited, "Slack is rate-limiting this webhook, try again later", http.StatusTooManyRequests
+		if sendErr.Generic {
+			p.Title = "The webhook endpoint is rate-limiting requests, try again later"
+		}
 	case errors.As(err, &sendErr):
 		// Only the kind is shown: Slack's answer and transport errors are never echoed.
 		p.Type, p.Title, p.Status, p.Detail = problemChannelFailed, "Slack did not accept the message", http.StatusBadGateway, slackFailureDetail(sendErr)
+		if sendErr.Generic {
+			p.Title, p.Detail = "The webhook endpoint did not accept the message", webhookFailureDetail(sendErr)
+		}
 	case errors.Is(err, scheduler.ErrNoLocation):
 		// Operational, not the caller's fault: the location that runs new monitors is missing or
 		// disabled.
@@ -296,6 +309,20 @@ func requestFieldErrors(e *openapi3filter.RequestError) []httpx.FieldError {
 		return nil
 	}
 	return []httpx.FieldError{{Field: strings.Join(ptr, "."), Message: se.Reason}}
+}
+
+func webhookFailureDetail(e *notify.SendError) string {
+	switch e.Kind {
+	case notify.KindNotFound:
+		return "The endpoint answered HTTP " + fmt.Sprint(e.Status) + " (not found or gone); check the URL."
+	case notify.KindHTTPStatus:
+		return fmt.Sprintf("The endpoint answered HTTP %d.", e.Status)
+	case notify.KindTimeout:
+		return "The endpoint did not answer in time."
+	case notify.KindBlockedAddress:
+		return "The endpoint resolves to an address Proreta does not connect to."
+	}
+	return "The endpoint could not be reached (" + e.Kind + ")."
 }
 
 func slackFailureDetail(e *notify.SendError) string {

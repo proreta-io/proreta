@@ -102,7 +102,7 @@ func (s *Service) ResendVerification(ctx context.Context, p Principal, ip netip.
 			return ErrUnauthenticated
 		}
 		// The system admin's login is a credential, not a mailbox, even when it looks like an address.
-		if u.IsPlatformAdmin || !isEmailAddress(u.Email) {
+		if u.IsSystemAdmin || !isEmailAddress(u.Email) {
 			return ErrEmailDisabled
 		}
 		if u.EmailVerifiedAt != nil {

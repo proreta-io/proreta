@@ -86,7 +86,7 @@ func (q *Queries) InsertEmailVerification(ctx context.Context, arg InsertEmailVe
 }
 
 const lockUserForVerification = `-- name: LockUserForVerification :one
-SELECT email, email_verified_at, status, is_platform_admin
+SELECT email, email_verified_at, status, is_platform_admin, is_system_admin
 FROM users
 WHERE id = $1
 FOR UPDATE
@@ -97,6 +97,7 @@ type LockUserForVerificationRow struct {
 	EmailVerifiedAt *time.Time
 	Status          string
 	IsPlatformAdmin bool
+	IsSystemAdmin   bool
 }
 
 // Serialises resends and the consumption of a link for one user.
@@ -108,6 +109,7 @@ func (q *Queries) LockUserForVerification(ctx context.Context, id uuid.UUID) (Lo
 		&i.EmailVerifiedAt,
 		&i.Status,
 		&i.IsPlatformAdmin,
+		&i.IsSystemAdmin,
 	)
 	return i, err
 }

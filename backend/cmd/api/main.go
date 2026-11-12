@@ -118,7 +118,8 @@ func run() error {
 		log.Info("oauth sign-in enabled", "providers", names, "password_login_enabled", cfg.PasswordLoginEnabled)
 	}
 
-	slack := notify.NewSlackNotifier(notify.NewSlackClient(cfg.BlockedCIDRs))
+	notifyClient := notify.NewSlackClient(cfg.BlockedCIDRs)
+	slack := notify.NewSlackNotifier(notifyClient)
 
 	sched := scheduler.New()
 	monitorSvc := monitors.NewService(pool, sched, incidents.NewService(sched))
@@ -141,7 +142,7 @@ func run() error {
 		Auth:     authSvc,
 		Monitors: monitorSvc,
 		Queries:  queries.New(pool, nil),
-		Channels: notify.NewService(pool, keys, slack, cfg.PublicURL),
+		Channels: notify.NewService(pool, keys, slack, cfg.PublicURL).WithWebhook(notify.NewWebhookNotifier(notifyClient)),
 		Plans:    plans.NewService(pool), Projects: projectsSvc,
 		StatusPages:  statuspages.NewService(pool, statuspages.Options{Logger: log}),
 		Admin:        adminSvc,

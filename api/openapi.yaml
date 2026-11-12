@@ -41,19 +41,24 @@ info:
     - Operations marked `x-experimental: true` (the platform admin API) may change in any
       release.
 
-    Roles: every operation that needs a session has a minimum role of the session's
-    membership in its organization. `viewer` reads; `member` also creates, edits,
-    pauses and deletes monitors; `maintainer` also manages notification channels, members,
-    invitations, projects and the status page; `owner` also deletes the organization, manages its sign-in domains and grants or revokes `owner`. A role below
-    the minimum gets 403 `urn:proreta:problem:forbidden`. A role change applies on the next request.
+    Roles: the same four roles exist at two levels. A role on the organization applies to every
+    project of it; a direct role on a project applies to that project only; the effective role in
+    a project is the higher of the two. A person may have no organization role and belong to the
+    organization only through projects (`role` null). `viewer` reads; `member` also creates, edits,
+    pauses and deletes monitors; `maintainer` also manages the notification channels, the people and
+    the settings of a project and, on the organization, members, invitations, projects and the
+    status page; `owner` also deletes projects and the organization, manages its sign-in domains and
+    grants or revokes `owner`. Every operation needs a permission (`docs/roles.md` lists them); one
+    that names a project is judged with the effective role there, one that does not is judged on the
+    organization role. A missing permission gets 403 `urn:proreta:problem:forbidden`; a project the
+    caller has no role in is 404. A role change applies on the next request.
 
     Projects: monitors (heartbeats included) and notification channels belong to
     a project of the organization; a channel may instead be organization-wide (`projectId` null).
-    Owners and admins see every project. Members and viewers see the projects they belong to (the
-    Default project includes every member) and only their monitors, checks, statistics,
-    incidents and channels, plus organization-wide channels; anything else is answered 404 as if it
-    did not exist. Inside a project a member may have a `viewer` override, which makes it
-    read-only there (403 on changes).
+    A person with an organization role sees every project. A person without one sees the projects
+    they belong to and only their monitors, checks, statistics, incidents and channels, plus
+    organization-wide channels; anything else is answered 404 as if it did not exist. A direct
+    project role can raise the organization role inside that project and never lowers it.
   contact:
     name: Proreta maintainers
     url: https://github.com/proreta-io/proreta
@@ -81,7 +86,8 @@ tags:
   - name: projects
     description: |
       Projects of the organization and their members. Every organization has a
-      Default project that includes all its members. Owners and admins manage projects.
+      Default project that cannot be deleted. Organization owners and maintainers create projects;
+      project owners and maintainers manage the people and settings of their project.
   - name: monitors
     description: HTTPS and heartbeat (watchdog) monitors, their status, statistics, checks and incidents
   - name: heartbeat
@@ -91,15 +97,15 @@ tags:
   - name: status-page
     description: |
       The organization's public status page: configuration, components, password and
-      a preview. Owners and admins change it; every role reads the page settings and its link.
+      a preview. Organization owners and maintainers change it; every organization role reads the page settings and its link.
       The public page itself is served by the separate statuspage process under `/status/<slug>`.
   - name: plan
     description: The organization's plan, its limits and the current usage
   - name: admin
     description: |
-      Platform administration across organizations. Only the platform admin (the system
-      admin configured by `PRORETA_ADMIN_LOGIN`, `isPlatformAdmin` in the user object) may call
-      these operations; any other session gets 403 `urn:proreta:problem:forbidden`. Every
+      Platform administration across organizations. Only a platform admin (`isPlatformAdmin` in
+      the user object: the system admin configured by `PRORETA_ADMIN_LOGIN`, and users granted
+      the flag with `PUT /api/v1/admin/users/{userId}/platform-admin`) may call these operations; any other session gets 403 `urn:proreta:problem:forbidden`. Every
       operation of this tag is experimental (`x-experimental: true`): it serves the bundled admin
       panel and may change in any release without notice.
 security:
@@ -330,7 +336,7 @@ paths:
       summary: Email a link to reset a forgotten password
       description: |
         Public (no session). Sends a one-time link to the address when it belongs to an account that
-        can be reset (active, with a password, not the platform admin) and answers 202 either way, so
+        can be reset (active, with a password, not the system admin) and answers 202 either way, so
         the answer says nothing about which addresses are registered. The link is
         `PRORETA_PUBLIC_URL/reset-password#<token>`; it works once and for one hour, and only the
         newest link of an account works. A malformed address is 422 (that says nothing about
@@ -829,7 +835,7 @@ paths:
         its first ping (then `up`) or until its first deadline passes (then `down`).
 
         `projectId` is the monitor's project (the Default project when omitted); the caller needs
-        the `member` role in it (403 with a viewer override, 422 for a project it does not see).
+        the `member` role in it (403 with the `viewer` role there, 422 for a project it does not see).
         `channelIds` selects the notification channels of the monitor (at most 10, each a channel
         of the monitor's project or an organization-wide one, 422 otherwise); with no selection,
         `notificationsEnabled` sends to the active channels of the monitor's own project only
@@ -1309,6 +1315,29 @@ paths:
           $ref: "#/components/responses/Forbidden"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/permissions:
+    get:
+      operationId: getPermissions
+      summary: Permissions of the current person
+      description: |
+        What the signed-in person may do in the organization of the session, and the catalogue of
+        roles and permissions. `organization` lists the permissions held through the organization role, which for a
+        project permission means in every project (only `account.use` for a person who belongs
+        through projects only); `projects` lists every project the person sees with the permissions
+        held there (the higher of the organization role and the direct project role). Any role,
+        including a person without an organization role.
+      tags: [members]
+      responses:
+        "200":
+          description: Permissions of the person and the catalogue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PermissionsInfo"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/channels:
     get:
       operationId: listChannels
@@ -1341,8 +1370,14 @@ paths:
       operationId: createChannel
       summary: Create a notification channel
       description: |
-        Creates a Slack channel. `webhookUrl` must match `https://hooks.slack.com/services/...`
-        and is stored encrypted; it is write-only. `events` defaults to every event. `mention`
+        Creates a channel of `type` `slack_webhook` (the default) or `webhook`. For Slack,
+        `webhookUrl` must match `https://hooks.slack.com/services/...`; for `webhook` it is an
+        `https` URL of a public host on port 443 (private, loopback and other internal addresses
+        are 422). It is stored encrypted and is write-only. A `webhook` channel also has a
+        `contentType` (`json`, the default, or `text`) and a `bodyTemplate` (a default for the
+        content type when omitted; 422 with a field error on `bodyTemplate` for an unknown
+        placeholder or, with `json`, a template that does not render to valid JSON); it has no
+        `mention`. `events` defaults to every event. `mention`
         holds at most three of `@here`, `@channel`, `<!subteam^ID>` (a user group) and `<@UID>` (a
         user), case-sensitive, and is used only in `down` and reminder messages.
         `reminderMinutes` is 0 (no reminders, the default) or 5 to 1440: while an incident stays
@@ -1478,7 +1513,7 @@ paths:
     post:
       operationId: testChannel
       summary: Send a test message to a channel
-      description: Sends a test message to the channel's webhook. Fails with 404 for an unknown channel, 429 when the organization tested a channel within the last 5 seconds or when Slack rate-limits the webhook (both with Retry-After), and 502 `urn:proreta:problem:channel-delivery-failed` when Slack does not accept the message (Slack's answer is never returned). A removed or revoked webhook (Slack answers 404 or 410) marks the channel `failed`.
+      description: Sends a test message to the channel's webhook (for a `webhook` channel, its template rendered with sample data and event `test`). Fails with 404 for an unknown channel, 429 when the organization tested a channel within the last 5 seconds or when Slack rate-limits the webhook (both with Retry-After), and 502 `urn:proreta:problem:channel-delivery-failed` when Slack does not accept the message (Slack's answer is never returned). A removed or revoked webhook (Slack answers 404 or 410) marks the channel `failed`.
       tags: [channels]
       security:
         - cookieAuth: []
@@ -1504,6 +1539,44 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/channels/preview-template:
+    post:
+      operationId: previewChannelTemplate
+      summary: Preview a webhook message template
+      description: |
+        Renders a template with sample data and returns the body, without sending anything and
+        without touching the network. 422 with `fieldErrors` on `contentType` or `bodyTemplate`
+        when the template is not acceptable (unknown placeholder, invalid JSON). Needs the
+        permission to manage channels.
+      tags: [channels]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChannelTemplatePreviewRequest"
+      responses:
+        "200":
+          description: The rendered sample
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelTemplatePreview"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         default:
           $ref: "#/components/responses/Error"
   /api/v1/projects:
@@ -1657,10 +1730,9 @@ paths:
       operationId: listProjectMembers
       summary: Members of a project
       description: |
-        The people with access to the project: owners and maintainers (they see every project,
-        `allProjects` true), the explicit members with their optional role override, and for a
-        project with `allMembers` (the Default project) every other member of the organization.
-        404 when the caller does not see the project.
+        The people with a role in the project: everyone with an organization role (`allProjects`
+        true, the role applies here) and everyone with a direct role (`explicit` true), with the
+        higher of the two as `effectiveRole`. 404 when the caller has no role in the project.
       tags: [projects]
       responses:
         "200":
@@ -1683,12 +1755,14 @@ paths:
       - $ref: "#/components/parameters/MemberUserId"
     put:
       operationId: putProjectMember
-      summary: Add a member to a project or change its override
+      summary: Give a person a direct role in a project
       description: |
-        Admin or owner. Makes a member of the organization a member of the project. `role`
-        `viewer` makes it read-only in this project; omitted (or `member`) keeps its organization
-        role. An override never raises the organization role: a viewer stays a viewer. In a project
-        with `allMembers` the row only carries the override. Audited as `project.member_changed`.
+        Project owner or maintainer, or an organization owner or maintainer. The person must
+        already belong to the organization (with or without an organization role). `role` is the
+        direct role in this project: it raises the organization role there and never lowers it.
+        Nobody grants a role above their own and a maintainer does not change an owner (403). A
+        project has no last-owner rule: organization owners always control every project. Audited
+        as `project.member_changed`.
       tags: [projects]
       security:
         - cookieAuth: []
@@ -1720,10 +1794,11 @@ paths:
           $ref: "#/components/responses/Error"
     delete:
       operationId: removeProjectMember
-      summary: Remove a member from a project
+      summary: Remove a person's direct role from a project
       description: |
-        Admin or owner. The member loses access to the project at its next request (in a project
-        with `allMembers` only the override is removed). Audited as `project.member_changed`.
+        Project owner or maintainer, or an organization owner or maintainer, under the rules of the
+        role change. The person keeps any organization role, and loses access to the project at its
+        next request when it has none. Audited as `project.member_changed`.
       tags: [projects]
       security:
         - cookieAuth: []
@@ -1750,7 +1825,9 @@ paths:
       description: |
         Every member with display name, role and when they joined, oldest first. Any role; the
         login (an email address) is shown to owners and maintainers only and is null for members and
-        viewers.
+        viewers. A person without an organization role (a member of projects only) gets only the
+        people they share a project with: everyone who has an organization role and everyone with a
+        role in one of their projects, never the rest of the directory, and never logins.
       tags: [members]
       responses:
         "200":
@@ -1770,9 +1847,11 @@ paths:
       operationId: updateMember
       summary: Change a member's role
       description: |
-        Maintainer or owner. A maintainer may change only maintainers, members and viewers and may not grant
-        `owner` (403 `urn:proreta:problem:forbidden`). The organization always keeps an active
-        owner: demoting the last one is 409 `urn:proreta:problem:last-owner`. The platform admin's
+        Maintainer or owner. A maintainer may change only maintainers, members, viewers and people
+        without an organization role, and may not grant `owner` (403 `urn:proreta:problem:forbidden`).
+        `role` null takes the organization role away: the person then belongs to the organization
+        only through projects. The organization always keeps an active owner: demoting the last
+        one, or taking its role away, is 409 `urn:proreta:problem:last-owner`. The system admin's
         role in the default organization cannot be changed (409 `urn:proreta:problem:system-admin`).
         Audited as `member.role_changed`. The new role applies on the member's next request.
       tags: [members]
@@ -1811,7 +1890,7 @@ paths:
       summary: Remove a member
       description: |
         Maintainer or owner, with the rules of the role change (a maintainer cannot remove an owner, the
-        last owner cannot be removed, nor the platform admin). The member's sessions in this
+        last owner cannot be removed, nor the system admin). The member's sessions in this
         organization end at once; the user and its other memberships stay. Audited as
         `member.removed`. To leave the organization yourself, use `POST /api/v1/organization/leave`.
       tags: [members]
@@ -1839,8 +1918,20 @@ paths:
     get:
       operationId: listInvitations
       summary: Invitations of the organization
-      description: The newest 200 invitations with their state (open, accepted, revoked or expired). The link of an invitation is never shown again. Admin or owner.
+      description: |
+        The newest 200 invitations with their state (open, accepted, revoked or expired). The link
+        of an invitation is never shown again. Organization owners and maintainers see all of them;
+        an owner or maintainer of a project sees only the invitations into their projects. An
+        invitation into a deleted project reads as revoked. `projectId` narrows the list to one
+        project (404 when the caller has no role there).
       tags: [members]
+      parameters:
+        - name: projectId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
       responses:
         "200":
           description: The invitations
@@ -1858,15 +1949,21 @@ paths:
       operationId: createInvitation
       summary: Invite someone
       description: |
-        Creates a single-use invitation with the role `maintainer`, `member` or `viewer` (`owner` is
-        granted by changing a member's role). It expires after 7 days. The answer carries `inviteUrl` with
+        Creates a single-use invitation. Without `projectId` it invites into the organization with the
+        role `maintainer`, `member` or `viewer` (`owner` is granted by changing a member's role);
+        organization owners and maintainers only. With `projectId` it invites into that project: `role`
+        is the role in the project (any of the four, never above the caller's own there), the person
+        gets no organization role, and an owner or maintainer of the project may do it (404 when the
+        caller has no role in the project, 403 when the role does not allow it). An existing member
+        who accepts only gets the project role, unless they already hold an equal or higher one there.
+        It expires after 7 days. The answer carries `inviteUrl` with
         the secret token in the URL fragment; it is shown only here (only its SHA-256 is stored)
         and must be handed over like a password. With `email` (and `sendEmail` not false) the same
         link is also emailed to that address (see below); the link is shown either way. Open invitations count
         toward the member limit of the plan: 409 `urn:proreta:problem:plan-limit-reached` (`limit`
         is `members`) when members plus open invitations already reach it. Audited as
         `member.invited` (without the token or the address; `emailed` says whether a message
-        was queued). Admin or owner.
+        was queued; `projectId` for a project invitation).
 
         **Email.** Sending is possible only when the installation has a tested mail server
         (`emailEnabled` in `GET /api/v1/auth/providers`); otherwise a request that asks for it is
@@ -1876,8 +1973,8 @@ paths:
         client whether to pre-check the option. The message is queued in the same
         transaction as the invitation, so it exists exactly when the invitation does, and is
         delivered a moment later by the background jobs process (`emailQueued` only means it was
-        queued, not that the mailbox accepted it). It names this organization, the role and the
-        inviter's display name, nothing else. The address is not stored and the invitation is
+        queued, not that the mailbox accepted it). It names this organization, the project when
+        there is one, the role and the inviter's display name, nothing else. The address is not stored and the invitation is
         not bound to it: whoever holds the link can use it, with any email address, exactly as
         without email. When `label` is empty and the address is at most 80 characters, the
         address becomes the label. Limited to 30 invitation emails per organization per hour and
@@ -1925,7 +2022,8 @@ paths:
         The link stops working at once and the place it reserved is freed. Revoking a revoked or
         expired invitation changes nothing (204); an accepted one is 409
         `urn:proreta:problem:invitation-accepted` (remove the member instead). Audited as
-        `invitation.revoked`. Admin or owner.
+        `invitation.revoked`. Follows the scope of the list: an invitation the caller cannot see is
+        404, and an invitation into a project with a role above the caller's own there is 403.
       tags: [members]
       security:
         - cookieAuth: []
@@ -1952,8 +2050,8 @@ paths:
       operationId: lookupInvitation
       summary: What an invitation link offers
       description: |
-        Public (no session): the organization name, role and expiry of an open invitation, for the
-        invitation page. The token travels in the body, never in a URL, so proxies do not log it.
+        Public (no session): the organization name, the project name when the invitation is into a
+        project, the role and the expiry of an open invitation, for the invitation page. The token travels in the body, never in a URL, so proxies do not log it.
         Unknown, expired, used and revoked tokens get the same 404
         `urn:proreta:problem:invitation-invalid`. Each 404 counts against a per-client-IP limit
         (429 with Retry-After).
@@ -1985,12 +2083,14 @@ paths:
       operationId: acceptInvitation
       summary: Accept an invitation as the logged-in user
       description: |
-        The logged-in user joins the inviting organization with the invited role, the invitation
-        is used up, and the session switches to that organization (new cookie and CSRF token, the
+        The logged-in user joins the inviting organization with the invited role (an organization
+        invitation) or, for a project invitation, gets the invited role in the project and no
+        organization role; a user who is already a member of the organization is accepted into the
+        project and keeps their organization role. The invitation is used up, and the session switches to that organization (new cookie and CSRF token, the
         old session is deleted). 404 `urn:proreta:problem:invitation-invalid` for an unknown,
         expired, used or revoked token (counted against the per-client-IP limit, 429); 409
-        `urn:proreta:problem:already-member` when the user is already a member, or when the user is
-        the platform admin (who belongs to the default organization only); 409
+        `urn:proreta:problem:already-member` when the user is already a member (organization invitations
+        only), or when the user is the system admin (who belongs to the default organization only); 409
         `urn:proreta:problem:plan-limit-reached` when the organization's member limit was lowered
         below its members. Audited as `member.joined`. Any role.
       tags: [members]
@@ -2225,11 +2325,15 @@ paths:
   /api/v1/status-pages:
     get:
       operationId: listStatusPages
-      summary: Status pages of the organization
+      summary: Status pages the caller sees
       description: |
-        Every role may read the organization's status pages (members see the public
-        link). The password itself is never returned, only `passwordProtected`.
+        The pages of the projects the caller can read and, with an organization role, the
+        organization-level pages (members see the public link). With `projectId`, only the pages
+        of that project (404 when the caller does not see the project). The password itself is
+        never returned, only `passwordProtected`.
       tags: [status-page]
+      parameters:
+        - $ref: "#/components/parameters/ProjectFilter"
       responses:
         "200":
           description: The status pages
@@ -2237,15 +2341,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StatusPageList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
         default:
           $ref: "#/components/responses/Error"
     post:
       operationId: createStatusPage
       summary: Create the status page
       description: |
-        Admin or owner. The page starts unpublished and without components. `slug` is global
+        Needs the status page permission in `projectId` (owners and maintainers of the project, or of
+        the organization) or, without `projectId`, an organization owner or maintainer. A page of a
+        project may show only monitors of that project; an organization-level page may show
+        monitors of every project. A project the caller does not see is 422 on `projectId`. The page starts unpublished and without components. `slug` is global
         (shared by every organization) and public; a slug in use is 409
         `urn:proreta:problem:slug-taken`, a reserved word is 422. The plan allows one page per
         organization: 409 `urn:proreta:problem:plan-limit-reached` (`limit` is `statusPages`).
@@ -2308,7 +2419,9 @@ paths:
       operationId: updateStatusPage
       summary: Change, publish or unpublish the status page
       description: |
-        Admin or owner. Only the given fields change; an empty `logoUrl` or `accentColor` removes
+        Owners and maintainers of the page's project (or of the organization); for an
+        organization-level page, organization owners and maintainers. A page of a project the
+        caller cannot see is 404. Only the given fields change; an empty `logoUrl` or `accentColor` removes
         it. `published` publishes or unpublishes the page: the public view is rebuilt in the same
         request and served within about 15 seconds. Audited as `status_page.updated` (field names
         only), `status_page.published` and `status_page.unpublished`.
@@ -2787,7 +2900,7 @@ paths:
       summary: Disable a user
       description: |
         The user can no longer sign in (password, OAuth or invitation) and all of the user's
-        sessions in every organization are deleted. Memberships stay. A platform admin cannot be
+        sessions in every organization are deleted. Memberships stay. The system admin cannot be
         disabled (409 `urn:proreta:problem:system-admin`). Disabling a user who is already
         disabled changes nothing and writes no audit row. Audited as `admin.user.disabled`
         (`sessionsRevoked`), in the user's last used organization. Platform admins only.
@@ -2849,6 +2962,56 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/users/{userId}/platform-admin:
+    parameters:
+      - $ref: "#/components/parameters/AdminUserId"
+    put:
+      operationId: adminSetPlatformAdmin
+      x-experimental: true
+      summary: Grant or revoke the platform-admin flag
+      description: |
+        `enabled` `true` makes an active user a platform admin with full control of the instance;
+        `false` removes the flag. The user keeps all sessions, memberships and organizations; the
+        flag is read on every request, so a revoked admin loses admin access at once. A request
+        that changes nothing does nothing and writes no audit row. The system admin cannot be
+        revoked (409 `urn:proreta:problem:system-admin`) and the last active platform admin
+        cannot be revoked (409 `urn:proreta:problem:last-platform-admin`). Only an active user can
+        be granted (422). Audited as `admin.user.platform_admin_granted` or
+        `admin.user.platform_admin_revoked`, in the user's last used organization. Platform admins
+        only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminPlatformAdminUpdate"
+      responses:
+        "200":
+          description: The user after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminUserDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         default:
           $ref: "#/components/responses/Error"
   /api/v1/admin/users/{userId}/sessions/revoke:
@@ -3080,8 +3243,8 @@ paths:
         `viewer`), or changes the role of a member; setting the role a member already has changes
         nothing and writes no audit row. An unknown user is 404. Adding respects the plan's member
         limit (409 `urn:proreta:problem:plan-limit-reached`; raise the plan first). The organization
-        always keeps an active owner (409 `urn:proreta:problem:last-owner`). The platform admin's
-        membership of the default organization cannot be changed and the platform admin cannot be
+        always keeps an active owner (409 `urn:proreta:problem:last-owner`). The system admin's
+        membership of the default organization cannot be changed and the system admin cannot be
         added to another organization (409 `urn:proreta:problem:system-admin`). A deleted
         organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). A disabled
         account can be added but cannot sign in. A new role applies on the member's next request.
@@ -3124,7 +3287,7 @@ paths:
       summary: Remove a member from an organization
       description: |
         Ends the membership and the user's sessions in this organization at once; the user and
-        their other memberships stay. The last active owner and the platform admin cannot be
+        their other memberships stay. The last active owner and the system admin cannot be
         removed (409 `urn:proreta:problem:last-owner`, `urn:proreta:problem:system-admin`); a deleted
         organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited as
         `admin.member.removed`. Platform admins only.
@@ -3437,14 +3600,14 @@ paths:
     put:
       operationId: adminPutOrganizationProjectMember
       x-experimental: true
-      summary: Add a member to a project or change its override
+      summary: Give a person a direct role in a project
       description: |
-        Makes a member of the organization a member of the project, with an optional `role`
-        override (`viewer` makes it read-only there; an override never raises the organization role).
-        A user who is not a member of the organization is 422 on `userId`. A deleted organization
-        cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in the organization
-        as `admin.project_member.added`, or `admin.project_member.updated` (`from`, `to`) when the
-        override changes; saving the same override again writes nothing. Platform admins only.
+        Gives a member of the organization (with or without an organization role) a direct `role`
+        in the project. A user who is not a member of the organization is 422 on `userId`. A
+        deleted organization cannot be changed (409 `urn:proreta:problem:organization-deleted`).
+        Audited in the organization as `admin.project_member.added`, or
+        `admin.project_member.updated` (`from`, `to`) when the role changes; saving the same role
+        again writes nothing. Platform admins only.
       tags: [admin]
       security:
         - cookieAuth: []
@@ -3483,8 +3646,8 @@ paths:
       x-experimental: true
       summary: Remove a member from a project
       description: |
-        The member loses access to the project at its next request (in a project with `allMembers`
-        only the override is removed). 404 when the user is not listed on the project. A deleted
+        The direct role is removed; the person loses access to the project at its next request
+        unless it has an organization role. 404 when the user has no direct role in the project. A deleted
         organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in the
         organization as `admin.project_member.removed`. Platform admins only.
       tags: [admin]
@@ -4009,7 +4172,10 @@ components:
         organization:
           $ref: "#/components/schemas/OrganizationRef"
         role:
-          $ref: "#/components/schemas/MembershipRole"
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs to the organization only through projects
         emailInvitations:
           type: boolean
           description: |
@@ -4049,8 +4215,14 @@ components:
         isPlatformAdmin:
           type: boolean
           description: |
-            Whether the user is the platform admin (only the system admin configured by
-            `PRORETA_ADMIN_LOGIN`; no API grants it).
+            Whether the user is a platform admin: the system admin configured by
+            `PRORETA_ADMIN_LOGIN`, or a user granted the flag in the admin panel.
+        isSystemAdmin:
+          type: boolean
+          description: |
+            Whether the user is the system admin configured by `PRORETA_ADMIN_LOGIN`: its login is
+            a credential, not a mailbox, and its membership of the default organization comes from
+            configuration. Absent in answers of an earlier release.
         emailVerified:
           type: boolean
           description: |
@@ -4641,8 +4813,8 @@ components:
             $ref: "#/components/schemas/Incident"
     ChannelType:
       type: string
-      description: "`slack_webhook`: a Slack Incoming Webhook"
-      enum: [slack_webhook]
+      description: "`slack_webhook`: a Slack Incoming Webhook; `webhook`: any https endpoint, which receives the channel's message template as a POST"
+      enum: [slack_webhook, webhook]
     ChannelEvent:
       type: string
       description: "`down`: a monitor went down (and reminders while it stays down); `recovered`: it is back up; `tls_expiring`: its TLS certificate expires within 14 days"
@@ -4656,7 +4828,7 @@ components:
         $ref: "#/components/schemas/ChannelEvent"
     ChannelMention:
       type: array
-      description: Slack mentions put in front of `down` and reminder messages; each is `@here`, `@channel`, `<!subteam^ID>` or `<@UID>` (400 otherwise)
+      description: Slack mentions put in front of `down` and reminder messages (Slack channels only; a `webhook` channel must have none); each is `@here`, `@channel`, `<!subteam^ID>` or `<@UID>` (400 otherwise)
       maxItems: 3
       items:
         type: string
@@ -4671,8 +4843,8 @@ components:
     Channel:
       type: object
       additionalProperties: false
-      required: [id, projectId, name, type, events, mention, reminderMinutes, status, createdAt, updatedAt]
-      description: A notification channel. Its webhook URL is a secret and is never returned.
+      required: [id, projectId, name, type, configHidden, events, mention, reminderMinutes, status, createdAt, updatedAt]
+      description: "A notification channel. Its webhook URL is a secret and is never returned. For an organization-wide channel the callers without the organization role get no settings: `configHidden` is true, `events` and `mention` are empty and `reminderMinutes` is 0."
       properties:
         id:
           type: string
@@ -4687,22 +4859,65 @@ components:
           example: "#ops-alerts"
         type:
           $ref: "#/components/schemas/ChannelType"
+        configHidden:
+          type: boolean
+          description: True when the settings of an organization-wide channel are withheld because the caller has no organization role
         events:
           $ref: "#/components/schemas/ChannelEvents"
         mention:
           $ref: "#/components/schemas/ChannelMention"
         reminderMinutes:
           $ref: "#/components/schemas/ReminderMinutes"
+        contentType:
+          type: string
+          enum: [json, text]
+          description: Of a `webhook` channel; absent for Slack channels and when `configHidden` is true
+        bodyTemplate:
+          type: string
+          description: The message template of a `webhook` channel (not a secret); absent for Slack channels and when `configHidden` is true
         status:
           type: string
           enum: [active, failed]
-          description: "`failed` means Slack answered 404 or 410 (the webhook was revoked); nothing is sent until a new webhook URL is stored."
+          description: "`failed` means the endpoint answered 404 or 410 (a Slack webhook was revoked); nothing is sent until a new webhook URL is stored."
         createdAt:
           type: string
           format: date-time
         updatedAt:
           type: string
           format: date-time
+    WebhookContentType:
+      type: string
+      description: "`json`: the body is `application/json` and every placeholder value is JSON-string-escaped; `text`: the body is `text/plain` and values are inserted verbatim"
+      enum: [json, text]
+    WebhookBodyTemplate:
+      type: string
+      description: |
+        The body of the message a `webhook` channel sends, with placeholders written `{{name}}`.
+        Known names: `event` (`opened`, `resolved`, `reminder`, `tls_expiring`, `test`), `status`
+        (`down` or `up`), `monitor.id`, `monitor.name`, `monitor.url`, `monitor.type`,
+        `project.name`, `organization.name`, `incident.id`, `incident.startedAt` and
+        `incident.resolvedAt` (RFC 3339, UTC), `incident.duration` (for example `5m`),
+        `error.kind`, `tls.expiresAt`, `tls.daysLeft` and `link` (the monitor in the dashboard). A
+        value that does not exist for the event is empty. An unknown name is 422. With `json` the
+        template rendered with sample data must be one valid JSON document.
+      maxLength: 8192
+    ChannelTemplatePreviewRequest:
+      type: object
+      additionalProperties: false
+      required: [contentType, bodyTemplate]
+      properties:
+        contentType:
+          $ref: "#/components/schemas/WebhookContentType"
+        bodyTemplate:
+          $ref: "#/components/schemas/WebhookBodyTemplate"
+    ChannelTemplatePreview:
+      type: object
+      additionalProperties: false
+      required: [body]
+      properties:
+        body:
+          type: string
+          description: The template rendered with sample data
     ChannelList:
       type: object
       additionalProperties: false
@@ -4734,9 +4949,13 @@ components:
         webhookUrl:
           type: string
           format: password
-          description: Slack Incoming Webhook URL, `https://hooks.slack.com/services/...`; write-only
+          description: Slack Incoming Webhook URL, `https://hooks.slack.com/services/...`, or for a `webhook` channel an `https` URL of a public host (port 443); write-only
           minLength: 1
           maxLength: 2048
+        contentType:
+          $ref: "#/components/schemas/WebhookContentType"
+        bodyTemplate:
+          $ref: "#/components/schemas/WebhookBodyTemplate"
         events:
           $ref: "#/components/schemas/ChannelEvents"
         mention:
@@ -4762,15 +4981,79 @@ components:
         webhookUrl:
           type: string
           format: password
-          description: A new Slack Incoming Webhook URL; write-only
+          description: A new Slack Incoming Webhook URL, or for a `webhook` channel a new `https` URL; write-only
           minLength: 1
           maxLength: 2048
+        contentType:
+          $ref: "#/components/schemas/WebhookContentType"
+        bodyTemplate:
+          $ref: "#/components/schemas/WebhookBodyTemplate"
         events:
           $ref: "#/components/schemas/ChannelEvents"
         mention:
           $ref: "#/components/schemas/ChannelMention"
         reminderMinutes:
           $ref: "#/components/schemas/ReminderMinutes"
+    PermissionsInfo:
+      type: object
+      additionalProperties: false
+      required: [organizationRole, organization, projects, catalogue]
+      properties:
+        organizationRole:
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs through projects only
+        organization:
+          type: array
+          items:
+            type: string
+          description: Permissions held through the organization role (every project permission of the role applies in every project), plus the account permissions of anybody who belongs
+          example: [account.use, organization.members.read]
+        projects:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectPermissions"
+        catalogue:
+          type: array
+          description: Every permission in the order of the role documentation, with the roles that hold it
+          items:
+            $ref: "#/components/schemas/PermissionDefinition"
+    ProjectPermissions:
+      type: object
+      additionalProperties: false
+      required: [projectId, name, role, permissions]
+      properties:
+        projectId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        role:
+          $ref: "#/components/schemas/MembershipRole"
+        permissions:
+          type: array
+          items:
+            type: string
+          description: Project permissions held in this project
+    PermissionDefinition:
+      type: object
+      additionalProperties: false
+      required: [name, level, description, roles]
+      properties:
+        name:
+          type: string
+          example: channel.manage
+        level:
+          type: string
+          enum: [account, organization, project]
+        description:
+          type: string
+        roles:
+          type: array
+          items:
+            $ref: "#/components/schemas/MembershipRole"
+          description: The roles that hold the permission, highest first
     Usage:
       type: object
       additionalProperties: false
@@ -4912,17 +5195,20 @@ components:
           type: string
           enum: [active, disabled]
         role:
-          $ref: "#/components/schemas/MembershipRole"
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs to the organization only through projects
         createdAt:
           type: string
           format: date-time
         isPlatformAdmin:
           type: boolean
-          description: The system admin; its password is managed by its Secret and cannot be reset here
+          description: A platform admin; the password of a platform admin cannot be reset here
     AdminUserSummary:
       type: object
       additionalProperties: false
-      required: [id, login, displayName, status, isPlatformAdmin, emailVerified, mustChangePassword, createdAt, organizationCount]
+      required: [id, login, displayName, status, isPlatformAdmin, isSystemAdmin, emailVerified, mustChangePassword, createdAt, organizationCount]
       properties:
         id:
           type: string
@@ -4937,6 +5223,9 @@ components:
           enum: [active, disabled]
         isPlatformAdmin:
           type: boolean
+        isSystemAdmin:
+          type: boolean
+          description: The configured system admin, which cannot be revoked or disabled
         emailVerified:
           type: boolean
           description: Whether an identity provider or an emailed link confirmed the address
@@ -4981,7 +5270,10 @@ components:
           type: string
           enum: [active, suspended, deleted]
         role:
-          $ref: "#/components/schemas/MembershipRole"
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs to the organization only through projects
         joinedAt:
           type: string
           format: date-time
@@ -5195,10 +5487,18 @@ components:
           type: boolean
           nullable: true
           description: "`true` or `false` is the choice; `null` follows the environment again"
+    AdminPlatformAdminUpdate:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+          description: "`true` grants the platform-admin flag, `false` revokes it"
     AdminMember:
       type: object
       additionalProperties: false
-      required: [userId, login, displayName, role, status, joinedAt, isPlatformAdmin]
+      required: [userId, login, displayName, role, status, joinedAt, isPlatformAdmin, isSystemAdmin]
       properties:
         userId:
           type: string
@@ -5209,7 +5509,10 @@ components:
         displayName:
           type: string
         role:
-          $ref: "#/components/schemas/MembershipRole"
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs to the organization only through projects
         status:
           type: string
           enum: [active, disabled]
@@ -5218,6 +5521,9 @@ components:
           type: string
           format: date-time
         isPlatformAdmin:
+          type: boolean
+          description: A platform admin
+        isSystemAdmin:
           type: boolean
           description: The system admin; its membership cannot be changed or removed
     AdminMemberList:
@@ -5239,7 +5545,10 @@ components:
           maxLength: 254
           description: Email address of an existing account
         role:
-          $ref: "#/components/schemas/MembershipRole"
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs to the organization only through projects
     AdminProject:
       type: object
       additionalProperties: false
@@ -5257,7 +5566,7 @@ components:
           description: The Default project of the organization; it cannot be deleted
         allMembers:
           type: boolean
-          description: Every member of the organization belongs to it without being listed (the Default project)
+          description: Marks the Default project; it no longer changes who has access, because an organization role covers every project
         memberCount:
           type: integer
           minimum: 0
@@ -5339,7 +5648,10 @@ components:
         name:
           type: string
         role:
-          $ref: "#/components/schemas/MembershipRole"
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs to the organization only through projects
         status:
           $ref: "#/components/schemas/OrganizationStatus"
         current:
@@ -5365,7 +5677,7 @@ components:
     Member:
       type: object
       additionalProperties: false
-      required: [userId, login, displayName, role, joinedAt, isPlatformAdmin]
+      required: [userId, login, displayName, role, joinedAt, isPlatformAdmin, isSystemAdmin]
       properties:
         userId:
           type: string
@@ -5377,11 +5689,17 @@ components:
         displayName:
           type: string
         role:
-          $ref: "#/components/schemas/MembershipRole"
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs to the organization only through projects
         joinedAt:
           type: string
           format: date-time
         isPlatformAdmin:
+          type: boolean
+          description: A platform admin
+        isSystemAdmin:
           type: boolean
           description: The system admin; its role cannot be changed and it cannot be removed
     MemberList:
@@ -5399,23 +5717,35 @@ components:
       required: [role]
       properties:
         role:
-          $ref: "#/components/schemas/MembershipRole"
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role; null for a person who belongs to the organization only through projects
     InvitationRole:
       type: string
-      enum: [maintainer, member, viewer]
+      description: The organization role of an organization invitation (never `owner`), or the role in the project of a project invitation
+      enum: [owner, maintainer, member, viewer]
     InvitationStatus:
       type: string
       enum: [open, accepted, revoked, expired]
     Invitation:
       type: object
       additionalProperties: false
-      required: [id, role, label, status, createdAt, expiresAt, createdBy, acceptedBy, acceptedAt, revokedAt]
+      required: [id, role, projectId, projectName, label, status, createdAt, expiresAt, createdBy, acceptedBy, acceptedAt, revokedAt]
       properties:
         id:
           type: string
           format: uuid
         role:
           $ref: "#/components/schemas/InvitationRole"
+        projectId:
+          type: string
+          format: uuid
+          nullable: true
+          description: The project of a project invitation, null for an organization invitation
+        projectName:
+          type: string
+          nullable: true
         label:
           type: string
           description: The maintainer's own note about whom the link is for; empty when none
@@ -5458,6 +5788,10 @@ components:
       properties:
         role:
           $ref: "#/components/schemas/InvitationRole"
+        projectId:
+          type: string
+          format: uuid
+          description: Invite into this project; `role` is then the role in the project and no organization role is granted
         label:
           type: string
           maxLength: 80
@@ -5532,10 +5866,14 @@ components:
     InvitationPreview:
       type: object
       additionalProperties: false
-      required: [organizationName, role, expiresAt]
+      required: [organizationName, projectName, role, expiresAt]
       properties:
         organizationName:
           type: string
+        projectName:
+          type: string
+          nullable: true
+          description: The project of a project invitation, null for an organization invitation
         role:
           $ref: "#/components/schemas/InvitationRole"
         expiresAt:
@@ -5543,8 +5881,8 @@ components:
           format: date-time
     ProjectRole:
       type: string
-      description: A project role override; `viewer` makes a member read-only in the project
-      enum: [member, viewer]
+      description: A direct role in one project; the same four roles as in the organization
+      enum: [owner, maintainer, member, viewer]
     Project:
       type: object
       additionalProperties: false
@@ -5564,7 +5902,7 @@ components:
           description: The Default project of the organization; it cannot be deleted
         allMembers:
           type: boolean
-          description: Every member of the organization belongs to it without being listed (the Default project)
+          description: Marks the Default project; it no longer changes who has access, because an organization role covers every project
         role:
           $ref: "#/components/schemas/MembershipRole"
         monitorCount:
@@ -5630,20 +5968,23 @@ components:
         displayName:
           type: string
         organizationRole:
-          $ref: "#/components/schemas/MembershipRole"
+          allOf:
+            - $ref: "#/components/schemas/MembershipRole"
+          nullable: true
+          description: The organization role, which applies to every project; null for a person who belongs only through projects
         projectRole:
           allOf:
             - $ref: "#/components/schemas/ProjectRole"
           nullable: true
-          description: The override in this project; null keeps the organization role
+          description: The direct role in this project; null when the person is here only through the organization role
         effectiveRole:
           $ref: "#/components/schemas/MembershipRole"
         explicit:
           type: boolean
-          description: Listed as a member of the project (false for owners, maintainers and members through `allMembers`)
+          description: Has a direct role in the project
         allProjects:
           type: boolean
-          description: An owner or maintainer, who sees every project
+          description: Has an organization role, which gives a role in every project
     ProjectMemberList:
       type: object
       additionalProperties: false
@@ -5656,17 +5997,23 @@ components:
     ProjectMemberPut:
       type: object
       additionalProperties: false
+      required: [role]
       properties:
         role:
           $ref: "#/components/schemas/ProjectRole"
     StatusPage:
       type: object
       additionalProperties: false
-      required: [id, slug, title, description, logoUrl, accentColor, published, passwordProtected, publicUrl, componentCount, createdAt, updatedAt]
+      required: [id, projectId, slug, title, description, logoUrl, accentColor, published, passwordProtected, publicUrl, componentCount, createdAt, updatedAt]
       properties:
         id:
           type: string
           format: uuid
+        projectId:
+          type: string
+          format: uuid
+          nullable: true
+          description: The project the page belongs to; null for an organization-level page, which may show monitors of several projects
         slug:
           type: string
           example: acme
@@ -5714,6 +6061,11 @@ components:
       additionalProperties: false
       required: [slug, title]
       properties:
+        projectId:
+          type: string
+          format: uuid
+          nullable: true
+          description: The project of the page; absent or null creates an organization-level page
         slug:
           type: string
           description: Lowercase letters, digits and hyphens (3-63), unique across Proreta; reserved words such as `api`, `admin` or `status` are refused
@@ -6139,7 +6491,8 @@ components:
         | `urn:proreta:problem:plan-limit-reached` | 409 | The plan allows no more of a resource; carries `limit` and `max` |
         | `urn:proreta:problem:protected-organization` | 409 | The default organization, or the admin's own, cannot be suspended or deleted |
         | `urn:proreta:problem:organization-deleted` | 409 | A deleted organization cannot be changed |
-        | `urn:proreta:problem:system-admin` | 409 | The platform admin's membership cannot be changed through the API, nor its password reset by another admin |
+        | `urn:proreta:problem:system-admin` | 409 | The system admin's membership cannot be changed through the API, nor can it be disabled or revoked; the password of a platform admin cannot be reset by another admin |
+        | `urn:proreta:problem:last-platform-admin` | 409 | The platform-admin flag of the last active platform admin cannot be revoked |
         | `urn:proreta:problem:invitation-accepted` | 409 | The invitation was already used |
         | `urn:proreta:problem:already-member` | 409 | The user is already a member of the organization |
         | `urn:proreta:problem:last-owner` | 409 | The organization would be left without an owner |

@@ -54,6 +54,7 @@ var definerCalls = map[string]string{
 	"list_due_heartbeats":               `SELECT * FROM list_due_heartbeats(1)`,
 	"fail_deleted_channel_deliveries":   `SELECT fail_deleted_channel_deliveries(gen_random_uuid())`,
 	"enqueue_incident_reminders":        `SELECT enqueue_incident_reminders(1)`,
+	"webhook_delivery_context":          `SELECT * FROM webhook_delivery_context(gen_random_uuid())`,
 	// Executable by proreta_api, which gets the in-function refusal (PRA01) for an unknown actor.
 	"auth_sync_platform_admin":    `SELECT auth_sync_platform_admin(gen_random_uuid())`,
 	"admin_list_tenants":          `SELECT * FROM admin_list_tenants(gen_random_uuid(), '', false, 1, 0)`,
@@ -69,6 +70,7 @@ var definerCalls = map[string]string{
 	"admin_list_user_memberships": `SELECT * FROM admin_list_user_memberships(gen_random_uuid(), gen_random_uuid())`,
 	"admin_set_user_status":       `SELECT * FROM admin_set_user_status(gen_random_uuid(), gen_random_uuid(), 'disabled', gen_random_uuid(), NULL)`,
 	"admin_revoke_user_sessions":  `SELECT admin_revoke_user_sessions(gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), NULL)`,
+	"admin_set_platform_admin":    `SELECT admin_set_platform_admin(gen_random_uuid(), gen_random_uuid(), true, gen_random_uuid(), NULL)`,
 	// org_delete_tenant refuses (PRO02) without a tenant in the transaction.
 	"auth_invitation_lookup":      `SELECT * FROM auth_invitation_lookup('\x00')`,
 	"auth_user_organizations":     `SELECT * FROM auth_user_organizations(gen_random_uuid())`,

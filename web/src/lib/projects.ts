@@ -1,6 +1,7 @@
 import { useCallback, useSyncExternalStore } from "react";
-import type { MembershipRole, Project } from "../api/endpoints";
-import { roleAtLeast } from "./roles";
+import type { Project } from "../api/endpoints";
+import type { Permissions } from "./permissions";
+import type { OptionalRole } from "./roles";
 
 /**
  * The project the shell is filtered to: one project or "all" (every project the
@@ -63,24 +64,30 @@ export function useProjectChoice(key: string | null): [string, (choice: string) 
   return [choice, set];
 }
 
-/** Whether the role may create and change monitors in a project (its role there). */
-export function canEditIn(project: Pick<Project, "role"> | undefined): boolean {
-  return roleAtLeast(project?.role, "member");
+type Can = Pick<Permissions, "inProject">;
+
+/** Whether the person may create and change monitors in a project. */
+export function canEditIn(can: Can, project: Pick<Project, "id"> | undefined): boolean {
+  return project !== undefined && can.inProject(project.id, "monitor.update");
 }
 
 /** The projects a monitor may be created in or moved to by this user. */
-export function editableProjects(projects: Project[] | undefined): Project[] {
-  return (projects ?? []).filter((p) => canEditIn(p));
+export function editableProjects(can: Can, projects: Project[] | undefined): Project[] {
+  return (projects ?? []).filter((p) => canEditIn(can, p));
 }
 
-/** The label of the "every project" entry: admins see the whole organization. */
-export function allProjectsLabel(role: MembershipRole | undefined): string {
-  return roleAtLeast(role, "maintainer") ? "All projects" : "All my projects";
+/** The label of the "every project" entry: an organization role covers the whole organization. */
+export function allProjectsLabel(role: OptionalRole): string {
+  return role ? "All projects" : "All my projects";
 }
 
 /** The default project of a new monitor: the shell's project when the user may edit there. */
-export function defaultProjectFor(choice: string, projects: Project[] | undefined): string {
-  const editable = editableProjects(projects);
+export function defaultProjectFor(
+  can: Can,
+  choice: string,
+  projects: Project[] | undefined,
+): string {
+  const editable = editableProjects(can, projects);
   if (editable.some((p) => p.id === choice)) return choice;
   return (editable.find((p) => p.isDefault) ?? editable[0])?.id ?? "";
 }

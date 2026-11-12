@@ -1,3 +1,4 @@
+import { usePermissions } from "../lib/permissions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -61,8 +62,7 @@ import {
   type MonitorFormValues,
 } from "../lib/monitorForm";
 import { atHeartbeatLimit, atMonitorLimit, useUsage } from "../lib/usage";
-import { useAuth } from "../auth/AuthProvider";
-import { abilities, ROLE_HINTS } from "../lib/roles";
+import { ROLE_HINTS } from "../lib/roles";
 import { canEditIn, channelScopeLabel, defaultProjectFor, editableProjects } from "../lib/projects";
 import { useProjectScope } from "../lib/useProjectScope";
 import type { Project } from "../api/endpoints";
@@ -71,7 +71,8 @@ const title = "text-headline leading-[1.1] font-semibold tracking-[-0.02em] sm:t
 
 export default function MonitorForm({ mode }: { mode: "create" | "edit" }) {
   const { id = "" } = useParams();
-  const canEdit = abilities(useAuth().session).editMonitors;
+  const can = usePermissions();
+  const canEdit = can.anywhere(mode === "create" ? "monitor.create" : "monitor.update");
   const scope = useProjectScope();
   const monitor = useQuery({
     queryKey: queryKeys.monitor(id),
@@ -79,6 +80,13 @@ export default function MonitorForm({ mode }: { mode: "create" | "edit" }) {
     enabled: mode === "edit" && canEdit,
   });
 
+  if (!can.ready) {
+    return (
+      <Loading label="Loading…" className="pt-10">
+        <Skeleton className="h-8 w-64" />
+      </Loading>
+    );
+  }
   if (!canEdit) {
     // Viewers read only; the API would refuse the save.
     return (
@@ -107,7 +115,10 @@ export default function MonitorForm({ mode }: { mode: "create" | "edit" }) {
         <MonitorFormBody
           mode="create"
           projects={projects}
-          initial={{ ...emptyMonitorForm, projectId: defaultProjectFor(scope.choice, projects) }}
+          initial={{
+            ...emptyMonitorForm,
+            projectId: defaultProjectFor(can, scope.choice, projects),
+          }}
         />
       </Page>
     );
@@ -136,13 +147,14 @@ export default function MonitorForm({ mode }: { mode: "create" | "edit" }) {
   }
   const m = monitor.data;
   const ownProject = scope.projects.data?.items.find((p) => p.id === m.projectId);
-  if (scope.projects.data && !canEditIn(ownProject)) {
-    // A viewer override in this project: the API would refuse the save.
+  if (scope.projects.data && !canEditIn(can, ownProject)) {
+    // A viewer in this project: the API would refuse the save.
     return (
       <Page back={<Link to={`/monitors/${m.id}`}>← {m.name}</Link>} title={`Edit ${m.name}`}>
         <Alert tone="neutral" title="Read only.">
-          Your role in the project {ownProject?.name ?? ""} is viewer: you can see this monitor but
-          not change it. Ask a maintainer to change your role in the project.
+          Your role in the project {ownProject?.name ?? ""} is {ownProject?.role ?? "viewer"}: you
+          can see this monitor but not change it. Ask a maintainer to change your role in the
+          project.
         </Alert>
       </Page>
     );
@@ -492,7 +504,7 @@ function ProjectField({
   error?: string;
   onChange: (projectId: string) => void;
 }) {
-  const choices = editableProjects(projects);
+  const choices = editableProjects(usePermissions(), projects);
   if (choices.length < 2) return null;
   return (
     <Field

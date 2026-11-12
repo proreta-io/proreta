@@ -1,9 +1,9 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Invitation, Member, MonitorDetail } from "../api/endpoints";
-import { json, mockApi, problem, renderApp, session } from "../test/utils";
+import { json, mockApi, permissionsBody, problem, renderApp, session } from "../test/utils";
 
-const as = (role: string, over: object = {}) => ({
+const as = (role: string | null, over: object = {}) => ({
   "GET /api/v1/auth/me": () => json({ ...session, role, ...over }),
 });
 
@@ -14,6 +14,7 @@ const member = (over: Partial<Member> = {}): Member => ({
   role: "member",
   joinedAt: "2026-10-02T00:00:00Z",
   isPlatformAdmin: false,
+  isSystemAdmin: false,
   ...over,
 });
 
@@ -27,6 +28,8 @@ const invitation = (over: Partial<Invitation> = {}): Invitation => ({
   createdAt: "2026-11-01T00:00:00Z",
   expiresAt: "2026-11-08T00:00:00Z",
   createdBy: "admin",
+  projectId: null,
+  projectName: null,
   acceptedBy: null,
   acceptedAt: null,
   revokedAt: null,
@@ -39,6 +42,73 @@ const requests = (mock: ReturnType<typeof mockApi>, method: string, path: string
     .filter((r) => r.method === method && new URL(r.url).pathname === path);
 
 describe("members page", () => {
+  it("shows a person without an organization role only the leave section", async () => {
+    const fetchMock = mockApi({ ...as(null) });
+    renderApp("/members");
+    expect(await screen.findByText(/through projects only/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Leave organization" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Invite someone" })).not.toBeInTheDocument();
+    expect(requests(fetchMock, "GET", "/api/v1/members")).toHaveLength(0);
+    // Without a role in any project there are no status pages to see.
+    expect(screen.queryByRole("link", { name: "Status pages" })).not.toBeInTheDocument();
+  });
+
+  it("names a person without an organization role for people who cannot change roles", async () => {
+    mockApi({
+      ...as("viewer"),
+      "GET /api/v1/members": () =>
+        json({
+          items: [
+            member({ userId: "u1", login: null, displayName: "Olga", role: "owner" }),
+            member({ userId: "u3", login: null, displayName: "Dana", role: null }),
+          ],
+        }),
+    });
+    renderApp("/members");
+    expect(await screen.findByRole("row", { name: /Dana/ })).toHaveTextContent("Projects only");
+  });
+
+  it("shows the project of an invitation into a project", async () => {
+    mockApi({
+      ...as("maintainer"),
+      "GET /api/v1/members": () => json({ items: [me] }),
+      "GET /api/v1/invitations": () =>
+        json({ items: [invitation({ role: "maintainer", projectId: "w", projectName: "Web" })] }),
+    });
+    renderApp("/members");
+    expect(await screen.findByRole("row", { name: /Carol/ })).toHaveTextContent("in Web");
+  });
+
+  it("makes a member project-only and back", async () => {
+    let bob = member({ role: "member" });
+    const sent: unknown[] = [];
+    const fetchMock = mockApi({
+      ...as("owner"),
+      "GET /api/v1/members": () => json({ items: [me, bob] }),
+      "GET /api/v1/invitations": () => json({ items: [] }),
+      "PATCH /api/v1/members/u2": async (r) => {
+        const body = (await r.json()) as { role: Member["role"] };
+        sent.push(body);
+        bob = { ...bob, role: body.role };
+        return json(bob);
+      },
+    });
+    renderApp("/members");
+    const select = await screen.findByLabelText("Role of bob@example.com");
+    await userEvent.selectOptions(select, "No organization role (projects only)");
+    await waitFor(() => expect(requests(fetchMock, "PATCH", "/api/v1/members/u2")).toHaveLength(1));
+    expect(sent).toEqual([{ role: null }]);
+    expect(
+      await screen.findByText("bob@example.com now belongs through projects only"),
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByLabelText("Role of bob@example.com")).toHaveValue("none"),
+    );
+    await userEvent.selectOptions(screen.getByLabelText("Role of bob@example.com"), "viewer");
+    await waitFor(() => expect(requests(fetchMock, "PATCH", "/api/v1/members/u2")).toHaveLength(2));
+    expect(sent).toEqual([{ role: null }, { role: "viewer" }]);
+  });
+
   it("shows a viewer display names and roles, never logins", async () => {
     mockApi({
       ...as("viewer"),
@@ -105,7 +175,7 @@ describe("members page", () => {
       within(role)
         .getAllByRole("option")
         .map((o) => o.textContent),
-    ).toEqual(["Owner", "Maintainer", "Member", "Viewer"]);
+    ).toEqual(["No organization role (projects only)", "Owner", "Maintainer", "Member", "Viewer"]);
     // The owner's own row: a select (owners manage owners) but no Remove for oneself.
     expect(screen.getByText("You")).toBeInTheDocument();
 
@@ -339,7 +409,7 @@ describe("members page", () => {
     expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Invite someone" })).toBeNull();
     expect(
-      screen.getAllByText("Only admins and owners can invite people or change roles.").length,
+      screen.getAllByText("Only maintainers and owners can invite people or change roles.").length,
     ).toBeGreaterThan(0);
     // Invitations are never even requested.
     expect(requests(fetchMock, "GET", "/api/v1/invitations")).toHaveLength(0);
@@ -464,12 +534,12 @@ describe("role-aware pages", () => {
     expect(await screen.findByRole("link", { name: "Edit" })).toBeInTheDocument();
     view.unmount();
 
-    renderApp("/settings");
+    renderApp("/channels");
     expect(await screen.findByText("#ops")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add channel" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Edit #ops" })).toBeNull();
     expect(
-      screen.getByText("Only admins and owners can change notification channels."),
+      screen.getByText("Only maintainers and owners can change notification channels."),
     ).toBeInTheDocument();
   });
 });
@@ -490,18 +560,22 @@ describe("organization switcher", () => {
         },
       ],
     };
+    let switched = false;
     const fetchMock = mockApi({
       ...as("owner"),
       "GET /api/v1/auth/organizations": () => json(orgs),
       "GET /api/v1/monitors": () =>
         json({ summary: { up: 0, down: 0, paused: 0, unknown: 0 }, items: [] }),
-      "POST /api/v1/auth/switch-organization": () =>
-        json({
+      "GET /api/v1/permissions": () => json(permissionsBody(switched ? "viewer" : "owner")),
+      "POST /api/v1/auth/switch-organization": () => {
+        switched = true;
+        return json({
           ...session,
           organization: { id: "t2", slug: "beta", name: "Beta" },
           role: "viewer",
           csrfToken: "csrf-2",
-        }),
+        });
+      },
     });
     renderApp("/");
     await waitFor(() => expect(requests(fetchMock, "GET", "/api/v1/monitors")).toHaveLength(1));
@@ -579,6 +653,18 @@ describe("invitation page: new account and invalid links", () => {
       inviteToken: "TOKEN-123",
     });
     expect(await screen.findByRole("heading", { name: "Monitors" })).toBeInTheDocument();
+  });
+
+  it("tells which project and role a project link is for", async () => {
+    mockApi({
+      "GET /api/v1/auth/me": () => problem(401, "Not authenticated"),
+      "POST /api/v1/invitations/lookup": () =>
+        json({ ...preview, projectName: "Storefront", role: "maintainer" }),
+    });
+    renderApp("/invite#TOKEN-123");
+    expect(await screen.findByRole("heading", { name: "Join Acme" })).toBeInTheDocument();
+    expect(screen.getByText("Storefront")).toBeInTheDocument();
+    expect(screen.getByText(/in this project only/)).toBeInTheDocument();
   });
 
   it("joins as the signed-in user", async () => {

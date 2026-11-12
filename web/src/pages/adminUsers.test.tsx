@@ -14,6 +14,7 @@ const summary = (over: Partial<AdminUserSummary> = {}): AdminUserSummary => ({
   displayName: "Alice",
   status: "active",
   isPlatformAdmin: false,
+  isSystemAdmin: false,
   emailVerified: true,
   mustChangePassword: false,
   createdAt: "2026-10-01T00:00:00Z",
@@ -173,7 +174,8 @@ describe("admin user details", () => {
   it("does not offer to disable the system admin", async () => {
     mockApi({
       ...asAdmin,
-      "GET /api/v1/admin/users/u-1": () => json(detail({ isPlatformAdmin: true, login: "admin" })),
+      "GET /api/v1/admin/users/u-1": () =>
+        json(detail({ isPlatformAdmin: true, isSystemAdmin: true, login: "admin" })),
     });
     renderApp("/admin/users/u-1");
     expect(
@@ -215,5 +217,125 @@ describe("admin user details", () => {
       within(screen.getByRole("dialog")).getByRole("button", { name: "Disable user" }),
     );
     expect(await screen.findByText("Not here.")).toBeInTheDocument();
+  });
+});
+
+describe("admin user: platform admin", () => {
+  it("grants the flag after a confirmation", async () => {
+    let current = detail();
+    const fetchMock = mockApi({
+      ...asAdmin,
+      "GET /api/v1/admin/users/u-1": () => json(current),
+      "PUT /api/v1/admin/users/u-1/platform-admin": () => {
+        current = detail({ isPlatformAdmin: true });
+        return json(current);
+      },
+    });
+    renderApp("/admin/users/u-1");
+    expect(await screen.findByText("This user is not a platform admin.")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Grant platform admin" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText(/full control of the whole instance/)).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Grant platform admin" }));
+    expect(await screen.findByText("Platform admin granted")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Revoke platform admin" })).toBeEnabled();
+    const put = requests(fetchMock, "PUT", "/api/v1/admin/users/u-1/platform-admin");
+    expect(put).toHaveLength(1);
+    expect(await put[0]!.clone().json()).toEqual({ enabled: true });
+  });
+
+  it("revokes the flag after a confirmation", async () => {
+    let current = detail({ isPlatformAdmin: true });
+    const fetchMock = mockApi({
+      ...asAdmin,
+      "GET /api/v1/admin/users/u-1": () => json(current),
+      "PUT /api/v1/admin/users/u-1/platform-admin": () => {
+        current = detail();
+        return json(current);
+      },
+    });
+    renderApp("/admin/users/u-1");
+    await userEvent.click(await screen.findByRole("button", { name: "Revoke platform admin" }));
+    await userEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Revoke platform admin" }),
+    );
+    expect(await screen.findByText("Platform admin revoked")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Grant platform admin" })).toBeEnabled();
+    const put = requests(fetchMock, "PUT", "/api/v1/admin/users/u-1/platform-admin");
+    expect(await put[0]!.clone().json()).toEqual({ enabled: false });
+  });
+
+  it("cannot revoke the system admin and says why", async () => {
+    mockApi({
+      ...asAdmin,
+      "GET /api/v1/admin/users/u-1": () =>
+        json(detail({ isPlatformAdmin: true, isSystemAdmin: true, login: "root" })),
+    });
+    renderApp("/admin/users/u-1");
+    const button = await screen.findByRole("button", { name: "Revoke platform admin" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAccessibleDescription(/configured by the deployment/);
+    expect(screen.getByText("System admin")).toBeInTheDocument();
+  });
+
+  it("cannot revoke your own access", async () => {
+    mockApi({
+      "GET /api/v1/auth/me": () =>
+        json({ ...session, user: { ...session.user, id: "u-1", isPlatformAdmin: true } }),
+      "GET /api/v1/admin/users/u-1": () => json(detail({ isPlatformAdmin: true })),
+    });
+    renderApp("/admin/users/u-1");
+    expect(await screen.findByRole("button", { name: "Revoke platform admin" })).toBeDisabled();
+  });
+
+  it("cannot grant a disabled user", async () => {
+    mockApi({
+      ...asAdmin,
+      "GET /api/v1/admin/users/u-1": () => json(detail({ status: "disabled" })),
+    });
+    renderApp("/admin/users/u-1");
+    expect(await screen.findByRole("button", { name: "Grant platform admin" })).toBeDisabled();
+  });
+
+  it("shows the refusal for the last platform admin", async () => {
+    mockApi({
+      ...asAdmin,
+      "GET /api/v1/admin/users/u-1": () => json(detail({ isPlatformAdmin: true })),
+      "PUT /api/v1/admin/users/u-1/platform-admin": () =>
+        problem(409, "Conflict", {
+          type: "urn:proreta:problem:last-platform-admin",
+          detail: "Grant platform admin access to another active user first.",
+        }),
+    });
+    renderApp("/admin/users/u-1");
+    await userEvent.click(await screen.findByRole("button", { name: "Revoke platform admin" }));
+    await userEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Revoke platform admin" }),
+    );
+    expect(
+      await screen.findByText("Grant platform admin access to another active user first."),
+    ).toBeInTheDocument();
+  });
+
+  it("marks admins in the list", async () => {
+    mockApi({
+      ...asAdmin,
+      "GET /api/v1/admin/users": () =>
+        json({
+          items: [
+            summary({ id: "u-2", login: "bob@beta.example", isPlatformAdmin: true }),
+            summary({ id: "u-3", login: "root", isPlatformAdmin: true, isSystemAdmin: true }),
+            summary(),
+          ],
+          total: 3,
+          limit: 25,
+          offset: 0,
+        }),
+    });
+    renderApp("/admin/users");
+    const rows = within(await screen.findByRole("table")).getAllByRole("row");
+    expect(within(rows[1]!).getByText("Admin")).toBeInTheDocument();
+    expect(within(rows[2]!).getByText("System admin")).toBeInTheDocument();
+    expect(within(rows[3]!).queryByText("Admin")).toBeNull();
   });
 });

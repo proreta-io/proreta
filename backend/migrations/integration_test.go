@@ -65,6 +65,7 @@ var definerAllowList = map[string][]string{
 	"admin_list_user_memberships": {"proreta_api"},
 	"admin_set_user_status":       {"proreta_api"},
 	"admin_revoke_user_sessions":  {"proreta_api"},
+	"admin_set_platform_admin":    {"proreta_api"},
 	"ensure_partitions":           {"proreta_worker"},
 	"claim_due_monitors":          {"proreta_worker"},
 	"compute_rollups":             {"proreta_worker"},
@@ -112,6 +113,9 @@ var definerAllowList = map[string][]string{
 	// the caller's tenant, and jobs queues reminders of open incidents across tenants.
 	"fail_deleted_channel_deliveries": {"proreta_api"},
 	"enqueue_incident_reminders":      {"proreta_worker"},
+	// jobs reads the monitor type and the names of its project and organization to render a
+	// webhook body.
+	"webhook_delivery_context": {"proreta_worker"},
 	// Members and invitations: an invitation token is looked up before the
 	// tenant is known, the organization switcher lists the user's own memberships, and an owner
 	// soft-deletes the organization of its own transaction.
@@ -159,7 +163,8 @@ var extraPolicies = map[string]struct {
 	"monitor_channels.owner_reminder_read":          {cmd: "r", roles: []string{"proreta_owner"}},
 	"notification_deliveries.owner_reminder_insert": {cmd: "a", roles: []string{"proreta_owner"}},
 	// auth_invitation_lookup.
-	"invitations.owner_invitation_lookup": {cmd: "r", roles: []string{"proreta_owner"}},
+	"invitations.owner_invitation_lookup":      {cmd: "r", roles: []string{"proreta_owner"}},
+	"projects.owner_invitation_project_lookup": {cmd: "r", roles: []string{"proreta_owner"}},
 	// status_page_published_pages and status_page_snapshot.
 	"status_pages.owner_statuspage_read":          {cmd: "r", roles: []string{"proreta_owner"}},
 	"status_page_snapshots.owner_statuspage_read": {cmd: "r", roles: []string{"proreta_owner"}},

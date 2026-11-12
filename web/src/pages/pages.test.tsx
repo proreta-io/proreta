@@ -7,7 +7,7 @@ import type {
   MonitorDetail,
   MonitorListItem,
 } from "../api/endpoints";
-import { json, mockApi, problem, renderApp, signedIn } from "../test/utils";
+import { json, mockApi, problem, renderApp, session, signedIn } from "../test/utils";
 
 const httpOf = (over: Partial<HttpMonitor> = {}): HttpMonitor => ({
   url: "https://example.com/",
@@ -66,6 +66,7 @@ const channel = (over: Partial<Channel> = {}): Channel => ({
   projectId: "p-default",
   name: "#ops",
   type: "slack_webhook",
+  configHidden: false,
   events: ["down", "recovered", "tls_expiring"],
   mention: [],
   reminderMinutes: 0,
@@ -855,7 +856,10 @@ describe("settings", () => {
     mockApi({ ...signedIn, "GET /api/v1/channels": () => json({ items: [] }) });
     renderApp("/settings");
     expect(await screen.findByText("Cannot load plan and usage")).toBeInTheDocument();
-    expect(screen.getByText(/No notification channels yet/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Notification channels" })).toHaveAttribute(
+      "href",
+      "/channels",
+    );
     expect(screen.getByText(/Signed in as/)).toHaveTextContent(
       "Signed in as admin. The password is managed outside the app.",
     );
@@ -879,13 +883,54 @@ describe("settings", () => {
           ],
         }),
     });
-    renderApp("/settings");
+    renderApp("/channels");
     const oncall = await screen.findByRole("row", { name: /#on-call/ });
-    expect(oncall).toHaveTextContent("#on-callDown@hereEvery 1 hFailed");
+    expect(oncall).toHaveTextContent("#on-callSlackDown@hereEvery 1 hFailed");
     expect(screen.getByRole("row", { name: /#ops/ })).toHaveTextContent(
-      "#opsDown, Recovered, TLS certificate expiringNoneOffActive",
+      "#opsSlackDown, Recovered, TLS certificate expiringNoneOffActive",
     );
-    expect(screen.getByText(/refused by Slack/)).toBeInTheDocument();
+    expect(screen.getByText(/was refused by/)).toBeInTheDocument();
+  });
+
+  it("shows project-only maintainers an organization-wide channel without settings or actions", async () => {
+    mockApi({
+      "GET /api/v1/auth/me": () => json({ ...session, role: null }),
+      "GET /api/v1/projects": () =>
+        json({
+          items: [
+            {
+              id: "p-web",
+              name: "Web",
+              slug: "web",
+              isDefault: false,
+              allMembers: false,
+              role: "maintainer",
+              monitorCount: 0,
+              channelCount: 1,
+              createdAt: "2026-10-01T00:00:00Z",
+              updatedAt: "2026-10-01T00:00:00Z",
+            },
+          ],
+        }),
+      "GET /api/v1/channels": () =>
+        json({
+          items: [
+            channel({
+              id: "c-org",
+              projectId: null,
+              name: "#all-hands",
+              configHidden: true,
+              events: [],
+            }),
+            channel({ id: "c-web", projectId: "p-web", name: "#web" }),
+          ],
+        }),
+    });
+    renderApp("/channels");
+    const org = await screen.findByRole("row", { name: /#all-hands/ });
+    expect(org).toHaveTextContent("Settings are managed by the organization.");
+    expect(within(org).queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit #web" })).toBeInTheDocument();
   });
 
   it("adds a channel without showing the webhook again", async () => {
@@ -900,7 +945,7 @@ describe("settings", () => {
         return json(items[0], 201);
       },
     });
-    renderApp("/settings");
+    renderApp("/channels");
     await userEvent.click(await screen.findByRole("button", { name: "Add channel" }));
     const url = screen.getByLabelText("Slack webhook URL");
     expect(url).toHaveAttribute("type", "text");
@@ -930,7 +975,7 @@ describe("settings", () => {
 
   it("checks the form before sending it", async () => {
     const fetchMock = mockApi({ ...signedIn, "GET /api/v1/channels": () => json({ items: [] }) });
-    renderApp("/settings");
+    renderApp("/channels");
     await userEvent.click(await screen.findByRole("button", { name: "Add channel" }));
     await userEvent.type(screen.getByLabelText("Name"), "x");
     await userEvent.type(screen.getByLabelText("Slack webhook URL"), "https://example.com");
@@ -958,7 +1003,7 @@ describe("settings", () => {
           max: 1,
         }),
     });
-    const { queryClient } = renderApp("/settings");
+    const { queryClient } = renderApp("/channels");
     expect(await screen.findByRole("button", { name: "Add channel" })).toBeDisabled();
     expect(screen.getByText(/limit is reached/)).toBeInTheDocument();
 
@@ -991,7 +1036,7 @@ describe("settings", () => {
         return json(channel({ name: "#ops2" }));
       },
     });
-    renderApp("/settings");
+    renderApp("/channels");
     await userEvent.click(await screen.findByRole("button", { name: "Edit #ops" }));
     expect(screen.queryByLabelText(/webhook URL/)).not.toBeInTheDocument();
     expect(screen.getByText("Configured, hidden")).toBeInTheDocument();
@@ -1017,7 +1062,7 @@ describe("settings", () => {
         return json(channel());
       },
     });
-    renderApp("/settings");
+    renderApp("/channels");
     await userEvent.click(await screen.findByRole("button", { name: "Edit #ops" }));
     await userEvent.click(screen.getByRole("button", { name: "Replace" }));
     const url = screen.getByLabelText("New Slack webhook URL");
@@ -1039,7 +1084,7 @@ describe("settings", () => {
           ? problem(429, "Too many attempts", { detail: "Try again later." })
           : new Response(null, { status: 204 }),
     });
-    renderApp("/settings");
+    renderApp("/channels");
     await userEvent.click(
       await screen.findByRole("button", { name: "Send a test message to #ops" }),
     );
@@ -1059,7 +1104,7 @@ describe("settings", () => {
         return new Response(null, { status: 204 });
       },
     });
-    renderApp("/settings");
+    renderApp("/channels");
     await userEvent.click(await screen.findByRole("button", { name: "Delete #ops" }));
     const dialog = screen.getByRole("dialog", { name: "Delete #ops?" });
     expect(dialog).toHaveTextContent(/notify every active channel/);

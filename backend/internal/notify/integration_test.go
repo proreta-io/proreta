@@ -79,8 +79,8 @@ func TestIntegrationChannels(t *testing.T) {
 			('`+monitorB+`', '`+tenantB+`', (SELECT id FROM projects WHERE tenant_id = '`+tenantB+`' AND is_default), 'b', '{"url":"https://b.example","expectedStatus":"2xx"}')`)
 	sender := &fakeSender{}
 	svc := notify.NewService(env.Pool(t, env.APIURL, 4), keyring(t), sender, "https://proreta.example.com")
-	a := notify.Actor{TenantID: uuid.MustParse(tenantA), UserID: uuid.MustParse(userA)}
-	b := notify.Actor{TenantID: uuid.MustParse(tenantB), UserID: uuid.MustParse(userA)}
+	a := notify.Actor{TenantID: uuid.MustParse(tenantA), UserID: uuid.MustParse(userA), Access: authz.Actor{Role: authz.Owner}}
+	b := notify.Actor{TenantID: uuid.MustParse(tenantB), UserID: uuid.MustParse(userA), Access: authz.Actor{Role: authz.Owner}}
 
 	if list, err := svc.List(ctx, a.TenantID, everyProject, nil); err != nil || len(list) != 0 {
 		t.Fatalf("empty: %v %v", list, err)

@@ -464,7 +464,9 @@ describe("provider sign-in edge cases", () => {
         registrationEnabled: false,
       }),
     );
-    const steps = await screen.findByRole("list");
+    const steps = await within(
+      await screen.findByRole("region", { name: "Sign-in domains" }),
+    ).findByRole("list");
     const items = within(steps).getAllByRole("listitem");
     expect(items).toHaveLength(2);
     expect(items[0]).toHaveTextContent(

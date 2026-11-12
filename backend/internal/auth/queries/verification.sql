@@ -23,7 +23,7 @@ WHERE id = @id AND email = @email AND email_verified_at IS NULL;
 
 -- name: LockUserForVerification :one
 -- Serialises resends and the consumption of a link for one user.
-SELECT email, email_verified_at, status, is_platform_admin
+SELECT email, email_verified_at, status, is_platform_admin, is_system_admin
 FROM users
 WHERE id = @id
 FOR UPDATE;

@@ -144,16 +144,23 @@ func TestIntegrationProjects(t *testing.T) {
 				t.Errorf("worker reads %s: %v", table, err)
 			}
 		}
-		// project_members: role override member or viewer only, removed with the membership.
+		// project_members: a direct role (one of the four, never NULL), removed with the membership.
 		user := uuid.NewString()
 		pgtest.MustExec(t, admin, `INSERT INTO users (id, email) VALUES ('`+user+`', 'pm@example.com')`,
 			`INSERT INTO memberships (tenant_id, user_id, role) VALUES ('`+tenantA+`', '`+user+`', 'member')`)
 		err = inTenant(t, api, tenantA, func(tx pgx.Tx) error {
-			_, err := tx.Exec(ctx, `INSERT INTO project_members (tenant_id, project_id, user_id, role) VALUES ($1, $2, $3, 'maintainer')`, tenantA, defA, user)
+			_, err := tx.Exec(ctx, `INSERT INTO project_members (tenant_id, project_id, user_id, role) VALUES ($1, $2, $3, 'admin')`, tenantA, defA, user)
 			return err
 		})
 		if err == nil {
-			t.Fatal("project role maintainer accepted")
+			t.Fatal("project role admin accepted")
+		}
+		err = inTenant(t, api, tenantA, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `INSERT INTO project_members (tenant_id, project_id, user_id, role) VALUES ($1, $2, $3, NULL)`, tenantA, defA, user)
+			return err
+		})
+		if err == nil {
+			t.Fatal("a NULL project role accepted")
 		}
 		err = inTenant(t, api, tenantA, func(tx pgx.Tx) error {
 			_, err := tx.Exec(ctx, `INSERT INTO project_members (tenant_id, project_id, user_id, role) VALUES ($1, $2, $3, 'viewer')`, tenantA, defA, user)

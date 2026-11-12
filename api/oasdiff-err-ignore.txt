@@ -41,3 +41,23 @@ GET /api/v1/projects/{projectId} added the new `maintainer` enum value to the `r
 PATCH /api/v1/projects/{projectId} added the new `maintainer` enum value to the `role` response property for the response status `200`
 GET /api/v1/projects/{projectId}/members added the new `maintainer` enum value to the `items/items/effectiveRole` response property for the response status `200` (shared schema: `MembershipRole`, also at `items/items/organizationRole`)
 PUT /api/v1/projects/{projectId}/members/{userId} added the new `maintainer` enum value to the `effectiveRole` response property for the response status `200` (shared schema: `MembershipRole`, also at `organizationRole`)
+
+# Roles exist at two levels. An organization role may be null (a person who belongs to the organization only through projects), and a role in a project is a direct role of the same four values, required, instead of an optional override. Before the first stable release there is no compatibility with older clients (the web app changes in the same release).
+POST /api/v1/admin/organizations/{organizationId}/members added `#/components/schemas/MembershipRole` to the `role` request property `allOf` list
+PUT /api/v1/admin/organizations/{organizationId}/members/{userId} added `#/components/schemas/MembershipRole` to the `role` request property `allOf` list
+PUT /api/v1/admin/organizations/{organizationId}/projects/{projectId}/members/{userId} the request property `role` became required
+PATCH /api/v1/members/{userId} added `#/components/schemas/MembershipRole` to the `role` request property `allOf` list
+PUT /api/v1/projects/{projectId}/members/{userId} the request property `role` became required
+
+# An invitation into a project carries the role in the project, which may be owner, so the shared invitation role gains that value. Before the first stable release there is no compatibility with older clients (the web app changes in the same release).
+GET /api/v1/admin/organizations/{organizationId}/invitations added the new `owner` enum value to the `items/items/role` response property for the response status `200`
+POST /api/v1/admin/organizations/{organizationId}/invitations added the new `owner` enum value to the `invitation/role` response property for the response status `201`
+GET /api/v1/invitations added the new `owner` enum value to the `items/items/role` response property for the response status `200`
+POST /api/v1/invitations added the new `owner` enum value to the `invitation/role` response property for the response status `201`
+POST /api/v1/invitations/lookup added the new `owner` enum value to the `role` response property for the response status `200`
+
+# A second channel type, webhook. Before the first stable release there is no compatibility with older clients (the web app changes in the same release).
+GET /api/v1/channels added the new `webhook` enum value to the `items/items/type` response property for the response status `200`
+POST /api/v1/channels added the new `webhook` enum value to the `type` response property for the response status `201`
+GET /api/v1/channels/{channelId} added the new `webhook` enum value to the `type` response property for the response status `200`
+PATCH /api/v1/channels/{channelId} added the new `webhook` enum value to the `type` response property for the response status `200`

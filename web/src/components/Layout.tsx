@@ -1,12 +1,13 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
+import { usePermissions } from "../lib/permissions";
 import ErrorBoundary from "./ErrorBoundary";
 import OrganizationSwitcher from "./OrganizationSwitcher";
 import ProjectSwitcher from "./ProjectSwitcher";
 import ThemeToggle from "./ThemeToggle";
 import VerifyEmailBanner from "./VerifyEmailBanner";
-import { Badge, Button, cx } from "./ui";
+import { Button, cx } from "./ui";
 
 /** The page width shared by the top bar and the content, so their edges line up. */
 export const PAGE = "mx-auto w-full max-w-[1200px] px-4 sm:px-8";
@@ -19,7 +20,7 @@ const navClass = ({ isActive }: { isActive: boolean }) =>
       : "text-muted-foreground hover:text-foreground",
   );
 
-export default function Layout() {
+export default function Layout({ children }: { children?: ReactNode }) {
   const auth = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -28,8 +29,7 @@ export default function Layout() {
   const menuOpen = menuFor === location.pathname;
   const login = auth.session?.user.login;
   const isAdmin = auth.session?.user.isPlatformAdmin === true;
-  // The grey band with its own navigation is the signal that this is the privileged area.
-  const inAdmin = isAdmin && /^\/admin(\/|$)/.test(location.pathname);
+  const can = usePermissions();
 
   async function onLogout() {
     await auth.logout();
@@ -41,15 +41,16 @@ export default function Layout() {
       <NavLink to="/" end className={navClass}>
         Monitors
       </NavLink>
-      <NavLink to="/projects" className={navClass}>
-        Projects
-      </NavLink>
-      <NavLink to="/members" className={navClass}>
-        Members
-      </NavLink>
-      <NavLink to="/status-page" className={navClass}>
-        Status page
-      </NavLink>
+      {can.anywhere("statuspage.read") && (
+        <NavLink to="/status-page" className={navClass}>
+          Status pages
+        </NavLink>
+      )}
+      {can.anywhere("channel.read") && (
+        <NavLink to="/channels" className={navClass}>
+          Channels
+        </NavLink>
+      )}
       <NavLink to="/settings" className={navClass}>
         Settings
       </NavLink>
@@ -128,40 +129,12 @@ export default function Layout() {
           </div>
         )}
       </header>
-      {inAdmin && (
-        <div className="border-b border-border bg-muted">
-          <div className={cx(PAGE, "flex h-11 items-stretch gap-6")}>
-            <span className="flex items-center">
-              <Badge tone="inverse">Platform admin</Badge>
-            </span>
-            <nav aria-label="Admin" className="flex items-stretch gap-5">
-              <NavLink to="/admin" end className={navClass}>
-                Overview
-              </NavLink>
-              <NavLink to="/admin/organizations" className={navClass}>
-                Organizations
-              </NavLink>
-              <NavLink to="/admin/users" className={navClass}>
-                Users
-              </NavLink>
-              <NavLink to="/admin/email" className={navClass}>
-                Email
-              </NavLink>
-              <NavLink to="/admin/registration" className={navClass}>
-                Registration
-              </NavLink>
-            </nav>
-          </div>
-        </div>
-      )}
       <div className={PAGE}>
         <VerifyEmailBanner />
       </div>
       <main className={cx(PAGE, "flex flex-1 flex-col pb-16")}>
         {/* Keyed by path so an error on one page does not stick after navigating away. */}
-        <ErrorBoundary key={location.pathname}>
-          <Outlet />
-        </ErrorBoundary>
+        <ErrorBoundary key={location.pathname}>{children ?? <Outlet />}</ErrorBoundary>
       </main>
     </div>
   );

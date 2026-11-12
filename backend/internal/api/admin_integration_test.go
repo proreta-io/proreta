@@ -83,7 +83,7 @@ func adminCalls(t *testing.T, tenantID, userID string) []struct{ method, path, b
 				case http.MethodPost, http.MethodPatch:
 					body = `{"name":"Payments"}`
 				case http.MethodPut:
-					body = `{}`
+					body = `{"role":"member"}`
 				}
 			case method == http.MethodPatch:
 				body = `{"status":"suspended"}`
@@ -93,6 +93,8 @@ func adminCalls(t *testing.T, tenantID, userID string) []struct{ method, path, b
 				body = `{"sendInvitations":false,"sendEmailVerification":false,"allowPasswordReset":false}`
 			case method == http.MethodPut && strings.HasSuffix(path, "/registration"):
 				body = `{"enabled":false}`
+			case method == http.MethodPut && strings.HasSuffix(path, "/platform-admin"):
+				body = `{"enabled":true}`
 			case method == http.MethodPut && strings.Contains(path, "/members/"):
 				body = `{"role":"member"}`
 			case method == http.MethodPost && strings.HasSuffix(path, "/members"):
@@ -104,8 +106,8 @@ func adminCalls(t *testing.T, tenantID, userID string) []struct{ method, path, b
 				strings.NewReplacer("{tenantId}", tenantID, "{organizationId}", tenantID, "{userId}", userID, "{invitationId}", userID, "{projectId}", userID).Replace(path), body})
 		}
 	}
-	if len(out) != 33 {
-		t.Fatalf("%d admin operations in the spec, want 33", len(out))
+	if len(out) != 34 {
+		t.Fatalf("%d admin operations in the spec, want 34", len(out))
 	}
 	return out
 }

@@ -81,7 +81,7 @@ func (s *Service) FindUserByEmail(ctx context.Context, email string) (uuid.UUID,
 // ChangeRole apply (last owner, platform admin); the platform admin cannot join another
 // organization. a must come from PlatformActor.
 func (s *Service) SetMember(ctx context.Context, a Actor, userID uuid.UUID, role string) (m Member, action string, err error) {
-	if !a.platform || !authz.Valid(authz.Role(role)) {
+	if !a.platform || (role != "" && !authz.Valid(authz.Role(role))) {
 		return Member{}, "", authz.ErrForbidden
 	}
 	err = db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
@@ -110,7 +110,7 @@ func (s *Service) SetMember(ctx context.Context, a Actor, userID uuid.UUID, role
 		if err != nil {
 			return fmt.Errorf("get user: %w", err)
 		}
-		if u.IsPlatformAdmin {
+		if u.IsSystemAdmin {
 			// BootstrapAdmin refuses to start when the admin belongs to another tenant.
 			return ErrSystemAdminMember
 		}
@@ -125,12 +125,12 @@ func (s *Service) SetMember(ctx context.Context, a Actor, userID uuid.UUID, role
 			return fmt.Errorf("read new member: %w", err)
 		}
 		m = Member{UserID: userID, Login: row.Email, DisplayName: row.DisplayName, Role: row.Role, JoinedAt: row.CreatedAt,
-			IsPlatformAdmin: row.IsPlatformAdmin, Status: row.Status}
+			IsPlatformAdmin: row.IsPlatformAdmin, IsSystemAdmin: row.IsSystemAdmin, Status: row.Status}
 		action = ActionAdminMemberAdded
 		return audit.Record(ctx, tx, audit.Entry{
 			TenantID: a.TenantID, ActorUserID: &a.UserID, Action: action,
 			EntityType: "user", EntityID: userID.String(), IP: a.IP,
-			Metadata: map[string]any{"role": role},
+			Metadata: map[string]any{"role": roleLabel(role)},
 		})
 	})
 	if err != nil {

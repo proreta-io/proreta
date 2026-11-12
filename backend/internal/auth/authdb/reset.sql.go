@@ -56,7 +56,7 @@ func (q *Queries) CountRecentPasswordResets(ctx context.Context, arg CountRecent
 }
 
 const getUserForReset = `-- name: GetUserForReset :one
-SELECT id, email, status, is_platform_admin, (password_hash IS NOT NULL)::boolean AS has_password
+SELECT id, email, status, is_platform_admin, is_system_admin, (password_hash IS NOT NULL)::boolean AS has_password
 FROM users
 WHERE email = $1
 `
@@ -66,6 +66,7 @@ type GetUserForResetRow struct {
 	Email           string
 	Status          string
 	IsPlatformAdmin bool
+	IsSystemAdmin   bool
 	HasPassword     bool
 }
 
@@ -78,6 +79,7 @@ func (q *Queries) GetUserForReset(ctx context.Context, email string) (GetUserFor
 		&i.Email,
 		&i.Status,
 		&i.IsPlatformAdmin,
+		&i.IsSystemAdmin,
 		&i.HasPassword,
 	)
 	return i, err
@@ -108,7 +110,7 @@ func (q *Queries) InsertPasswordReset(ctx context.Context, arg InsertPasswordRes
 }
 
 const lockUserForReset = `-- name: LockUserForReset :one
-SELECT email, status, is_platform_admin, (password_hash IS NOT NULL)::boolean AS has_password, email_verified_at
+SELECT email, status, is_platform_admin, is_system_admin, (password_hash IS NOT NULL)::boolean AS has_password, email_verified_at
 FROM users
 WHERE id = $1
 FOR UPDATE
@@ -118,6 +120,7 @@ type LockUserForResetRow struct {
 	Email           string
 	Status          string
 	IsPlatformAdmin bool
+	IsSystemAdmin   bool
 	HasPassword     bool
 	EmailVerifiedAt *time.Time
 }
@@ -129,6 +132,7 @@ func (q *Queries) LockUserForReset(ctx context.Context, id uuid.UUID) (LockUserF
 		&i.Email,
 		&i.Status,
 		&i.IsPlatformAdmin,
+		&i.IsSystemAdmin,
 		&i.HasPassword,
 		&i.EmailVerifiedAt,
 	)

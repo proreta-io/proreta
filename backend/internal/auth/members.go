@@ -34,9 +34,9 @@ var (
 	ErrMemberNotFound = errors.New("auth: member not found")
 	// ErrLastOwner means the change would leave the organization without an active owner.
 	ErrLastOwner = errors.New("auth: the organization must keep an active owner")
-	// ErrSystemAdminMember means the change targets the platform admin, whose owner membership of
+	// ErrSystemAdminMember means the change targets the system admin, whose owner membership of
 	// the default tenant comes from configuration.
-	ErrSystemAdminMember = errors.New("auth: the platform admin's membership cannot be changed")
+	ErrSystemAdminMember = errors.New("auth: the system admin's membership cannot be changed")
 	// ErrProtectedOrganization means the default organization cannot be deleted.
 	ErrProtectedOrganization = errors.New("auth: the default organization cannot be deleted")
 )
@@ -60,22 +60,50 @@ type Member struct {
 	Role            string
 	JoinedAt        time.Time
 	IsPlatformAdmin bool
+	// IsSystemAdmin marks the configured admin, whose membership is never changed.
+	IsSystemAdmin bool
 	// Status is the account status (active or disabled); set by ListMembers.
 	Status string
 }
 
 // ListMembers returns the members of the organization, oldest first.
 func (s *Service) ListMembers(ctx context.Context, tenantID uuid.UUID) ([]Member, error) {
+	return s.listMembers(ctx, tenantID, nil)
+}
+
+// ListMembersInProjects returns the people a person without an organization role may see: those
+// with an organization role (they are in every project) and those with a direct role in one of the
+// projects.
+func (s *Service) ListMembersInProjects(ctx context.Context, tenantID uuid.UUID, projectIDs []uuid.UUID) ([]Member, error) {
+	if projectIDs == nil {
+		projectIDs = []uuid.UUID{}
+	}
+	return s.listMembers(ctx, tenantID, projectIDs)
+}
+
+func (s *Service) listMembers(ctx context.Context, tenantID uuid.UUID, projectIDs []uuid.UUID) ([]Member, error) {
 	var out []Member
 	err := db.WithTenantTx(ctx, s.pool, tenantID, func(tx pgx.Tx) error {
-		rows, err := authdb.New(tx).ListMembers(ctx, tenantID)
-		if err != nil {
-			return err
+		q := authdb.New(tx)
+		var rows []authdb.ListMembersRow
+		if projectIDs == nil {
+			var err error
+			if rows, err = q.ListMembers(ctx, tenantID); err != nil {
+				return err
+			}
+		} else {
+			scoped, err := q.ListMembersInProjects(ctx, authdb.ListMembersInProjectsParams{TenantID: tenantID, ProjectIds: projectIDs})
+			if err != nil {
+				return err
+			}
+			for _, r := range scoped {
+				rows = append(rows, authdb.ListMembersRow(r))
+			}
 		}
 		out = make([]Member, len(rows))
 		for i, r := range rows {
 			out[i] = Member{UserID: r.UserID, Login: r.Email, DisplayName: r.DisplayName, Role: r.Role,
-				JoinedAt: r.CreatedAt, IsPlatformAdmin: r.IsPlatformAdmin, Status: r.Status}
+				JoinedAt: r.CreatedAt, IsPlatformAdmin: r.IsPlatformAdmin, IsSystemAdmin: r.IsSystemAdmin, Status: r.Status}
 		}
 		return nil
 	})
@@ -106,7 +134,7 @@ func lockActorRole(ctx context.Context, tx pgx.Tx, a Actor) (authz.Actor, error)
 }
 
 // lockTarget locks the target membership and applies the rules that need the database: the
-// platform admin is never changed and the last active owner never loses the role.
+// system admin is never changed and the last active owner never loses the role.
 func lockTarget(ctx context.Context, q *authdb.Queries, tenantID, userID uuid.UUID, losesOwner bool) (authdb.LockMemberRow, error) {
 	m, err := q.LockMember(ctx, authdb.LockMemberParams{TenantID: tenantID, UserID: userID})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -115,7 +143,7 @@ func lockTarget(ctx context.Context, q *authdb.Queries, tenantID, userID uuid.UU
 	if err != nil {
 		return m, fmt.Errorf("lock member: %w", err)
 	}
-	if m.IsPlatformAdmin {
+	if m.IsSystemAdmin {
 		return m, ErrSystemAdminMember
 	}
 	if m.Role == RoleOwner && losesOwner {
@@ -130,10 +158,12 @@ func lockTarget(ctx context.Context, q *authdb.Queries, tenantID, userID uuid.UU
 	return m, nil
 }
 
-// ChangeRole gives a member another role (maintainer or owner only; a maintainer never touches an owner
-// and nobody grants a role above their own, authz.CanManage).
+// ChangeRole gives a member another organization role, or none (role "": the person then belongs to
+// the organization only through projects). Maintainers and owners only; a maintainer never touches
+// an owner and nobody grants a role above their own (authz.CanManage). Taking the role away from the
+// last owner is refused like a demotion.
 func (s *Service) ChangeRole(ctx context.Context, a Actor, userID uuid.UUID, role string) (Member, error) {
-	if !authz.Valid(authz.Role(role)) {
+	if role != "" && !authz.Valid(authz.Role(role)) {
 		return Member{}, fmt.Errorf("%w: unknown role", authz.ErrForbidden)
 	}
 	var out Member
@@ -165,7 +195,7 @@ func changeRole(ctx context.Context, tx pgx.Tx, a Actor, actor authz.Actor, user
 	if !authz.CanManage(actor, authz.Role(m.Role), authz.Role(role)) {
 		return Member{}, false, authz.ErrForbidden
 	}
-	out := Member{UserID: userID, Login: m.Email, DisplayName: m.DisplayName, Role: m.Role, JoinedAt: m.CreatedAt, IsPlatformAdmin: m.IsPlatformAdmin, Status: m.Status}
+	out := Member{UserID: userID, Login: m.Email, DisplayName: m.DisplayName, Role: m.Role, JoinedAt: m.CreatedAt, IsPlatformAdmin: m.IsPlatformAdmin, IsSystemAdmin: m.IsSystemAdmin, Status: m.Status}
 	if m.Role == role {
 		return out, false, nil
 	}
@@ -179,7 +209,7 @@ func changeRole(ctx context.Context, tx pgx.Tx, a Actor, actor authz.Actor, user
 	return out, true, audit.Record(ctx, tx, audit.Entry{
 		TenantID: a.TenantID, ActorUserID: &a.UserID, Action: a.action(ActionMemberRoleChanged),
 		EntityType: "user", EntityID: userID.String(), IP: a.IP,
-		Metadata: map[string]any{"from": m.Role, "to": role},
+		Metadata: map[string]any{"from": roleLabel(m.Role), "to": roleLabel(role)},
 	})
 }
 
@@ -228,7 +258,7 @@ func (s *Service) deleteMembership(ctx context.Context, tx pgx.Tx, a Actor, user
 	if _, err := q.DeleteMembership(ctx, authdb.DeleteMembershipParams{TenantID: a.TenantID, UserID: userID}); err != nil {
 		return fmt.Errorf("delete membership: %w", err)
 	}
-	meta := map[string]any{"role": m.Role}
+	meta := map[string]any{"role": roleLabel(m.Role)}
 	if !a.platform {
 		meta["self"] = self
 	}
@@ -236,6 +266,14 @@ func (s *Service) deleteMembership(ctx context.Context, tx pgx.Tx, a Actor, user
 		TenantID: a.TenantID, ActorUserID: &a.UserID, Action: a.action(ActionMemberRemoved),
 		EntityType: "user", EntityID: userID.String(), IP: a.IP, Metadata: meta,
 	})
+}
+
+// roleLabel names an organization role in audit metadata; "none" is a person without one.
+func roleLabel(role string) string {
+	if role == "" {
+		return "none"
+	}
+	return role
 }
 
 func wrapMemberErr(op string, err error) error {
@@ -286,7 +324,7 @@ type Organization struct {
 func (s *Service) Organizations(ctx context.Context, userID uuid.UUID) ([]Organization, error) {
 	var out []Organization
 	err := db.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT tenant_id, slug, name, status, role FROM auth_user_organizations($1)`, userID)
+		rows, err := tx.Query(ctx, `SELECT tenant_id, slug, name, status, coalesce(role, '') FROM auth_user_organizations($1)`, userID)
 		if err != nil {
 			return err
 		}
@@ -345,7 +383,7 @@ func (s *Service) SwitchOrganization(ctx context.Context, p Principal, tenantID 
 			return err
 		}
 		res = LoginResult{Token: sess.token, SessionInfo: SessionInfo{
-			User:   User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, IsPlatformAdmin: u.IsPlatformAdmin, MustChangePassword: u.PasswordMustChange, EmailVerified: u.EmailVerifiedAt != nil},
+			User:   User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, IsPlatformAdmin: u.IsPlatformAdmin, IsSystemAdmin: u.IsSystemAdmin, MustChangePassword: u.PasswordMustChange, EmailVerified: u.EmailVerifiedAt != nil},
 			Tenant: t, Role: role, CSRFToken: sess.csrf, ExpiresAt: sess.expiresAt,
 		}}
 		return nil

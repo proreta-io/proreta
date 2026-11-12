@@ -162,6 +162,17 @@ func TestIntegrationAdminMembers(t *testing.T) {
 		if role(orgA, bobID) != "owner" {
 			t.Fatal("the last owner lost the role")
 		}
+		// Taking the role away counts as losing it.
+		if r := c.do(http.MethodPut, base+orgA+"/members/"+bobID, `{"role":null}`, ah); r.code != http.StatusConflict || r.body["type"] != "urn:proreta:problem:last-owner" {
+			t.Fatalf("null role for the last owner: %d %s", r.code, r.raw)
+		}
+		// A maintainer may become project-only and gets a role again.
+		if r := c.do(http.MethodPut, base+orgA+"/members/"+aliceID, `{"role":null}`, ah); r.code != http.StatusOK || r.body["role"] != nil {
+			t.Fatalf("project-only: %d %s", r.code, r.raw)
+		}
+		if l := c.do(http.MethodGet, base+orgA+"/members", "", ah); l.code != http.StatusOK || !strings.Contains(l.raw, `"role":null`) {
+			t.Fatalf("members with a null role: %d %s", l.code, l.raw)
+		}
 		if r := c.do(http.MethodPut, base+orgA+"/members/"+aliceID, `{"role":"owner"}`, ah); r.code != http.StatusOK {
 			t.Fatalf("restore alice: %d %s", r.code, r.raw)
 		}

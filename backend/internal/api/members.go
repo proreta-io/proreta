@@ -7,15 +7,18 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/proreta-io/proreta/backend/internal/api/gen"
 	"github.com/proreta-io/proreta/backend/internal/auth"
 	"github.com/proreta-io/proreta/backend/internal/authz"
 	"github.com/proreta-io/proreta/backend/internal/platform/httpx"
 	"github.com/proreta-io/proreta/backend/internal/platform/logging"
+	"github.com/proreta-io/proreta/backend/internal/projects"
 )
 
-// roleError is a request refused by the operation table because the session's role is below the
-// operation's minimum role.
+// roleError is a request refused by the operation table because no role of the actor holds the
+// permission the operation needs; required is the lowest role that does.
 type roleError struct{ required authz.Role }
 
 func (e *roleError) Error() string { return fmt.Sprintf("forbidden: needs role %s", e.required) }
@@ -25,8 +28,10 @@ var errPasswordChangeRequired = errors.New("password change required")
 
 // authorize is the strict-handler middleware that applies the operation table of internal/authz
 // to every operation by its operation id: unknown operations are refused, public ones pass, and
-// every other one needs a session whose role reaches the operation's minimum. It runs after the
-// request validator, so the session (and the CSRF token) were already checked.
+// every other one needs a session whose permissions cover the operation: through the
+// organization role or, for a project-scope permission, in at least one project. Operations that
+// name a project are checked again for that project by the service. It runs after the request
+// validator, so the session (and the CSRF token) were already checked.
 func (s *server) authorize(f gen.StrictHandlerFunc, operationID string) gen.StrictHandlerFunc {
 	min, known := authz.MinRole(operationID)
 	return func(ctx context.Context, w http.ResponseWriter, r *http.Request, req any) (any, error) {
@@ -44,7 +49,16 @@ func (s *server) authorize(f gen.StrictHandlerFunc, operationID string) gen.Stri
 		if p.MustChangePassword && !authz.AllowedWhileMustChangePassword(operationID) {
 			return nil, errPasswordChangeRequired
 		}
-		if !authz.Can(authz.Actor{UserID: p.UserID, Role: authz.Role(p.Role)}, operationID) {
+		allowed := authz.Can(authz.Actor{UserID: p.UserID, Role: authz.Role(p.Role)}, operationID)
+		if !allowed && authz.LevelOfOperation(operationID) == authz.LevelProject {
+			// Only now the direct project roles are needed (one query, cached for the request).
+			full, err := s.accessFor(r)
+			if err != nil {
+				return nil, err
+			}
+			allowed = authz.Can(full, operationID)
+		}
+		if !allowed {
 			s.log.WarnContext(ctx, "operation refused by role", "operation", operationID, "role", p.Role, "required", string(min))
 			return nil, &roleError{required: min}
 		}
@@ -65,7 +79,16 @@ func (s *server) ListMembers(ctx context.Context, _ gen.ListMembersRequestObject
 	if err != nil {
 		return nil, err
 	}
-	list, err := s.auth.ListMembers(ctx, p.TenantID)
+	var list []auth.Member
+	if authz.Has(authz.Role(p.Role), "organization.members.read") {
+		list, err = s.auth.ListMembers(ctx, p.TenantID)
+	} else {
+		// Only through projects: the directory is limited to the people they share a project with.
+		var scope authz.Scope
+		if scope, err = s.scope(ctx); err == nil {
+			list, err = s.auth.ListMembersInProjects(ctx, p.TenantID, scope.IDs)
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +106,7 @@ func (s *server) UpdateMember(ctx context.Context, req gen.UpdateMemberRequestOb
 	if err != nil {
 		return nil, err
 	}
-	m, err := s.auth.ChangeRole(ctx, a, req.UserId, string(req.Body.Role))
+	m, err := s.auth.ChangeRole(ctx, a, req.UserId, roleString(req.Body.Role))
 	if err != nil {
 		return nil, err
 	}
@@ -125,12 +148,25 @@ func (s *server) DeleteOrganization(ctx context.Context, _ gen.DeleteOrganizatio
 	return gen.DeleteOrganization204Response{Headers: gen.DeleteOrganization204ResponseHeaders{SetCookie: &cleared}}, nil
 }
 
-func (s *server) ListInvitations(ctx context.Context, _ gen.ListInvitationsRequestObject) (gen.ListInvitationsResponseObject, error) {
+func (s *server) ListInvitations(ctx context.Context, req gen.ListInvitationsRequestObject) (gen.ListInvitationsResponseObject, error) {
 	p, err := s.principal(ctx)
 	if err != nil {
 		return nil, err
 	}
-	list, err := s.auth.ListInvitations(ctx, p.TenantID)
+	a, err := s.access(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// Organization owners and maintainers see everything; a project owner or maintainer only the
+	// invitations into their projects.
+	scope := authz.Scope{All: a.Holds("organization.members.manage")}
+	if !scope.All {
+		scope = a.ScopeFor("project.members.manage")
+	}
+	if req.Params.ProjectId != nil && !a.Sees(*req.Params.ProjectId) {
+		return nil, projects.ErrNotFound
+	}
+	list, err := s.auth.ListInvitationsIn(ctx, p.TenantID, scope, req.Params.ProjectId)
 	if err != nil {
 		return nil, err
 	}
@@ -144,6 +180,9 @@ func (s *server) ListInvitations(ctx context.Context, _ gen.ListInvitationsReque
 // CreateInvitation answers the invitation link once. The token is in the URL fragment, which
 // browsers never send to a server, so opening the link does not put it in any access log.
 func (s *server) CreateInvitation(ctx context.Context, req gen.CreateInvitationRequestObject) (gen.CreateInvitationResponseObject, error) {
+	if err := organizationInvitationRole(req.Body.ProjectId, req.Body.Role); err != nil {
+		return nil, err
+	}
 	a, err := s.memberActor(ctx)
 	if err != nil {
 		return nil, err
@@ -156,11 +195,20 @@ func (s *server) CreateInvitation(ctx context.Context, req gen.CreateInvitationR
 	if req.Body.Email != nil {
 		email = *req.Body.Email
 	}
-	inv, token, emailed, err := s.auth.CreateInvitationFor(ctx, a, auth.InvitationInput{Role: string(req.Body.Role), Label: label, Email: email, SendEmail: req.Body.SendEmail})
+	inv, token, emailed, err := s.auth.CreateInvitationFor(ctx, a, auth.InvitationInput{Role: string(req.Body.Role), ProjectID: req.Body.ProjectId, Label: label, Email: email, SendEmail: req.Body.SendEmail})
 	if err != nil {
 		return nil, err
 	}
 	return gen.CreateInvitation201JSONResponse{Invitation: toInvitation(inv), InviteUrl: s.cfg.PublicURL + "/invite#" + token, EmailQueued: emailed}, nil
+}
+
+// organizationInvitationRole refuses owner for an invitation into the organization (the shared role
+// enum also holds it for project invitations): an owner is made by changing a member's role.
+func organizationInvitationRole(project *uuid.UUID, role gen.InvitationRole) error {
+	if project == nil && role == gen.InvitationRole(authz.Owner) {
+		return &badRequestError{detail: "role: owner is granted by changing a member's role, not by a link"}
+	}
+	return nil
 }
 
 func (s *server) RevokeInvitation(ctx context.Context, req gen.RevokeInvitationRequestObject) (gen.RevokeInvitationResponseObject, error) {
@@ -180,7 +228,7 @@ func (s *server) LookupInvitation(ctx context.Context, req gen.LookupInvitationR
 	if err != nil {
 		return nil, err
 	}
-	return gen.LookupInvitation200JSONResponse{OrganizationName: pv.OrganizationName, Role: gen.InvitationRole(pv.Role), ExpiresAt: pv.ExpiresAt}, nil
+	return gen.LookupInvitation200JSONResponse{OrganizationName: pv.OrganizationName, ProjectName: pv.ProjectName, Role: gen.InvitationRole(pv.Role), ExpiresAt: pv.ExpiresAt}, nil
 }
 
 func (s *server) AcceptInvitation(ctx context.Context, req gen.AcceptInvitationRequestObject) (gen.AcceptInvitationResponseObject, error) {
@@ -212,7 +260,7 @@ func (s *server) ListOrganizations(ctx context.Context, _ gen.ListOrganizationsR
 	}
 	out := gen.ListOrganizations200JSONResponse{Items: make([]gen.Organization, len(list))}
 	for i, o := range list {
-		out.Items[i] = gen.Organization{Id: o.Tenant.ID, Slug: o.Tenant.Slug, Name: o.Tenant.Name, Role: gen.MembershipRole(o.Role),
+		out.Items[i] = gen.Organization{Id: o.Tenant.ID, Slug: o.Tenant.Slug, Name: o.Tenant.Name, Role: optRole(o.Role),
 			Status: gen.OrganizationStatus(o.Tenant.Status), Current: o.Tenant.ID == p.TenantID}
 	}
 	return out, nil
@@ -236,14 +284,31 @@ func (s *server) SwitchOrganization(ctx context.Context, req gen.SwitchOrganizat
 	}, nil
 }
 
+// optRole maps an organization role that may be empty (none) to the nullable API value.
+func optRole(r string) *gen.MembershipRole {
+	if r == "" {
+		return nil
+	}
+	v := gen.MembershipRole(r)
+	return &v
+}
+
+// roleString maps a nullable API role to the empty string for none.
+func roleString(r *gen.MembershipRole) string {
+	if r == nil {
+		return ""
+	}
+	return string(*r)
+}
+
 // toMember maps a member; showLogin is false for callers below maintainer.
 func toMember(m auth.Member, showLogin bool) gen.Member {
-	return gen.Member{UserId: m.UserID, Login: loginFor(m.Login, showLogin), DisplayName: m.DisplayName, Role: gen.MembershipRole(m.Role),
-		JoinedAt: m.JoinedAt, IsPlatformAdmin: m.IsPlatformAdmin}
+	return gen.Member{UserId: m.UserID, Login: loginFor(m.Login, showLogin), DisplayName: m.DisplayName, Role: optRole(m.Role),
+		JoinedAt: m.JoinedAt, IsPlatformAdmin: m.IsPlatformAdmin, IsSystemAdmin: m.IsSystemAdmin}
 }
 
 func toInvitation(i auth.Invitation) gen.Invitation {
-	return gen.Invitation{Id: i.ID, Role: gen.InvitationRole(i.Role), Label: i.Label, Status: gen.InvitationStatus(i.Status),
+	return gen.Invitation{Id: i.ID, Role: gen.InvitationRole(i.Role), ProjectId: i.ProjectID, ProjectName: i.ProjectName, Label: i.Label, Status: gen.InvitationStatus(i.Status),
 		CreatedAt: i.CreatedAt, ExpiresAt: i.ExpiresAt, CreatedBy: i.CreatedBy, AcceptedBy: i.AcceptedBy,
 		AcceptedAt: i.AcceptedAt, RevokedAt: i.RevokedAt}
 }

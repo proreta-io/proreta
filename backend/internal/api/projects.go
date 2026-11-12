@@ -33,7 +33,12 @@ func withAccessSlot(next http.Handler) http.Handler {
 // access resolves the actor of the request with its role in each project it belongs to
 // (once per request, read from the database, so a change applies on the next request).
 func (s *server) access(ctx context.Context) (authz.Actor, error) {
-	r := httpRequest(ctx)
+	return s.accessFor(httpRequest(ctx))
+}
+
+// accessFor is access for code that has the request but not yet the context of the handlers.
+func (s *server) accessFor(r *http.Request) (authz.Actor, error) {
+	ctx := r.Context()
 	slot, _ := r.Context().Value(accessKey{}).(*accessSlot)
 	if slot == nil {
 		return authz.Actor{}, fmt.Errorf("api: access slot missing")
@@ -45,7 +50,7 @@ func (s *server) access(ctx context.Context) (authz.Actor, error) {
 			return
 		}
 		a := authz.Actor{UserID: p.UserID, Role: authz.Role(p.Role)}
-		a.Projects, slot.err = s.projects.Access(ctx, p.TenantID, p.UserID, a.Role)
+		a.Projects, slot.err = s.projects.Access(ctx, p.TenantID, p.UserID)
 		slot.actor = a
 	})
 	return slot.actor, slot.err
@@ -160,10 +165,9 @@ func (s *server) ListProjectMembers(ctx context.Context, req gen.ListProjectMemb
 	if err != nil {
 		return nil, err
 	}
-	showLogins := a.Access.Role.AtLeast(authz.Maintainer) // logins are visible to maintainers and above
 	out := gen.ListProjectMembers200JSONResponse{Items: make([]gen.ProjectMember, len(list))}
 	for i, m := range list {
-		out.Items[i] = toProjectMember(m, showLogins)
+		out.Items[i] = toProjectMember(m, showLogins(a))
 	}
 	return out, nil
 }
@@ -173,16 +177,11 @@ func (s *server) PutProjectMember(ctx context.Context, req gen.PutProjectMemberR
 	if err != nil {
 		return nil, err
 	}
-	var role *authz.Role
-	if req.Body.Role != nil {
-		r := authz.Role(*req.Body.Role)
-		role = &r
-	}
-	m, err := s.projects.PutMember(ctx, a, req.ProjectId, req.UserId, role)
+	m, err := s.projects.PutMember(ctx, a, req.ProjectId, req.UserId, authz.Role(req.Body.Role))
 	if err != nil {
 		return nil, err
 	}
-	return gen.PutProjectMember200JSONResponse(toProjectMember(m, true)), nil
+	return gen.PutProjectMember200JSONResponse(toProjectMember(m, showLogins(a))), nil
 }
 
 func (s *server) RemoveProjectMember(ctx context.Context, req gen.RemoveProjectMemberRequestObject) (gen.RemoveProjectMemberResponseObject, error) {
@@ -196,6 +195,10 @@ func (s *server) RemoveProjectMember(ctx context.Context, req gen.RemoveProjectM
 	return gen.RemoveProjectMember204Response{}, nil
 }
 
+// showLogins reports whether the actor sees the logins (email addresses) of people: organization
+// owners and maintainers do.
+func showLogins(a projects.Actor) bool { return a.Access.Role.AtLeast(authz.Maintainer) }
+
 func toProject(p projects.Project) gen.Project {
 	return gen.Project{Id: p.ID, Name: p.Name, Slug: p.Slug, IsDefault: p.IsDefault, AllMembers: p.AllMembers,
 		Role: gen.MembershipRole(p.Role), MonitorCount: p.MonitorCount, ChannelCount: p.ChannelCount,
@@ -205,7 +208,7 @@ func toProject(p projects.Project) gen.Project {
 // toProjectMember maps a project member; showLogin is false for callers below maintainer.
 func toProjectMember(m projects.Member, showLogin bool) gen.ProjectMember {
 	out := gen.ProjectMember{UserId: m.UserID, Login: loginFor(m.Login, showLogin), DisplayName: m.DisplayName,
-		OrganizationRole: gen.MembershipRole(m.OrganizationRole), EffectiveRole: gen.MembershipRole(m.EffectiveRole),
+		OrganizationRole: optRole(string(m.OrganizationRole)), EffectiveRole: gen.MembershipRole(m.EffectiveRole),
 		Explicit: m.Explicit, AllProjects: m.AllProjects}
 	if m.ProjectRole != nil {
 		r := gen.ProjectRole(*m.ProjectRole)

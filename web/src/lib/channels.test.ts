@@ -35,6 +35,7 @@ describe("channel form", () => {
   it("rejects what the server would reject", () => {
     const errors = validateChannelForm(
       {
+        ...emptyChannelForm,
         name: "",
         project: "",
         webhookUrl: "https://example.com/hook",

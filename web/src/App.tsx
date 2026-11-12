@@ -1,8 +1,12 @@
 import { Route, Routes } from "react-router-dom";
 import RequireAuth from "./auth/RequireAuth";
+import RequirePermission from "./auth/RequirePermission";
 import RequirePlatformAdmin from "./auth/RequirePlatformAdmin";
+import AdminLayout from "./components/AdminLayout";
 import Layout from "./components/Layout";
+import Channels from "./pages/Channels";
 import ForgotPassword from "./pages/ForgotPassword";
+import HelpRoles from "./pages/HelpRoles";
 import Invite from "./pages/Invite";
 import Login from "./pages/Login";
 import Members from "./pages/Members";
@@ -43,19 +47,29 @@ export default function App() {
           <Route path="/settings" element={<Settings />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/members" element={<Members />} />
-          <Route path="/projects" element={<Projects />} />
-          <Route path="/status-page" element={<StatusPageSettings />} />
-          <Route path="/admin" element={<RequirePlatformAdmin />}>
+          <Route path="/help/roles" element={<HelpRoles />} />
+          <Route element={<RequirePermission permission="project.read" />}>
+            <Route path="/projects" element={<Projects />} />
+          </Route>
+          <Route element={<RequirePermission permission="channel.read" />}>
+            <Route path="/channels" element={<Channels />} />
+          </Route>
+          <Route element={<RequirePermission permission="statuspage.read" />}>
+            <Route path="/status-page" element={<StatusPageSettings />} />
+          </Route>
+          <Route path="*" element={<NotFound />} />
+        </Route>
+        <Route path="/admin" element={<RequirePlatformAdmin />}>
+          <Route element={<AdminLayout />}>
             <Route index element={<AdminOverview />} />
             <Route path="organizations" element={<AdminOrganizations />} />
+            <Route path="organizations/:id" element={<AdminOrganizationDetails />} />
             <Route path="users" element={<AdminUsers />} />
             <Route path="users/:id" element={<AdminUserDetails />} />
             <Route path="email" element={<AdminEmail />} />
             <Route path="registration" element={<AdminRegistration />} />
-            <Route path="organizations/:id" element={<AdminOrganizationDetails />} />
             <Route path="*" element={<NotFound />} />
           </Route>
-          <Route path="*" element={<NotFound />} />
         </Route>
       </Route>
     </Routes>

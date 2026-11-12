@@ -14,9 +14,9 @@ const providers = (emailEnabled: boolean) => ({
       emailVerificationEnabled: emailEnabled,
     }),
 });
-const user = (login: string, emailVerified: boolean, isPlatformAdmin = false) => ({
+const user = (login: string, emailVerified: boolean, isSystemAdmin = false) => ({
   "GET /api/v1/auth/me": () =>
-    json({ ...session, user: { ...session.user, login, emailVerified, isPlatformAdmin } }),
+    json({ ...session, user: { ...session.user, login, emailVerified, isSystemAdmin } }),
   "GET /api/v1/monitors": () =>
     json({ summary: { up: 0, down: 0, paused: 0, unknown: 0 }, items: [] }),
 });
@@ -135,7 +135,7 @@ describe("the verification banner", () => {
     ["the installation sends no email", user("ada@example.com", false), providers(false)],
     ["the address is verified", user("ada@example.com", true), providers(true)],
     ["the login is not an address", user("admin", false), providers(true)],
-    ["the user is the platform admin", user("ops@example.com", false, true), providers(true)],
+    ["the user is the system admin", user("ops@example.com", false, true), providers(true)],
     [
       "the providers cannot be loaded",
       user("ada@example.com", false),

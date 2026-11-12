@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/proreta-io/proreta/backend/internal/authz"
 	"github.com/proreta-io/proreta/backend/internal/incidents"
 	"github.com/proreta-io/proreta/backend/internal/jobs"
 	"github.com/proreta-io/proreta/backend/internal/monitors"
@@ -121,7 +122,7 @@ func newEnv(t *testing.T, name string) *env {
 	// Channels are configured through the owning service, so the stored value is the real envelope.
 	channels := notify.NewService(e.Pool(t, e.APIURL, 2), keys, nil, "")
 	for tenant, hook := range map[string]string{tenantA: webhookA, tenantB: webhookB} {
-		c, err := channels.Create(e.ctx, notify.Actor{TenantID: uuid.MustParse(tenant), UserID: uuid.MustParse(userID)}, notify.CreateInput{Name: "alerts", WebhookURL: hook})
+		c, err := channels.Create(e.ctx, notify.Actor{TenantID: uuid.MustParse(tenant), UserID: uuid.MustParse(userID), Access: authz.Actor{Role: authz.Owner}}, notify.CreateInput{Name: "alerts", WebhookURL: hook})
 		if err != nil {
 			t.Fatal(err)
 		}

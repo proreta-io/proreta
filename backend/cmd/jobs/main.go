@@ -66,10 +66,12 @@ func run() error {
 
 	reg := metrics.NewRegistry("jobs", version, commit)
 	m := jobs.NewMetrics(reg)
+	notifyClient := notify.NewSlackClient(cfg.BlockedCIDRs)
 	deliverer := jobs.NewDeliverer(jobs.DeliveryConfig{PublicURL: cfg.PublicURL, DrainTimeout: cfg.ShutdownTimeout}, jobs.DeliveryDeps{
 		Pool:     pool,
 		Channels: notify.NewService(pool, keys, nil, cfg.PublicURL),
-		Notifier: notify.NewSlackNotifier(notify.NewSlackClient(cfg.BlockedCIDRs)),
+		Notifier: notify.NewSlackNotifier(notifyClient),
+		Webhook:  notify.NewWebhookNotifier(notifyClient),
 		Metrics:  m,
 		Log:      log,
 	})
