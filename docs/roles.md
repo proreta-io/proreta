@@ -7,7 +7,7 @@ Permissions of the organization level are held only through an organization role
 
 ## Roles and permissions
 
-| Permission | Level | What it allows | owner | admin | member | viewer |
+| Permission | Level | What it allows | owner | maintainer | member | viewer |
 |---|---|---|---|---|---|---|
 | `account.use` | organization | Use the session, switch and leave organizations, link sign-in identities | yes | yes | yes | yes |
 | `organization.delete` | organization | Delete the organization | yes | | | |

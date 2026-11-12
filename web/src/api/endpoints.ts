@@ -517,7 +517,7 @@ export const removeProjectMember = (projectId: string, userId: string) =>
     }),
   );
 
-// Status page. Every role reads the settings; admins and owners change them.
+// Status page. Every role reads the settings; maintainers and owners change them.
 
 export const listStatusPages = () => unwrap(client.GET("/api/v1/status-pages"));
 

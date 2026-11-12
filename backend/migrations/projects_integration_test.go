@@ -149,11 +149,11 @@ func TestIntegrationProjects(t *testing.T) {
 		pgtest.MustExec(t, admin, `INSERT INTO users (id, email) VALUES ('`+user+`', 'pm@example.com')`,
 			`INSERT INTO memberships (tenant_id, user_id, role) VALUES ('`+tenantA+`', '`+user+`', 'member')`)
 		err = inTenant(t, api, tenantA, func(tx pgx.Tx) error {
-			_, err := tx.Exec(ctx, `INSERT INTO project_members (tenant_id, project_id, user_id, role) VALUES ($1, $2, $3, 'admin')`, tenantA, defA, user)
+			_, err := tx.Exec(ctx, `INSERT INTO project_members (tenant_id, project_id, user_id, role) VALUES ($1, $2, $3, 'maintainer')`, tenantA, defA, user)
 			return err
 		})
 		if err == nil {
-			t.Fatal("project role admin accepted")
+			t.Fatal("project role maintainer accepted")
 		}
 		err = inTenant(t, api, tenantA, func(tx pgx.Tx) error {
 			_, err := tx.Exec(ctx, `INSERT INTO project_members (tenant_id, project_id, user_id, role) VALUES ($1, $2, $3, 'viewer')`, tenantA, defA, user)

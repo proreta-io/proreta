@@ -75,7 +75,7 @@ export function editableProjects(projects: Project[] | undefined): Project[] {
 
 /** The label of the "every project" entry: admins see the whole organization. */
 export function allProjectsLabel(role: MembershipRole | undefined): string {
-  return roleAtLeast(role, "admin") ? "All projects" : "All my projects";
+  return roleAtLeast(role, "maintainer") ? "All projects" : "All my projects";
 }
 
 /** The default project of a new monitor: the shell's project when the user may edit there. */

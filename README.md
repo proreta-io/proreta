@@ -7,7 +7,7 @@ Proreta is a multi-tenant uptime-monitoring service you can run yourself.
 - **Alerts:** Slack notification channels per project or per organization, with reminders while an incident stays open.
 - **Watchdog heartbeats:** a dead man's switch URL, for example for the always-firing `Watchdog` alert of Prometheus Alertmanager. When the pings stop, Proreta raises an incident.
 - **Status pages:** public, optionally password-protected pages per organization, with an RSS feed.
-- **Organizations, projects and roles:** owners, admins, members and viewers; projects scope monitors and channels; invitations by link.
+- **Organizations, projects and roles:** owners, maintainers, members and viewers; projects scope monitors and channels; invitations by link.
 - **Sign-in:** password, Google and GitHub (OAuth), with optional Google Workspace domain auto-join.
 - **Platform admin panel:** plans and limits, suspension, password resets.
 

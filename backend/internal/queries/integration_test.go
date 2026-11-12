@@ -16,7 +16,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/testsupport/pgtest"
 )
 
-// all is the scope of an owner or admin: every project.
+// all is the scope of an owner or maintainer: every project.
 var everyProject = authz.Scope{All: true}
 
 const defaultLocation = "01920000-0000-7000-8000-000000000001"

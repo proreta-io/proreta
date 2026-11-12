@@ -147,7 +147,7 @@ func TestIntegrationAdminMembers(t *testing.T) {
 
 	t.Run("last owner", func(t *testing.T) {
 		for _, step := range []struct{ method, path, body string }{
-			{http.MethodPut, aliceID, `{"role":"admin"}`}, // bob is an owner too
+			{http.MethodPut, aliceID, `{"role":"maintainer"}`}, // bob is an owner too
 		} {
 			if r := c.do(step.method, base+orgA+"/members/"+step.path, step.body, ah); r.code != http.StatusOK {
 				t.Fatalf("demote alice: %d %s", r.code, r.raw)
@@ -175,7 +175,7 @@ func TestIntegrationAdminMembers(t *testing.T) {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
-					codes[i] = c.do(http.MethodPut, base+orgA+"/members/"+id, `{"role":"admin"}`, ah).code
+					codes[i] = c.do(http.MethodPut, base+orgA+"/members/"+id, `{"role":"maintainer"}`, ah).code
 				}()
 			}
 			wg.Wait()
@@ -272,7 +272,7 @@ func TestIntegrationAdminMembers(t *testing.T) {
 			t.Fatalf("remove again: %d %s", r.code, r.raw)
 		}
 		// The place is free again.
-		if r := c.do(http.MethodPut, base+orgA+"/members/"+bobID, `{"role":"admin"}`, ah); r.code != http.StatusOK {
+		if r := c.do(http.MethodPut, base+orgA+"/members/"+bobID, `{"role":"maintainer"}`, ah); r.code != http.StatusOK {
 			t.Fatalf("re-add: %d %s", r.code, r.raw)
 		}
 		if r := c.do(http.MethodDelete, base+orgA+"/members/"+bobID, "", ah); r.code != http.StatusNoContent {

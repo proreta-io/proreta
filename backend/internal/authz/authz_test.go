@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 )
 
-var roles = []Role{Owner, Admin, Member, Viewer}
+var roles = []Role{Owner, Maintainer, Member, Viewer}
 
 func TestCanDeniesUnknown(t *testing.T) {
 	for _, r := range roles {
@@ -40,7 +40,7 @@ var expectedMinimum = map[Role][]string{
 		"createMonitor", "updateMonitor", "deleteMonitor", "pauseMonitor", "resumeMonitor",
 		"regenerateHeartbeatToken",
 	},
-	Admin: {
+	Maintainer: {
 		"createChannel", "updateChannel", "deleteChannel", "testChannel", "getUsage",
 		"listInvitations", "createInvitation", "revokeInvitation", "updateMember", "removeMember",
 		"createProject", "updateProject", "deleteProject", "putProjectMember", "removeProjectMember",
@@ -152,15 +152,15 @@ func TestCanManage(t *testing.T) {
 		actor, target, to Role
 		want              bool
 	}{
-		{Owner, Owner, Admin, true},
+		{Owner, Owner, Maintainer, true},
 		{Owner, Viewer, Owner, true},
-		{Owner, Admin, "", true},
-		{Admin, Owner, Admin, false},  // admins cannot touch owners
-		{Admin, Owner, "", false},     // nor remove them
-		{Admin, Member, Owner, false}, // nor grant owner
-		{Admin, Member, Admin, true},
-		{Admin, Admin, Viewer, true},
-		{Admin, Viewer, "", true},
+		{Owner, Maintainer, "", true},
+		{Maintainer, Owner, Maintainer, false}, // maintainers cannot touch owners
+		{Maintainer, Owner, "", false},         // nor remove them
+		{Maintainer, Member, Owner, false},     // nor grant owner
+		{Maintainer, Member, Maintainer, true},
+		{Maintainer, Maintainer, Viewer, true},
+		{Maintainer, Viewer, "", true},
 		{Member, Viewer, Member, false},
 		{Viewer, Viewer, "", false},
 		{Owner, Member, "root", false},
@@ -178,10 +178,10 @@ func TestCanInvite(t *testing.T) {
 		actor, role Role
 		want        bool
 	}{
-		{Owner, Admin, true},
+		{Owner, Maintainer, true},
 		{Owner, Owner, false},
-		{Admin, Admin, true},
-		{Admin, Viewer, true},
+		{Maintainer, Maintainer, true},
+		{Maintainer, Viewer, true},
 		{Member, Viewer, false},
 		{Viewer, Viewer, false},
 		{Owner, "root", false},
@@ -230,7 +230,7 @@ func TestProjectAccess(t *testing.T) {
 	if (Actor{Role: "nobody", Projects: map[uuid.UUID]Role{p1: Member}}).Sees(p1) {
 		t.Error("unknown role sees a project")
 	}
-	for _, r := range []Role{Owner, Admin} {
+	for _, r := range []Role{Owner, Maintainer} {
 		a := Actor{Role: r}
 		if !a.Sees(p3) || !a.CanEditIn(p3) || !a.Scope().All {
 			t.Errorf("%s does not see every project", r)

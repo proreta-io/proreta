@@ -1,6 +1,6 @@
 // Package statuspages owns the public status page of an organization: its
 // configuration (status_pages, status_page_components) and the prepared public view
-// (status_page_snapshots). Only owners and admins configure a page; the snapshot builder (Build) is
+// (status_page_snapshots). Only owners and maintainers configure a page; the snapshot builder (Build) is
 // the one place that decides what becomes public. The public renderer lives in
 // internal/statuspages/public and reads nothing but snapshots.
 package statuspages
@@ -119,7 +119,7 @@ func NewService(pool *db.Pool, o Options) *Service {
 }
 
 func requireAdmin(a Actor) error {
-	if !a.Access.Role.AtLeast(authz.Admin) {
+	if !a.Access.Role.AtLeast(authz.Maintainer) {
 		return authz.ErrForbidden
 	}
 	return nil
@@ -413,7 +413,7 @@ func (s *Service) Delete(ctx context.Context, a Actor, id uuid.UUID) error {
 	})
 }
 
-// Components lists a page's components with their monitors (admin only: monitor names of every
+// Components lists a page's components with their monitors (maintainer only: monitor names of every
 // project are shown).
 func (s *Service) Components(ctx context.Context, a Actor, id uuid.UUID) ([]ComponentConfig, error) {
 	if err := requireAdmin(a); err != nil {
@@ -446,7 +446,7 @@ func components(ctx context.Context, q *statuspagesdb.Queries, tenantID, id uuid
 
 // PutComponents replaces a page's components: the list is the new content and order (creating,
 // renaming, regrouping, reordering and removing in one call). Monitors and heartbeats of any
-// project of the organization may be used; only admins and owners may call it.
+// project of the organization may be used; only maintainers and owners may call it.
 func (s *Service) PutComponents(ctx context.Context, a Actor, id uuid.UUID, in []ComponentInput) ([]ComponentConfig, error) {
 	if err := requireAdmin(a); err != nil {
 		return nil, err
@@ -525,7 +525,7 @@ func (s *Service) PutComponents(ctx context.Context, a Actor, id uuid.UUID, in [
 }
 
 // Preview builds the public snapshot of a page as it would be published now, without storing it
-// (admin only; works for unpublished pages).
+// (maintainer only; works for unpublished pages).
 func (s *Service) Preview(ctx context.Context, a Actor, id uuid.UUID) (Snapshot, error) {
 	if err := requireAdmin(a); err != nil {
 		return Snapshot{}, err

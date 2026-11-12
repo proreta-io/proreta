@@ -122,7 +122,7 @@ func TestIntegrationAdminOrganizationProjects(t *testing.T) {
 		if r.code != http.StatusUnprocessableEntity || len(fe) == 0 || fe[0].(map[string]any)["field"] != "userId" {
 			t.Fatalf("non-member: %d %s", r.code, r.raw)
 		}
-		if r := c.do(http.MethodPut, mp+"/"+member, `{"role":"admin"}`, ah); r.code != http.StatusBadRequest {
+		if r := c.do(http.MethodPut, mp+"/"+member, `{"role":"maintainer"}`, ah); r.code != http.StatusBadRequest {
 			t.Fatalf("bad role: %d %s", r.code, r.raw)
 		}
 		r = c.do(http.MethodGet, mp, "", ah)

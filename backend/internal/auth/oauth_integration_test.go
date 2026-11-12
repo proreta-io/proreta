@@ -299,8 +299,8 @@ func TestIntegrationOAuthDomains(t *testing.T) {
 	if _, err := e.svc.CreateAuthDomain(e.ctx, owner, "not a domain", "", true); err == nil {
 		t.Fatal("invalid domain accepted")
 	}
-	if _, err := e.svc.CreateAuthDomain(e.ctx, owner, "example.com", auth.RoleAdmin, true); err == nil {
-		t.Fatal("a new claim with the admin role was accepted")
+	if _, err := e.svc.CreateAuthDomain(e.ctx, owner, "example.com", auth.RoleMaintainer, true); err == nil {
+		t.Fatal("a new claim with the maintainer role was accepted")
 	}
 	// A proof older than the window does not count; a new link or sign-in refreshes it.
 	pgtest.MustExec(t, e.admin, `UPDATE auth_identities SET last_login_at = now() - interval '11 minutes' WHERE subject = 'g-admin'`)

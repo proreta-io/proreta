@@ -36,7 +36,7 @@ import {
 import { formatDate } from "../../lib/format";
 import { ROLE_LABELS } from "../../lib/roles";
 
-const ROLES: MembershipRole[] = ["owner", "admin", "member", "viewer"];
+const ROLES: MembershipRole[] = ["owner", "maintainer", "member", "viewer"];
 
 type Pending =
   | { kind: "role"; member: AdminMember; role: MembershipRole }

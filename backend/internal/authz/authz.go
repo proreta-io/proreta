@@ -19,10 +19,10 @@ type Role string
 
 // Roles, highest first.
 const (
-	Owner  Role = "owner"
-	Admin  Role = "admin"
-	Member Role = "member"
-	Viewer Role = "viewer"
+	Owner      Role = "owner"
+	Maintainer Role = "maintainer"
+	Member     Role = "member"
+	Viewer     Role = "viewer"
 )
 
 // ErrForbidden means the actor's role does not allow the action.
@@ -33,7 +33,7 @@ func rank(r Role) int {
 	switch r {
 	case Owner:
 		return 4
-	case Admin:
+	case Maintainer:
 		return 3
 	case Member:
 		return 2
@@ -54,7 +54,7 @@ type Actor struct {
 	UserID uuid.UUID
 	Role   Role
 	// Projects is the effective role in each project the actor belongs to.
-	// Owners and admins see every project and need no entries.
+	// Owners and maintainers see every project and need no entries.
 	Projects map[uuid.UUID]Role
 }
 
@@ -72,7 +72,7 @@ func ProjectRole(org Role, override *Role) Role {
 }
 
 // AllProjects reports whether the actor sees every project of the organization.
-func (a Actor) AllProjects() bool { return a.Role.AtLeast(Admin) }
+func (a Actor) AllProjects() bool { return a.Role.AtLeast(Maintainer) }
 
 // RoleIn returns the actor's effective role in a project and whether it sees the project at all.
 func (a Actor) RoleIn(project uuid.UUID) (Role, bool) {
@@ -207,7 +207,7 @@ var grants = map[Role][]Permission{
 		"monitor.read", "monitor.create", "monitor.update", "monitor.delete", "incident.read", "heartbeat.manage",
 		"channel.read", "channel.manage", "statuspage.read", "statuspage.manage",
 	},
-	Admin: {
+	Maintainer: {
 		"account.use",
 		"organization.members.read", "organization.members.manage", "usage.read", "project.create",
 		"project.read", "project.update", "project.delete", "project.members.read", "project.members.manage",
@@ -231,7 +231,7 @@ var grants = map[Role][]Permission{
 }
 
 // Roles returns the roles, highest first.
-func Roles() []Role { return []Role{Owner, Admin, Member, Viewer} }
+func Roles() []Role { return []Role{Owner, Maintainer, Member, Viewer} }
 
 // Has reports whether the role holds the permission. An unknown role holds nothing.
 func Has(r Role, p Permission) bool { return slices.Contains(grants[r], p) }
@@ -439,12 +439,12 @@ func Can(a Actor, operationID string) bool {
 }
 
 // CanManage reports whether the actor may change or remove a member whose role is target, and
-// (for a role change) give it the role to (pass "" for a removal). Only admins and owners manage
-// members; an admin never touches an owner and never grants owner: nobody grants a
+// (for a role change) give it the role to (pass "" for a removal). Only maintainers and owners manage
+// members; a maintainer never touches an owner and never grants owner: nobody grants a
 // role above their own. Guard rails that need the database (the last owner, the platform admin)
 // are checked by the caller.
 func CanManage(a Actor, target, to Role) bool {
-	if !a.Role.AtLeast(Admin) || !Valid(target) {
+	if !a.Role.AtLeast(Maintainer) || !Valid(target) {
 		return false
 	}
 	if rank(target) > rank(a.Role) {
@@ -456,8 +456,8 @@ func CanManage(a Actor, target, to Role) bool {
 	return true
 }
 
-// CanInvite reports whether the actor may create an invitation with the role: admins and owners,
-// for admin, member or viewer (owner is granted by a role change, never by a link).
+// CanInvite reports whether the actor may create an invitation with the role: maintainers and owners,
+// for maintainer, member or viewer (owner is granted by a role change, never by a link).
 func CanInvite(a Actor, role Role) bool {
-	return a.Role.AtLeast(Admin) && role != Owner && Valid(role) && rank(role) <= rank(a.Role)
+	return a.Role.AtLeast(Maintainer) && role != Owner && Valid(role) && rank(role) <= rank(a.Role)
 }

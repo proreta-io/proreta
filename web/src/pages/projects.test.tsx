@@ -50,14 +50,14 @@ const requests = (mock: ReturnType<typeof mockApi>, method: string, path: string
 afterEach(() => localStorage.clear());
 
 describe("projects page", () => {
-  it("lets an admin create, rename and delete a project after confirming", async () => {
+  it("lets a maintainer create, rename and delete a project after confirming", async () => {
     let items = [def, web];
     const fetchMock = mockApi({
-      ...as("admin"),
+      ...as("maintainer"),
       "GET /api/v1/projects": () => json({ items }),
       "POST /api/v1/projects": async (r) => {
         const body = (await r.json()) as { name: string };
-        const created = project({ id: "n", name: body.name, slug: "payments", role: "admin" });
+        const created = project({ id: "n", name: body.name, slug: "payments", role: "maintainer" });
         items = [...items, created];
         return json(created, 201);
       },

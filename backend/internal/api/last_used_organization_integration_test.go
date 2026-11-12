@@ -24,7 +24,7 @@ func tenantOf(r response) string {
 	return id
 }
 
-// A login enters the organization used last, member logins are shown to owners and admins only,
+// A login enters the organization used last, member logins are shown to owners and maintainers only,
 // and the session lists the organization's plan features.
 func TestIntegrationLastUsedOrganization(t *testing.T) {
 	env := pgtest.New(t, pgtest.DBName("lastusedorg"))
