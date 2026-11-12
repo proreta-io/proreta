@@ -50,7 +50,9 @@ WHERE tenant_id = @tenant_id AND id = @id AND NOT is_default AND deleted_at IS N
 SELECT (SELECT count(*) FROM monitors AS m
         WHERE m.tenant_id = @tenant_id AND m.project_id = @project_id::uuid AND m.deleted_at IS NULL)::bigint AS monitors,
        (SELECT count(*) FROM notification_channels AS c
-        WHERE c.tenant_id = @tenant_id AND c.project_id = @project_id AND c.deleted_at IS NULL)::bigint AS channels;
+        WHERE c.tenant_id = @tenant_id AND c.project_id = @project_id AND c.deleted_at IS NULL)::bigint AS channels,
+       (SELECT count(*) FROM status_pages AS s
+        WHERE s.tenant_id = @tenant_id AND s.project_id = @project_id AND s.deleted_at IS NULL)::bigint AS status_pages;
 
 -- name: DeleteProjectMembers :execrows
 DELETE FROM project_members

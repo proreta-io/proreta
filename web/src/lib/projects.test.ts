@@ -85,6 +85,7 @@ describe("project rights", () => {
       projectId,
       name: id,
       type: "slack_webhook" as const,
+      configHidden: false,
       events: ["down" as const],
       mention: [],
       reminderMinutes: 0,

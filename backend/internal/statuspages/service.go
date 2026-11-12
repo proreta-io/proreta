@@ -1,6 +1,7 @@
 // Package statuspages owns the public status page of an organization: its
 // configuration (status_pages, status_page_components) and the prepared public view
-// (status_page_snapshots). Only owners and maintainers configure a page; the snapshot builder (Build) is
+// (status_page_snapshots). A page belongs to a project, whose owners and maintainers configure it,
+// or to the organization, whose owners and maintainers configure it; the snapshot builder (Build) is
 // the one place that decides what becomes public. The public renderer lives in
 // internal/statuspages/public and reads nothing but snapshots.
 package statuspages
@@ -11,7 +12,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
-	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,6 +25,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/platform/db"
 	"github.com/proreta-io/proreta/backend/internal/platform/uuidv7"
 	"github.com/proreta-io/proreta/backend/internal/platform/validation"
+	"github.com/proreta-io/proreta/backend/internal/projects"
 	"github.com/proreta-io/proreta/backend/internal/statuspages/statuspagesdb"
 )
 
@@ -55,7 +56,9 @@ type Actor struct {
 // Page is the configuration of a status page as the admin API shows it. The password hash never
 // leaves the module; only whether there is one.
 type Page struct {
-	ID                uuid.UUID
+	ID uuid.UUID
+	// ProjectID is the project the page belongs to; nil for an organization-level page.
+	ProjectID         *uuid.UUID
 	Slug              string
 	Title             string
 	Description       string
@@ -118,30 +121,54 @@ func NewService(pool *db.Pool, o Options) *Service {
 	return s
 }
 
-func requireAdmin(a Actor) error {
-	if !a.Access.Role.AtLeast(authz.Maintainer) {
-		return authz.ErrForbidden
+// canRead reports whether the actor sees pages of a project (nil = organization-level pages).
+func (a Actor) canRead(project *uuid.UUID) bool {
+	if project == nil {
+		return a.Access.Holds("organization.statuspages.read")
+	}
+	return a.Access.CanIn(*project, "statuspage.read")
+}
+
+// checkManage is ErrNotFound for a page the actor cannot see, so ids of other projects reveal
+// nothing, and a forbidden error for a page it sees but may not change.
+func (a Actor) checkManage(project *uuid.UUID) error {
+	if !a.canRead(project) {
+		return ErrNotFound
+	}
+	if project == nil {
+		if !a.Access.Holds("organization.statuspages.manage") {
+			return authz.ErrForbidden
+		}
+		return nil
+	}
+	if !a.Access.CanIn(*project, "statuspage.manage") {
+		return authz.ErrProjectForbidden
 	}
 	return nil
 }
 
-// List returns the organization's pages (any role: members see the public link).
-func (s *Service) List(ctx context.Context, a Actor) ([]Page, error) {
-	if !authz.Valid(a.Access.Role) {
-		return nil, authz.ErrForbidden
-	}
+// List returns the pages the actor sees: those of its projects and, with an organization role, the
+// organization-level ones. With project set, only the pages of that project.
+func (s *Service) List(ctx context.Context, a Actor, project *uuid.UUID) ([]Page, error) {
 	out := []Page{}
 	err := db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
-		var err error
-		out, err = listPages(ctx, tx, a.TenantID)
-		return err
+		all, err := listPages(ctx, tx, a.TenantID)
+		if err != nil {
+			return err
+		}
+		for _, p := range all {
+			if a.canRead(p.ProjectID) && (project == nil || (p.ProjectID != nil && *p.ProjectID == *project)) {
+				out = append(out, p)
+			}
+		}
+		return nil
 	})
 	return out, err
 }
 
-// Get returns one page (any role).
+// Get returns one page the actor sees, or ErrNotFound.
 func (s *Service) Get(ctx context.Context, a Actor, id uuid.UUID) (Page, error) {
-	pages, err := s.List(ctx, a)
+	pages, err := s.List(ctx, a, nil)
 	if err != nil {
 		return Page{}, err
 	}
@@ -160,7 +187,7 @@ func listPages(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) ([]Page, erro
 	}
 	out := make([]Page, len(rows))
 	for i, r := range rows {
-		out[i] = Page{ID: r.ID, Slug: r.Slug, Title: r.Title, Description: r.Description, LogoURL: r.LogoUrl, AccentColor: r.AccentColor,
+		out[i] = Page{ID: r.ID, ProjectID: r.ProjectID, Slug: r.Slug, Title: r.Title, Description: r.Description, LogoURL: r.LogoUrl, AccentColor: r.AccentColor,
 			Published: r.Published, PasswordProtected: r.Protected, ComponentCount: int(r.ComponentCount), CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
 	}
 	return out, nil
@@ -181,6 +208,8 @@ func getPage(ctx context.Context, tx pgx.Tx, tenantID, id uuid.UUID) (Page, erro
 
 // CreateInput is a new page. Empty LogoURL and AccentColor mean none.
 type CreateInput struct {
+	// ProjectID is the project of the page; nil creates an organization-level page.
+	ProjectID   *uuid.UUID
 	Slug        string
 	Title       string
 	Description string
@@ -189,9 +218,10 @@ type CreateInput struct {
 }
 
 // Create adds an unpublished page under the max_status_pages quota (a *plans.LimitError when used up).
+// A page in a project needs statuspage.manage there, an organization-level one the organization role.
 func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Page, error) {
-	if err := requireAdmin(a); err != nil {
-		return Page{}, err
+	if in.ProjectID == nil && !a.Access.Holds("organization.statuspages.manage") {
+		return Page{}, authz.ErrForbidden
 	}
 	f, err := validateFields(&in.Slug, &in.Title, &in.Description, &in.LogoURL, &in.AccentColor)
 	if err != nil {
@@ -203,15 +233,29 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Page, er
 		if err := plans.CheckCreate(ctx, tx, a.TenantID, plans.ResourceStatusPage); err != nil {
 			return err
 		}
+		if in.ProjectID != nil {
+			_, err := projects.ForUse(ctx, tx, a.TenantID, in.ProjectID)
+			if errors.Is(err, projects.ErrNotFound) || (err == nil && !a.Access.Sees(*in.ProjectID)) {
+				var verr validation.Error
+				verr.Add("projectId", "does not exist")
+				return &verr
+			}
+			if err != nil {
+				return err
+			}
+			if !a.Access.CanIn(*in.ProjectID, "statuspage.manage") {
+				return authz.ErrProjectForbidden
+			}
+		}
 		if err := checkSlugFree(ctx, statuspagesdb.New(tx), f.slug); err != nil {
 			return err
 		}
 		if err := statuspagesdb.New(tx).InsertPage(ctx, statuspagesdb.InsertPageParams{
-			ID: id, TenantID: a.TenantID, Slug: f.slug, Title: f.title, Description: f.description, LogoUrl: f.logo, AccentColor: f.accent,
+			ID: id, TenantID: a.TenantID, ProjectID: in.ProjectID, Slug: f.slug, Title: f.title, Description: f.description, LogoUrl: f.logo, AccentColor: f.accent,
 		}); err != nil {
 			return mapWriteErr("insert page", err)
 		}
-		if err := s.audit(ctx, tx, a, ActionCreated, id, map[string]any{"slug": f.slug}); err != nil {
+		if err := s.audit(ctx, tx, a, ActionCreated, id, map[string]any{"slug": f.slug, "project": projectMeta(in.ProjectID)}); err != nil {
 			return err
 		}
 		out, err = getPage(ctx, tx, a.TenantID, id)
@@ -279,9 +323,6 @@ type UpdateInput struct {
 // Update changes a page and rebuilds (or removes) its snapshot in the same transaction, so a
 // change is public on the renderer's next cache miss.
 func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateInput) (Page, error) {
-	if err := requireAdmin(a); err != nil {
-		return Page{}, err
-	}
 	f, err := validateFields(in.Slug, in.Title, in.Description, in.LogoURL, in.AccentColor)
 	if err != nil {
 		return Page{}, err
@@ -291,6 +332,9 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 		q := statuspagesdb.New(tx)
 		cur, err := lockPage(ctx, q, a.TenantID, id)
 		if err != nil {
+			return err
+		}
+		if err := a.checkManage(cur.ProjectID); err != nil {
 			return err
 		}
 		next := statuspagesdb.UpdatePageParams{TenantID: a.TenantID, ID: id, Slug: cur.Slug, Title: cur.Title, Description: cur.Description,
@@ -356,9 +400,6 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 // password is never stored or logged in clear. Cookies issued for the old password stop working,
 // because the renderer binds them to the hash.
 func (s *Service) SetPassword(ctx context.Context, a Actor, id uuid.UUID, password *string) error {
-	if err := requireAdmin(a); err != nil {
-		return err
-	}
 	var hash *string
 	if password != nil {
 		if msg := ValidatePassword(*password); msg != "" {
@@ -374,7 +415,11 @@ func (s *Service) SetPassword(ctx context.Context, a Actor, id uuid.UUID, passwo
 	}
 	return db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
 		q := statuspagesdb.New(tx)
-		if _, err := lockPage(ctx, q, a.TenantID, id); err != nil {
+		cur, err := lockPage(ctx, q, a.TenantID, id)
+		if err != nil {
+			return err
+		}
+		if err := a.checkManage(cur.ProjectID); err != nil {
 			return err
 		}
 		if err := q.SetPagePassword(ctx, statuspagesdb.SetPagePasswordParams{TenantID: a.TenantID, ID: id, PasswordHash: hash}); err != nil {
@@ -391,13 +436,13 @@ func (s *Service) SetPassword(ctx context.Context, a Actor, id uuid.UUID, passwo
 // Delete soft-deletes a page and removes its snapshot; the slug stays reserved for this
 // organization for 30 days.
 func (s *Service) Delete(ctx context.Context, a Actor, id uuid.UUID) error {
-	if err := requireAdmin(a); err != nil {
-		return err
-	}
 	return db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
 		q := statuspagesdb.New(tx)
 		cur, err := lockPage(ctx, q, a.TenantID, id)
 		if err != nil {
+			return err
+		}
+		if err := a.checkManage(cur.ProjectID); err != nil {
 			return err
 		}
 		if err := q.SoftDeletePage(ctx, statuspagesdb.SoftDeletePageParams{TenantID: a.TenantID, ID: id}); err != nil {
@@ -413,18 +458,18 @@ func (s *Service) Delete(ctx context.Context, a Actor, id uuid.UUID) error {
 	})
 }
 
-// Components lists a page's components with their monitors (maintainer only: monitor names of every
-// project are shown).
+// Components lists a page's components with their monitors (those who manage the page only:
+// monitor names are shown).
 func (s *Service) Components(ctx context.Context, a Actor, id uuid.UUID) ([]ComponentConfig, error) {
-	if err := requireAdmin(a); err != nil {
-		return nil, err
-	}
 	var out []ComponentConfig
 	err := db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
-		if _, err := getPage(ctx, tx, a.TenantID, id); err != nil {
+		page, err := getPage(ctx, tx, a.TenantID, id)
+		if err != nil {
 			return err
 		}
-		var err error
+		if err := a.checkManage(page.ProjectID); err != nil {
+			return err
+		}
 		out, err = components(ctx, statuspagesdb.New(tx), a.TenantID, id)
 		return err
 	})
@@ -445,12 +490,9 @@ func components(ctx context.Context, q *statuspagesdb.Queries, tenantID, id uuid
 }
 
 // PutComponents replaces a page's components: the list is the new content and order (creating,
-// renaming, regrouping, reordering and removing in one call). Monitors and heartbeats of any
-// project of the organization may be used; only maintainers and owners may call it.
+// renaming, regrouping, reordering and removing in one call). An organization-level page may use
+// monitors and heartbeats of any project; a page of a project only those of that project.
 func (s *Service) PutComponents(ctx context.Context, a Actor, id uuid.UUID, in []ComponentInput) ([]ComponentConfig, error) {
-	if err := requireAdmin(a); err != nil {
-		return nil, err
-	}
 	var verr validation.Error
 	if len(in) > MaxComponents {
 		verr.Add("items", fmt.Sprintf("must have at most %d components", MaxComponents))
@@ -484,7 +526,11 @@ func (s *Service) PutComponents(ctx context.Context, a Actor, id uuid.UUID, in [
 	var out []ComponentConfig
 	err := db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
 		q := statuspagesdb.New(tx)
-		if _, err := lockPage(ctx, q, a.TenantID, id); err != nil {
+		page, err := lockPage(ctx, q, a.TenantID, id)
+		if err != nil {
+			return err
+		}
+		if err := a.checkManage(page.ProjectID); err != nil {
 			return err
 		}
 		ids := make([]uuid.UUID, len(clean))
@@ -495,9 +541,17 @@ func (s *Service) PutComponents(ctx context.Context, a Actor, id uuid.UUID, in [
 		if err != nil {
 			return fmt.Errorf("statuspages: monitors: %w", err)
 		}
+		projectOf := map[uuid.UUID]uuid.UUID{}
+		for _, m := range live {
+			projectOf[m.ID] = m.ProjectID
+		}
 		for i, c := range clean {
-			if !slices.Contains(live, c.MonitorID) {
+			p, ok := projectOf[c.MonitorID]
+			switch {
+			case !ok:
 				verr.Add(fmt.Sprintf("items.%d.monitorId", i), "does not exist")
+			case page.ProjectID != nil && p != *page.ProjectID:
+				verr.Add(fmt.Sprintf("items.%d.monitorId", i), "must belong to the project of the page")
 			}
 		}
 		if err := verr.Err(); err != nil {
@@ -525,14 +579,17 @@ func (s *Service) PutComponents(ctx context.Context, a Actor, id uuid.UUID, in [
 }
 
 // Preview builds the public snapshot of a page as it would be published now, without storing it
-// (maintainer only; works for unpublished pages).
+// (those who manage the page only; works for unpublished pages).
 func (s *Service) Preview(ctx context.Context, a Actor, id uuid.UUID) (Snapshot, error) {
-	if err := requireAdmin(a); err != nil {
-		return Snapshot{}, err
-	}
 	var out Snapshot
 	err := db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
-		var err error
+		page, err := getPage(ctx, tx, a.TenantID, id)
+		if err != nil {
+			return err
+		}
+		if err := a.checkManage(page.ProjectID); err != nil {
+			return err
+		}
 		out, err = Build(ctx, tx, a.TenantID, id, s.clock.Now())
 		return err
 	})
@@ -628,4 +685,11 @@ func (s *Service) audit(ctx context.Context, tx pgx.Tx, a Actor, action string, 
 		TenantID: a.TenantID, ActorUserID: &actor, Action: action,
 		EntityType: "status_page", EntityID: id.String(), Metadata: meta, IP: a.IP,
 	})
+}
+
+func projectMeta(p *uuid.UUID) any {
+	if p == nil {
+		return nil
+	}
+	return p.String()
 }

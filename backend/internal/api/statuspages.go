@@ -23,12 +23,18 @@ func (s *server) pageActor(ctx context.Context) (statuspages.Actor, error) {
 	return statuspages.Actor{TenantID: p.TenantID, IP: httpx.ClientIP(httpRequest(ctx), s.cfg.TrustedProxyHops), Access: a}, nil
 }
 
-func (s *server) ListStatusPages(ctx context.Context, _ gen.ListStatusPagesRequestObject) (gen.ListStatusPagesResponseObject, error) {
+func (s *server) ListStatusPages(ctx context.Context, req gen.ListStatusPagesRequestObject) (gen.ListStatusPagesResponseObject, error) {
 	a, err := s.pageActor(ctx)
 	if err != nil {
 		return nil, err
 	}
-	list, err := s.pages.List(ctx, a)
+	if req.Params.ProjectId != nil {
+		// 404 for a project the caller does not see.
+		if _, err := s.projectFilter(ctx, req.Params.ProjectId); err != nil {
+			return nil, err
+		}
+	}
+	list, err := s.pages.List(ctx, a, req.Params.ProjectId)
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +50,7 @@ func (s *server) CreateStatusPage(ctx context.Context, req gen.CreateStatusPageR
 	if err != nil {
 		return nil, err
 	}
-	in := statuspages.CreateInput{Slug: req.Body.Slug, Title: req.Body.Title}
+	in := statuspages.CreateInput{ProjectID: req.Body.ProjectId, Slug: req.Body.Slug, Title: req.Body.Title}
 	if req.Body.Description != nil {
 		in.Description = *req.Body.Description
 	}
@@ -172,7 +178,7 @@ func (r previewResponse) VisitPreviewStatusPageResponse(w http.ResponseWriter) e
 }
 
 func (s *server) toStatusPage(p statuspages.Page) gen.StatusPage {
-	return gen.StatusPage{Id: p.ID, Slug: p.Slug, Title: p.Title, Description: p.Description, LogoUrl: p.LogoURL, AccentColor: p.AccentColor,
+	return gen.StatusPage{Id: p.ID, ProjectId: p.ProjectID, Slug: p.Slug, Title: p.Title, Description: p.Description, LogoUrl: p.LogoURL, AccentColor: p.AccentColor,
 		Published: p.Published, PasswordProtected: p.PasswordProtected, PublicUrl: s.cfg.PublicURL + "/status/" + p.Slug,
 		ComponentCount: p.ComponentCount, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt}
 }

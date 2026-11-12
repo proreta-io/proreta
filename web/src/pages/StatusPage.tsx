@@ -17,6 +17,7 @@ import {
   type StatusPage as Page,
   type StatusPageComponent,
   type StatusPageSnapshot,
+  type Project,
   type StatusPageUpdate,
 } from "../api/endpoints";
 import { useAuth } from "../auth/AuthProvider";
@@ -43,7 +44,10 @@ import {
   TriangleShape,
   WriteOnlyValue,
 } from "../components/ui";
-import { abilities, ROLE_HINTS } from "../lib/roles";
+import { channelScopeLabel } from "../lib/projects";
+import { abilities, canManageOwned, ROLE_HINTS } from "../lib/roles";
+import { useProjectScope } from "../lib/useProjectScope";
+import { useUsage } from "../lib/usage";
 import {
   accentError,
   COMPONENT_TEXT,
@@ -66,11 +70,24 @@ import {
   type PublicStatus,
 } from "../lib/statusPage";
 
-/** The organization's public status page: settings, components and a preview. */
+/** "Organization" for a page without a project, the project's name otherwise. */
+function pageScope(page: Page, projects: Project[] | undefined): string {
+  return page.projectId ? channelScopeLabel(page.projectId, projects) : "Organization";
+}
+
+/** Public status pages: settings, components and a preview of the page chosen. */
 export default function StatusPageSettings() {
-  const can = abilities(useAuth().session);
-  const pages = useQuery({ queryKey: queryKeys.statusPages, queryFn: listStatusPages });
-  const page = pages.data?.items[0];
+  const session = useAuth().session;
+  const can = abilities(session);
+  const projects = useProjectScope().projects.data?.items;
+  const pages = useQuery({ queryKey: queryKeys.statusPages, queryFn: () => listStatusPages() });
+  const [selected, setSelected] = useState<string>();
+  const [adding, setAdding] = useState(false);
+  const items = pages.data?.items ?? [];
+  const page = items.find((p) => p.id === selected) ?? items[0];
+  const scopes = creatableScopes(session, projects);
+  const usage = useUsage().data;
+  const atLimit = usage !== undefined && usage.usage.statusPages >= usage.limits.statusPages;
 
   return (
     <section className="flex flex-col gap-6">
@@ -99,36 +116,99 @@ export default function StatusPageSettings() {
           meta={errorMeta(pages.error)}
           onRetry={() => void pages.refetch()}
         />
-      ) : !page ? (
-        can.manageStatusPage ? (
-          <CreatePage />
+      ) : !page || adding ? (
+        scopes.length > 0 ? (
+          <CreatePage
+            scopes={scopes}
+            onDone={(id) => {
+              setSelected(id);
+              setAdding(false);
+            }}
+            onCancel={page ? () => setAdding(false) : undefined}
+          />
         ) : (
-          <EmptyNote>This organization has no status page yet.</EmptyNote>
+          <EmptyNote>There is no status page you can see yet.</EmptyNote>
         )
-      ) : can.manageStatusPage ? (
-        <Editor key={page.id} page={page} />
       ) : (
-        <ReadOnly page={page} />
+        <>
+          {(items.length > 1 || (scopes.length > 0 && !atLimit)) && (
+            <div className="flex flex-wrap items-end gap-3">
+              {items.length > 1 && (
+                <div className="w-full max-w-[420px]">
+                  <Field label="Page">
+                    {(c) => (
+                      <Select {...c} value={page.id} onChange={(e) => setSelected(e.target.value)}>
+                        {items.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.title} · {pageScope(p, projects)}
+                          </option>
+                        ))}
+                      </Select>
+                    )}
+                  </Field>
+                </div>
+              )}
+              {scopes.length > 0 && !atLimit && (
+                <Button variant="secondary" size="small" onClick={() => setAdding(true)}>
+                  New status page
+                </Button>
+              )}
+            </div>
+          )}
+          <p className="text-caption text-muted-foreground">
+            Belongs to: <span className="font-medium">{pageScope(page, projects)}</span>
+            {!page.projectId && " (may show monitors of every project)"}
+          </p>
+          {canManageOwned(session, projects, page.projectId) ? (
+            <Editor key={page.id} page={page} />
+          ) : (
+            <ReadOnly page={page} />
+          )}
+        </>
       )}
     </section>
   );
+}
+
+/** The scopes a new page can be created in: the organization (organization maintainers) and each project the user maintains. */
+function creatableScopes(
+  session: Parameters<typeof canManageOwned>[0],
+  projects: Project[] | undefined,
+): { value: string; label: string }[] {
+  const out: { value: string; label: string }[] = [];
+  if (canManageOwned(session, projects, null)) out.push({ value: "", label: "Organization" });
+  for (const p of projects ?? []) {
+    if (canManageOwned(session, projects, p.id)) out.push({ value: p.id, label: p.name });
+  }
+  return out;
 }
 
 function fieldErrors(err: unknown): Record<string, string> {
   return err instanceof ApiError ? err.fieldErrorMap() : {};
 }
 
-function CreatePage() {
+function CreatePage({
+  scopes,
+  onDone,
+  onCancel,
+}: {
+  scopes: { value: string; label: string }[];
+  onDone: (id: string) => void;
+  onCancel?: () => void;
+}) {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const [scope, setScope] = useState(scopes[0]!.value);
   const [title, setTitle] = useState("");
   const [slug, setSlug] = useState("");
   const [slugTouched, setSlugTouched] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string>();
   const create = useMutation({
-    mutationFn: () => createStatusPage({ title: title.trim(), slug }),
-    onSuccess: () => {
+    mutationFn: () =>
+      createStatusPage({ title: title.trim(), slug, ...(scope ? { projectId: scope } : {}) }),
+    onSuccess: (created) => {
+      onDone(created.id);
       void queryClient.invalidateQueries({ queryKey: queryKeys.statusPages });
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
       toast("Status page created. Add components, then publish it.");
@@ -160,6 +240,23 @@ function CreatePage() {
     >
       <h2 className="text-lead font-semibold">Create the status page</h2>
       {formError && <Alert>{formError}</Alert>}
+      {scopes.length > 1 && (
+        <Field
+          label="Belongs to"
+          error={errors.projectId}
+          hint="A project page is managed by that project's maintainers and shows only its monitors. An organization page is managed by organization maintainers and can show monitors of every project."
+        >
+          {(c) => (
+            <Select {...c} value={scope} onChange={(e) => setScope(e.target.value)}>
+              {scopes.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+      )}
       <Field label="Title" error={errors.title} hint="Shown at the top of the page.">
         {(c) => (
           <Input
@@ -193,10 +290,15 @@ function CreatePage() {
           />
         )}
       </Field>
-      <div>
+      <div className="flex gap-2">
         <Button type="submit" busy={create.isPending}>
           Create status page
         </Button>
+        {onCancel && (
+          <Button variant="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+        )}
       </div>
     </form>
   );
@@ -509,9 +611,11 @@ function Components({ page }: { page: Page }) {
         Components
       </h2>
       <p className="text-caption text-muted-foreground">
-        Monitors and heartbeats from any project. Visitors see only the public name and group, the
-        state and the daily history. Components with the same group next to each other are shown
-        together.
+        {page.projectId
+          ? "Monitors and heartbeats of this project. "
+          : "Monitors and heartbeats from any project. "}
+        Visitors see only the public name and group, the state and the daily history. Components
+        with the same group next to each other are shown together.
       </p>
       {components.isPending ? (
         <Loading label="Loading components…" />
@@ -533,8 +637,8 @@ function ComponentEditor({ page, initial }: { page: Page; initial: StatusPageCom
   const queryClient = useQueryClient();
   const toast = useToast();
   const monitors = useQuery({
-    queryKey: queryKeys.monitorList(undefined),
-    queryFn: () => listMonitors(),
+    queryKey: queryKeys.monitorList(page.projectId ?? undefined),
+    queryFn: () => listMonitors(page.projectId ?? undefined),
   });
   const [rows, setRows] = useState<Row[]>(() => toRows(initial));
   const [pick, setPick] = useState("");

@@ -105,6 +105,8 @@ type Channel struct {
 	ReminderMinutes int
 	// ProjectID is the channel's project; nil for an organization-wide channel.
 	ProjectID *uuid.UUID
+	// ConfigHidden is true when the settings were withheld by ForViewer.
+	ConfigHidden bool
 	// Status is StatusActive or StatusFailed.
 	Status    string
 	CreatedAt time.Time
@@ -166,6 +168,18 @@ func NewService(pool *db.Pool, keys *crypto.Keyring, s sender, publicURL string)
 // does not decrypt.
 func channelAAD(id uuid.UUID) []byte {
 	return []byte("notification_channels.config_encrypted:" + id.String())
+}
+
+// ForViewer withholds the settings of an organization-wide channel from an actor without the
+// organization role: people who only hold project roles may select it for their monitors and see
+// its name, nothing else.
+func (c Channel) ForViewer(a authz.Actor) Channel {
+	if c.ProjectID != nil || a.Holds("channel.manage") {
+		return c
+	}
+	c.ConfigHidden = true
+	c.Events, c.Mention, c.ReminderMinutes = []string{}, []string{}, 0
+	return c
 }
 
 // Visible reports whether a channel is visible within scope: organization-wide channels are

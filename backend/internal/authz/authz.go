@@ -243,8 +243,10 @@ var permissions = []Definition{
 	{"heartbeat.manage", LevelProject, "Regenerate heartbeat tokens"},
 	{"channel.read", LevelProject, "List and read notification channels"},
 	{"channel.manage", LevelProject, "Create, change, test and delete notification channels"},
-	{"statuspage.read", LevelOrganization, "Read the status page settings and link"},
-	{"statuspage.manage", LevelOrganization, "Configure, protect and publish status pages"},
+	{"statuspage.read", LevelProject, "Read the settings and link of the status pages of a project"},
+	{"statuspage.manage", LevelProject, "Configure, protect and publish the status pages of a project"},
+	{"organization.statuspages.read", LevelOrganization, "Read the organization-level status pages"},
+	{"organization.statuspages.manage", LevelOrganization, "Configure, protect and publish organization-level status pages"},
 }
 
 // grants is the one role table: each role is the set of permissions it holds, listed in full.
@@ -255,6 +257,7 @@ var grants = map[Role][]Permission{
 		"project.read", "project.update", "project.delete", "project.members.read", "project.members.manage",
 		"monitor.read", "monitor.create", "monitor.update", "monitor.delete", "incident.read", "heartbeat.manage",
 		"channel.read", "channel.manage", "statuspage.read", "statuspage.manage",
+		"organization.statuspages.read", "organization.statuspages.manage",
 	},
 	Maintainer: {
 		"account.use",
@@ -262,20 +265,21 @@ var grants = map[Role][]Permission{
 		"project.read", "project.update", "project.members.read", "project.members.manage",
 		"monitor.read", "monitor.create", "monitor.update", "monitor.delete", "incident.read", "heartbeat.manage",
 		"channel.read", "channel.manage", "statuspage.read", "statuspage.manage",
+		"organization.statuspages.read", "organization.statuspages.manage",
 	},
 	Member: {
 		"account.use",
 		"organization.members.read",
 		"project.read", "project.members.read",
 		"monitor.read", "monitor.create", "monitor.update", "monitor.delete", "incident.read", "heartbeat.manage",
-		"channel.read", "statuspage.read",
+		"channel.read", "statuspage.read", "organization.statuspages.read",
 	},
 	Viewer: {
 		"account.use",
 		"organization.members.read",
 		"project.read", "project.members.read",
 		"monitor.read", "incident.read",
-		"channel.read", "statuspage.read",
+		"channel.read", "statuspage.read", "organization.statuspages.read",
 	},
 }
 
@@ -361,8 +365,8 @@ var operations = map[string]Permission{
 	"putprojectmember":    "project.members.manage",
 	"removeprojectmember": "project.members.manage",
 
-	// The status page: every role sees its settings and link; the others configure and publish
-	// it. Components and the preview name monitors of every project.
+	// Status pages: the permission is the project one; a page without a project is checked
+	// again by the service against organization.statuspages.* (organization role only).
 	"liststatuspages":          "statuspage.read",
 	"getstatuspage":            "statuspage.read",
 	"createstatuspage":         "statuspage.manage",

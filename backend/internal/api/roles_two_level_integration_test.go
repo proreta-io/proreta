@@ -198,6 +198,7 @@ func wantStatus(a roleActor, o roleOp, p roleProject) int {
 // exist, and checks that the two get the same answer.
 func TestIntegrationTwoLevelRoleMatrix(t *testing.T) {
 	w := newProjectWorld(t, "twolevelmatrix")
+	sp := w.addStatusPages(t)
 	unknownID := "0192b9c4-7c5e-7000-8000-0000000000ee"
 	projects := []roleProject{
 		{"def", w.def, w.mDef, w.hbDef, w.chDef},
@@ -206,7 +207,7 @@ func TestIntegrationTwoLevelRoleMatrix(t *testing.T) {
 		{"gamma", w.gamma, w.mGam, w.hbGamma, w.chGamma},
 		{"unknown", unknownID, unknownID, unknownID, unknownID},
 	}
-	ops := roleOps()
+	ops := append(roleOps(), statusPageOps(sp)...)
 	for _, a := range roleActors {
 		hdr := w.hdr(a.name)
 		for _, p := range projects {

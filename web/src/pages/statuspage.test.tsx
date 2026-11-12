@@ -14,6 +14,7 @@ const as = (role: string) => ({
 
 const page = (over: Partial<StatusPage> = {}): StatusPage => ({
   id: "sp",
+  projectId: null,
   slug: "acme",
   title: "Acme status",
   description: "",
@@ -59,6 +60,77 @@ const component = (over: Partial<StatusPageComponent>): StatusPageComponent => (
   ...over,
 });
 
+const project = (id: string, name: string, role: string) => ({
+  id,
+  name,
+  slug: name.toLowerCase(),
+  isDefault: false,
+  allMembers: false,
+  role,
+  monitorCount: 0,
+  channelCount: 0,
+  createdAt: "2026-11-01T00:00:00Z",
+  updatedAt: "2026-11-01T00:00:00Z",
+});
+
+describe("status pages of projects", () => {
+  it("lets a project-only maintainer create a page in its project", async () => {
+    let body: unknown;
+    let items: StatusPage[] = [];
+    mockApi({
+      "GET /api/v1/auth/me": () => json({ ...session, role: null }),
+      "GET /api/v1/projects": () =>
+        json({ items: [project("p1", "Web", "maintainer"), project("p2", "Data", "viewer")] }),
+      "GET /api/v1/status-pages": () => json({ items }),
+      "POST /api/v1/status-pages": async (r) => {
+        body = await r.json();
+        items = [page({ projectId: "p1" })];
+        return json(items[0], 201);
+      },
+      "GET /api/v1/status-pages/sp/preview": () => json(snapshot()),
+      "GET /api/v1/status-pages/sp/components": () => json({ items: [] }),
+      "GET /api/v1/monitors": () => json({ items: [] }),
+    });
+    renderApp("/status-page");
+    await userEvent.type(await screen.findByLabelText("Title"), "Web status");
+    // The only project it maintains is implied; there is no organization scope to choose.
+    expect(screen.queryByLabelText("Belongs to")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Create status page" }));
+    expect(await screen.findByRole("button", { name: "Publish" })).toBeInTheDocument();
+    expect(body).toEqual({ title: "Web status", slug: "web-status", projectId: "p1" });
+    expect(screen.getByText(/Belongs to:/)).toHaveTextContent("Belongs to: Web");
+  });
+
+  it("offers the organization and the projects to an organization maintainer", async () => {
+    mockApi({
+      ...as("maintainer"),
+      "GET /api/v1/projects": () =>
+        json({ items: [project("p1", "Web", "maintainer"), project("p2", "Data", "maintainer")] }),
+      "GET /api/v1/status-pages": () => json({ items: [] }),
+    });
+    renderApp("/status-page");
+    const scope = await screen.findByLabelText("Belongs to");
+    expect(
+      within(scope)
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual(["Organization", "Web", "Data"]);
+  });
+
+  it("shows a page of a project where the user is a viewer without settings", async () => {
+    mockApi({
+      "GET /api/v1/auth/me": () => json({ ...session, role: null }),
+      "GET /api/v1/projects": () => json({ items: [project("p2", "Data", "viewer")] }),
+      "GET /api/v1/status-pages": () =>
+        json({ items: [page({ projectId: "p2", published: true })] }),
+    });
+    renderApp("/status-page");
+    expect(await screen.findByLabelText("Public link")).toBeInTheDocument();
+    expect(screen.getByText("Data")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Publish/ })).not.toBeInTheDocument();
+  });
+});
+
 describe("status page settings", () => {
   it("lets a maintainer create the page with a slug from the title", async () => {
     let items: StatusPage[] = [];
@@ -100,7 +172,9 @@ describe("status page settings", () => {
       "https://proreta.example.com/status/acme",
     );
     expect(
-      screen.getByText(/Only organization maintainers and owners can change or publish/),
+      screen.getByText(
+        /Only maintainers and owners of the organization or of the page's project can change or publish/,
+      ),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Publish/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("complementary", { name: "Live preview" })).not.toBeInTheDocument();

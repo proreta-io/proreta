@@ -183,8 +183,8 @@ func TestIntegrationRoleMatrix(t *testing.T) {
 	orgScoped := map[string]bool{}
 	for _, op := range []string{"listMembers", "updateMember", "removeMember", "listInvitations", "createInvitation", "revokeInvitation",
 		"getUsage", "createProject", "deleteOrganization", "listAuthDomains", "createAuthDomain", "updateAuthDomain", "deleteAuthDomain",
-		"listStatusPages", "createStatusPage", "getStatusPage", "updateStatusPage", "deleteStatusPage", "setStatusPagePassword",
-		"clearStatusPagePassword", "listStatusPageComponents", "putStatusPageComponents", "previewStatusPage"} {
+		// The request of the matrix names no project, which makes the page organization-level.
+		"createStatusPage"} {
 		orgScoped[strings.ToLower(op)] = true
 	}
 

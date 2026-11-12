@@ -47,8 +47,8 @@ describe("members page", () => {
     expect(screen.getByRole("button", { name: "Leave organization" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Invite someone" })).not.toBeInTheDocument();
     expect(requests(fetchMock, "GET", "/api/v1/members")).toHaveLength(0);
-    // The status page belongs to the organization: no link for this person.
-    expect(screen.queryByRole("link", { name: "Status page" })).not.toBeInTheDocument();
+    // Status pages of their projects are theirs to see, so the link stays.
+    expect(screen.getByRole("link", { name: "Status page" })).toBeInTheDocument();
   });
 
   it("makes a member project-only and back", async () => {

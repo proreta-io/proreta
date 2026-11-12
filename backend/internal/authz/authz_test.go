@@ -242,19 +242,21 @@ var expectedInProject = map[Permission][]Role{
 	"project.update":         {Owner, Maintainer},
 	"project.members.manage": {Owner, Maintainer},
 	"channel.manage":         {Owner, Maintainer},
+	"statuspage.read":        {Owner, Maintainer, Member, Viewer},
+	"statuspage.manage":      {Owner, Maintainer},
 	"project.delete":         {Owner},
 }
 
 // organization permissions written by hand.
 var expectedInOrganization = map[Permission][]Role{
-	"organization.members.read":   {Owner, Maintainer, Member, Viewer},
-	"statuspage.read":             {Owner, Maintainer, Member, Viewer},
-	"usage.read":                  {Owner, Maintainer},
-	"project.create":              {Owner, Maintainer},
-	"organization.members.manage": {Owner, Maintainer},
-	"statuspage.manage":           {Owner, Maintainer},
-	"organization.delete":         {Owner},
-	"organization.domains.manage": {Owner},
+	"organization.members.read":       {Owner, Maintainer, Member, Viewer},
+	"organization.statuspages.read":   {Owner, Maintainer, Member, Viewer},
+	"usage.read":                      {Owner, Maintainer},
+	"project.create":                  {Owner, Maintainer},
+	"organization.members.manage":     {Owner, Maintainer},
+	"organization.statuspages.manage": {Owner, Maintainer},
+	"organization.delete":             {Owner},
+	"organization.domains.manage":     {Owner},
 }
 
 func contains(list []Role, r Role) bool {
@@ -355,7 +357,7 @@ func TestCanInProject(t *testing.T) {
 	// A project owner holds no organization permission, however high the project role.
 	owner := Actor{Projects: map[uuid.UUID]Role{p1: Owner}}
 	for _, p := range []Permission{"organization.delete", "organization.members.manage", "project.create", "usage.read",
-		"organization.domains.manage", "statuspage.manage", "organization.members.read"} {
+		"organization.domains.manage", "organization.statuspages.manage", "organization.statuspages.read", "organization.members.read"} {
 		if owner.CanIn(p1, p) || owner.Holds(p) || owner.HoldsAnywhere(p) {
 			t.Errorf("a project owner holds %s", p)
 		}
@@ -386,7 +388,7 @@ func TestProjectOnlyReachesOperations(t *testing.T) {
 		}
 		// Operations of the organization level stay closed, whatever the project role.
 		for _, op := range []string{"listMembers", "updateMember", "removeMember", "listInvitations", "createInvitation",
-			"createProject", "getUsage", "deleteOrganization", "listAuthDomains", "listStatusPages", "createStatusPage"} {
+			"createProject", "getUsage", "deleteOrganization", "listAuthDomains"} {
 			if Can(a, op) {
 				t.Errorf("project-only %s can call %s", r, op)
 			}
@@ -394,7 +396,8 @@ func TestProjectOnlyReachesOperations(t *testing.T) {
 		// Project operations pass the table exactly when the role holds the permission.
 		for op, p := range map[string]Permission{"listMonitors": "monitor.read", "createMonitor": "monitor.create",
 			"createChannel": "channel.manage", "putProjectMember": "project.members.manage", "deleteProject": "project.delete",
-			"updateProject": "project.update", "getProject": "project.read"} {
+			"updateProject": "project.update", "getProject": "project.read",
+			"listStatusPages": "statuspage.read", "createStatusPage": "statuspage.manage"} {
 			if got := Can(a, op); got != Has(r, p) {
 				t.Errorf("project-only %s: Can(%s) = %v", r, op, got)
 			}

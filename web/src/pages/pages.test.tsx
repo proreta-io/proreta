@@ -7,7 +7,7 @@ import type {
   MonitorDetail,
   MonitorListItem,
 } from "../api/endpoints";
-import { json, mockApi, problem, renderApp, signedIn } from "../test/utils";
+import { json, mockApi, problem, renderApp, session, signedIn } from "../test/utils";
 
 const httpOf = (over: Partial<HttpMonitor> = {}): HttpMonitor => ({
   url: "https://example.com/",
@@ -63,6 +63,7 @@ const channel = (over: Partial<Channel> = {}): Channel => ({
   projectId: "p-default",
   name: "#ops",
   type: "slack_webhook",
+  configHidden: false,
   events: ["down", "recovered", "tls_expiring"],
   mention: [],
   reminderMinutes: 0,
@@ -791,6 +792,47 @@ describe("settings", () => {
       "#opsDown, Recovered, TLS certificate expiringNoneOffActive",
     );
     expect(screen.getByText(/refused by Slack/)).toBeInTheDocument();
+  });
+
+  it("shows project-only maintainers an organization-wide channel without settings or actions", async () => {
+    mockApi({
+      "GET /api/v1/auth/me": () => json({ ...session, role: null }),
+      "GET /api/v1/projects": () =>
+        json({
+          items: [
+            {
+              id: "p-web",
+              name: "Web",
+              slug: "web",
+              isDefault: false,
+              allMembers: false,
+              role: "maintainer",
+              monitorCount: 0,
+              channelCount: 1,
+              createdAt: "2026-10-01T00:00:00Z",
+              updatedAt: "2026-10-01T00:00:00Z",
+            },
+          ],
+        }),
+      "GET /api/v1/channels": () =>
+        json({
+          items: [
+            channel({
+              id: "c-org",
+              projectId: null,
+              name: "#all-hands",
+              configHidden: true,
+              events: [],
+            }),
+            channel({ id: "c-web", projectId: "p-web", name: "#web" }),
+          ],
+        }),
+    });
+    renderApp("/settings");
+    const org = await screen.findByRole("row", { name: /#all-hands/ });
+    expect(org).toHaveTextContent("Settings are managed by the organization.");
+    expect(within(org).queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit #web" })).toBeInTheDocument();
   });
 
   it("adds a channel without showing the webhook again", async () => {

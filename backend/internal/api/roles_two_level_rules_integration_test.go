@@ -26,7 +26,6 @@ func TestIntegrationProjectOnlyPeople(t *testing.T) {
 		{http.MethodPost, "/api/v1/invitations", `{"role":"viewer"}`},
 		{http.MethodGet, "/api/v1/usage", ""},
 		{http.MethodPost, "/api/v1/projects", `{"name":"mine"}`},
-		{http.MethodGet, "/api/v1/status-pages", ""},
 		{http.MethodPost, "/api/v1/status-pages", `{"slug":"project-only","title":"x"}`},
 		{http.MethodGet, "/api/v1/organization/auth-domains", ""},
 		{http.MethodDelete, "/api/v1/organization", ""},
