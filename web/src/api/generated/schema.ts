@@ -2271,6 +2271,35 @@ export interface components {
      * @example 2xx
      */
     ExpectedStatus: string;
+    /**
+     * @description The HTTP method of the check. `POST`, `PUT`, `PATCH` and `DELETE` act on the target
+     *     system once a minute; use them only against endpoints that are safe to call that often.
+     *     `GET` when omitted on create; omitted on update keeps the current method.
+     * @example GET
+     * @enum {string}
+     */
+    HttpMethod: "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
+    /**
+     * @description A custom request header. The value is write-only: it is stored encrypted and never
+     *     returned. On update, a header whose `value` is omitted keeps the value stored for the same
+     *     name (422 when there is none); on create `value` is required.
+     */
+    HttpHeaderInput: {
+      /**
+       * @description A header name. `Host`, `Content-Length`, `Transfer-Encoding`, `Connection`, `Upgrade`,
+       *     `TE`, `Trailer`, `Expect` and `Proxy-*` are refused; `User-Agent` replaces ours.
+       * @example Authorization
+       */
+      name: string;
+      /** @description The value, without control characters */
+      value?: string;
+    };
+    /**
+     * @description A text request body of at most 64 KiB, sent as is. Only for `POST`, `PUT`, `PATCH` and
+     *     `DELETE`; `Content-Type` defaults to `application/json` when no such header is set.
+     *     Write-only: stored encrypted and never returned. On update an empty string removes the body.
+     */
+    HttpBody: string;
     /** @description The settings of an HTTPS monitor in a create request */
     HttpSettings: {
       /**
@@ -2279,6 +2308,10 @@ export interface components {
        */
       url: string;
       expectedStatus?: components["schemas"]["ExpectedStatus"];
+      method?: components["schemas"]["HttpMethod"];
+      /** @description Custom request headers, at most 10; a name may appear once */
+      headers?: components["schemas"]["HttpHeaderInput"][];
+      body?: components["schemas"]["HttpBody"];
       /**
        * @description Check interval in seconds; 60 is the only accepted value (422 otherwise)
        * @default 60
@@ -2300,6 +2333,10 @@ export interface components {
       /** @description A new target, with the rules of create; restarts the monitor */
       url?: string;
       expectedStatus?: components["schemas"]["ExpectedStatus"];
+      method?: components["schemas"]["HttpMethod"];
+      /** @description Replaces the custom headers; omit to keep them, send `[]` to remove them all */
+      headers?: components["schemas"]["HttpHeaderInput"][];
+      body?: components["schemas"]["HttpBody"];
       /** @description Accepted only with the current value (60) */
       intervalSeconds?: number;
       /** @description Accepted only with the current value (10) */
@@ -2432,6 +2469,11 @@ export interface components {
       /** @description The checked URL */
       url: string;
       expectedStatus: components["schemas"]["ExpectedStatus"];
+      method: components["schemas"]["HttpMethod"];
+      /** @description The names of the custom headers; their values are never returned */
+      headerNames: string[];
+      /** @description Whether the monitor sends a body; the body itself is never returned */
+      bodySet: boolean;
       /** @description Check interval in seconds */
       intervalSeconds: number;
       /** @description Request deadline in seconds, including redirects */
