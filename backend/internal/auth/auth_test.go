@@ -92,6 +92,22 @@ func TestLimiterBoundsMemory(t *testing.T) {
 	}
 }
 
+// A full table drops the least recently used key, never a recently counted one.
+func TestLimiterEvictsLeastRecentlyUsed(t *testing.T) {
+	l := NewLimiter(1, time.Hour, 3, clock.NewFake(time.Now()))
+	l.Reserve("old")
+	l.Reserve("victim") // counted: its next attempt must be refused
+	l.Reserve("b")
+	l.Reserve("victim") // refused, but the key is now the most recently used
+	l.Reserve("c")      // table is full: "old" goes
+	if ok, _ := l.Reserve("victim"); ok {
+		t.Fatal("a recently counted key was evicted")
+	}
+	if ok, _ := l.Reserve("old"); !ok {
+		t.Fatal("the least recently used key should have been evicted")
+	}
+}
+
 func TestCSRFValid(t *testing.T) {
 	cases := []struct {
 		expected, got string

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"container/list"
 	"sync"
 	"time"
 
@@ -19,17 +20,19 @@ type Limiter struct {
 	window  time.Duration
 	maxKeys int
 	clock   clock.Clock
-	entries map[string]*limitEntry
+	entries map[string]*list.Element // values are *limitEntry
+	lru     *list.List               // front: most recently used
 }
 
 type limitEntry struct {
+	key      string
 	start    time.Time
 	attempts int
 }
 
 // NewLimiter allows up to limit attempts per key per window and tracks at most maxKeys keys.
 func NewLimiter(limit int, window time.Duration, maxKeys int, c clock.Clock) *Limiter {
-	return &Limiter{limit: limit, window: window, maxKeys: maxKeys, clock: c, entries: map[string]*limitEntry{}}
+	return &Limiter{limit: limit, window: window, maxKeys: maxKeys, clock: c, entries: map[string]*list.Element{}, lru: list.New()}
 }
 
 // Reserve counts one attempt for key if the limit allows it. Otherwise it reports false and
@@ -38,16 +41,20 @@ func (l *Limiter) Reserve(key string) (bool, time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.clock.Now()
-	e, ok := l.entries[key]
-	if ok && now.Sub(e.start) >= l.window {
-		ok = false
-	}
-	if !ok {
-		if len(l.entries) >= l.maxKeys {
-			l.evictLocked(now)
+	var e *limitEntry
+	if el, ok := l.entries[key]; ok {
+		l.lru.MoveToFront(el)
+		e = el.Value.(*limitEntry)
+		if now.Sub(e.start) >= l.window {
+			e.start, e.attempts = now, 0
 		}
-		e = &limitEntry{start: now}
-		l.entries[key] = e
+	} else {
+		// The least recently used key goes, so a flood of new keys cannot erase a recent counter at random.
+		for len(l.entries) >= l.maxKeys && l.lru.Len() > 0 {
+			l.remove(l.lru.Back())
+		}
+		e = &limitEntry{key: key, start: now}
+		l.entries[key] = l.lru.PushFront(e)
 	}
 	if e.attempts >= l.limit {
 		return false, e.start.Add(l.window).Sub(now)
@@ -60,8 +67,10 @@ func (l *Limiter) Reserve(key string) (bool, time.Duration) {
 func (l *Limiter) Refund(key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if e, ok := l.entries[key]; ok && e.attempts > 0 {
-		e.attempts--
+	if el, ok := l.entries[key]; ok {
+		if e := el.Value.(*limitEntry); e.attempts > 0 {
+			e.attempts--
+		}
 	}
 }
 
@@ -69,21 +78,12 @@ func (l *Limiter) Refund(key string) {
 func (l *Limiter) Reset(key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	delete(l.entries, key)
+	if el, ok := l.entries[key]; ok {
+		l.remove(el)
+	}
 }
 
-// evictLocked drops expired entries; if the table is still full it drops arbitrary entries,
-// trading accuracy for bounded memory under a flood of distinct keys.
-func (l *Limiter) evictLocked(now time.Time) {
-	for k, e := range l.entries {
-		if now.Sub(e.start) >= l.window {
-			delete(l.entries, k)
-		}
-	}
-	for k := range l.entries {
-		if len(l.entries) < l.maxKeys {
-			return
-		}
-		delete(l.entries, k)
-	}
+func (l *Limiter) remove(el *list.Element) {
+	delete(l.entries, el.Value.(*limitEntry).key)
+	l.lru.Remove(el)
 }

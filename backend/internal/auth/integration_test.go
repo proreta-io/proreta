@@ -302,6 +302,10 @@ func TestIntegrationLoginLimitHoldsUnderConcurrency(t *testing.T) {
 	if _, err := login(t, svc, "admin", "pw"); !errors.Is(err, auth.ErrRateLimited) {
 		t.Fatalf("login after the limit: err = %v", err)
 	}
+	// Another address is not locked out by the first one's failures.
+	if _, err := svc.Login(ctx, auth.LoginInput{Login: "admin", Password: "pw", IP: netip.MustParseAddr("203.0.113.77")}); err != nil {
+		t.Fatalf("login from another address: %v", err)
+	}
 }
 
 // A registered user logs in to their own tenant; a suspended or deleted tenant refuses the login
