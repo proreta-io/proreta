@@ -298,19 +298,6 @@ export const setAdminMember = (organizationId: string, userId: string, role: Mem
     }),
   );
 
-/** Like setAdminMember for the account with this email; 404 when there is none. */
-export const addAdminMemberByEmail = (
-  organizationId: string,
-  email: string,
-  role: MembershipRole,
-) =>
-  unwrap(
-    client.POST("/api/v1/admin/organizations/{organizationId}/members", {
-      params: { path: { organizationId } },
-      body: { email, role },
-    }),
-  );
-
 export const removeAdminMember = (organizationId: string, userId: string) =>
   unwrap(
     client.DELETE("/api/v1/admin/organizations/{organizationId}/members/{userId}", {

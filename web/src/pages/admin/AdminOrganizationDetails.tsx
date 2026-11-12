@@ -6,20 +6,15 @@ import {
   deleteAdminOrganization,
   getAdminStats,
   getAdminOrganization,
-  listAdminOrganizationUsers,
   queryKeys,
-  resetAdminUserPassword,
   updateAdminOrganization,
   type AdminOrganization,
   type AdminOrganizationUpdate,
-  type AdminUser,
 } from "../../api/endpoints";
-import TemporaryPasswordPanel from "../../components/TemporaryPasswordPanel";
 import { useAuth } from "../../auth/AuthProvider";
 import { useToast } from "../../components/Toasts";
 import {
   Alert,
-  Badge,
   Button,
   buttonClass,
   ConfirmDialog,
@@ -29,12 +24,7 @@ import {
   MetricStrip,
   Select,
   Skeleton,
-  Table,
-  Td,
-  Th,
-  Tr,
   Loading,
-  EmptyNote,
 } from "../../components/ui";
 import { formatDate, formatDateTime } from "../../lib/format";
 import AdminOrganizationInvitations from "./AdminOrganizationInvitations";
@@ -110,7 +100,6 @@ function OrganizationDetails({ id }: { id: string }) {
   return (
     <section className="flex flex-col gap-8 pt-4">
       <OrganizationInfo organization={organization.data} />
-      <OrganizationUsers organization={organization.data} />
       <AdminOrganizationMembers organization={organization.data} />
       <AdminOrganizationInvitations organization={organization.data} />
       <AdminOrganizationProjects organization={organization.data} />
@@ -334,144 +323,5 @@ function OrganizationInfo({ organization }: { organization: AdminOrganization })
         </ConfirmDialog>
       )}
     </>
-  );
-}
-
-function OrganizationUsers({ organization }: { organization: AdminOrganization }) {
-  const toast = useToast();
-  const users = useQuery({
-    queryKey: queryKeys.adminUsers(organization.id),
-    queryFn: () => listAdminOrganizationUsers(organization.id),
-  });
-  const [confirmUser, setConfirmUser] = useState<AdminUser | null>(null);
-  // The temporary password lives only here: never in storage, gone when hidden or the page is
-  // left. The mutation keeps no copy: gcTime 0 and reset() right after copying it.
-  const [temporary, setTemporary] = useState<{ login: string; password: string } | null>(null);
-
-  const reset = useMutation({
-    mutationFn: (user: AdminUser) => resetAdminUserPassword(user.id),
-    gcTime: 0,
-    onSuccess: (res, user) => {
-      setConfirmUser(null);
-      setTemporary({ login: user.login, password: res.temporaryPassword });
-      reset.reset();
-    },
-    onError: (err) => {
-      setConfirmUser(null);
-      toast(errorMessage(err), "error");
-    },
-  });
-
-  return (
-    <section aria-labelledby="users-heading" className="flex flex-col gap-3">
-      <h2 id="users-heading" className="text-lead font-semibold">
-        Users
-      </h2>
-      {temporary && (
-        <TemporaryPasswordPanel login={temporary.login} password={temporary.password}>
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setTemporary(null);
-              reset.reset();
-            }}
-          >
-            I handed it over, hide it
-          </Button>
-        </TemporaryPasswordPanel>
-      )}
-      {users.isPending && (
-        <Loading label="Loading users…">
-          <Skeleton className="w-1/2" />
-        </Loading>
-      )}
-      {users.isError && (
-        <ErrorState
-          variant="section"
-          title="Cannot load the users"
-          onRetry={() => void users.refetch()}
-        />
-      )}
-      {users.data && users.data.items.length === 0 && (
-        <EmptyNote>This organization has no users.</EmptyNote>
-      )}
-      {users.data && users.data.items.length > 0 && (
-        <Table>
-          <thead>
-            <tr>
-              <Th>Login</Th>
-              <Th>Role</Th>
-              <Th>Status</Th>
-              <Th numeric>Created</Th>
-              <Th numeric>
-                <span className="sr-only">Actions</span>
-              </Th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.data.items.map((u) => (
-              <Tr key={u.id}>
-                <Td>
-                  <span className="flex flex-wrap items-center gap-2">
-                    <Link
-                      to={`/admin/users/${u.id}`}
-                      className="font-mono text-[13px] break-all hover:underline"
-                    >
-                      {u.login}
-                    </Link>
-                    {u.isPlatformAdmin && <Badge tone="inverse">System admin</Badge>}
-                  </span>
-                </Td>
-                <Td>{u.role}</Td>
-                <Td className={u.status === "disabled" ? "text-subtle-foreground" : undefined}>
-                  {u.status}
-                </Td>
-                <Td numeric>{formatDate(u.createdAt)}</Td>
-                <Td numeric>
-                  <Button
-                    variant="secondary"
-                    size="small"
-                    disabled={u.isPlatformAdmin}
-                    aria-describedby={u.isPlatformAdmin ? `system-admin-note-${u.id}` : undefined}
-                    onClick={() => setConfirmUser(u)}
-                  >
-                    Reset password
-                  </Button>
-                  {u.isPlatformAdmin && (
-                    <span
-                      id={`system-admin-note-${u.id}`}
-                      className="mt-1 block font-sans text-caption text-muted-foreground"
-                    >
-                      Managed by the proreta-admin Secret, not here.
-                    </span>
-                  )}
-                </Td>
-              </Tr>
-            ))}
-          </tbody>
-        </Table>
-      )}
-      {users.data && users.data.total > users.data.items.length && (
-        <p className="text-caption text-muted-foreground">
-          Showing the first {users.data.items.length} of {users.data.total} users.
-        </p>
-      )}
-      {confirmUser && (
-        <ConfirmDialog
-          title={`Reset the password of ${confirmUser.login}?`}
-          confirmLabel="Reset password"
-          confirmVariant="primary"
-          busy={reset.isPending}
-          onCancel={() => setConfirmUser(null)}
-          onConfirm={() => reset.mutate(confirmUser)}
-        >
-          <p>
-            The current password stops working and all of the user&apos;s sessions end. You get a
-            temporary password once, to hand over yourself; the user must choose a new password at
-            the next sign-in. Verify who asked for it first.
-          </p>
-        </ConfirmDialog>
-      )}
-    </section>
   );
 }

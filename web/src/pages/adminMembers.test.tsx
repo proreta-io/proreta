@@ -1,6 +1,11 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { AdminMember, AdminOrganization, Invitation } from "../api/endpoints";
+import type {
+  AdminMember,
+  AdminOrganization,
+  AdminUserSummary,
+  Invitation,
+} from "../api/endpoints";
 import { json, mockApi, problem, renderApp, session } from "../test/utils";
 
 const adminSession = { ...session, user: { ...session.user, isPlatformAdmin: true } };
@@ -27,6 +32,19 @@ const member = (over: Partial<AdminMember> = {}): AdminMember => ({
   status: "active",
   joinedAt: "2026-10-01T00:00:00Z",
   isPlatformAdmin: false,
+  ...over,
+});
+
+const summary = (over: Partial<AdminUserSummary> = {}): AdminUserSummary => ({
+  id: "u-1",
+  login: "alice@alpha.example",
+  displayName: "",
+  status: "active",
+  isPlatformAdmin: false,
+  emailVerified: true,
+  mustChangePassword: false,
+  createdAt: "2026-10-01T00:00:00Z",
+  organizationCount: 1,
   ...over,
 });
 
@@ -143,29 +161,53 @@ describe("admin organization members", () => {
     expect(screen.queryByRole("button", { name: "Remove admin" })).toBeNull();
   });
 
-  it("adds an existing user by email and suggests an invitation when there is no account", async () => {
-    let known = false;
+  it("finds a user by typing, adds them with the chosen role and hides current members", async () => {
     const fetchMock = setup({
-      [`POST ${base}/members`]: () =>
-        known
-          ? json(member({ userId: "u-3", login: "carol@gamma.example", role: "admin" }))
-          : problem(404, "No account found", { detail: "No account matches." }),
+      "GET /api/v1/admin/users": (r) => {
+        const q = new URL(r.url).searchParams.get("query");
+        return json({
+          items:
+            q === "ca"
+              ? [
+                  summary({ id: "u-3", login: "carol@gamma.example", displayName: "Carol" }),
+                  summary({ id: "u-2", login: "bob@beta.example" }),
+                  summary({ id: "u-admin", login: "admin", isPlatformAdmin: true }),
+                ]
+              : [],
+          total: 3,
+          limit: 25,
+          offset: 0,
+        });
+      },
+      [`PUT ${base}/members/u-3`]: () =>
+        json(member({ userId: "u-3", login: "carol@gamma.example", role: "admin" })),
     });
     renderApp("/admin/organizations/t-1");
-    await userEvent.type(
-      await screen.findByLabelText("Email of the account"),
-      "carol@gamma.example",
-    );
+    const add = await screen.findByRole("button", { name: "Add member" });
+    expect(add).toBeDisabled();
+    await userEvent.type(screen.getByLabelText("Find a user"), "ca");
+    const list = await screen.findByRole("list", { name: "Matching users" });
+    expect(within(list).getAllByRole("button")).toHaveLength(1);
+    expect(within(list).getByText("carol@gamma.example")).toBeInTheDocument();
+    await userEvent.click(within(list).getByRole("button"));
+    expect(screen.queryByLabelText("Find a user")).toBeNull();
     await userEvent.selectOptions(screen.getByLabelText("Role", { selector: "select" }), "admin");
     await userEvent.click(screen.getByRole("button", { name: "Add member" }));
-    expect(await screen.findByText("No account with this email.")).toBeInTheDocument();
-    known = true;
-    await userEvent.click(screen.getByRole("button", { name: "Add member" }));
-    await waitFor(() => expect(requests(fetchMock, "POST", `${base}/members`)).toHaveLength(2));
-    expect(await requests(fetchMock, "POST", `${base}/members`)[1]!.json()).toEqual({
-      email: "carol@gamma.example",
+    await waitFor(() => expect(requests(fetchMock, "PUT", `${base}/members/u-3`)).toHaveLength(1));
+    expect(await requests(fetchMock, "PUT", `${base}/members/u-3`)[0]!.json()).toEqual({
       role: "admin",
     });
+    expect(await screen.findByLabelText("Find a user")).toBeInTheDocument();
+  });
+
+  it("suggests an invitation when nothing matches", async () => {
+    setup({
+      "GET /api/v1/admin/users": () => json({ items: [], total: 0, limit: 25, offset: 0 }),
+    });
+    renderApp("/admin/organizations/t-1");
+    await userEvent.type(await screen.findByLabelText("Find a user"), "zz");
+    expect(await screen.findByText(/No account matches “zz”/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add member" })).toBeDisabled();
   });
 
   it("offers no changes for a deleted organization", async () => {
