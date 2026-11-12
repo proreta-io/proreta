@@ -51,6 +51,7 @@ import {
   ROLE_LABELS,
   roleLabel,
 } from "../lib/roles";
+import { absoluteLink } from "../lib/inviteLink";
 import { memberLabel } from "../lib/members";
 
 /** Members, roles and invitations of the organization. */
@@ -302,16 +303,14 @@ interface CreatedLink {
   emailedTo?: string;
 }
 
-function absoluteLink(url: string) {
-  // The api builds it from PRORETA_PUBLIC_URL; without one it is a path on this origin.
-  return url.startsWith("/") ? `${globalThis.location.origin}${url}` : url;
-}
-
 function Invitations() {
   const auth = useAuth();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const invitations = useQuery({ queryKey: queryKeys.invitations, queryFn: listInvitations });
+  const invitations = useQuery({
+    queryKey: queryKeys.invitations,
+    queryFn: () => listInvitations(),
+  });
   const [dialog, setDialog] = useState(false);
   const [role, setRole] = useState<InvitationRole>("member");
   const [label, setLabel] = useState("");
@@ -451,7 +450,14 @@ function Invitations() {
                     {inv.acceptedBy ? ` · joined: ${inv.acceptedBy}` : ""}
                   </span>
                 </Td>
-                <Td>{ROLE_LABELS[inv.role]}</Td>
+                <Td>
+                  {ROLE_LABELS[inv.role]}
+                  {inv.projectName && (
+                    <span className="block text-caption text-muted-foreground">
+                      in {inv.projectName}
+                    </span>
+                  )}
+                </Td>
                 <Td>
                   <Badge tone={STATUS_TONES[inv.status]}>{inv.status}</Badge>
                 </Td>

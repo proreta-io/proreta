@@ -468,7 +468,7 @@ func (s *server) toSessionInfo(ctx context.Context, i auth.SessionInfo) gen.Sess
 	}
 	return gen.SessionInfo{
 		Features:           features,
-		EmailInvitations:   s.auth.MailFeatures(ctx).Invitations && authz.Can(authz.Actor{Role: authz.Role(i.Role)}, "createInvitation"),
+		EmailInvitations:   s.auth.MailFeatures(ctx).Invitations && s.canInvite(ctx, i),
 		MustChangePassword: i.User.MustChangePassword,
 		User:               gen.User{Id: i.User.ID, Login: i.User.Login, DisplayName: i.User.DisplayName, IsPlatformAdmin: i.User.IsPlatformAdmin, IsSystemAdmin: &i.User.IsSystemAdmin, EmailVerified: i.User.EmailVerified},
 		Organization:       gen.OrganizationRef{Id: i.Tenant.ID, Slug: i.Tenant.Slug, Name: i.Tenant.Name},
@@ -476,4 +476,19 @@ func (s *server) toSessionInfo(ctx context.Context, i auth.SessionInfo) gen.Sess
 		CsrfToken:          i.CSRFToken,
 		ExpiresAt:          i.ExpiresAt,
 	}
+}
+
+// canInvite reports whether the session's user may invite anyone: through the organization role
+// or as owner or maintainer of a project.
+func (s *server) canInvite(ctx context.Context, i auth.SessionInfo) bool {
+	a := authz.Actor{UserID: i.User.ID, Role: authz.Role(i.Role)}
+	if authz.Can(a, "createInvitation") {
+		return true
+	}
+	var err error
+	if a.Projects, err = s.projects.Access(ctx, i.Tenant.ID, i.User.ID); err != nil {
+		s.log.ErrorContext(ctx, "project access lookup failed", "error", err)
+		return false
+	}
+	return authz.Can(a, "createInvitation")
 }

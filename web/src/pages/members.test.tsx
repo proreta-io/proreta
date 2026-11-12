@@ -28,6 +28,8 @@ const invitation = (over: Partial<Invitation> = {}): Invitation => ({
   createdAt: "2026-11-01T00:00:00Z",
   expiresAt: "2026-11-08T00:00:00Z",
   createdBy: "admin",
+  projectId: null,
+  projectName: null,
   acceptedBy: null,
   acceptedAt: null,
   revokedAt: null,
@@ -49,6 +51,32 @@ describe("members page", () => {
     expect(requests(fetchMock, "GET", "/api/v1/members")).toHaveLength(0);
     // Status pages of their projects are theirs to see, so the link stays.
     expect(screen.getByRole("link", { name: "Status page" })).toBeInTheDocument();
+  });
+
+  it("names a person without an organization role for people who cannot change roles", async () => {
+    mockApi({
+      ...as("viewer"),
+      "GET /api/v1/members": () =>
+        json({
+          items: [
+            member({ userId: "u1", login: null, displayName: "Olga", role: "owner" }),
+            member({ userId: "u3", login: null, displayName: "Dana", role: null }),
+          ],
+        }),
+    });
+    renderApp("/members");
+    expect(await screen.findByRole("row", { name: /Dana/ })).toHaveTextContent("Projects only");
+  });
+
+  it("shows the project of an invitation into a project", async () => {
+    mockApi({
+      ...as("maintainer"),
+      "GET /api/v1/members": () => json({ items: [me] }),
+      "GET /api/v1/invitations": () =>
+        json({ items: [invitation({ role: "maintainer", projectId: "w", projectName: "Web" })] }),
+    });
+    renderApp("/members");
+    expect(await screen.findByRole("row", { name: /Carol/ })).toHaveTextContent("in Web");
   });
 
   it("makes a member project-only and back", async () => {
@@ -618,6 +646,18 @@ describe("invitation page: new account and invalid links", () => {
       inviteToken: "TOKEN-123",
     });
     expect(await screen.findByRole("heading", { name: "Monitors" })).toBeInTheDocument();
+  });
+
+  it("tells which project and role a project link is for", async () => {
+    mockApi({
+      "GET /api/v1/auth/me": () => problem(401, "Not authenticated"),
+      "POST /api/v1/invitations/lookup": () =>
+        json({ ...preview, projectName: "Storefront", role: "maintainer" }),
+    });
+    renderApp("/invite#TOKEN-123");
+    expect(await screen.findByRole("heading", { name: "Join Acme" })).toBeInTheDocument();
+    expect(screen.getByText("Storefront")).toBeInTheDocument();
+    expect(screen.getByText(/in this project only/)).toBeInTheDocument();
   });
 
   it("joins as the signed-in user", async () => {

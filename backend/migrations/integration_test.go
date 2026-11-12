@@ -160,7 +160,8 @@ var extraPolicies = map[string]struct {
 	"monitor_channels.owner_reminder_read":          {cmd: "r", roles: []string{"proreta_owner"}},
 	"notification_deliveries.owner_reminder_insert": {cmd: "a", roles: []string{"proreta_owner"}},
 	// auth_invitation_lookup.
-	"invitations.owner_invitation_lookup": {cmd: "r", roles: []string{"proreta_owner"}},
+	"invitations.owner_invitation_lookup":      {cmd: "r", roles: []string{"proreta_owner"}},
+	"projects.owner_invitation_project_lookup": {cmd: "r", roles: []string{"proreta_owner"}},
 	// status_page_published_pages and status_page_snapshot.
 	"status_pages.owner_statuspage_read":          {cmd: "r", roles: []string{"proreta_owner"}},
 	"status_page_snapshots.owner_statuspage_read": {cmd: "r", roles: []string{"proreta_owner"}},

@@ -1,6 +1,13 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Channel, Member, MonitorListItem, Project, ProjectMember } from "../api/endpoints";
+import type {
+  Channel,
+  Invitation,
+  Member,
+  MonitorListItem,
+  Project,
+  ProjectMember,
+} from "../api/endpoints";
 import { json, mockApi, problem, renderApp, session } from "../test/utils";
 
 const as = (role: string) => ({
@@ -253,6 +260,96 @@ describe("projects page with two-level roles", () => {
     expect(screen.queryByLabelText("Add someone")).not.toBeInTheDocument();
     await userEvent.selectOptions(viewerRole, "maintainer");
     await waitFor(() => expect(bodies).toEqual([{ role: "maintainer" }]));
+  });
+});
+
+describe("project invitations", () => {
+  const inv = (over: Partial<Invitation>): Invitation => ({
+    id: "i1",
+    role: "member",
+    projectId: "w",
+    projectName: "Web",
+    label: "Carol",
+    status: "open",
+    createdAt: "2026-11-01T00:00:00Z",
+    expiresAt: "2026-11-08T00:00:00Z",
+    createdBy: "dana",
+    acceptedBy: null,
+    acceptedAt: null,
+    revokedAt: null,
+    ...over,
+  });
+
+  it("lets a project maintainer invite into the project with a role up to their own", async () => {
+    let items = [inv({})];
+    const bodies: unknown[] = [];
+    const fetchMock = mockApi({
+      "GET /api/v1/auth/me": () => json({ ...session, role: null }),
+      "GET /api/v1/projects": () => json({ items: [{ ...web, role: "maintainer" }] }),
+      "GET /api/v1/projects/w/members": () => json({ items: [] }),
+      "GET /api/v1/invitations": () => json({ items }),
+      "POST /api/v1/invitations": async (r) => {
+        const body = (await r.json()) as { role: "member" | "viewer" | "maintainer" };
+        bodies.push(body);
+        const created = inv({ id: "i2", role: body.role, label: "" });
+        items = [created, ...items];
+        return json(
+          {
+            invitation: created,
+            inviteUrl: "https://proreta.example.com/invite#SECRET",
+            emailQueued: false,
+          },
+          201,
+        );
+      },
+      "POST /api/v1/invitations/i1/revoke": () => {
+        items = items.map((i) => (i.id === "i1" ? { ...i, status: "revoked" } : i));
+        return new Response(null, { status: 204 });
+      },
+    });
+    renderApp("/projects");
+    await userEvent.click(await screen.findByRole("button", { name: "People in Web" }));
+    const list = await screen.findByRole("heading", { name: "Invitations to Web" });
+    expect(list).toBeInTheDocument();
+    expect(await screen.findByRole("row", { name: /Carol/ })).toHaveTextContent("Member");
+    expect(new URL(requests(fetchMock, "GET", "/api/v1/invitations")[0]!.url).search).toBe(
+      "?projectId=w",
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Invite someone" }));
+    const dialog = await screen.findByRole("dialog");
+    const role = within(dialog).getByLabelText("Role in this project");
+    expect(
+      within(role)
+        .getAllByRole("option")
+        .map((o) => o.textContent),
+    ).toEqual(["Maintainer", "Member", "Viewer"]);
+    await userEvent.selectOptions(role, "viewer");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Create link" }));
+    expect(
+      await screen.findByDisplayValue("https://proreta.example.com/invite#SECRET"),
+    ).toBeInTheDocument();
+    expect(bodies).toEqual([{ role: "viewer", projectId: "w" }]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Revoke the invitation Carol" }));
+    await userEvent.click(
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Revoke invitation" }),
+    );
+    await waitFor(() =>
+      expect(requests(fetchMock, "POST", "/api/v1/invitations/i1/revoke")).toHaveLength(1),
+    );
+  });
+
+  it("offers no invitations to people who only read or write monitors in the project", async () => {
+    mockApi({
+      ...as("member"),
+      "GET /api/v1/projects": () => json({ items: [{ ...web, role: "member" }] }),
+      "GET /api/v1/projects/w/members": () => json({ items: [] }),
+    });
+    renderApp("/projects");
+    await userEvent.click(await screen.findByRole("button", { name: "People in Web" }));
+    await screen.findByRole("heading", { name: "People in Web" });
+    expect(screen.queryByRole("heading", { name: "Invitations to Web" })).not.toBeInTheDocument();
   });
 });
 

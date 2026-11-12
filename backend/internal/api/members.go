@@ -7,11 +7,14 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/proreta-io/proreta/backend/internal/api/gen"
 	"github.com/proreta-io/proreta/backend/internal/auth"
 	"github.com/proreta-io/proreta/backend/internal/authz"
 	"github.com/proreta-io/proreta/backend/internal/platform/httpx"
 	"github.com/proreta-io/proreta/backend/internal/platform/logging"
+	"github.com/proreta-io/proreta/backend/internal/projects"
 )
 
 // roleError is a request refused by the operation table because no role of the actor holds the
@@ -76,7 +79,16 @@ func (s *server) ListMembers(ctx context.Context, _ gen.ListMembersRequestObject
 	if err != nil {
 		return nil, err
 	}
-	list, err := s.auth.ListMembers(ctx, p.TenantID)
+	var list []auth.Member
+	if authz.Has(authz.Role(p.Role), "organization.members.read") {
+		list, err = s.auth.ListMembers(ctx, p.TenantID)
+	} else {
+		// Only through projects: the directory is limited to the people they share a project with.
+		var scope authz.Scope
+		if scope, err = s.scope(ctx); err == nil {
+			list, err = s.auth.ListMembersInProjects(ctx, p.TenantID, scope.IDs)
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -136,12 +148,25 @@ func (s *server) DeleteOrganization(ctx context.Context, _ gen.DeleteOrganizatio
 	return gen.DeleteOrganization204Response{Headers: gen.DeleteOrganization204ResponseHeaders{SetCookie: &cleared}}, nil
 }
 
-func (s *server) ListInvitations(ctx context.Context, _ gen.ListInvitationsRequestObject) (gen.ListInvitationsResponseObject, error) {
+func (s *server) ListInvitations(ctx context.Context, req gen.ListInvitationsRequestObject) (gen.ListInvitationsResponseObject, error) {
 	p, err := s.principal(ctx)
 	if err != nil {
 		return nil, err
 	}
-	list, err := s.auth.ListInvitations(ctx, p.TenantID)
+	a, err := s.access(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// Organization owners and maintainers see everything; a project owner or maintainer only the
+	// invitations into their projects.
+	scope := authz.Scope{All: a.Holds("organization.members.manage")}
+	if !scope.All {
+		scope = a.ScopeFor("project.members.manage")
+	}
+	if req.Params.ProjectId != nil && !a.Sees(*req.Params.ProjectId) {
+		return nil, projects.ErrNotFound
+	}
+	list, err := s.auth.ListInvitationsIn(ctx, p.TenantID, scope, req.Params.ProjectId)
 	if err != nil {
 		return nil, err
 	}
@@ -155,6 +180,9 @@ func (s *server) ListInvitations(ctx context.Context, _ gen.ListInvitationsReque
 // CreateInvitation answers the invitation link once. The token is in the URL fragment, which
 // browsers never send to a server, so opening the link does not put it in any access log.
 func (s *server) CreateInvitation(ctx context.Context, req gen.CreateInvitationRequestObject) (gen.CreateInvitationResponseObject, error) {
+	if err := organizationInvitationRole(req.Body.ProjectId, req.Body.Role); err != nil {
+		return nil, err
+	}
 	a, err := s.memberActor(ctx)
 	if err != nil {
 		return nil, err
@@ -167,11 +195,20 @@ func (s *server) CreateInvitation(ctx context.Context, req gen.CreateInvitationR
 	if req.Body.Email != nil {
 		email = *req.Body.Email
 	}
-	inv, token, emailed, err := s.auth.CreateInvitationFor(ctx, a, auth.InvitationInput{Role: string(req.Body.Role), Label: label, Email: email, SendEmail: req.Body.SendEmail})
+	inv, token, emailed, err := s.auth.CreateInvitationFor(ctx, a, auth.InvitationInput{Role: string(req.Body.Role), ProjectID: req.Body.ProjectId, Label: label, Email: email, SendEmail: req.Body.SendEmail})
 	if err != nil {
 		return nil, err
 	}
 	return gen.CreateInvitation201JSONResponse{Invitation: toInvitation(inv), InviteUrl: s.cfg.PublicURL + "/invite#" + token, EmailQueued: emailed}, nil
+}
+
+// organizationInvitationRole refuses owner for an invitation into the organization (the shared role
+// enum also holds it for project invitations): an owner is made by changing a member's role.
+func organizationInvitationRole(project *uuid.UUID, role gen.InvitationRole) error {
+	if project == nil && role == gen.InvitationRole(authz.Owner) {
+		return &badRequestError{detail: "role: owner is granted by changing a member's role, not by a link"}
+	}
+	return nil
 }
 
 func (s *server) RevokeInvitation(ctx context.Context, req gen.RevokeInvitationRequestObject) (gen.RevokeInvitationResponseObject, error) {
@@ -191,7 +228,7 @@ func (s *server) LookupInvitation(ctx context.Context, req gen.LookupInvitationR
 	if err != nil {
 		return nil, err
 	}
-	return gen.LookupInvitation200JSONResponse{OrganizationName: pv.OrganizationName, Role: gen.InvitationRole(pv.Role), ExpiresAt: pv.ExpiresAt}, nil
+	return gen.LookupInvitation200JSONResponse{OrganizationName: pv.OrganizationName, ProjectName: pv.ProjectName, Role: gen.InvitationRole(pv.Role), ExpiresAt: pv.ExpiresAt}, nil
 }
 
 func (s *server) AcceptInvitation(ctx context.Context, req gen.AcceptInvitationRequestObject) (gen.AcceptInvitationResponseObject, error) {
@@ -271,7 +308,7 @@ func toMember(m auth.Member, showLogin bool) gen.Member {
 }
 
 func toInvitation(i auth.Invitation) gen.Invitation {
-	return gen.Invitation{Id: i.ID, Role: gen.InvitationRole(i.Role), Label: i.Label, Status: gen.InvitationStatus(i.Status),
+	return gen.Invitation{Id: i.ID, Role: gen.InvitationRole(i.Role), ProjectId: i.ProjectID, ProjectName: i.ProjectName, Label: i.Label, Status: gen.InvitationStatus(i.Status),
 		CreatedAt: i.CreatedAt, ExpiresAt: i.ExpiresAt, CreatedBy: i.CreatedBy, AcceptedBy: i.AcceptedBy,
 		AcceptedAt: i.AcceptedAt, RevokedAt: i.RevokedAt}
 }

@@ -1037,7 +1037,9 @@ export interface paths {
      * Members of the organization
      * @description Every member with display name, role and when they joined, oldest first. Any role; the
      *     login (an email address) is shown to owners and maintainers only and is null for members and
-     *     viewers.
+     *     viewers. A person without an organization role (a member of projects only) gets only the
+     *     people they share a project with: everyone who has an organization role and everyone with a
+     *     role in one of their projects, never the rest of the directory, and never logins.
      */
     get: operations["listMembers"];
     put?: never;
@@ -1093,21 +1095,31 @@ export interface paths {
     };
     /**
      * Invitations of the organization
-     * @description The newest 200 invitations with their state (open, accepted, revoked or expired). The link of an invitation is never shown again. Admin or owner.
+     * @description The newest 200 invitations with their state (open, accepted, revoked or expired). The link
+     *     of an invitation is never shown again. Organization owners and maintainers see all of them;
+     *     an owner or maintainer of a project sees only the invitations into their projects. An
+     *     invitation into a deleted project reads as revoked. `projectId` narrows the list to one
+     *     project (404 when the caller has no role there).
      */
     get: operations["listInvitations"];
     put?: never;
     /**
      * Invite someone
-     * @description Creates a single-use invitation with the role `maintainer`, `member` or `viewer` (`owner` is
-     *     granted by changing a member's role). It expires after 7 days. The answer carries `inviteUrl` with
+     * @description Creates a single-use invitation. Without `projectId` it invites into the organization with the
+     *     role `maintainer`, `member` or `viewer` (`owner` is granted by changing a member's role);
+     *     organization owners and maintainers only. With `projectId` it invites into that project: `role`
+     *     is the role in the project (any of the four, never above the caller's own there), the person
+     *     gets no organization role, and an owner or maintainer of the project may do it (404 when the
+     *     caller has no role in the project, 403 when the role does not allow it). An existing member
+     *     who accepts only gets the project role, unless they already hold an equal or higher one there.
+     *     It expires after 7 days. The answer carries `inviteUrl` with
      *     the secret token in the URL fragment; it is shown only here (only its SHA-256 is stored)
      *     and must be handed over like a password. With `email` (and `sendEmail` not false) the same
      *     link is also emailed to that address (see below); the link is shown either way. Open invitations count
      *     toward the member limit of the plan: 409 `urn:proreta:problem:plan-limit-reached` (`limit`
      *     is `members`) when members plus open invitations already reach it. Audited as
      *     `member.invited` (without the token or the address; `emailed` says whether a message
-     *     was queued). Admin or owner.
+     *     was queued; `projectId` for a project invitation).
      *
      *     **Email.** Sending is possible only when the installation has a tested mail server
      *     (`emailEnabled` in `GET /api/v1/auth/providers`); otherwise a request that asks for it is
@@ -1117,8 +1129,8 @@ export interface paths {
      *     client whether to pre-check the option. The message is queued in the same
      *     transaction as the invitation, so it exists exactly when the invitation does, and is
      *     delivered a moment later by the background jobs process (`emailQueued` only means it was
-     *     queued, not that the mailbox accepted it). It names this organization, the role and the
-     *     inviter's display name, nothing else. The address is not stored and the invitation is
+     *     queued, not that the mailbox accepted it). It names this organization, the project when
+     *     there is one, the role and the inviter's display name, nothing else. The address is not stored and the invitation is
      *     not bound to it: whoever holds the link can use it, with any email address, exactly as
      *     without email. When `label` is empty and the address is at most 80 characters, the
      *     address becomes the label. Limited to 30 invitation emails per organization per hour and
@@ -1148,7 +1160,8 @@ export interface paths {
      * @description The link stops working at once and the place it reserved is freed. Revoking a revoked or
      *     expired invitation changes nothing (204); an accepted one is 409
      *     `urn:proreta:problem:invitation-accepted` (remove the member instead). Audited as
-     *     `invitation.revoked`. Admin or owner.
+     *     `invitation.revoked`. Follows the scope of the list: an invitation the caller cannot see is
+     *     404, and an invitation into a project with a role above the caller's own there is 403.
      */
     post: operations["revokeInvitation"];
     delete?: never;
@@ -1168,8 +1181,8 @@ export interface paths {
     put?: never;
     /**
      * What an invitation link offers
-     * @description Public (no session): the organization name, role and expiry of an open invitation, for the
-     *     invitation page. The token travels in the body, never in a URL, so proxies do not log it.
+     * @description Public (no session): the organization name, the project name when the invitation is into a
+     *     project, the role and the expiry of an open invitation, for the invitation page. The token travels in the body, never in a URL, so proxies do not log it.
      *     Unknown, expired, used and revoked tokens get the same 404
      *     `urn:proreta:problem:invitation-invalid`. Each 404 counts against a per-client-IP limit
      *     (429 with Retry-After).
@@ -1192,12 +1205,14 @@ export interface paths {
     put?: never;
     /**
      * Accept an invitation as the logged-in user
-     * @description The logged-in user joins the inviting organization with the invited role, the invitation
-     *     is used up, and the session switches to that organization (new cookie and CSRF token, the
+     * @description The logged-in user joins the inviting organization with the invited role (an organization
+     *     invitation) or, for a project invitation, gets the invited role in the project and no
+     *     organization role; a user who is already a member of the organization is accepted into the
+     *     project and keeps their organization role. The invitation is used up, and the session switches to that organization (new cookie and CSRF token, the
      *     old session is deleted). 404 `urn:proreta:problem:invitation-invalid` for an unknown,
      *     expired, used or revoked token (counted against the per-client-IP limit, 429); 409
-     *     `urn:proreta:problem:already-member` when the user is already a member, or when the user is
-     *     the system admin (who belongs to the default organization only); 409
+     *     `urn:proreta:problem:already-member` when the user is already a member (organization invitations
+     *     only), or when the user is the system admin (who belongs to the default organization only); 409
      *     `urn:proreta:problem:plan-limit-reached` when the organization's member limit was lowered
      *     below its members. Audited as `member.joined`. Any role.
      */
@@ -3077,14 +3092,23 @@ export interface components {
       /** @description The organization role; null for a person who belongs to the organization only through projects */
       role: components["schemas"]["MembershipRole"] | null;
     };
-    /** @enum {string} */
-    InvitationRole: "maintainer" | "member" | "viewer";
+    /**
+     * @description The organization role of an organization invitation (never `owner`), or the role in the project of a project invitation
+     * @enum {string}
+     */
+    InvitationRole: "owner" | "maintainer" | "member" | "viewer";
     /** @enum {string} */
     InvitationStatus: "open" | "accepted" | "revoked" | "expired";
     Invitation: {
       /** Format: uuid */
       id: string;
       role: components["schemas"]["InvitationRole"];
+      /**
+       * Format: uuid
+       * @description The project of a project invitation, null for an organization invitation
+       */
+      projectId: string | null;
+      projectName: string | null;
       /** @description The maintainer's own note about whom the link is for; empty when none */
       label: string;
       status: components["schemas"]["InvitationStatus"];
@@ -3106,6 +3130,11 @@ export interface components {
     };
     InvitationCreate: {
       role: components["schemas"]["InvitationRole"];
+      /**
+       * Format: uuid
+       * @description Invite into this project; `role` is then the role in the project and no organization role is granted
+       */
+      projectId?: string;
       /** @description An optional note for yourself, for example the person's name */
       label?: string;
       /**
@@ -3148,6 +3177,8 @@ export interface components {
     };
     InvitationPreview: {
       organizationName: string;
+      /** @description The project of a project invitation, null for an organization invitation */
+      projectName: string | null;
       role: components["schemas"]["InvitationRole"];
       /** Format: date-time */
       expiresAt: string;
@@ -5140,7 +5171,9 @@ export interface operations {
   };
   listInvitations: {
     parameters: {
-      query?: never;
+      query?: {
+        projectId?: string;
+      };
       header?: never;
       path?: never;
       cookie?: never;

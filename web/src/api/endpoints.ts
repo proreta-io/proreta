@@ -79,6 +79,7 @@ export const queryKeys = {
   channelsFor: (projectId: string | undefined) => ["channels", "for", projectId ?? "all"] as const,
   projects: ["projects"] as const,
   projectMembers: (id: string) => ["projects", id, "members"] as const,
+  projectInvitations: (id: string) => ["projects", id, "invitations"] as const,
   usage: ["usage"] as const,
   statusPages: ["status-pages"] as const,
   statusPageComponents: (id: string) => ["status-pages", id, "components"] as const,
@@ -435,16 +436,31 @@ export const updateMember = (userId: string, role: MembershipRole | null) =>
 export const removeMember = (userId: string) =>
   unwrap(client.DELETE("/api/v1/members/{userId}", memberPath(userId)));
 
-export const listInvitations = () => unwrap(client.GET("/api/v1/invitations"));
+/** The invitations the caller may see; with a project id only those into that project. */
+export const listInvitations = (projectId?: string) =>
+  unwrap(
+    client.GET("/api/v1/invitations", {
+      ...(projectId ? { params: { query: { projectId } } } : {}),
+    }),
+  );
 
-/** A new invitation; its link is in this answer only. */
-export const createInvitation = (role: InvitationRole, label: string, email = "") =>
+/**
+ * A new invitation; its link is in this answer only. With a project id it invites into that
+ * project and the role is the role there.
+ */
+export const createInvitation = (
+  role: InvitationRole,
+  label: string,
+  email = "",
+  projectId?: string,
+) =>
   unwrap(
     client.POST("/api/v1/invitations", {
       // An address is only sent when the box "Send by email" is checked, so it always asks for
       // the email explicitly.
       body: {
         role,
+        ...(projectId ? { projectId } : {}),
         ...(label ? { label } : {}),
         ...(email ? { email, sendEmail: true } : {}),
       },

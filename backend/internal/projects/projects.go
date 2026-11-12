@@ -115,18 +115,25 @@ func NewService(pool *db.Pool) *Service { return &Service{pool: pool} }
 // organization role is not part of it: it covers every project and authz.Actor combines the two.
 // The api calls it once per request.
 func (s *Service) Access(ctx context.Context, tenantID, userID uuid.UUID) (map[uuid.UUID]authz.Role, error) {
-	out := map[uuid.UUID]authz.Role{}
-	err := db.WithTenantTx(ctx, s.pool, tenantID, func(tx pgx.Tx) error {
-		rows, err := projectsdb.New(tx).ListUserProjects(ctx, projectsdb.ListUserProjectsParams{TenantID: tenantID, UserID: userID})
-		if err != nil {
-			return fmt.Errorf("projects: access: %w", err)
-		}
-		for _, r := range rows {
-			out[r.ID] = authz.Role(r.Role)
-		}
-		return nil
+	var out map[uuid.UUID]authz.Role
+	err := db.WithTenantTx(ctx, s.pool, tenantID, func(tx pgx.Tx) (err error) {
+		out, err = AccessIn(ctx, tx, tenantID, userID)
+		return err
 	})
 	return out, err
+}
+
+// AccessIn is Access inside the caller's tenant transaction.
+func AccessIn(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID) (map[uuid.UUID]authz.Role, error) {
+	rows, err := projectsdb.New(tx).ListUserProjects(ctx, projectsdb.ListUserProjectsParams{TenantID: tenantID, UserID: userID})
+	if err != nil {
+		return nil, fmt.Errorf("projects: access: %w", err)
+	}
+	out := make(map[uuid.UUID]authz.Role, len(rows))
+	for _, r := range rows {
+		out[r.ID] = authz.Role(r.Role)
+	}
+	return out, nil
 }
 
 // need checks that the actor holds a project-scope permission in a project: ErrNotFound when it

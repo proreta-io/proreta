@@ -100,12 +100,12 @@ Operations marked `public` need no session. Operations marked `platform admin` a
 | `GetHealth` | `GET /api/v1/health` | `public` |
 | `PingHeartbeat` | `GET /api/v1/heartbeat/{token}` | `public` |
 | `PingHeartbeatPost` | `POST /api/v1/heartbeat/{token}` | `public` |
-| `ListInvitations` | `GET /api/v1/invitations` | `organization.members.manage` |
-| `CreateInvitation` | `POST /api/v1/invitations` | `organization.members.manage` |
+| `ListInvitations` | `GET /api/v1/invitations` | `project.members.manage` |
+| `CreateInvitation` | `POST /api/v1/invitations` | `project.members.manage` |
 | `AcceptInvitation` | `POST /api/v1/invitations/accept` | `account.use` |
 | `LookupInvitation` | `POST /api/v1/invitations/lookup` | `public` |
-| `RevokeInvitation` | `POST /api/v1/invitations/{invitationId}/revoke` | `organization.members.manage` |
-| `ListMembers` | `GET /api/v1/members` | `organization.members.read` |
+| `RevokeInvitation` | `POST /api/v1/invitations/{invitationId}/revoke` | `project.members.manage` |
+| `ListMembers` | `GET /api/v1/members` | `project.members.read` |
 | `RemoveMember` | `DELETE /api/v1/members/{userId}` | `organization.members.manage` |
 | `UpdateMember` | `PATCH /api/v1/members/{userId}` | `organization.members.manage` |
 | `ListMonitors` | `GET /api/v1/monitors` | `monitor.read` |

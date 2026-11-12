@@ -68,11 +68,37 @@ type Member struct {
 
 // ListMembers returns the members of the organization, oldest first.
 func (s *Service) ListMembers(ctx context.Context, tenantID uuid.UUID) ([]Member, error) {
+	return s.listMembers(ctx, tenantID, nil)
+}
+
+// ListMembersInProjects returns the people a person without an organization role may see: those
+// with an organization role (they are in every project) and those with a direct role in one of the
+// projects.
+func (s *Service) ListMembersInProjects(ctx context.Context, tenantID uuid.UUID, projectIDs []uuid.UUID) ([]Member, error) {
+	if projectIDs == nil {
+		projectIDs = []uuid.UUID{}
+	}
+	return s.listMembers(ctx, tenantID, projectIDs)
+}
+
+func (s *Service) listMembers(ctx context.Context, tenantID uuid.UUID, projectIDs []uuid.UUID) ([]Member, error) {
 	var out []Member
 	err := db.WithTenantTx(ctx, s.pool, tenantID, func(tx pgx.Tx) error {
-		rows, err := authdb.New(tx).ListMembers(ctx, tenantID)
-		if err != nil {
-			return err
+		q := authdb.New(tx)
+		var rows []authdb.ListMembersRow
+		if projectIDs == nil {
+			var err error
+			if rows, err = q.ListMembers(ctx, tenantID); err != nil {
+				return err
+			}
+		} else {
+			scoped, err := q.ListMembersInProjects(ctx, authdb.ListMembersInProjectsParams{TenantID: tenantID, ProjectIds: projectIDs})
+			if err != nil {
+				return err
+			}
+			for _, r := range scoped {
+				rows = append(rows, authdb.ListMembersRow(r))
+			}
 		}
 		out = make([]Member, len(rows))
 		for i, r := range rows {

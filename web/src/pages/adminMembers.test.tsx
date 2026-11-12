@@ -58,6 +58,8 @@ const invitation = (over: Partial<Invitation> = {}): Invitation => ({
   createdAt: "2026-10-01T00:00:00Z",
   expiresAt: "2026-10-08T00:00:00Z",
   createdBy: "admin",
+  projectId: null,
+  projectName: null,
   acceptedBy: null,
   acceptedAt: null,
   revokedAt: null,

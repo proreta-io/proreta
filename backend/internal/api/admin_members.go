@@ -85,7 +85,10 @@ func (s *server) AdminCreateOrganizationInvitation(ctx context.Context, req gen.
 	if err != nil {
 		return nil, err
 	}
-	in := auth.InvitationInput{Role: string(req.Body.Role), SendEmail: req.Body.SendEmail}
+	if err := organizationInvitationRole(req.Body.ProjectId, req.Body.Role); err != nil {
+		return nil, err
+	}
+	in := auth.InvitationInput{Role: string(req.Body.Role), ProjectID: req.Body.ProjectId, SendEmail: req.Body.SendEmail}
 	if req.Body.Label != nil {
 		in.Label = *req.Body.Label
 	}

@@ -19,10 +19,8 @@ func TestIntegrationProjectOnlyPeople(t *testing.T) {
 	owner := w.hdr("owner")
 
 	orgLevel := []struct{ method, path, body string }{
-		{http.MethodGet, "/api/v1/members", ""},
 		{http.MethodPatch, "/api/v1/members/" + w.people["tgt"].id, `{"role":"viewer"}`},
 		{http.MethodDelete, "/api/v1/members/" + w.people["tgt"].id, ""},
-		{http.MethodGet, "/api/v1/invitations", ""},
 		{http.MethodPost, "/api/v1/invitations", `{"role":"viewer"}`},
 		{http.MethodGet, "/api/v1/usage", ""},
 		{http.MethodPost, "/api/v1/projects", `{"name":"mine"}`},
@@ -71,8 +69,9 @@ func TestIntegrationProjectOnlyPeople(t *testing.T) {
 	if r := c.do(http.MethodPatch, "/api/v1/members/"+memberID, `{"role":null}`, owner); r.code != http.StatusOK || r.body["role"] != nil {
 		t.Fatalf("member to project-only: %d %s", r.code, r.raw)
 	}
+	// Without a project there is nobody to list.
 	if r := c.do(http.MethodGet, "/api/v1/members", "", w.hdr("member")); r.code != http.StatusForbidden {
-		t.Fatalf("former member lists members: %d %s", r.code, r.raw)
+		t.Fatalf("former member with no project lists members: %d %s", r.code, r.raw)
 	}
 	if r := c.do(http.MethodGet, "/api/v1/projects", "", w.hdr("member")); r.code != http.StatusForbidden {
 		t.Fatalf("former member with no project lists projects: %d %s", r.code, r.raw)

@@ -330,7 +330,9 @@ var operations = map[string]Permission{
 	"listmonitorincidents": "incident.read",
 	"listchannels":         "channel.read",
 	"getchannel":           "channel.read",
-	"listmembers":          "organization.members.read",
+	// Everyone who belongs lists people; a person without an organization role gets only those
+	// who share a project (the service narrows the list).
+	"listmembers": "project.members.read",
 	// Projects: the list and reads show only the projects the actor sees.
 	"listprojects":       "project.read",
 	"getproject":         "project.read",
@@ -351,10 +353,12 @@ var operations = map[string]Permission{
 	"testchannel":   "channel.manage",
 	// Organization-wide usage counts: members and viewers learn about a reached limit
 	// from the 409 of the create that hits it.
-	"getusage":         "usage.read",
-	"listinvitations":  "organization.members.manage",
-	"createinvitation": "organization.members.manage",
-	"revokeinvitation": "organization.members.manage",
+	"getusage": "usage.read",
+	// Invitations: into a project they need project.members.manage there, into the organization
+	// the organization role; the service decides per invitation.
+	"listinvitations":  "project.members.manage",
+	"createinvitation": "project.members.manage",
+	"revokeinvitation": "project.members.manage",
 	"updatemember":     "organization.members.manage",
 	"removemember":     "organization.members.manage",
 
