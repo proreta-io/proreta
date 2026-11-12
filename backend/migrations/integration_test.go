@@ -77,7 +77,9 @@ var definerAllowList = map[string][]string{
 	"specula_agents_sync_location": {},
 	// Runs a monitor at the worker or at a Specula of its organization.
 	"monitor_set_location": {"proreta_api"},
-	"compute_rollups":      {"proreta_worker"},
+	// Marks the monitors of a revoked or silent Specula unknown.
+	"specula_mark_unreachable": {"proreta_worker"},
+	"compute_rollups":          {"proreta_worker"},
 	// Rollups from the watermark in rollup_state.
 	"compute_rollups_catch_up": {"proreta_worker"},
 	// Retention in three steps driven by jobs.
@@ -184,6 +186,9 @@ var extraPolicies = map[string]struct {
 	// specula_authenticate, specula_hello, specula_revoke and the claim's access check.
 	"specula_agents.owner_specula":        {cmd: "*", roles: []string{"proreta_owner"}},
 	"specula_projects.owner_specula_read": {cmd: "r", roles: []string{"proreta_owner"}},
+	// specula_mark_unreachable.
+	"monitor_state.owner_specula_unreachable_read":  {cmd: "r", roles: []string{"proreta_owner"}},
+	"monitor_state.owner_specula_unreachable_write": {cmd: "w", roles: []string{"proreta_owner"}},
 }
 
 var runtimeRoles = []string{"proreta_api", "proreta_statuspage", "proreta_worker"}

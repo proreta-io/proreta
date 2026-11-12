@@ -40,6 +40,7 @@ const (
 	lockPurgeSessions    int64 = 0x7072_6f72_6574_0004
 	lockHeartbeats       int64 = 0x7072_6f72_6574_0005
 	lockReminders        int64 = 0x7072_6f72_6574_0006
+	lockSpeculaGone      int64 = 0x7072_6f72_6574_000b
 	lockStatusPages      int64 = 0x7072_6f72_6574_0007
 	lockPurgeMail        int64 = 0x7072_6f72_6574_0008
 	lockPurgeVerifs      int64 = 0x7072_6f72_6574_0009
@@ -84,6 +85,7 @@ func DefaultTasks(m *Metrics, log *slog.Logger, mon *monitors.Service) []Task {
 		{Name: "purge_mail_outbox", Every: time.Hour, LockKey: lockPurgeMail, Run: purgeMail},
 		{Name: "purge_email_verifications", Every: 24 * time.Hour, LockKey: lockPurgeVerifs, Run: scalar(`SELECT purge_email_verifications()`)},
 		{Name: "purge_password_resets", Every: 24 * time.Hour, LockKey: lockPurgeResets, Run: scalar(`SELECT purge_password_resets()`)},
+		{Name: "specula_mark_unreachable", Every: time.Minute, LockKey: lockSpeculaGone, Run: scalar(`SELECT specula_mark_unreachable()`)},
 		{Name: "enqueue_incident_reminders", Every: ReminderEvery, LockKey: lockReminders, Run: enqueueReminders},
 	}
 }

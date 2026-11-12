@@ -731,6 +731,8 @@ monitor_location_state owner_claim_lease cmd=w permissive=true to=proreta_owner 
 monitor_location_state owner_claim_read cmd=r permissive=true to=proreta_owner using true
 monitor_location_state tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
 monitor_locations tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
+monitor_state owner_specula_unreachable_read cmd=r permissive=true to=proreta_owner using true
+monitor_state owner_specula_unreachable_write cmd=w permissive=true to=proreta_owner using true check true
 monitor_state tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
 monitors owner_claim_read cmd=r permissive=true to=proreta_owner using true
 monitors tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
@@ -833,6 +835,7 @@ specula_agents_sync_location() owner=proreta_owner definer=true acl=proreta_owne
 specula_authenticate(bytea) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_create(uuid,text,bytea,boolean,uuid[],uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 specula_hello(uuid,text,text) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+specula_mark_unreachable(interval) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_revoke(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 status_page_published_pages() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 status_page_slug_held(text) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
@@ -2585,6 +2588,31 @@ AS $function$
         RETURNING 1
     )
     SELECT EXISTS (SELECT 1 FROM u)
+$function$
+CREATE OR REPLACE FUNCTION public.specula_mark_unreachable(p_after interval DEFAULT '00:03:00'::interval)
+ RETURNS integer
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    WITH gone AS (
+        SELECT a.location_id
+        FROM specula_agents AS a
+        WHERE a.revoked_at IS NOT NULL OR a.last_seen_at < now() - p_after
+    ), flagged AS (
+        UPDATE monitor_location_state AS s
+        SET status = 'unknown', consecutive_failures = 0
+        FROM gone
+        WHERE s.location_id = gone.location_id AND s.status <> 'unknown'
+        RETURNING s.tenant_id, s.monitor_id
+    ), changed AS (
+        UPDATE monitor_state AS m
+        SET status = 'unknown', status_changed_at = now()
+        FROM flagged
+        WHERE m.tenant_id = flagged.tenant_id AND m.monitor_id = flagged.monitor_id AND m.status <> 'unknown'
+        RETURNING 1
+    )
+    SELECT count(*)::integer FROM changed
 $function$
 CREATE OR REPLACE FUNCTION public.specula_revoke(p_id uuid)
  RETURNS boolean

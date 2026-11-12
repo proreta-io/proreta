@@ -52,11 +52,11 @@ When a project may use at least one Specula, the monitor form has a **Run from**
 |---|---|
 | Waiting | Registered, never connected. |
 | Online | Heard from in the last 90 seconds (it reports every minute). |
-| Offline | Connected before, silent for longer. Its monitors are not being checked. |
-| Revoked | The token no longer works. |
+| Offline | Connected before, silent for longer. Its monitors are not being checked. After 3 minutes without a call they show **unknown**, not *down*, so a lost link does not look like an outage of your services. They return to up or down with the first check after it reconnects. |
+| Revoked | The token no longer works. Its monitors show *unknown* at once. |
 
 ## Change who can use it, rename, revoke
-Owners and maintainers can **Edit** a Specula (name, who can use it) and **Revoke** it. Revoking works at once: the executor is refused from its next call and the location hands out no more checks. A revoked Specula cannot be restored. Monitors that ran there stop being checked until you move them to another location.
+Owners and maintainers can **Edit** a Specula (name, who can use it) and **Revoke** it. Revoking works at once: the executor is refused from its next call and the location hands out no more checks. A revoked Specula cannot be restored. Monitors that ran there stop being checked and show *unknown* until you move them to another location.
 
 Removing a project from the list stops the Specula from handing out that project's monitors; move them first.
 
@@ -67,6 +67,7 @@ Owners and maintainers register, edit and revoke Specula and see all of them. Me
 `specula.created`, `specula.updated` (field names only) and `specula.revoked`. Tokens are never recorded.
 
 ## Limits
+- Going offline or being revoked does not open an incident or send a notification yet; the monitors show *unknown*. Watch the Specula page, or alert on the executor's own metrics.
 - HTTP and HTTPS checks only; TCP checks are not available yet.
 - No limit on the number of Specula per plan yet.
 - A token has no expiry; rotate by registering a new Specula and revoking the old one.

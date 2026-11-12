@@ -6,10 +6,12 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/proreta-io/proreta/backend/internal/authz"
 	"github.com/proreta-io/proreta/backend/internal/incidents"
 	"github.com/proreta-io/proreta/backend/internal/monitors"
+	"github.com/proreta-io/proreta/backend/internal/platform/db"
 	"github.com/proreta-io/proreta/backend/internal/platform/validation"
 	"github.com/proreta-io/proreta/backend/internal/scheduler"
 	"github.com/proreta-io/proreta/backend/internal/specula"
@@ -175,4 +177,101 @@ func stripDashes(id uuid.UUID) string {
 		}
 	}
 	return string(b)
+}
+
+func TestIntegrationSpeculaUnreachable(t *testing.T) {
+	env := pgtest.New(t, pgtest.DBName("speculagone"))
+	ctx := context.Background()
+	admin := env.AdminConn(t)
+	user := uuid.New()
+	pgtest.MustExec(t, admin,
+		`INSERT INTO tenants (id, slug, name, plan_key) VALUES ('`+tenantA+`', 'a', 'A', 'internal')`,
+		`INSERT INTO users (id, email) VALUES ('`+user.String()+`', 'owner@example.com')`)
+	apiPool, worker := env.Pool(t, env.APIURL, 4), env.Pool(t, env.WorkerURL, 4)
+	sched := scheduler.New()
+	mon := monitors.NewService(apiPool, sched, incidents.NewService(sched))
+	svc := specula.NewService(apiPool)
+	ma := monitors.Actor{TenantID: uuid.MustParse(tenantA), UserID: user, Access: authz.Actor{UserID: user, Role: authz.Owner}}
+	sa := specula.Actor{TenantID: ma.TenantID, UserID: user}
+
+	newMonitor := func(name string, at *uuid.UUID) uuid.UUID {
+		t.Helper()
+		url := "http://svc.internal:8080/health"
+		if at == nil {
+			url = "https://example.com/health"
+		}
+		m, err := mon.Create(ctx, ma, monitors.CreateInput{Name: name, SpeculaID: at, HTTP: &monitors.HTTPSettings{URL: &url}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// A monitor that has been checked: up.
+		pgtest.MustExec(t, admin,
+			`UPDATE monitor_location_state SET status = 'up' WHERE monitor_id = '`+m.ID.String()+`'`,
+			`UPDATE monitor_state SET status = 'up' WHERE monitor_id = '`+m.ID.String()+`'`)
+		return m.ID
+	}
+	statusOf := func(id uuid.UUID) (state, loc string) {
+		t.Helper()
+		if err := admin.QueryRow(ctx, `SELECT s.status, l.status FROM monitor_state s JOIN monitor_location_state l ON l.monitor_id = s.monitor_id WHERE s.monitor_id = $1`, id).Scan(&state, &loc); err != nil {
+			t.Fatal(err)
+		}
+		return state, loc
+	}
+	sweep := func() int {
+		t.Helper()
+		var n int
+		err := db.WithTx(ctx, worker, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT specula_mark_unreachable()`).Scan(&n)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	online, _, err := svc.Create(ctx, sa, specula.CreateInput{Name: "Online", AllProjects: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	silent, _, err := svc.Create(ctx, sa, specula.CreateInput{Name: "Silent", AllProjects: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, _, err := svc.Create(ctx, sa, specula.CreateInput{Name: "Never connected", AllProjects: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pgtest.MustExec(t, admin,
+		`UPDATE specula_agents SET last_seen_at = now() WHERE id = '`+online.ID.String()+`'`,
+		`UPDATE specula_agents SET last_seen_at = now() - interval '10 minutes' WHERE id = '`+silent.ID.String()+`'`)
+	onlineMon, silentMon, pendingMon, cloudMon := newMonitor("on", &online.ID), newMonitor("silent", &silent.ID), newMonitor("pending", &pending.ID), newMonitor("cloud", nil)
+
+	if n := sweep(); n != 1 {
+		t.Fatalf("changed %d monitors, want only the silent Specula's", n)
+	}
+	for name, id := range map[string]uuid.UUID{"online": onlineMon, "pending": pendingMon, "cloud": cloudMon} {
+		if state, loc := statusOf(id); state != "up" && name != "pending" || loc != "up" && name != "pending" {
+			t.Errorf("%s: %s/%s, want up/up", name, state, loc)
+		}
+	}
+	if state, loc := statusOf(silentMon); state != "unknown" || loc != "unknown" {
+		t.Fatalf("silent: %s/%s", state, loc)
+	}
+	if n := sweep(); n != 0 {
+		t.Fatalf("a second sweep changed %d monitors", n)
+	}
+
+	// Revoking flags the monitors at once, even though the Specula was just heard from.
+	if err := svc.Revoke(ctx, sa, online.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n := sweep(); n != 1 {
+		t.Fatalf("after revoke changed %d", n)
+	}
+	if state, _ := statusOf(onlineMon); state != "unknown" {
+		t.Fatalf("revoked Specula's monitor: %s", state)
+	}
+	if state, _ := statusOf(cloudMon); state != "up" {
+		t.Fatalf("a cloud monitor was touched: %s", state)
+	}
 }
