@@ -16,6 +16,9 @@ A person can also have no organization role. They belong to the organization onl
 
 The API refuses anything above a role with 403 `urn:proreta:problem:forbidden` and answers 404 for a project the caller has no role in; the web hides those controls and says who can do it. A role change applies on the member's next request. Nobody grants a role above their own, and a maintainer never changes an owner. Every organization keeps at least one active owner: the last one cannot step down, lose the role, be removed or leave (409 `urn:proreta:problem:last-owner`). Ownership transfer is "make someone owner, then step down". A project has no last-owner rule: organization owners always control every project. Organization-wide notification channels are managed by organization owners and maintainers only.
 
+## Where the settings are
+The top bar shows **Monitors**, **Status pages** and **Channels** to people who may read them in at least one project, and **Settings** to everybody. **Settings** lists what the signed-in person may manage and links to the screen that does it: under **Organization** the people and invitations, the projects, the channels and status pages shared by the whole organization, the sign-in domains and the plan and usage; under **Projects** each project the person manages, with its people and invitations, channels and status pages. An entry appears only for people whose role holds the permission, and an address they may not use shows "Page not found". **Settings → Roles and permissions** (`/help/roles`) lists what each role may do and marks the signed-in person's roles.
+
 ## Inviting someone
 An invitation goes either into the **organization** or into one **project**. The organization kind below is for organization owners and maintainers; for the project kind see [Inviting into a project](#inviting-into-a-project).
 

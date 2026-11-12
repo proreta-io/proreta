@@ -19,6 +19,9 @@ export type ChannelCreate = Schemas["ChannelCreate"];
 export type ChannelUpdate = Schemas["ChannelUpdate"];
 export type ChannelEvent = Schemas["ChannelEvent"];
 export type Usage = Schemas["Usage"];
+export type PermissionsInfo = Schemas["PermissionsInfo"];
+export type ProjectPermissions = Schemas["ProjectPermissions"];
+export type PermissionDefinition = Schemas["PermissionDefinition"];
 export type PublicConfig = Schemas["PublicConfig"];
 export type AdminStats = Schemas["AdminStats"];
 export type AdminOrganization = Schemas["AdminOrganization"];
@@ -81,6 +84,7 @@ export const queryKeys = {
   projectMembers: (id: string) => ["projects", id, "members"] as const,
   projectInvitations: (id: string) => ["projects", id, "invitations"] as const,
   usage: ["usage"] as const,
+  permissions: ["permissions"] as const,
   statusPages: ["status-pages"] as const,
   statusPageComponents: (id: string) => ["status-pages", id, "components"] as const,
   statusPagePreview: (id: string) => ["status-pages", id, "preview"] as const,
@@ -242,6 +246,8 @@ export const testChannel = (channelId: string) =>
   unwrap(client.POST("/api/v1/channels/{channelId}/test", channelPath(channelId)));
 
 export const getUsage = () => unwrap(client.GET("/api/v1/usage"));
+
+export const getPermissions = () => unwrap(client.GET("/api/v1/permissions"));
 
 // Platform admin panel (experimental API). Every call answers 403 to anybody but the platform
 // admin.

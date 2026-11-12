@@ -125,6 +125,7 @@ Operations marked `public` need no session. Operations marked `platform admin` a
 | `DeleteAuthDomain` | `DELETE /api/v1/organization/auth-domains/{domainId}` | `organization.domains.manage` |
 | `UpdateAuthDomain` | `PATCH /api/v1/organization/auth-domains/{domainId}` | `organization.domains.manage` |
 | `LeaveOrganization` | `POST /api/v1/organization/leave` | `account.use` |
+| `GetPermissions` | `GET /api/v1/permissions` | `account.use` |
 | `ListProjects` | `GET /api/v1/projects` | `project.read` |
 | `CreateProject` | `POST /api/v1/projects` | `project.create` |
 | `DeleteProject` | `DELETE /api/v1/projects/{projectId}` | `project.delete` |

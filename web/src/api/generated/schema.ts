@@ -807,6 +807,31 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/permissions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Permissions of the current person
+     * @description What the signed-in person may do in the organization of the session, and the catalogue of
+     *     roles and permissions. `organization` lists the permissions held through the organization role, which for a
+     *     project permission means in every project (only `account.use` for a person who belongs
+     *     through projects only); `projects` lists every project the person sees with the permissions
+     *     held there (the higher of the organization role and the direct project role). Any role,
+     *     including a person without an organization role.
+     */
+    get: operations["getPermissions"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/channels": {
     parameters: {
       query?: never;
@@ -2730,6 +2755,38 @@ export interface components {
       mention?: components["schemas"]["ChannelMention"];
       reminderMinutes?: components["schemas"]["ReminderMinutes"];
     };
+    PermissionsInfo: {
+      /** @description The organization role; null for a person who belongs through projects only */
+      organizationRole: components["schemas"]["MembershipRole"] | null;
+      /**
+       * @description Permissions held through the organization role (every project permission of the role applies in every project), plus the account permissions of anybody who belongs
+       * @example [
+       *       "account.use",
+       *       "organization.members.read"
+       *     ]
+       */
+      organization: string[];
+      projects: components["schemas"]["ProjectPermissions"][];
+      /** @description Every permission in the order of the role documentation, with the roles that hold it */
+      catalogue: components["schemas"]["PermissionDefinition"][];
+    };
+    ProjectPermissions: {
+      /** Format: uuid */
+      projectId: string;
+      name: string;
+      role: components["schemas"]["MembershipRole"];
+      /** @description Project permissions held in this project */
+      permissions: string[];
+    };
+    PermissionDefinition: {
+      /** @example channel.manage */
+      name: string;
+      /** @enum {string} */
+      level: "account" | "organization" | "project";
+      description: string;
+      /** @description The roles that hold the permission, highest first */
+      roles: components["schemas"]["MembershipRole"][];
+    };
     Usage: {
       plan: components["schemas"]["PlanRef"];
       limits: components["schemas"]["ResourceCounts"];
@@ -4643,6 +4700,28 @@ export interface operations {
       };
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
+      default: components["responses"]["Error"];
+    };
+  };
+  getPermissions: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Permissions of the person and the catalogue */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PermissionsInfo"];
+        };
+      };
+      401: components["responses"]["Unauthorized"];
       default: components["responses"]["Error"];
     };
   };

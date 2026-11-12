@@ -30,7 +30,7 @@ func TestCanDeniesUnknown(t *testing.T) {
 // that may call each operation.
 var expectedMinimum = map[Role][]string{
 	Viewer: {
-		"logout", "getMe", "resendEmailVerification", "listOrganizations", "switchOrganization",
+		"logout", "getMe", "getPermissions", "resendEmailVerification", "listOrganizations", "switchOrganization",
 		"changePassword", "acceptInvitation", "leaveOrganization", "listIdentities", "unlinkIdentity",
 		"listMonitors", "getMonitor", "getMonitorStats", "listMonitorChecks", "listMonitorIncidents",
 		"listChannels", "getChannel", "listMembers", "listProjects", "getProject", "listProjectMembers",
@@ -476,5 +476,26 @@ func TestCanManageIn(t *testing.T) {
 		if got := CanManageIn(c.actor, c.project, c.target, c.to); got != c.want {
 			t.Errorf("%s: CanManageIn = %v, want %v", c.name, got, c.want)
 		}
+	}
+}
+
+func TestHeldAndRolesWith(t *testing.T) {
+	if got := (Actor{UserID: uuid.New()}).Held(); len(got) != 1 || got[0] != "account.use" {
+		t.Errorf("person without a role holds %v, want account.use only", got)
+	}
+	if got := (Actor{}).Held(); len(got) != 0 {
+		t.Errorf("nobody holds %v", got)
+	}
+	if got := (Actor{UserID: uuid.New(), Role: Member}).Held(); len(got) != 13 {
+		t.Errorf("member holds %v, want 13 permissions", got)
+	}
+	if got := ProjectPermissions("nobody"); len(got) != 0 {
+		t.Errorf("unknown role holds %v in a project", got)
+	}
+	if got := RolesWith("project.delete"); len(got) != 1 || got[0] != Owner {
+		t.Errorf("project.delete roles = %v", got)
+	}
+	if got := RolesWith("monitor.read"); len(got) != 4 || got[0] != Owner || got[3] != Viewer {
+		t.Errorf("monitor.read roles = %v", got)
 	}
 }

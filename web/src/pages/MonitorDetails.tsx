@@ -1,4 +1,4 @@
-import { useAbilities } from "../lib/useAbilities";
+import { usePermissions } from "../lib/permissions";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -240,7 +240,7 @@ function Header({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const canEdit = useAbilities().editMonitors;
+  const canEdit = usePermissions().inProject(monitor.projectId, "monitor.update");
   const [confirming, setConfirming] = useState(false);
   const heartbeat = isHeartbeat(monitor);
 
@@ -578,7 +578,7 @@ function IncidentLane({
 
 function HeartbeatSection({ monitor, now }: { monitor: MonitorDetail; now: number }) {
   const toast = useToast();
-  const canEdit = useAbilities().editMonitors;
+  const canEdit = usePermissions().inProject(monitor.projectId, "heartbeat.manage");
   const [regenerating, setRegenerating] = useState(false);
   const [newUrl, setNewUrl] = useState<string | undefined>();
   const deadline = heartbeatDeadline(monitor);

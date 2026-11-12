@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
+import { usePermissions } from "../lib/permissions";
 import ErrorBoundary from "./ErrorBoundary";
 import OrganizationSwitcher from "./OrganizationSwitcher";
 import ProjectSwitcher from "./ProjectSwitcher";
@@ -28,6 +29,7 @@ export default function Layout({ children }: { children?: ReactNode }) {
   const menuOpen = menuFor === location.pathname;
   const login = auth.session?.user.login;
   const isAdmin = auth.session?.user.isPlatformAdmin === true;
+  const can = usePermissions();
 
   async function onLogout() {
     await auth.logout();
@@ -39,15 +41,16 @@ export default function Layout({ children }: { children?: ReactNode }) {
       <NavLink to="/" end className={navClass}>
         Monitors
       </NavLink>
-      <NavLink to="/projects" className={navClass}>
-        Projects
-      </NavLink>
-      <NavLink to="/members" className={navClass}>
-        Members
-      </NavLink>
-      <NavLink to="/status-page" className={navClass}>
-        Status page
-      </NavLink>
+      {can.anywhere("statuspage.read") && (
+        <NavLink to="/status-page" className={navClass}>
+          Status pages
+        </NavLink>
+      )}
+      {can.anywhere("channel.read") && (
+        <NavLink to="/channels" className={navClass}>
+          Channels
+        </NavLink>
+      )}
       <NavLink to="/settings" className={navClass}>
         Settings
       </NavLink>

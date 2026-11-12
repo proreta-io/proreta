@@ -1,4 +1,4 @@
-import { useAbilities } from "../lib/useAbilities";
+import { usePermissions } from "../lib/permissions";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -526,8 +526,9 @@ function atAllLimits(usage: Usage | undefined): boolean {
  * button marked aria-disabled with the reason next to it (the server enforces the limits anyway).
  */
 function AddMonitor({ usage }: { usage: Usage | undefined }) {
-  const canEdit = useAbilities().editMonitors;
-  if (!canEdit) {
+  const can = usePermissions();
+  if (!can.ready) return null;
+  if (!can.anywhere("monitor.create")) {
     // Viewers read only; the API refuses a create anyway.
     return (
       <p className="max-w-[320px] self-start text-caption text-muted-foreground">

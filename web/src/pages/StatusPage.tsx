@@ -20,7 +20,6 @@ import {
   type Project,
   type StatusPageUpdate,
 } from "../api/endpoints";
-import { useAuth } from "../auth/AuthProvider";
 import { useToast } from "../components/Toasts";
 import {
   Alert,
@@ -45,7 +44,8 @@ import {
   WriteOnlyValue,
 } from "../components/ui";
 import { channelScopeLabel } from "../lib/projects";
-import { abilities, canManageOwned, ROLE_HINTS } from "../lib/roles";
+import { canManageStatusPageOf, usePermissions } from "../lib/permissions";
+import { ROLE_HINTS } from "../lib/roles";
 import { useProjectScope } from "../lib/useProjectScope";
 import { useUsage } from "../lib/usage";
 import {
@@ -77,15 +77,14 @@ function pageScope(page: Page, projects: Project[] | undefined): string {
 
 /** Public status pages: settings, components and a preview of the page chosen. */
 export default function StatusPageSettings() {
-  const session = useAuth().session;
-  const can = abilities(session);
+  const can = usePermissions();
   const projects = useProjectScope().projects.data?.items;
   const pages = useQuery({ queryKey: queryKeys.statusPages, queryFn: () => listStatusPages() });
   const [selected, setSelected] = useState<string>();
   const [adding, setAdding] = useState(false);
   const items = pages.data?.items ?? [];
   const page = items.find((p) => p.id === selected) ?? items[0];
-  const scopes = creatableScopes(session, projects);
+  const scopes = creatableScopes(can, projects);
   const usage = useUsage().data;
   const atLimit = usage !== undefined && usage.usage.statusPages >= usage.limits.statusPages;
 
@@ -100,7 +99,7 @@ export default function StatusPageSettings() {
           and incidents. Only public names are shown, never monitor names, addresses or projects.
           Updates reach the page within a minute.
         </p>
-        {!can.manageStatusPage && (
+        {can.ready && !can.anywhere("statuspage.manage") && (
           <p className="text-caption text-muted-foreground">{ROLE_HINTS.manageStatusPage}</p>
         )}
       </div>
@@ -159,7 +158,7 @@ export default function StatusPageSettings() {
             Belongs to: <span className="font-medium">{pageScope(page, projects)}</span>
             {!page.projectId && " (may show monitors of every project)"}
           </p>
-          {canManageOwned(session, projects, page.projectId) ? (
+          {canManageStatusPageOf(can, page.projectId) ? (
             <Editor key={page.id} page={page} />
           ) : (
             <ReadOnly page={page} />
@@ -172,13 +171,13 @@ export default function StatusPageSettings() {
 
 /** The scopes a new page can be created in: the organization (organization maintainers) and each project the user maintains. */
 function creatableScopes(
-  session: Parameters<typeof canManageOwned>[0],
+  can: Parameters<typeof canManageStatusPageOf>[0],
   projects: Project[] | undefined,
 ): { value: string; label: string }[] {
   const out: { value: string; label: string }[] = [];
-  if (canManageOwned(session, projects, null)) out.push({ value: "", label: "Organization" });
+  if (canManageStatusPageOf(can, null)) out.push({ value: "", label: "Organization" });
   for (const p of projects ?? []) {
-    if (canManageOwned(session, projects, p.id)) out.push({ value: p.id, label: p.name });
+    if (canManageStatusPageOf(can, p.id)) out.push({ value: p.id, label: p.name });
   }
   return out;
 }

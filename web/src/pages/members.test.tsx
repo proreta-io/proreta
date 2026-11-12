@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Invitation, Member, MonitorDetail } from "../api/endpoints";
-import { json, mockApi, problem, renderApp, session } from "../test/utils";
+import { json, mockApi, permissionsBody, problem, renderApp, session } from "../test/utils";
 
 const as = (role: string | null, over: object = {}) => ({
   "GET /api/v1/auth/me": () => json({ ...session, role, ...over }),
@@ -49,8 +49,8 @@ describe("members page", () => {
     expect(screen.getByRole("button", { name: "Leave organization" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Invite someone" })).not.toBeInTheDocument();
     expect(requests(fetchMock, "GET", "/api/v1/members")).toHaveLength(0);
-    // Status pages of their projects are theirs to see, so the link stays.
-    expect(screen.getByRole("link", { name: "Status page" })).toBeInTheDocument();
+    // Without a role in any project there are no status pages to see.
+    expect(screen.queryByRole("link", { name: "Status pages" })).not.toBeInTheDocument();
   });
 
   it("names a person without an organization role for people who cannot change roles", async () => {
@@ -531,7 +531,7 @@ describe("role-aware pages", () => {
     expect(await screen.findByRole("link", { name: "Edit" })).toBeInTheDocument();
     view.unmount();
 
-    renderApp("/settings");
+    renderApp("/channels");
     expect(await screen.findByText("#ops")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add channel" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Edit #ops" })).toBeNull();
@@ -557,18 +557,22 @@ describe("organization switcher", () => {
         },
       ],
     };
+    let switched = false;
     const fetchMock = mockApi({
       ...as("owner"),
       "GET /api/v1/auth/organizations": () => json(orgs),
       "GET /api/v1/monitors": () =>
         json({ summary: { up: 0, down: 0, paused: 0, unknown: 0 }, items: [] }),
-      "POST /api/v1/auth/switch-organization": () =>
-        json({
+      "GET /api/v1/permissions": () => json(permissionsBody(switched ? "viewer" : "owner")),
+      "POST /api/v1/auth/switch-organization": () => {
+        switched = true;
+        return json({
           ...session,
           organization: { id: "t2", slug: "beta", name: "Beta" },
           role: "viewer",
           csrfToken: "csrf-2",
-        }),
+        });
+      },
     });
     renderApp("/");
     await waitFor(() => expect(requests(fetchMock, "GET", "/api/v1/monitors")).toHaveLength(1));
