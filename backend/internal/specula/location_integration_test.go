@@ -24,7 +24,7 @@ func TestIntegrationMonitorLocation(t *testing.T) {
 	admin := env.AdminConn(t)
 	user := uuid.New()
 	pgtest.MustExec(t, admin,
-		`INSERT INTO tenants (id, slug, name) VALUES ('`+tenantA+`', 'a', 'A'), ('`+tenantB+`', 'b', 'B')`,
+		`INSERT INTO tenants (id, slug, name, plan_key) VALUES ('`+tenantA+`', 'a', 'A', 'internal'), ('`+tenantB+`', 'b', 'B', 'internal')`,
 		`INSERT INTO users (id, email) VALUES ('`+user.String()+`', 'owner@example.com')`)
 	apiPool := env.Pool(t, env.APIURL, 4)
 	sched := scheduler.New()

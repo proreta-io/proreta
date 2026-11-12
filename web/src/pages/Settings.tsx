@@ -132,6 +132,7 @@ const usageRows: { key: keyof Usage["limits"]; label: string }[] = [
   { key: "channels", label: "Notification channels" },
   { key: "members", label: "Members and open invitations" },
   { key: "projects", label: "Projects" },
+  { key: "specula", label: "Specula" },
 ];
 
 function PlanUsage() {

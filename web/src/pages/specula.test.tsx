@@ -200,4 +200,38 @@ describe("Specula page", () => {
     expect(screen.queryByRole("button", { name: "Edit Prod cluster" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Revoke Prod cluster" })).not.toBeInTheDocument();
   });
+  it("disables registering and says why when the plan limit is reached", async () => {
+    const usage = (used: number) => ({
+      plan: { key: "free", name: "Free" },
+      limits: {
+        monitors: 3,
+        heartbeats: 1,
+        channels: 1,
+        members: 3,
+        projects: 50,
+        statusPages: 1,
+        specula: 1,
+      },
+      usage: {
+        monitors: 0,
+        heartbeats: 0,
+        channels: 0,
+        members: 1,
+        projects: 1,
+        statusPages: 0,
+        specula: used,
+      },
+    });
+    mockApi({
+      ...signedIn,
+      "GET /api/v1/projects": () => json(projects),
+      "GET /api/v1/specula": () => json({ items: [specula()] }),
+      "GET /api/v1/usage": () => json(usage(1)),
+    });
+    renderApp("/specula");
+    expect(
+      await screen.findByText(/Your plan allows 1 Specula, and the limit is reached/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Register a Specula" })).toBeDisabled();
+  });
 });

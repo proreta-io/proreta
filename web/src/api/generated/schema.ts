@@ -1101,7 +1101,8 @@ export interface paths {
      * @description Registers an executor and returns its token once; it is stored only as a hash and cannot be
      *     read again. Run the executor with `PRORETA_SPECULA_TOKEN` set to it. `allProjects` defaults
      *     to true; with false, `projectIds` lists the projects that may use it (at least one).
-     *     Business-rule failures are 422 with `fieldErrors`.
+     *     Business-rule failures are 422 with `fieldErrors`; an organization at its plan's limit of
+     *     Specula gets 409 `urn:proreta:problem:plan-limit-reached` (`limit` is `specula`).
      */
     post: operations["createSpecula"];
     delete?: never;
@@ -3064,6 +3065,8 @@ export interface components {
       projects: number;
       /** @description Status pages (deleted pages do not count) */
       statusPages: number;
+      /** @description Specula executors (revoked ones do not count) */
+      specula: number;
     };
     /**
      * @description `suspended`: the organization's users cannot log in and nothing of it is checked. A deleted organization is also `suspended` and has `deletedAt`.
@@ -3860,7 +3863,8 @@ export interface components {
        * @description Which plan limit was reached (only with `urn:proreta:problem:plan-limit-reached`)
        * @enum {string}
        */
-      limit?: "monitors" | "heartbeats" | "channels" | "members" | "projects" | "statusPages";
+      limit?:
+        "monitors" | "heartbeats" | "channels" | "members" | "projects" | "statusPages" | "specula";
       /** @description The value of that limit for the organization (only with `urn:proreta:problem:plan-limit-reached`) */
       max?: number;
     };
@@ -5504,6 +5508,7 @@ export interface operations {
       400: components["responses"]["BadRequest"];
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
+      409: components["responses"]["Conflict"];
       422: components["responses"]["UnprocessableEntity"];
       default: components["responses"]["Error"];
     };

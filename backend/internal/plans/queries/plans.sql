@@ -44,6 +44,12 @@ SELECT count(*)
 FROM status_pages
 WHERE tenant_id = @tenant_id AND deleted_at IS NULL;
 
+-- name: CountSpecula :one
+-- Read-only count for the max_agents quota (Specula are owned by internal/specula).
+SELECT count(*)
+FROM specula_agents
+WHERE tenant_id = @tenant_id AND revoked_at IS NULL;
+
 -- name: GetPlanFeatures :one
 SELECT features
 FROM plans

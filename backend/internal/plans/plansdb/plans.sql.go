@@ -86,6 +86,20 @@ func (q *Queries) CountProjects(ctx context.Context, tenantID uuid.UUID) (int64,
 	return count, err
 }
 
+const countSpecula = `-- name: CountSpecula :one
+SELECT count(*)
+FROM specula_agents
+WHERE tenant_id = $1 AND revoked_at IS NULL
+`
+
+// Read-only count for the max_agents quota (Specula are owned by internal/specula).
+func (q *Queries) CountSpecula(ctx context.Context, tenantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countSpecula, tenantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countStatusPages = `-- name: CountStatusPages :one
 SELECT count(*)
 FROM status_pages

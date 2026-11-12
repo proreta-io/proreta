@@ -106,8 +106,9 @@ const usageOf = (
     members: 3,
     projects: 50,
     statusPages: 1,
+    specula: 1,
   },
-  usage: { monitors, heartbeats, channels: 1, members: 1, projects: 1, statusPages: 0 },
+  usage: { monitors, heartbeats, channels: 1, members: 1, projects: 1, statusPages: 0, specula: 0 },
 });
 
 describe("monitors list", () => {
@@ -906,6 +907,7 @@ describe("settings", () => {
       ["Notification channels", "1", "1"],
       ["Members and open invitations", "1", "3"],
       ["Projects", "1", "50"],
+      ["Specula", "0", "1"],
     ]);
     expect(screen.getByText("Limit reached")).toBeInTheDocument();
   });
