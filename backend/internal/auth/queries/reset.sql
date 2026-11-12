@@ -1,6 +1,6 @@
 -- name: GetUserForReset :one
 -- The account a reset request names, if it can be reset: active, with a password.
-SELECT id, email, status, is_platform_admin, (password_hash IS NOT NULL)::boolean AS has_password
+SELECT id, email, status, is_platform_admin, is_system_admin, (password_hash IS NOT NULL)::boolean AS has_password
 FROM users
 WHERE email = @email;
 
@@ -32,7 +32,7 @@ WHERE token_hash = @token_hash AND used_at IS NULL AND expires_at > @now
 RETURNING user_id, email;
 
 -- name: LockUserForReset :one
-SELECT email, status, is_platform_admin, (password_hash IS NOT NULL)::boolean AS has_password, email_verified_at
+SELECT email, status, is_platform_admin, is_system_admin, (password_hash IS NOT NULL)::boolean AS has_password, email_verified_at
 FROM users
 WHERE id = @id
 FOR UPDATE;

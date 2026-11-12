@@ -147,7 +147,8 @@ export default function AdminUsers() {
                       >
                         {u.login}
                       </Link>
-                      {u.isPlatformAdmin && <Badge tone="inverse">System admin</Badge>}
+                      {u.isSystemAdmin && <Badge tone="inverse">System admin</Badge>}
+                      {u.isPlatformAdmin && !u.isSystemAdmin && <Badge tone="inverse">Admin</Badge>}
                     </span>
                     {u.displayName && (
                       <span className="block text-caption text-muted-foreground">

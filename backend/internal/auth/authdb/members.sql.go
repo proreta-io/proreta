@@ -135,7 +135,7 @@ func (q *Queries) ListInvitations(ctx context.Context, tenantID uuid.UUID) ([]Li
 
 const listMembers = `-- name: ListMembers :many
 
-SELECT m.user_id, u.email, u.display_name, u.status, u.is_platform_admin, m.role, m.created_at
+SELECT m.user_id, u.email, u.display_name, u.status, u.is_platform_admin, u.is_system_admin, m.role, m.created_at
 FROM memberships AS m
 JOIN users AS u ON u.id = m.user_id
 WHERE m.tenant_id = $1
@@ -148,6 +148,7 @@ type ListMembersRow struct {
 	DisplayName     string
 	Status          string
 	IsPlatformAdmin bool
+	IsSystemAdmin   bool
 	Role            string
 	CreatedAt       time.Time
 }
@@ -168,6 +169,7 @@ func (q *Queries) ListMembers(ctx context.Context, tenantID uuid.UUID) ([]ListMe
 			&i.DisplayName,
 			&i.Status,
 			&i.IsPlatformAdmin,
+			&i.IsSystemAdmin,
 			&i.Role,
 			&i.CreatedAt,
 		); err != nil {
@@ -248,7 +250,7 @@ func (q *Queries) LockInvitationByHash(ctx context.Context, arg LockInvitationBy
 }
 
 const lockMember = `-- name: LockMember :one
-SELECT m.role, m.created_at, u.email, u.display_name, u.status, u.is_platform_admin
+SELECT m.role, m.created_at, u.email, u.display_name, u.status, u.is_platform_admin, u.is_system_admin
 FROM memberships AS m
 JOIN users AS u ON u.id = m.user_id
 WHERE m.tenant_id = $1 AND m.user_id = $2
@@ -267,6 +269,7 @@ type LockMemberRow struct {
 	DisplayName     string
 	Status          string
 	IsPlatformAdmin bool
+	IsSystemAdmin   bool
 }
 
 // The membership a role change or removal acts on, locked until the end of the transaction.
@@ -280,6 +283,7 @@ func (q *Queries) LockMember(ctx context.Context, arg LockMemberParams) (LockMem
 		&i.DisplayName,
 		&i.Status,
 		&i.IsPlatformAdmin,
+		&i.IsSystemAdmin,
 	)
 	return i, err
 }

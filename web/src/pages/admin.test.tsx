@@ -29,6 +29,7 @@ const member = (over: Partial<AdminMember> = {}): AdminMember => ({
   status: "active",
   joinedAt: "2026-10-01T00:00:00Z",
   isPlatformAdmin: false,
+  isSystemAdmin: false,
   ...over,
 });
 
@@ -69,14 +70,10 @@ describe("admin area guard", () => {
     );
   });
 
-  it("shows the top-bar link and the overview to the platform admin", async () => {
+  it("shows the overview to the platform admin", async () => {
     mockApi({ ...asAdmin, "GET /api/v1/admin/stats": () => json(stats) });
     renderApp("/admin");
     expect(await screen.findByRole("heading", { name: "Admin" })).toBeInTheDocument();
-    expect(within(screen.getByRole("banner")).getByRole("link", { name: "Admin" })).toHaveAttribute(
-      "href",
-      "/admin",
-    );
     expect(await screen.findByText("3")).toBeInTheDocument();
     expect(screen.getByText("2 active · 1 suspended · 1 deleted")).toBeInTheDocument();
     const rows = within(screen.getByRole("table")).getAllByRole("row");
@@ -205,6 +202,7 @@ describe("admin organization details", () => {
               login: "admin",
               role: "maintainer",
               isPlatformAdmin: true,
+              isSystemAdmin: true,
             }),
           ],
         }),

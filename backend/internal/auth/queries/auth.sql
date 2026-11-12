@@ -1,5 +1,5 @@
 -- name: GetUserByEmail :one
-SELECT id, email, password_hash, display_name, status, is_platform_admin, updated_at, password_changed_at, configured_password_hash, password_must_change, email_verified_at
+SELECT id, email, password_hash, display_name, status, is_platform_admin, is_system_admin, updated_at, password_changed_at, configured_password_hash, password_must_change, email_verified_at
 FROM users
 WHERE email = @email;
 
@@ -13,7 +13,7 @@ WHERE id = @id
 FOR SHARE;
 
 -- name: GetUserByID :one
-SELECT id, email, display_name, status, is_platform_admin, password_must_change, email_verified_at
+SELECT id, email, display_name, status, is_platform_admin, is_system_admin, password_must_change, email_verified_at
 FROM users
 WHERE id = @id;
 
@@ -61,7 +61,7 @@ WHERE id = @id AND expires_at > @now
 FOR UPDATE;
 
 -- name: GetUserCredential :one
-SELECT email, password_hash, display_name, status, is_platform_admin
+SELECT email, password_hash, display_name, status, is_platform_admin, is_system_admin
 FROM users
 WHERE id = @id;
 
@@ -105,9 +105,9 @@ SELECT m.user_id
 FROM memberships AS m
 JOIN users AS u ON u.id = m.user_id
 WHERE m.tenant_id = @tenant_id AND m.role = 'owner' AND m.user_id <> @user_id AND u.status = 'active'
-  -- Only a previous configured admin (still flagged until auth_sync_platform_admin runs after
+  -- Only a previous system admin (still flagged until auth_sync_platform_admin runs after
   -- this), never an owner granted through member management.
-  AND u.is_platform_admin
+  AND u.is_system_admin
 ORDER BY m.user_id;
 
 -- name: InsertUser :exec

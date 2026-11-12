@@ -330,6 +330,7 @@ users.9 email_verified_at timestamp with time zone acl=proreta_api=aw/proreta_ow
 users.10 password_changed_at timestamp with time zone acl=proreta_api=w/proreta_owner
 users.11 configured_password_hash text acl=proreta_api=w/proreta_owner
 users.12 password_must_change boolean not null default false acl=proreta_api=aw/proreta_owner
+users.13 is_system_admin boolean not null default false
 
 -- constraints
 audit_log audit_log_action_check CHECK (((length(action) >= 1) AND (length(action) <= 100)))
@@ -563,6 +564,7 @@ users users_email_check CHECK (((length((email)::text) >= 3) AND (length((email)
 users users_email_key UNIQUE (email)
 users users_pkey PRIMARY KEY (id)
 users users_status_check CHECK ((status = ANY (ARRAY['active'::text, 'disabled'::text])))
+users users_system_admin_is_platform_admin CHECK ((is_platform_admin OR (NOT is_system_admin)))
 
 -- indexes
 CREATE UNIQUE INDEX audit_log_pkey ON public.audit_log USING btree (id)
@@ -727,6 +729,7 @@ admin_registration_set(uuid,boolean,uuid,inet) owner=proreta_owner definer=true 
 admin_require_platform_admin(uuid) owner=proreta_owner definer=false acl=proreta_owner=X/proreta_owner
 admin_reset_user_password(uuid,uuid,text,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_revoke_user_sessions(uuid,uuid,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+admin_set_platform_admin(uuid,uuid,boolean,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_set_tenant_plan(uuid,uuid,text,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_set_tenant_status(uuid,uuid,text,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_set_user_status(uuid,uuid,text,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
@@ -1037,7 +1040,7 @@ BEGIN
 END
 $function$
 CREATE OR REPLACE FUNCTION public.admin_get_user(p_actor uuid, p_user_id uuid)
- RETURNS TABLE(id uuid, login text, display_name text, status text, is_platform_admin boolean, email_verified boolean, must_change_password boolean, created_at timestamp with time zone, organization_count integer, open_sessions integer)
+ RETURNS TABLE(id uuid, login text, display_name text, status text, is_platform_admin boolean, is_system_admin boolean, email_verified boolean, must_change_password boolean, created_at timestamp with time zone, organization_count integer, open_sessions integer)
  LANGUAGE plpgsql
  STABLE SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
@@ -1046,7 +1049,7 @@ AS $function$
 BEGIN
     PERFORM admin_require_platform_admin(p_actor);
     RETURN QUERY
-    SELECT u.id, u.email::text, u.display_name, u.status, u.is_platform_admin, u.email_verified_at IS NOT NULL,
+    SELECT u.id, u.email::text, u.display_name, u.status, u.is_platform_admin, u.is_system_admin, u.email_verified_at IS NOT NULL,
            u.password_must_change, u.created_at,
            (SELECT count(*)::integer FROM memberships AS m WHERE m.user_id = u.id),
            (SELECT count(*)::integer FROM sessions AS s WHERE s.user_id = u.id AND s.expires_at > now())
@@ -1058,7 +1061,7 @@ BEGIN
 END
 $function$
 CREATE OR REPLACE FUNCTION public.admin_list_all_users(p_actor uuid, p_query text, p_status text, p_limit integer, p_offset integer)
- RETURNS TABLE(id uuid, login text, display_name text, status text, is_platform_admin boolean, email_verified boolean, must_change_password boolean, created_at timestamp with time zone, organization_count integer, total_count integer)
+ RETURNS TABLE(id uuid, login text, display_name text, status text, is_platform_admin boolean, is_system_admin boolean, email_verified boolean, must_change_password boolean, created_at timestamp with time zone, organization_count integer, total_count integer)
  LANGUAGE plpgsql
  STABLE SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
@@ -1073,7 +1076,7 @@ BEGIN
         RAISE EXCEPTION 'admin: invalid status' USING ERRCODE = 'PRA04';
     END IF;
     RETURN QUERY
-    SELECT u.id, u.email::text, u.display_name, u.status, u.is_platform_admin, u.email_verified_at IS NOT NULL,
+    SELECT u.id, u.email::text, u.display_name, u.status, u.is_platform_admin, u.is_system_admin, u.email_verified_at IS NOT NULL,
            u.password_must_change, u.created_at,
            (SELECT count(*)::integer FROM memberships AS m WHERE m.user_id = u.id),
            (count(*) OVER ())::integer
@@ -1287,6 +1290,54 @@ BEGIN
     RETURN v_n;
 END
 $function$
+CREATE OR REPLACE FUNCTION public.admin_set_platform_admin(p_actor uuid, p_user_id uuid, p_grant boolean, p_audit_id uuid, p_ip inet)
+ RETURNS boolean
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+#variable_conflict use_column
+DECLARE
+    v_status text;
+    v_admin  boolean;
+    v_system boolean;
+    v_tenant uuid;
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtext('proreta.platform_admin'));
+    PERFORM admin_require_platform_admin(p_actor);
+    IF p_grant IS NULL THEN
+        RAISE EXCEPTION 'admin: grant must be set' USING ERRCODE = 'PRA04';
+    END IF;
+    SELECT u.status, u.is_platform_admin, u.is_system_admin INTO v_status, v_admin, v_system
+    FROM users AS u WHERE u.id = p_user_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'admin: user not found' USING ERRCODE = 'PRA02';
+    END IF;
+    IF v_admin = p_grant THEN
+        RETURN false;
+    END IF;
+    IF p_grant THEN
+        IF v_status <> 'active' THEN
+            RAISE EXCEPTION 'admin: only an active user can be a platform admin' USING ERRCODE = 'PRA15';
+        END IF;
+    ELSE
+        IF v_system THEN
+            RAISE EXCEPTION 'admin: the system admin cannot be revoked' USING ERRCODE = 'PRA07';
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM users AS u WHERE u.is_platform_admin AND u.status = 'active' AND u.id <> p_user_id) THEN
+            RAISE EXCEPTION 'admin: the last platform admin cannot be revoked' USING ERRCODE = 'PRA14';
+        END IF;
+    END IF;
+    UPDATE users SET is_platform_admin = p_grant, updated_at = now() WHERE id = p_user_id;
+    v_tenant := admin_user_audit_tenant(p_user_id);
+    IF v_tenant IS NOT NULL THEN
+        PERFORM admin_audit(v_tenant, p_actor, p_audit_id,
+                            CASE WHEN p_grant THEN 'admin.user.platform_admin_granted' ELSE 'admin.user.platform_admin_revoked' END,
+                            'user', p_user_id::text, '{}'::jsonb, p_ip);
+    END IF;
+    RETURN true;
+END
+$function$
 CREATE OR REPLACE FUNCTION public.admin_set_tenant_plan(p_actor uuid, p_tenant_id uuid, p_plan_key text, p_audit_id uuid, p_ip inet)
  RETURNS boolean
  LANGUAGE plpgsql
@@ -1378,7 +1429,7 @@ AS $function$
 #variable_conflict use_column
 DECLARE
     v_status text;
-    v_admin  boolean;
+    v_system boolean;
     v_tenant uuid;
     v_n      integer := 0;
 BEGIN
@@ -1386,7 +1437,7 @@ BEGIN
     IF p_status IS NULL OR p_status NOT IN ('active', 'disabled') THEN
         RAISE EXCEPTION 'admin: invalid status' USING ERRCODE = 'PRA04';
     END IF;
-    SELECT u.status, u.is_platform_admin INTO v_status, v_admin FROM users AS u WHERE u.id = p_user_id FOR UPDATE;
+    SELECT u.status, u.is_system_admin INTO v_status, v_system FROM users AS u WHERE u.id = p_user_id FOR UPDATE;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'admin: user not found' USING ERRCODE = 'PRA02';
     END IF;
@@ -1394,8 +1445,8 @@ BEGIN
         RETURN QUERY SELECT false, 0;
         RETURN;
     END IF;
-    IF p_status = 'disabled' AND v_admin THEN
-        RAISE EXCEPTION 'admin: a platform admin cannot be disabled' USING ERRCODE = 'PRA07';
+    IF p_status = 'disabled' AND v_system THEN
+        RAISE EXCEPTION 'admin: the system admin cannot be disabled' USING ERRCODE = 'PRA07';
     END IF;
     UPDATE users SET status = p_status, updated_at = now() WHERE id = p_user_id;
     IF p_status = 'disabled' THEN
@@ -1560,6 +1611,7 @@ CREATE OR REPLACE FUNCTION public.auth_sync_platform_admin(p_user_id uuid)
 AS $function$
 DECLARE
     n integer;
+    m integer;
 BEGIN
     IF NOT EXISTS (
         SELECT 1
@@ -1578,10 +1630,14 @@ BEGIN
             USING ERRCODE = 'PRA01';
     END IF;
     UPDATE users AS u
-    SET is_platform_admin = (u.id = p_user_id), updated_at = now()
-    WHERE u.is_platform_admin IS DISTINCT FROM (u.id = p_user_id);
+    SET is_platform_admin = false, is_system_admin = false, updated_at = now()
+    WHERE u.is_system_admin AND u.id <> p_user_id;
     GET DIAGNOSTICS n = ROW_COUNT;
-    RETURN n;
+    UPDATE users AS u
+    SET is_platform_admin = true, is_system_admin = true, updated_at = now()
+    WHERE u.id = p_user_id AND NOT (u.is_platform_admin AND u.is_system_admin);
+    GET DIAGNOSTICS m = ROW_COUNT;
+    RETURN n + m;
 END
 $function$
 CREATE OR REPLACE FUNCTION public.auth_user_organizations(p_user_id uuid)

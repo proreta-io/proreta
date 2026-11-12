@@ -373,6 +373,15 @@ export const disableAdminUser = (userId: string) =>
 export const enableAdminUser = (userId: string) =>
   unwrap(client.POST("/api/v1/admin/users/{userId}/enable", userPath(userId)));
 
+/** Grants or revokes the platform-admin flag; answers the user afterwards. */
+export const setAdminPlatformAdmin = (userId: string, enabled: boolean) =>
+  unwrap(
+    client.PUT("/api/v1/admin/users/{userId}/platform-admin", {
+      params: { path: { userId } },
+      body: { enabled },
+    }),
+  );
+
 /** Deletes all of the user's sessions; answers how many were open. */
 export const revokeAdminUserSessions = (userId: string) =>
   unwrap(client.POST("/api/v1/admin/users/{userId}/sessions/revoke", userPath(userId)));

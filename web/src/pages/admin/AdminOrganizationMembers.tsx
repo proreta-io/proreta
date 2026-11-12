@@ -210,11 +210,14 @@ export default function AdminOrganizationMembers({
                     >
                       {m.login}
                     </Link>
-                    {m.isPlatformAdmin && <Badge tone="inverse">System admin</Badge>}
+                    {m.isSystemAdmin && <Badge tone="inverse">System admin</Badge>}
+                    {m.isPlatformAdmin && !m.isSystemAdmin && (
+                      <Badge tone="inverse">Platform admin</Badge>
+                    )}
                   </span>
                 </Td>
                 <Td>
-                  {deleted || m.isPlatformAdmin ? (
+                  {deleted || m.isSystemAdmin ? (
                     ROLE_LABELS[m.role]
                   ) : (
                     <Select
@@ -241,16 +244,16 @@ export default function AdminOrganizationMembers({
                     <Button
                       variant="secondary"
                       size="small"
-                      disabled={m.isPlatformAdmin}
+                      disabled={m.isSystemAdmin}
                       aria-label={`Reset password of ${m.login}`}
                       aria-describedby={
-                        m.isPlatformAdmin ? `system-admin-note-${m.userId}` : undefined
+                        m.isSystemAdmin ? `system-admin-note-${m.userId}` : undefined
                       }
                       onClick={() => setPending({ kind: "reset", member: m })}
                     >
                       Reset password
                     </Button>
-                    {!deleted && !m.isPlatformAdmin && (
+                    {!deleted && !m.isSystemAdmin && (
                       <Button
                         variant="ghost-destructive"
                         size="small"
@@ -261,7 +264,7 @@ export default function AdminOrganizationMembers({
                       </Button>
                     )}
                   </span>
-                  {m.isPlatformAdmin && (
+                  {m.isSystemAdmin && (
                     <span
                       id={`system-admin-note-${m.userId}`}
                       className="mt-1 block font-sans text-caption text-muted-foreground"
@@ -425,7 +428,7 @@ function UserMatches({
   if (error) return <p className="text-caption text-muted-foreground">Cannot search users.</p>;
   if (!users)
     return loading ? <p className="text-caption text-muted-foreground">Searching…</p> : null;
-  const shown = users.filter((u) => !u.isPlatformAdmin && !exclude.has(u.id));
+  const shown = users.filter((u) => !u.isSystemAdmin && !exclude.has(u.id));
   if (shown.length === 0)
     return (
       <p className="text-caption text-muted-foreground">

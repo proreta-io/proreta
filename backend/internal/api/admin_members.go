@@ -9,7 +9,7 @@ import (
 
 func toAdminMember(m auth.Member) gen.AdminMember {
 	return gen.AdminMember{UserId: m.UserID, Login: m.Login, DisplayName: m.DisplayName, Role: gen.MembershipRole(m.Role),
-		Status: gen.AdminMemberStatus(m.Status), JoinedAt: m.JoinedAt, IsPlatformAdmin: m.IsPlatformAdmin}
+		Status: gen.AdminMemberStatus(m.Status), JoinedAt: m.JoinedAt, IsPlatformAdmin: m.IsPlatformAdmin, IsSystemAdmin: m.IsSystemAdmin}
 }
 
 func (s *server) AdminListOrganizationMembers(ctx context.Context, req gen.AdminListOrganizationMembersRequestObject) (gen.AdminListOrganizationMembersResponseObject, error) {

@@ -32,6 +32,7 @@ const member = (over: Partial<AdminMember> = {}): AdminMember => ({
   status: "active",
   joinedAt: "2026-10-01T00:00:00Z",
   isPlatformAdmin: false,
+  isSystemAdmin: false,
   ...over,
 });
 
@@ -41,6 +42,7 @@ const summary = (over: Partial<AdminUserSummary> = {}): AdminUserSummary => ({
   displayName: "",
   status: "active",
   isPlatformAdmin: false,
+  isSystemAdmin: false,
   emailVerified: true,
   mustChangePassword: false,
   createdAt: "2026-10-01T00:00:00Z",
@@ -153,7 +155,16 @@ describe("admin organization members", () => {
   it("does not offer changes for the system admin", async () => {
     setup({
       [`GET ${base}/members`]: () =>
-        json({ items: [member({ userId: "u-admin", login: "admin", isPlatformAdmin: true })] }),
+        json({
+          items: [
+            member({
+              userId: "u-admin",
+              login: "admin",
+              isPlatformAdmin: true,
+              isSystemAdmin: true,
+            }),
+          ],
+        }),
     });
     renderApp("/admin/organizations/t-1");
     expect(await screen.findByText("System admin")).toBeInTheDocument();
@@ -171,7 +182,12 @@ describe("admin organization members", () => {
               ? [
                   summary({ id: "u-3", login: "carol@gamma.example", displayName: "Carol" }),
                   summary({ id: "u-2", login: "bob@beta.example" }),
-                  summary({ id: "u-admin", login: "admin", isPlatformAdmin: true }),
+                  summary({
+                    id: "u-admin",
+                    login: "admin",
+                    isPlatformAdmin: true,
+                    isSystemAdmin: true,
+                  }),
                 ]
               : [],
           total: 3,

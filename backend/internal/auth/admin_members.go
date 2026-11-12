@@ -110,7 +110,7 @@ func (s *Service) SetMember(ctx context.Context, a Actor, userID uuid.UUID, role
 		if err != nil {
 			return fmt.Errorf("get user: %w", err)
 		}
-		if u.IsPlatformAdmin {
+		if u.IsSystemAdmin {
 			// BootstrapAdmin refuses to start when the admin belongs to another tenant.
 			return ErrSystemAdminMember
 		}
@@ -125,7 +125,7 @@ func (s *Service) SetMember(ctx context.Context, a Actor, userID uuid.UUID, role
 			return fmt.Errorf("read new member: %w", err)
 		}
 		m = Member{UserID: userID, Login: row.Email, DisplayName: row.DisplayName, Role: row.Role, JoinedAt: row.CreatedAt,
-			IsPlatformAdmin: row.IsPlatformAdmin, Status: row.Status}
+			IsPlatformAdmin: row.IsPlatformAdmin, IsSystemAdmin: row.IsSystemAdmin, Status: row.Status}
 		action = ActionAdminMemberAdded
 		return audit.Record(ctx, tx, audit.Entry{
 			TenantID: a.TenantID, ActorUserID: &a.UserID, Action: action,

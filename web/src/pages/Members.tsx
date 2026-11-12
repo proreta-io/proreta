@@ -185,10 +185,10 @@ function MemberList() {
         </thead>
         <tbody>
           {members.data.items.map((m) => {
-            const manageable = canManageMember(actor, m.role) && !m.isPlatformAdmin;
+            const manageable = canManageMember(actor, m.role) && !m.isSystemAdmin;
             const noteId = `member-note-${m.userId}`;
-            const note = m.isPlatformAdmin
-              ? "The platform administrator; set by the deployment."
+            const note = m.isSystemAdmin
+              ? "The system administrator; set by the deployment."
               : actor && canManageMember(actor, "viewer") && !canManageMember(actor, m.role)
                 ? "Only an owner can change an owner."
                 : undefined;

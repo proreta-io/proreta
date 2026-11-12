@@ -127,6 +127,7 @@ describe("projects page", () => {
         role: "member",
         joinedAt: "",
         isPlatformAdmin: false,
+        isSystemAdmin: false,
       },
     ];
     const bodies: unknown[] = [];

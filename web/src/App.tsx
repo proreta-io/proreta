@@ -1,6 +1,7 @@
 import { Route, Routes } from "react-router-dom";
 import RequireAuth from "./auth/RequireAuth";
 import RequirePlatformAdmin from "./auth/RequirePlatformAdmin";
+import AdminLayout from "./components/AdminLayout";
 import Layout from "./components/Layout";
 import ForgotPassword from "./pages/ForgotPassword";
 import Invite from "./pages/Invite";
@@ -45,17 +46,19 @@ export default function App() {
           <Route path="/members" element={<Members />} />
           <Route path="/projects" element={<Projects />} />
           <Route path="/status-page" element={<StatusPageSettings />} />
-          <Route path="/admin" element={<RequirePlatformAdmin />}>
+          <Route path="*" element={<NotFound />} />
+        </Route>
+        <Route path="/admin" element={<RequirePlatformAdmin />}>
+          <Route element={<AdminLayout />}>
             <Route index element={<AdminOverview />} />
             <Route path="organizations" element={<AdminOrganizations />} />
+            <Route path="organizations/:id" element={<AdminOrganizationDetails />} />
             <Route path="users" element={<AdminUsers />} />
             <Route path="users/:id" element={<AdminUserDetails />} />
             <Route path="email" element={<AdminEmail />} />
             <Route path="registration" element={<AdminRegistration />} />
-            <Route path="organizations/:id" element={<AdminOrganizationDetails />} />
             <Route path="*" element={<NotFound />} />
           </Route>
-          <Route path="*" element={<NotFound />} />
         </Route>
       </Route>
     </Routes>

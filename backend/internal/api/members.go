@@ -239,7 +239,7 @@ func (s *server) SwitchOrganization(ctx context.Context, req gen.SwitchOrganizat
 // toMember maps a member; showLogin is false for callers below maintainer.
 func toMember(m auth.Member, showLogin bool) gen.Member {
 	return gen.Member{UserId: m.UserID, Login: loginFor(m.Login, showLogin), DisplayName: m.DisplayName, Role: gen.MembershipRole(m.Role),
-		JoinedAt: m.JoinedAt, IsPlatformAdmin: m.IsPlatformAdmin}
+		JoinedAt: m.JoinedAt, IsPlatformAdmin: m.IsPlatformAdmin, IsSystemAdmin: m.IsSystemAdmin}
 }
 
 func toInvitation(i auth.Invitation) gen.Invitation {
