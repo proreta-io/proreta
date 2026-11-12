@@ -31,7 +31,7 @@ func TestIntegrationMigrateFromScratchAndRerun(t *testing.T) {
 	}
 	want := "audit_log,auth_identities,check_results,email_settings,email_verifications,heartbeat_tokens,incident_monitors,incidents,invitations,mail_outbox,memberships,monitor_channels,monitor_location_state," +
 		"monitor_locations,monitor_state,monitors,notification_channels,notification_deliveries,org_auth_domains,password_resets,plans,platform_settings,probe_locations,project_members,projects,result_rollups_hourly,rollup_state,sessions," +
-		"status_page_components,status_page_released_slugs,status_page_snapshots,status_pages,tenants,users"
+		"specula_agents,specula_projects,status_page_components,status_page_released_slugs,status_page_snapshots,status_pages,tenants,users"
 	if got := strings.Join(tables, ","); got != want {
 		t.Fatalf("tables = %s, want %s", got, want)
 	}
@@ -68,7 +68,14 @@ var definerAllowList = map[string][]string{
 	"admin_set_platform_admin":    {"proreta_api"},
 	"ensure_partitions":           {"proreta_worker"},
 	"claim_due_monitors":          {"proreta_worker"},
-	"compute_rollups":             {"proreta_worker"},
+	// Specula, the executor in a customer's network: create and revoke by the api inside the
+	// tenant, token authentication and self-report by the gateway, the rename trigger.
+	"specula_create":               {"proreta_api"},
+	"specula_revoke":               {"proreta_api"},
+	"specula_authenticate":         {"proreta_worker"},
+	"specula_hello":                {"proreta_worker"},
+	"specula_agents_sync_location": {},
+	"compute_rollups":              {"proreta_worker"},
 	// Rollups from the watermark in rollup_state.
 	"compute_rollups_catch_up": {"proreta_worker"},
 	// Retention in three steps driven by jobs.
@@ -172,6 +179,9 @@ var extraPolicies = map[string]struct {
 	"status_page_released_slugs.owner_slug_hold_read": {cmd: "r", roles: []string{"proreta_owner"}},
 	// auth_domain_lookup.
 	"org_auth_domains.owner_domain_lookup": {cmd: "r", roles: []string{"proreta_owner"}},
+	// specula_authenticate, specula_hello, specula_revoke and the claim's access check.
+	"specula_agents.owner_specula":        {cmd: "*", roles: []string{"proreta_owner"}},
+	"specula_projects.owner_specula_read": {cmd: "r", roles: []string{"proreta_owner"}},
 }
 
 var runtimeRoles = []string{"proreta_api", "proreta_statuspage", "proreta_worker"}

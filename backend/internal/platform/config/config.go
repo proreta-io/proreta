@@ -155,6 +155,15 @@ type Worker struct {
 	Location string
 }
 
+// SpeculaGateway is the configuration of cmd/speculagw, the endpoint of the executors that run in
+// customer networks. It uses the worker's database role.
+type SpeculaGateway struct {
+	Server
+	HTTPAddr string
+	// Request opens the sealed headers and bodies of monitor requests handed to an executor.
+	Request RequestSeal
+}
+
 // Jobs is the configuration of cmd/jobs.
 type Jobs struct {
 	Server
@@ -298,6 +307,20 @@ func LoadWorker(lookup LookupFunc) (Worker, error) {
 		TenantConcurrency: l.integer("PRORETA_WORKER_TENANT_CONCURRENCY", 5, 1, 1000),
 		HostConcurrency:   l.integer("PRORETA_WORKER_HOST_CONCURRENCY", 2, 1, 1000),
 		Location:          l.dnsLabel("PRORETA_WORKER_LOCATION", "default"),
+	}
+	return cfg, l.err()
+}
+
+// LoadSpeculaGateway loads the Specula gateway configuration.
+func LoadSpeculaGateway(lookup LookupFunc) (SpeculaGateway, error) {
+	l := &loader{lookup: lookup}
+	cfg := SpeculaGateway{
+		Server:   l.server(10),
+		HTTPAddr: l.addr("PRORETA_HTTP_ADDR", ":8080"),
+		Request:  l.requestSeal(),
+	}
+	if cfg.HTTPAddr != "" && cfg.HTTPAddr == cfg.AdminAddr {
+		l.fail("PRORETA_HTTP_ADDR", "must differ from PRORETA_ADMIN_ADDR")
 	}
 	return cfg, l.err()
 }

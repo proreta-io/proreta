@@ -530,7 +530,7 @@ func TestIntegrationClaimDueMonitors(t *testing.T) {
 		free()
 		other := uuid.New().String()
 		pgtest.MustExec(t, admin, `INSERT INTO probe_locations (id, code, name, provider, region, kind)
-			VALUES ('`+other+`', 'agent-lab', 'Lab agent', 'self', 'lab', 'agent')`)
+			VALUES ('`+other+`', 'agent-lab', 'Lab agent', 'self', 'lab', 'platform')`)
 		om := uuid.New().String()
 		pgtest.MustExec(t, admin,
 			`INSERT INTO monitors (id, tenant_id, project_id, name, config) VALUES ('`+om+`', '`+tenantA+`', `+defaultProject(tenantA)+`, 'o', '{"url":"https://example.com/o"}')`,

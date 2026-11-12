@@ -79,6 +79,12 @@ var definerCalls = map[string]string{
 	"status_page_snapshot":        `SELECT * FROM status_page_snapshot('acme')`,
 	"status_page_slug_held":       `SELECT status_page_slug_held('acme')`,
 	"auth_domain_lookup":          `SELECT * FROM auth_domain_lookup('example.com')`,
+	// Specula: the in-function refusal without a tenant, an unknown token, a trigger function.
+	"specula_create":               `SELECT specula_create(gen_random_uuid(), 'x', '\x00', true, NULL, gen_random_uuid())`,
+	"specula_revoke":               `SELECT specula_revoke(gen_random_uuid())`,
+	"specula_authenticate":         `SELECT * FROM specula_authenticate('\x00')`,
+	"specula_hello":                `SELECT specula_hello(gen_random_uuid(), 'v', 'h')`,
+	"specula_agents_sync_location": `SELECT specula_agents_sync_location()`,
 }
 
 // Every definer function in the allow-list is executable by exactly the roles listed there: a
