@@ -43,7 +43,8 @@ Operators: the gateway is a separate Deployment of the Proreta chart, off by def
 ## Use it in a monitor
 When a project may use at least one Specula, the monitor form has a **Run from** field: *Proreta cloud* or one of them.
 
-- A monitor that runs at a Specula may use `http` or `https`, any port, and internal host names or addresses such as `http://orders.shop.svc:8080/health`. The executor reaches whatever your network lets it reach; Proreta's blocking of private addresses does not apply there because the targets are yours.
+- A TCP monitor ([TCP monitors](../tcp-monitors.md)) may run at a Specula too: its host may be any name or address your network resolves, on any port. Upgrade the executor before you place TCP monitors on it.
+- An HTTP monitor that runs at a Specula may use `http` or `https`, any port, and internal host names or addresses such as `http://orders.shop.svc:8080/health`. The executor reaches whatever your network lets it reach; Proreta's blocking of private addresses does not apply there because the targets are yours.
 - Moving a monitor between *Proreta cloud* and a Specula ends an open incident and starts its status over. A target that only works inside your network is refused when you move it back to *Proreta cloud*.
 - Method, headers and body work as in [Monitor requests](../monitor-requests.md). The executor receives the decrypted headers and body over TLS, so install it only where you trust the host.
 
@@ -71,6 +72,6 @@ Under **Settings → Notification channels** a Slack or webhook channel can subs
 
 ## Limits
 - Going offline opens an incident and notifies; revoking does not (it is deliberate): the incident of a revoked Specula ends and no *back online* message follows. The silence threshold is fixed at 3 minutes and the check runs every minute, so the message comes 3 to 4 minutes after the last call. The incident is not reminded while it stays open.
-- HTTP and HTTPS checks only; TCP checks are not available yet.
+- HTTP, HTTPS and TCP checks only.
 - No limit on the number of Specula per plan yet.
 - A token has no expiry; rotate by registering a new Specula and revoking the old one.

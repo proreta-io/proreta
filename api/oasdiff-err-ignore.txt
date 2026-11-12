@@ -61,3 +61,26 @@ GET /api/v1/channels added the new `webhook` enum value to the `items/items/type
 POST /api/v1/channels added the new `webhook` enum value to the `type` response property for the response status `201`
 GET /api/v1/channels/{channelId} added the new `webhook` enum value to the `type` response property for the response status `200`
 PATCH /api/v1/channels/{channelId} added the new `webhook` enum value to the `type` response property for the response status `200`
+
+# A new monitor type, tcp; before the first stable release there is no compatibility with older clients (the web app changes in the same release).
+GET /api/v1/monitors added the new `tcp` enum value to the `items/items/type` response property for the response status `200`
+POST /api/v1/monitors added the new `tcp` enum value to the `type` response property for the response status `201`
+GET /api/v1/monitors/{monitorId} added the new `tcp` enum value to the `type` response property for the response status `200`
+PATCH /api/v1/monitors/{monitorId} added the new `tcp` enum value to the `type` response property for the response status `200`
+POST /api/v1/monitors/{monitorId}/pause added the new `tcp` enum value to the `type` response property for the response status `200`
+POST /api/v1/monitors/{monitorId}/resume added the new `tcp` enum value to the `type` response property for the response status `200`
+GET /api/v1/status-pages/{statusPageId}/components added the new `tcp` enum value to the `items/items/monitorType` response property for the response status `200`
+PUT /api/v1/status-pages/{statusPageId}/components added the new `tcp` enum value to the `items/items/monitorType` response property for the response status `200`
+# Specula offline: two more channel events, agent_offline and agent_online (the channel event list grows from 3 to 5). Before the first stable release there is no compatibility with older clients (the web app changes in the same release).
+GET /api/v1/channels added the new `agent_offline` enum value to the `items/items/events/items` response property for the response status `200`
+GET /api/v1/channels added the new `agent_online` enum value to the `items/items/events/items` response property for the response status `200`
+GET /api/v1/channels the `items/items/events` response property's maxItems was increased from `3` to `5` for the response status `200`
+POST /api/v1/channels added the new `agent_offline` enum value to the `events/items` response property for the response status `201`
+POST /api/v1/channels added the new `agent_online` enum value to the `events/items` response property for the response status `201`
+POST /api/v1/channels the `events` response property's maxItems was increased from `3` to `5` for the response status `201`
+GET /api/v1/channels/{channelId} added the new `agent_offline` enum value to the `events/items` response property for the response status `200`
+GET /api/v1/channels/{channelId} added the new `agent_online` enum value to the `events/items` response property for the response status `200`
+GET /api/v1/channels/{channelId} the `events` response property's maxItems was increased from `3` to `5` for the response status `200`
+PATCH /api/v1/channels/{channelId} added the new `agent_offline` enum value to the `events/items` response property for the response status `200`
+PATCH /api/v1/channels/{channelId} added the new `agent_online` enum value to the `events/items` response property for the response status `200`
+PATCH /api/v1/channels/{channelId} the `events` response property's maxItems was increased from `3` to `5` for the response status `200`

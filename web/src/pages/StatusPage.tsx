@@ -785,7 +785,8 @@ function ComponentEditor({ page, initial }: { page: Page; initial: StatusPageCom
               </option>
               {available.map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.name} ({m.type === "heartbeat" ? "heartbeat" : "HTTPS"})
+                  {m.name} (
+                  {m.type === "heartbeat" ? "heartbeat" : m.type === "tcp" ? "TCP" : "HTTPS"})
                 </option>
               ))}
             </Select>

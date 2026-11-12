@@ -4,7 +4,10 @@ import {
   mapServerErrors,
   toCreateRequest,
   toMonitorRequest,
+  validateHost,
+  validatePort,
   validateMonitorForm,
+  valuesFromMonitor,
   validateMonitorUrl,
   describeSetup,
   withHttps,
@@ -320,5 +323,102 @@ describe("describeSetup", () => {
     expect(sentence({ type: "heartbeat", expectedIntervalSeconds: "60", graceSeconds: "0" })).toBe(
       "Expects a ping every 1 min and alerts Slack the moment one is late.",
     );
+  });
+});
+
+describe("tcp monitors", () => {
+  const tcp = {
+    ...emptyMonitorForm,
+    type: "tcp" as const,
+    name: "DB",
+    host: "db.example.com",
+    port: "5432",
+  };
+
+  it.each([
+    ["db.example.com", undefined],
+    ["10.0.0.5", undefined],
+    ["::1", undefined],
+    ["", "Enter a host name or an IP address."],
+    ["https://db.example.com", "Enter only the host: no http://, path, user name or spaces."],
+    ["db.example.com/x", "Enter only the host: no http://, path, user name or spaces."],
+    ["user@db.example.com", "Enter only the host: no http://, path, user name or spaces."],
+    ["db example", "Enter only the host: no http://, path, user name or spaces."],
+    ["a".repeat(256), "Use 255 characters or fewer."],
+  ])("host %s -> %s", (host, expected) => {
+    expect(validateHost(host)).toBe(expected);
+  });
+
+  it.each([
+    ["5432", true],
+    ["1", true],
+    ["65535", true],
+    ["0", false],
+    ["65536", false],
+    ["", false],
+    ["54x", false],
+    ["-1", false],
+  ])("port %s", (port, ok) => {
+    expect(validatePort(port) === undefined).toBe(ok);
+  });
+
+  it("validates only the tcp fields and ignores the http ones", () => {
+    expect(validateMonitorForm(tcp)).toEqual({});
+    expect(validateMonitorForm({ ...tcp, host: "", port: "x", failureThreshold: 4 })).toEqual({
+      host: "Enter a host name or an IP address.",
+      port: "Enter a port from 1 to 65535.",
+      failureThreshold: "Choose 1, 2 or 3 failed checks.",
+    });
+  });
+
+  it("sends the tcp sub-object, and a location only for a Specula", () => {
+    expect(toCreateRequest(tcp)).toEqual({
+      type: "tcp",
+      name: "DB",
+      tcp: { host: "db.example.com", port: 5432, failureThreshold: 2 },
+      notificationsEnabled: true,
+      channelIds: [],
+    });
+    expect(toCreateRequest({ ...tcp, speculaId: "s1" })).toMatchObject({
+      location: { type: "specula", speculaId: "s1" },
+    });
+    // An edit always states the location, so a monitor can move back to Proreta's cloud.
+    expect(toMonitorRequest(tcp)).toMatchObject({
+      location: { type: "cloud" },
+      tcp: { port: 5432 },
+    });
+    expect(toMonitorRequest(tcp)).not.toHaveProperty("http");
+  });
+
+  it("fills the form from a stored monitor and maps server errors to its fields", () => {
+    const stored = {
+      type: "tcp",
+      name: "DB",
+      notificationsEnabled: true,
+      channelIds: [],
+      projectId: "p",
+      location: { type: "cloud" },
+      tcp: {
+        host: "db.example.com",
+        port: 5432,
+        intervalSeconds: 60,
+        timeoutSeconds: 10,
+        failureThreshold: 3,
+        lastResponseMs: null,
+      },
+    } as unknown as Parameters<typeof valuesFromMonitor>[0];
+    expect(valuesFromMonitor(stored)).toMatchObject({
+      type: "tcp",
+      host: "db.example.com",
+      port: "5432",
+      failureThreshold: 3,
+    });
+    const err = new ApiError({
+      type: "x",
+      title: "Validation failed",
+      status: 422,
+      fieldErrors: [{ field: "tcp.host", message: "host must be a public address" }],
+    });
+    expect(mapServerErrors(err).fields).toEqual({ host: "Host must be a public address" });
   });
 });

@@ -5,7 +5,10 @@ export const WEBHOOK_URL_MAX = 2048;
 
 /** Mirrors the server list; the server rejects every other name. */
 export const placeholders: { name: string; help: string }[] = [
-  { name: "event", help: "opened, resolved, reminder, tls_expiring, agent_offline, agent_online or test" },
+  {
+    name: "event",
+    help: "opened, resolved, reminder, tls_expiring, agent_offline, agent_online or test",
+  },
   { name: "status", help: "down, up, offline or online" },
   { name: "monitor.id", help: "Monitor id" },
   { name: "monitor.name", help: "Monitor name" },

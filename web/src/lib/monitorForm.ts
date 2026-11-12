@@ -15,7 +15,7 @@ import {
   INTERVAL_MIN,
 } from "./heartbeat";
 
-export type MonitorKind = "http" | "heartbeat";
+export type MonitorKind = "http" | "tcp" | "heartbeat";
 
 export const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] as const;
 export type Method = (typeof METHODS)[number];
@@ -60,6 +60,9 @@ export interface MonitorFormValues {
   projectId: string;
   /** The Specula the monitor runs at; empty runs it from Proreta's own worker. */
   speculaId: string;
+  /** TCP fields, as typed: the host (no scheme or port) and the port number. */
+  host: string;
+  port: string;
   /** Heartbeat fields, as typed (seconds). */
   expectedIntervalSeconds: string;
   graceSeconds: string;
@@ -78,6 +81,8 @@ export const formFields = [
   "channelIds",
   "projectId",
   "speculaId",
+  "host",
+  "port",
   "expectedIntervalSeconds",
   "graceSeconds",
 ] as const;
@@ -93,6 +98,9 @@ const serverFields: Record<string, FormField> = {
   "http.headers": "headers",
   "http.body": "body",
   "http.failureThreshold": "failureThreshold",
+  "tcp.host": "host",
+  "tcp.port": "port",
+  "tcp.failureThreshold": "failureThreshold",
   "heartbeat.expectedIntervalSeconds": "expectedIntervalSeconds",
   "heartbeat.graceSeconds": "graceSeconds",
 };
@@ -120,6 +128,8 @@ export const emptyMonitorForm: MonitorFormValues = {
   channelIds: [],
   projectId: "",
   speculaId: "",
+  host: "",
+  port: "",
   expectedIntervalSeconds: String(DEFAULT_INTERVAL),
   graceSeconds: String(DEFAULT_GRACE),
 };
@@ -138,11 +148,14 @@ export function valuesFromMonitor(m: MonitorDetail): MonitorFormValues {
     body: "",
     bodyStored: m.http?.bodySet ?? false,
     bodyDirty: false,
-    failureThreshold: m.http?.failureThreshold ?? emptyMonitorForm.failureThreshold,
+    failureThreshold:
+      m.http?.failureThreshold ?? m.tcp?.failureThreshold ?? emptyMonitorForm.failureThreshold,
     notificationsEnabled: m.notificationsEnabled,
     channelIds: m.channelIds,
     projectId: m.projectId,
     speculaId: m.location?.speculaId ?? "",
+    host: m.tcp?.host ?? "",
+    port: m.tcp ? String(m.tcp.port) : "",
     expectedIntervalSeconds: String(m.heartbeat?.expectedIntervalSeconds ?? DEFAULT_INTERVAL),
     graceSeconds: String(m.heartbeat?.graceSeconds ?? DEFAULT_GRACE),
   };
@@ -194,6 +207,23 @@ export function validateMonitorUrl(raw: string, specula = false): string | undef
   return undefined;
 }
 
+export const HOST_MAX = 255;
+
+/** A host name or IP address on its own; the server applies the rules of the location. */
+export function validateHost(raw: string): string | undefined {
+  const value = raw.trim();
+  if (!value) return "Enter a host name or an IP address.";
+  if (value.length > HOST_MAX) return `Use ${HOST_MAX} characters or fewer.`;
+  if (/[/?#@\s]/.test(value)) return "Enter only the host: no http://, path, user name or spaces.";
+  return undefined;
+}
+
+/** A whole port number from 1 to 65535. */
+export function validatePort(raw: string): string | undefined {
+  const n = /^[0-9]+$/.test(raw.trim()) ? Number(raw.trim()) : 0;
+  return n >= 1 && n <= 65535 ? undefined : "Enter a port from 1 to 65535.";
+}
+
 export function validateMonitorForm(v: MonitorFormValues): MonitorFormErrors {
   const errors: MonitorFormErrors = {};
   const name = v.name.trim();
@@ -205,6 +235,16 @@ export function validateMonitorForm(v: MonitorFormValues): MonitorFormErrors {
     }
     if (seconds(v.graceSeconds, 0, GRACE_MAX) === undefined) {
       errors.graceSeconds = `Enter whole seconds from 0 to ${GRACE_MAX}.`;
+    }
+    return errors;
+  }
+  if (v.type === "tcp") {
+    const hostError = validateHost(v.host);
+    if (hostError) errors.host = hostError;
+    const portError = validatePort(v.port);
+    if (portError) errors.port = portError;
+    if (![1, 2, 3].includes(v.failureThreshold)) {
+      errors.failureThreshold = "Choose 1, 2 or 3 failed checks.";
     }
     return errors;
   }
@@ -253,7 +293,16 @@ export function validateHeaders(rows: HeaderRow[]): string | undefined {
 /** The settings sub-object of the form's type, as create and PATCH send it. */
 function settings(
   v: MonitorFormValues,
-): Pick<MonitorCreate, "http"> | Pick<MonitorCreate, "heartbeat"> {
+): Pick<MonitorCreate, "http"> | Pick<MonitorCreate, "tcp"> | Pick<MonitorCreate, "heartbeat"> {
+  if (v.type === "tcp") {
+    return {
+      tcp: {
+        host: v.host.trim(),
+        port: Number(v.port.trim()),
+        failureThreshold: v.failureThreshold,
+      },
+    };
+  }
   if (v.type === "heartbeat") {
     return {
       heartbeat: {
@@ -292,7 +341,7 @@ export function toMonitorRequest(v: MonitorFormValues): MonitorUpdate {
     channelIds: v.channelIds,
     ...(v.projectId ? { projectId: v.projectId } : {}),
     // Heartbeats have no location.
-    ...(v.type === "http" ? { location: locationOf(v) } : {}),
+    ...(v.type !== "heartbeat" ? { location: locationOf(v) } : {}),
     ...settings(v),
   };
 }
@@ -321,7 +370,7 @@ export function toCreateRequest(v: MonitorFormValues): MonitorCreate {
     notificationsEnabled: v.notificationsEnabled,
     channelIds: v.channelIds,
     ...(v.projectId ? { projectId: v.projectId } : {}),
-    ...(v.type === "http" && v.speculaId ? { location: locationOf(v) } : {}),
+    ...(v.type !== "heartbeat" && v.speculaId ? { location: locationOf(v) } : {}),
     ...settings(v),
   };
 }
@@ -388,6 +437,22 @@ export function describeSetup(v: MonitorFormValues): { text: string; blank?: boo
             graceOk ? { text: formatDuration(grace) } : { text: "…", blank: true },
             { text: " late." },
           ]),
+    ];
+  }
+  if (v.type === "tcp") {
+    const host = v.host.trim();
+    const port = v.port.trim();
+    return [
+      { text: "Connects to " },
+      host && port ? { text: `${host}:${port}` } : { text: "your host and port", blank: true },
+      { text: " every minute" },
+      { text: slack ? " and alerts Slack after " : " and marks it down after " },
+      {
+        text:
+          v.failureThreshold === 1
+            ? "the first failure."
+            : `${v.failureThreshold} failures in a row.`,
+      },
     ];
   }
   const host = withoutHttps(v.url.trim()).replace(/\/$/, "");

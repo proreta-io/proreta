@@ -29,6 +29,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/notify"
 	"github.com/proreta-io/proreta/backend/internal/platform/clock"
 	"github.com/proreta-io/proreta/backend/internal/platform/crypto"
+	"github.com/proreta-io/proreta/backend/internal/platform/db"
 	"github.com/proreta-io/proreta/backend/internal/scheduler"
 	"github.com/proreta-io/proreta/backend/internal/testsupport/pgtest"
 )
@@ -652,6 +653,19 @@ func TestIntegrationHousekeeping(t *testing.T) {
 		}
 		if count(`SELECT count(*) FROM rollup_state WHERE watermark = date_trunc('hour', now(), 'UTC')`) != 1 {
 			t.Fatal("watermark is not the start of the current hour")
+		}
+	})
+
+	t.Run("compute_rollups lifts the role's statement timeout for its own transaction", func(t *testing.T) {
+		var got string
+		err := db.WithTx(e.ctx, pool, func(tx pgx.Tx) error {
+			if _, err := task("compute_rollups").Run(e.ctx, tx, time.Now()); err != nil {
+				return err
+			}
+			return tx.QueryRow(e.ctx, `SHOW statement_timeout`).Scan(&got)
+		})
+		if err != nil || got != "5min" {
+			t.Fatalf("statement_timeout after the task = %q, %v; want 5min (the worker role has 30s)", got, err)
 		}
 	})
 

@@ -171,6 +171,9 @@ func (g *Handler) claim(w http.ResponseWriter, r *http.Request) {
 			MonitorID: j.MonitorID, LeaseToken: j.Token, LeaseUntil: j.Until.UTC(), URL: j.URL, Method: j.Method,
 			ExpectedStatus: j.ExpectedStatus, TimeoutSeconds: int(j.Timeout / time.Second),
 		}
+		if j.TCP() {
+			job.Type, job.Host, job.Port = wire.TypeTCP, j.Host, j.Port
+		}
 		if j.Request != "" {
 			sec, err := monitorrequest.Open(g.d.RequestKeys, j.TenantID, j.MonitorID, j.Request)
 			if err != nil {

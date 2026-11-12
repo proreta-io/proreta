@@ -113,7 +113,13 @@ components:
         monitorId: {type: string, format: uuid}
         leaseToken: {type: string, format: uuid, description: "Send it back with the result"}
         leaseUntil: {type: string, format: date-time}
+        type:
+          type: string
+          enum: [http, tcp]
+          description: "The kind of check; absent means `http`. A `tcp` job connects to `host`:`port` and is up when the handshake completes: `url`, `method` and `expectedStatus` are then unused (empty, GET and 2xx) and the result has no status code. An executor that does not know a type must not run the job."
         url: {type: string}
+        host: {type: string, description: "Only for a `tcp` job"}
+        port: {type: integer, minimum: 1, maximum: 65535, description: "Only for a `tcp` job"}
         method: {type: string, enum: [GET, HEAD, POST, PUT, PATCH, DELETE]}
         headers: {type: array, items: {$ref: "#/components/schemas/Header"}}
         body: {type: string, description: "A secret of the monitor; do not log it"}

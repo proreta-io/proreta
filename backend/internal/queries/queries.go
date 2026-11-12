@@ -67,11 +67,14 @@ type Incident struct {
 type Monitor struct {
 	ID        uuid.UUID
 	ProjectID uuid.UUID
-	// Type is "http" or "heartbeat".
+	// Type is "http", "tcp" or "heartbeat".
 	Type           string
 	Name           string
 	URL            string
 	ExpectedStatus string
+	// Host and Port are the target of a tcp monitor.
+	Host string
+	Port int
 	// Method, HeaderNames and BodySet describe the request of an http monitor; values are
 	// sealed and never read here.
 	Method      string
@@ -129,7 +132,8 @@ SELECT m.id, m.project_id, m.type, m.name, COALESCE(m.config ->> 'url', ''), COA
        i.id, i.started_at, COALESCE(i.reason, '` + unknownReason + `'),
        lr.latency_ms, h.last_ping_at,
        CASE WHEN m.type = 'heartbeat' THEN (m.config ->> 'graceSeconds')::numeric::integer END,
-       sp.id, sp.name
+       sp.id, sp.name,
+       COALESCE(m.config ->> 'host', ''), COALESCE((m.config ->> 'port')::integer, 0)
 FROM monitors AS m
 JOIN monitor_state AS s ON s.tenant_id = m.tenant_id AND s.monitor_id = m.id
 LEFT JOIN heartbeat_tokens AS h ON h.tenant_id = m.tenant_id AND h.monitor_id = m.id
@@ -164,7 +168,7 @@ func scanMonitor(row pgx.Row) (Monitor, error) {
 	var speculaName *string
 	err := row.Scan(&m.ID, &m.ProjectID, &m.Type, &m.Name, &m.URL, &m.ExpectedStatus, &m.Method, &m.HeaderNames, &m.BodySet, &interval, &timeout, &threshold, &m.NotificationsEnabled, &m.Paused,
 		&m.CreatedAt, &m.UpdatedAt, &m.Status, &m.StatusSince, &m.LastErrorKind, &m.LastCheckedAt, &m.TLSExpiresAt,
-		&incID, &incStarted, &incReason, &latency, &m.LastPingAt, &grace, &m.SpeculaID, &speculaName)
+		&incID, &incStarted, &incReason, &latency, &m.LastPingAt, &grace, &m.SpeculaID, &speculaName, &m.Host, &m.Port)
 	if err != nil {
 		return Monitor{}, err
 	}

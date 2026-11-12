@@ -249,6 +249,9 @@ func (w *Worker) tick(ctx, checkCtx context.Context) {
 	var deferred []scheduler.Lease
 	for _, j := range jobs {
 		host := hostOf(j.URL)
+		if j.TCP() {
+			host = strings.ToLower(j.Host)
+		}
 		if !w.limiter.TryAcquire(j.TenantID, host) {
 			deferred = append(deferred, j.Lease)
 			continue
@@ -284,6 +287,9 @@ func (w *Worker) check(ctx context.Context, j scheduler.Job, host string) {
 	}()
 	start := time.Now()
 	req := checks.Request{URL: j.URL, Method: j.Method, Timeout: j.Timeout, ExpectedStatus: j.ExpectedStatus}
+	if j.TCP() {
+		req = checks.Request{TCP: true, Host: j.Host, Port: j.Port, Timeout: j.Timeout}
+	}
 	var res checks.Result
 	if j.Request != "" {
 		sec, err := monitorrequest.Open(w.d.RequestKeys, j.TenantID, j.MonitorID, j.Request)

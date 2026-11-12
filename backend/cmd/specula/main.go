@@ -48,7 +48,10 @@ func run() error {
 
 	// The checks reach private addresses on purpose: the customer chose the targets and runs
 	// this process in the network they live in.
-	prober := checks.NewHTTPSProber(safehttp.NewPrivateClient(safehttp.Options{Timeout: checks.DefaultTimeout, MaxRedirects: 3}))
+	prober := checks.Mux{
+		HTTP: checks.NewHTTPSProber(safehttp.NewPrivateClient(safehttp.Options{Timeout: checks.DefaultTimeout, MaxRedirects: 3})),
+		TCP:  checks.NewTCPProber(safehttp.NewPrivateDialer(checks.DefaultTimeout)),
+	}
 	exec := executor.New(executor.Config{
 		BaseURL: cfg.URL, Token: cfg.Token.Value(), Version: version, Hostname: hostname,
 		Concurrency: cfg.Concurrency, PollInterval: cfg.PollInterval,

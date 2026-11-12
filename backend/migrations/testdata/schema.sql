@@ -469,14 +469,19 @@ CASE
     ELSE false
 END)))
 monitors monitors_interval_seconds_check CHECK ((interval_seconds > 0))
-monitors monitors_mvp_interval CHECK (((type <> 'http'::text) OR (interval_seconds = 60)))
-monitors monitors_mvp_timeout CHECK (((type <> 'http'::text) OR (timeout_seconds = 10)))
+monitors monitors_mvp_interval CHECK (((type = 'heartbeat'::text) OR (interval_seconds = 60)))
+monitors monitors_mvp_timeout CHECK (((type = 'heartbeat'::text) OR (timeout_seconds = 10)))
 monitors monitors_name_check CHECK (((char_length(name) >= 1) AND (char_length(name) <= 80)))
 monitors monitors_pkey PRIMARY KEY (id)
 monitors monitors_project_fkey FOREIGN KEY (tenant_id, project_id) REFERENCES projects(tenant_id, id)
+monitors monitors_tcp_check CHECK (((type <> 'tcp'::text) OR ((COALESCE(jsonb_typeof((config -> 'host'::text)), ''::text) = 'string'::text) AND
+CASE
+    WHEN ((jsonb_typeof((config -> 'port'::text)) = 'number'::text) AND ((config ->> 'port'::text) ~ '^[0-9]+$'::text)) THEN ((((config ->> 'port'::text))::numeric >= (1)::numeric) AND (((config ->> 'port'::text))::numeric <= (65535)::numeric))
+    ELSE false
+END)))
 monitors monitors_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id)
 monitors monitors_tenant_id_id_key UNIQUE (tenant_id, id)
-monitors monitors_type_check CHECK ((type = ANY (ARRAY['http'::text, 'heartbeat'::text])))
+monitors monitors_type_check CHECK ((type = ANY (ARRAY['http'::text, 'tcp'::text, 'heartbeat'::text])))
 notification_channels notification_channels_body_template_check CHECK ((char_length(body_template) <= 8192))
 notification_channels notification_channels_config_encrypted_check CHECK (((length(config_encrypted) >= 1) AND (length(config_encrypted) <= 4096)))
 notification_channels notification_channels_config_present CHECK (((deleted_at IS NOT NULL) OR (config_encrypted IS NOT NULL)))
@@ -1110,7 +1115,7 @@ BEGIN
     RETURN QUERY
     SELECT t.id, t.slug, t.name, t.plan_key, pl.name, t.status, t.created_at, t.deleted_at,
            (SELECT count(*)::integer FROM memberships AS m WHERE m.tenant_id = t.id),
-           (SELECT count(*)::integer FROM monitors AS mo WHERE mo.tenant_id = t.id AND mo.type = 'http' AND mo.deleted_at IS NULL),
+           (SELECT count(*)::integer FROM monitors AS mo WHERE mo.tenant_id = t.id AND mo.type <> 'heartbeat' AND mo.deleted_at IS NULL),
            (SELECT count(*)::integer FROM monitors AS mo WHERE mo.tenant_id = t.id AND mo.type = 'heartbeat' AND mo.deleted_at IS NULL)
     FROM tenants AS t
     JOIN plans AS pl ON pl.key = t.plan_key
@@ -1200,7 +1205,7 @@ BEGIN
     )
     SELECT p.id, p.slug, p.name, p.plan_key, pl.name, p.status, p.created_at, p.deleted_at,
            (SELECT count(*)::integer FROM memberships AS m WHERE m.tenant_id = p.id),
-           (SELECT count(*)::integer FROM monitors AS mo WHERE mo.tenant_id = p.id AND mo.type = 'http' AND mo.deleted_at IS NULL),
+           (SELECT count(*)::integer FROM monitors AS mo WHERE mo.tenant_id = p.id AND mo.type <> 'heartbeat' AND mo.deleted_at IS NULL),
            (SELECT count(*)::integer FROM monitors AS mo WHERE mo.tenant_id = p.id AND mo.type = 'heartbeat' AND mo.deleted_at IS NULL),
            p.total::integer
     FROM page AS p
@@ -1561,7 +1566,7 @@ BEGIN
                     FROM tenants AS t),
         'users', (SELECT count(*) FROM users AS u WHERE u.status = 'active'),
         'monitors', (SELECT count(*) FROM monitors AS m JOIN tenants AS t ON t.id = m.tenant_id
-                     WHERE m.type = 'http' AND m.deleted_at IS NULL AND t.deleted_at IS NULL),
+                     WHERE m.type <> 'heartbeat' AND m.deleted_at IS NULL AND t.deleted_at IS NULL),
         'heartbeats', (SELECT count(*) FROM monitors AS m JOIN tenants AS t ON t.id = m.tenant_id
                        WHERE m.type = 'heartbeat' AND m.deleted_at IS NULL AND t.deleted_at IS NULL),
         'plans', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
@@ -1795,7 +1800,7 @@ AS $function$
               d.claim_token, d.specula_id
 $function$
 CREATE OR REPLACE FUNCTION public.claim_due_monitors(n integer, p_location text)
- RETURNS TABLE(tenant_id uuid, monitor_id uuid, location_id uuid, lease_token uuid, lease_until timestamp with time zone, url text, expected_status text, failure_threshold integer, interval_seconds integer, timeout_seconds integer, next_run_at timestamp with time zone, method text, request text)
+ RETURNS TABLE(tenant_id uuid, monitor_id uuid, location_id uuid, lease_token uuid, lease_until timestamp with time zone, url text, expected_status text, failure_threshold integer, interval_seconds integer, timeout_seconds integer, next_run_at timestamp with time zone, method text, request text, monitor_type text, host text, port integer)
  LANGUAGE sql
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
@@ -1812,7 +1817,7 @@ AS $function$
           AND t.deleted_at IS NULL
           AND s.next_run_at <= now()
           AND (s.lease_token IS NULL OR s.lease_until <= now())
-          AND m.type = 'http'
+          AND m.type IN ('http', 'tcp')
           AND NOT m.paused
           AND m.deleted_at IS NULL
           AND (l.kind = 'platform' OR EXISTS (
@@ -1832,9 +1837,10 @@ AS $function$
     WHERE s.monitor_id = due.monitor_id AND s.location_id = due.location_id
       AND m.tenant_id = s.tenant_id AND m.id = s.monitor_id
     RETURNING s.tenant_id, s.monitor_id, s.location_id, s.lease_token, s.lease_until,
-              m.config ->> 'url', COALESCE(m.config ->> 'expectedStatus', '2xx'),
+              COALESCE(m.config ->> 'url', ''), COALESCE(m.config ->> 'expectedStatus', '2xx'),
               m.failure_threshold, m.interval_seconds, m.timeout_seconds, s.next_run_at,
-              COALESCE(m.config ->> 'method', 'GET'), COALESCE(m.config ->> 'request', '')
+              COALESCE(m.config ->> 'method', 'GET'), COALESCE(m.config ->> 'request', ''),
+              m.type, COALESCE(m.config ->> 'host', ''), COALESCE((m.config ->> 'port')::integer, 0)
 $function$
 CREATE OR REPLACE FUNCTION public.claim_mail(n integer)
  RETURNS TABLE(id uuid, kind text, payload bytea, attempts integer, claim_token uuid)
@@ -2361,7 +2367,7 @@ BEGIN
         RAISE EXCEPTION 'monitor_set_location: app.tenant_id is not set' USING ERRCODE = 'insufficient_privilege';
     END IF;
     SELECT project_id INTO mon_project FROM monitors
-    WHERE tenant_id = caller_tenant AND id = p_monitor_id AND deleted_at IS NULL AND type = 'http';
+    WHERE tenant_id = caller_tenant AND id = p_monitor_id AND deleted_at IS NULL AND type IN ('http', 'tcp');
     IF mon_project IS NULL THEN
         RETURN 'no_monitor';
     END IF;
@@ -2520,7 +2526,7 @@ BEGIN
         consecutive_failures = 0,
         lease_token = NULL,
         lease_until = NULL,
-        next_run_at = CASE WHEN m.type = 'http' THEN now() + random() * interval '30 seconds'
+        next_run_at = CASE WHEN m.type IN ('http', 'tcp') THEN now() + random() * interval '30 seconds'
                            ELSE 'infinity'::timestamptz END
     FROM monitors AS m
     WHERE m.tenant_id = caller_tenant AND m.id = p_monitor_id AND m.deleted_at IS NULL

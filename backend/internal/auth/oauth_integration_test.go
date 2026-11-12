@@ -11,6 +11,7 @@ import (
 
 	"github.com/proreta-io/proreta/backend/internal/auth"
 	"github.com/proreta-io/proreta/backend/internal/authz"
+	"github.com/proreta-io/proreta/backend/internal/plans"
 	"github.com/proreta-io/proreta/backend/internal/platform/clock"
 	"github.com/proreta-io/proreta/backend/internal/platform/crypto"
 	"github.com/proreta-io/proreta/backend/internal/platform/db"
@@ -375,6 +376,13 @@ func TestIntegrationOAuthDomains(t *testing.T) {
 	m, err := e.login(auth.OAuthLoginInput{Identity: google("g-m", "m@example.com", "example.com")})
 	if err != nil || m.Role != auth.RoleMember {
 		t.Fatalf("member join: %v %+v", err, m.SessionInfo)
+	}
+	// A join through the domain needs a free place: the free plan holds 3 members and the
+	// organization has them now (admin, the two domain joiners).
+	pgtest.MustExec(t, e.admin, `UPDATE tenants SET plan_key = 'free' WHERE id = '`+admin.Tenant.ID.String()+`'`)
+	var full *plans.LimitError
+	if _, err := e.login(auth.OAuthLoginInput{Identity: google("g-full", "full@example.com", "example.com")}); !errors.As(err, &full) {
+		t.Fatalf("domain join into a full organization: %v", err)
 	}
 	// A stored claim stops joining once the operator removes the domain from the list.
 	if _, err := off0.OAuthLogin(e.ctx, auth.OAuthLoginInput{Identity: google("g-o", "o@example.com", "example.com"), IP: oauthIP}); !errors.Is(err, auth.ErrOAuthNotInvited) {

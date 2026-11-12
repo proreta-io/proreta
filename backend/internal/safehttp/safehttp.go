@@ -23,6 +23,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -151,6 +152,8 @@ func (s schemeCheck) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 type guard struct {
+	// anyPort lifts the port-443 rule for NewDialer (TCP checks); the address rules stay.
+	anyPort  bool
 	extra    []netip.Prefix
 	resolver Resolver
 	dialer   *net.Dialer
@@ -165,6 +168,28 @@ func (g *guard) dialPort() uint16 {
 		return g.testPort
 	}
 	return 443
+}
+
+// NewDialer returns a dial function for TCP checks from our own infrastructure: the same
+// connect-time rules as NewClient (every resolved address must be allowed, the socket is dialed
+// to a validated IP, the control hook checks the actual address again), but to any port, because
+// a TCP monitor's purpose is the port. Redirects do not exist here. Only opts.Timeout,
+// BlockedPrefixes and Resolver apply.
+func NewDialer(opts Options) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = defaultTimeout
+	}
+	resolver := opts.Resolver
+	if resolver == nil {
+		resolver = net.DefaultResolver
+	}
+	g := &guard{
+		anyPort: true, extra: append([]netip.Prefix(nil), opts.BlockedPrefixes...), resolver: resolver,
+		override: opts.dialOverride, testPort: opts.loopbackPort,
+	}
+	g.dialer = &net.Dialer{Timeout: timeout, Control: g.control}
+	return g.dialContext
 }
 
 // allowedAddr is allowed() plus the test-only loopback exception.
@@ -182,7 +207,14 @@ func (g *guard) dialContext(ctx context.Context, network, addr string) (net.Conn
 	if err != nil {
 		return nil, ErrBlockedAddress
 	}
-	if port != allowedPort {
+	dialPort := g.dialPort()
+	if g.anyPort {
+		n, err := strconv.ParseUint(port, 10, 16)
+		if err != nil || n == 0 {
+			return nil, ErrBadPort
+		}
+		dialPort = uint16(n)
+	} else if port != allowedPort {
 		return nil, ErrBadPort
 	}
 	ips, err := g.resolve(ctx, host)
@@ -196,7 +228,7 @@ func (g *guard) dialContext(ctx context.Context, network, addr string) (net.Conn
 	}
 	var lastErr error
 	for _, ip := range ips {
-		target := netip.AddrPortFrom(ip.Unmap(), g.dialPort()).String()
+		target := netip.AddrPortFrom(ip.Unmap(), dialPort).String()
 		var conn net.Conn
 		if g.override != nil {
 			conn, err = g.override(ctx, network, target)
@@ -235,7 +267,7 @@ func (g *guard) control(_, address string, _ syscall.RawConn) error {
 	if err != nil {
 		return ErrBlockedAddress
 	}
-	if ap.Port() != g.dialPort() {
+	if !g.anyPort && ap.Port() != g.dialPort() {
 		return ErrBadPort
 	}
 	if !g.allowedAddr(ap.Addr()) {

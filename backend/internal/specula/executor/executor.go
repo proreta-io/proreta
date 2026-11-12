@@ -236,7 +236,11 @@ func (e *Executor) run(ctx context.Context, j wire.Job) {
 	if !j.LeaseUntil.After(e.cfg.Now()) {
 		return
 	}
+	if j.Type != "" && j.Type != wire.TypeHTTP && j.Type != wire.TypeTCP {
+		return // a type this executor does not know: the lease expires; an upgrade fixes it
+	}
 	req := checks.Request{
+		TCP: j.Type == wire.TypeTCP, Host: j.Host, Port: j.Port,
 		URL: j.URL, Method: j.Method, Body: []byte(j.Body), Timeout: time.Duration(j.TimeoutSeconds) * time.Second,
 		ExpectedStatus: j.ExpectedStatus,
 	}

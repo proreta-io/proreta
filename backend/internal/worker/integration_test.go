@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -468,4 +469,48 @@ func TestIntegrationGracefulShutdown(t *testing.T) {
 			t.Fatal("abandoned check kept its lease")
 		}
 	})
+}
+
+// A tcp monitor is claimed with its host and port and checked by the TCP prober: the stored result
+// has a connect time and no status code, and a closed port is a connect failure.
+func TestIntegrationWorkerChecksTCPMonitors(t *testing.T) {
+	e := newEnv(t, "workertcp")
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			_ = c.Close()
+		}
+	}()
+	closed, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closedPort := closed.Addr().(*net.TCPAddr).Port
+	_ = closed.Close()
+
+	tcpMonitor := func(port int) uuid.UUID {
+		id := e.monitor(tenantA, "https://unused.example.com", 2)
+		pgtest.MustExec(t, e.admin, fmt.Sprintf(`UPDATE monitors SET type = 'tcp', config = '{"host":"127.0.0.1","port":%d}' WHERE id = '%s'`, port, id))
+		return id
+	}
+	up, down := tcpMonitor(l.Addr().(*net.TCPAddr).Port), tcpMonitor(closedPort)
+	plain := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, addr)
+	}
+	w, _ := e.worker(checks.Mux{HTTP: &fakeProber{}, TCP: checks.NewTCPProber(plain)}, worker.Config{})
+	w.RunOnce(e.ctx)
+	if n := e.count(`SELECT count(*) FROM check_results WHERE monitor_id = $1 AND ok AND status_code IS NULL AND latency_ms IS NOT NULL AND error_kind IS NULL`, up); n != 1 {
+		t.Errorf("reachable port: %d matching results", n)
+	}
+	if n := e.count(`SELECT count(*) FROM check_results WHERE monitor_id = $1 AND NOT ok AND error_kind = 'connect' AND latency_ms IS NULL`, down); n != 1 {
+		t.Errorf("closed port: %d matching results", n)
+	}
 }

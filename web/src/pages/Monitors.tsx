@@ -33,6 +33,7 @@ import { formatAgo, formatClock, formatMs, formatPercent, formatSince } from "..
 import {
   downReason,
   filterMonitors,
+  targetText,
   monitorState,
   quietState,
   sortMonitors,
@@ -41,7 +42,6 @@ import {
   summaryParts,
 } from "../lib/monitors";
 import { atHeartbeatLimit, atMonitorLimit, countOf, useUsage } from "../lib/usage";
-import { withoutHttps } from "../lib/monitorForm";
 import { useNow } from "../lib/useNow";
 import { ROLE_HINTS } from "../lib/roles";
 import { useProjectScope } from "../lib/useProjectScope";
@@ -374,7 +374,7 @@ function MonitorRow({
   const isDown = state === "down";
   const heartbeat = isHeartbeat(m);
   const checked = formatAgo(m.heartbeat ? m.heartbeat.lastPingAt : m.lastCheckedAt, now);
-  const responseMs = m.http?.lastResponseMs;
+  const responseMs = m.http?.lastResponseMs ?? m.tcp?.lastResponseMs;
   const figure = cx("text-mono", isDown ? "font-medium text-down" : "text-muted-foreground");
   return (
     <Tr tone={isDown ? "down" : "default"} interactive onClick={onOpen}>
@@ -397,8 +397,9 @@ function MonitorRow({
               {m.name}
             </Link>
             {heartbeat && <Badge tone="strong">Watchdog</Badge>}
+            {m.tcp && <Badge>TCP</Badge>}
             <span className="min-w-0 truncate font-mono text-mono text-subtle-foreground">
-              {m.heartbeat ? expectationText(m.heartbeat) : withoutHttps(m.http?.url ?? "")}
+              {m.heartbeat ? expectationText(m.heartbeat) : targetText(m)}
             </span>
           </span>
           {isDown && (
