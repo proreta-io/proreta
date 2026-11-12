@@ -34,6 +34,8 @@ Permissions of the `organization` level are held only through an organization ro
 | `statuspage.manage` | project | Configure, protect and publish the status pages of a project | yes | yes | | |
 | `organization.statuspages.read` | organization | Read the organization-level status pages | yes | yes | yes | yes |
 | `organization.statuspages.manage` | organization | Configure, protect and publish organization-level status pages | yes | yes | | |
+| `specula.read` | project | List the Specula executors the project may use | yes | yes | yes | yes |
+| `specula.manage` | organization | Register, rename, share and revoke Specula executors | yes | yes | | |
 
 ## Operations
 
@@ -136,6 +138,11 @@ Operations marked `public` need no session. Operations marked `platform admin` a
 | `RemoveProjectMember` | `DELETE /api/v1/projects/{projectId}/members/{userId}` | `project.members.manage` |
 | `PutProjectMember` | `PUT /api/v1/projects/{projectId}/members/{userId}` | `project.members.manage` |
 | `GetPublicConfig` | `GET /api/v1/public/config` | `public` |
+| `ListSpecula` | `GET /api/v1/specula` | `specula.read` |
+| `CreateSpecula` | `POST /api/v1/specula` | `specula.manage` |
+| `RevokeSpecula` | `DELETE /api/v1/specula/{speculaId}` | `specula.manage` |
+| `GetSpecula` | `GET /api/v1/specula/{speculaId}` | `specula.read` |
+| `UpdateSpecula` | `PATCH /api/v1/specula/{speculaId}` | `specula.manage` |
 | `ListStatusPages` | `GET /api/v1/status-pages` | `statuspage.read` |
 | `CreateStatusPage` | `POST /api/v1/status-pages` | `statuspage.manage` |
 | `DeleteStatusPage` | `DELETE /api/v1/status-pages/{statusPageId}` | `statuspage.manage` |

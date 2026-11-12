@@ -14,23 +14,26 @@ func TestVisibleSpecula(t *testing.T) {
 	mine, other := uuid.New(), uuid.New()
 	now := time.Now()
 	revoked := now
+	shared := func(ids ...uuid.UUID) specula.Specula { return specula.Specula{ProjectIDs: ids} }
 	cases := []struct {
-		name string
-		role authz.Role
-		sp   specula.Specula
-		want bool
+		name  string
+		actor authz.Actor
+		sp    specula.Specula
+		want  bool
 	}{
-		{"owner sees a Specula of a project it is not in", authz.Owner, specula.Specula{ProjectIDs: []uuid.UUID{other}}, true},
-		{"maintainer sees a revoked one", authz.Maintainer, specula.Specula{AllProjects: true, RevokedAt: &revoked}, true},
-		{"member sees one shared with all projects", authz.Member, specula.Specula{AllProjects: true}, true},
-		{"member sees one shared with its project", authz.Member, specula.Specula{ProjectIDs: []uuid.UUID{mine}}, true},
-		{"member does not see one shared with another project", authz.Member, specula.Specula{ProjectIDs: []uuid.UUID{other}}, false},
-		{"member does not see a revoked one", authz.Member, specula.Specula{AllProjects: true, RevokedAt: &revoked}, false},
-		{"viewer sees one shared with its project", authz.Viewer, specula.Specula{ProjectIDs: []uuid.UUID{mine}}, true},
+		{"owner sees a Specula of a project it has no direct role in", authz.Actor{Role: authz.Owner}, shared(other), true},
+		{"maintainer sees a revoked one", authz.Actor{Role: authz.Maintainer}, specula.Specula{AllProjects: true, RevokedAt: &revoked}, true},
+		// An organization role covers every project.
+		{"org member sees one shared with any project", authz.Actor{Role: authz.Member}, shared(other), true},
+		{"org viewer does not see a revoked one", authz.Actor{Role: authz.Viewer}, specula.Specula{AllProjects: true, RevokedAt: &revoked}, false},
+		// A person with project roles only sees what their projects may use.
+		{"project-only member sees one shared with all projects", authz.Actor{Projects: map[uuid.UUID]authz.Role{mine: authz.Member}}, specula.Specula{AllProjects: true}, true},
+		{"project-only member sees one shared with its project", authz.Actor{Projects: map[uuid.UUID]authz.Role{mine: authz.Member}}, shared(mine), true},
+		{"project-only member does not see one shared with another project", authz.Actor{Projects: map[uuid.UUID]authz.Role{mine: authz.Member}}, shared(other), false},
+		{"project-only maintainer cannot manage, so a revoked one stays hidden", authz.Actor{Projects: map[uuid.UUID]authz.Role{mine: authz.Maintainer}}, specula.Specula{AllProjects: true, RevokedAt: &revoked}, false},
 	}
 	for _, tc := range cases {
-		a := authz.Actor{Role: tc.role, Projects: map[uuid.UUID]authz.Role{mine: authz.Member}}
-		if got := visibleSpecula(a, tc.sp); got != tc.want {
+		if got := visibleSpecula(tc.actor, tc.sp); got != tc.want {
 			t.Errorf("%s: %v, want %v", tc.name, got, tc.want)
 		}
 	}

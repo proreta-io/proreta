@@ -191,7 +191,7 @@ func TestIntegrationRoleMatrix(t *testing.T) {
 	// project invitation follows the project role (see TestIntegrationProjectInvitationPermissions).
 	orgScoped := map[string]bool{}
 	for _, op := range []string{"updateMember", "removeMember", "createInvitation",
-		"getUsage", "createProject", "deleteOrganization", "listAuthDomains", "createAuthDomain", "updateAuthDomain", "deleteAuthDomain",
+		"getUsage", "createProject", "deleteOrganization", "createSpecula", "updateSpecula", "revokeSpecula", "listAuthDomains", "createAuthDomain", "updateAuthDomain", "deleteAuthDomain",
 		// The request of the matrix names no project, which makes the page organization-level.
 		"createStatusPage"} {
 		orgScoped[strings.ToLower(op)] = true

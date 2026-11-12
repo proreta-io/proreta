@@ -233,6 +233,7 @@ func TestHigher(t *testing.T) {
 var expectedInProject = map[Permission][]Role{
 	"project.read":           {Owner, Maintainer, Member, Viewer},
 	"project.members.read":   {Owner, Maintainer, Member, Viewer},
+	"specula.read":           {Owner, Maintainer, Member, Viewer},
 	"monitor.read":           {Owner, Maintainer, Member, Viewer},
 	"incident.read":          {Owner, Maintainer, Member, Viewer},
 	"channel.read":           {Owner, Maintainer, Member, Viewer},
@@ -256,6 +257,7 @@ var expectedInOrganization = map[Permission][]Role{
 	"project.create":                  {Owner, Maintainer},
 	"organization.members.manage":     {Owner, Maintainer},
 	"organization.statuspages.manage": {Owner, Maintainer},
+	"specula.manage":                  {Owner, Maintainer},
 	"organization.delete":             {Owner},
 	"organization.domains.manage":     {Owner},
 }
