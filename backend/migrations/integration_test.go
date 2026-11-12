@@ -79,6 +79,11 @@ var definerAllowList = map[string][]string{
 	"monitor_set_location": {"proreta_api"},
 	// Marks the monitors of a revoked or silent Specula unknown.
 	"specula_mark_unreachable": {"proreta_worker"},
+	// Opens and resolves the incidents of silent Specula and queues their notifications; the status
+	// counts feed the gauge; the delivery context routes a queued Specula notification.
+	"specula_sync_offline":     {"proreta_worker"},
+	"specula_status_counts":    {"proreta_worker"},
+	"specula_delivery_context": {"proreta_worker"},
 	"compute_rollups":          {"proreta_worker"},
 	// Rollups from the watermark in rollup_state.
 	"compute_rollups_catch_up": {"proreta_worker"},
@@ -189,6 +194,11 @@ var extraPolicies = map[string]struct {
 	// specula_mark_unreachable.
 	"monitor_state.owner_specula_unreachable_read":  {cmd: "r", roles: []string{"proreta_owner"}},
 	"monitor_state.owner_specula_unreachable_write": {cmd: "w", roles: []string{"proreta_owner"}},
+	// specula_sync_offline.
+	"incidents.owner_specula_offline_incident_insert":           {cmd: "a", roles: []string{"proreta_owner"}},
+	"incidents.owner_specula_offline_incident_resolve":          {cmd: "w", roles: []string{"proreta_owner"}},
+	"incident_monitors.owner_specula_offline_incident_monitors": {cmd: "a", roles: []string{"proreta_owner"}},
+	"monitor_locations.owner_specula_offline_locations":         {cmd: "r", roles: []string{"proreta_owner"}},
 }
 
 var runtimeRoles = []string{"proreta_api", "proreta_statuspage", "proreta_worker"}

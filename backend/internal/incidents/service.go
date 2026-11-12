@@ -236,7 +236,7 @@ func (s *Service) enqueue(ctx context.Context, q *incidentsdb.Queries, in Result
 				continue
 			}
 			if err := q.InsertDelivery(ctx, incidentsdb.InsertDeliveryParams{
-				ID: uuidv7.New(), TenantID: in.TenantID, Kind: string(kind), MonitorID: in.MonitorID,
+				ID: uuidv7.New(), TenantID: in.TenantID, Kind: string(kind), MonitorID: &in.MonitorID,
 				IncidentID: incident, ChannelID: ch.ID, Payload: raw,
 			}); err != nil {
 				return fmt.Errorf("incidents: enqueue %s: %w", kind, err)

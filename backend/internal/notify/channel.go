@@ -13,10 +13,16 @@ const (
 	EventDown        = "down"
 	EventRecovered   = "recovered"
 	EventTLSExpiring = "tls_expiring"
+	// EventAgentOffline and EventAgentOnline are sent when a Specula goes silent and when it is back.
+	EventAgentOffline = "agent_offline"
+	EventAgentOnline  = "agent_online"
 )
 
-// AllEvents is the default of a new channel, in display order.
-var AllEvents = []string{EventDown, EventRecovered, EventTLSExpiring}
+// AllEvents lists every event a channel can subscribe to, in display order.
+var AllEvents = []string{EventDown, EventRecovered, EventTLSExpiring, EventAgentOffline, EventAgentOnline}
+
+// DefaultEvents is what a new channel receives when it names no events.
+var DefaultEvents = []string{EventDown, EventRecovered, EventTLSExpiring}
 
 // Channel limits (the database enforces them too).
 const (
@@ -57,7 +63,7 @@ func ValidateEvents(events []string) ([]string, string) {
 	}
 	for _, e := range events {
 		if !slices.Contains(AllEvents, e) {
-			return nil, `must be "down", "recovered" or "tls_expiring"`
+			return nil, `must be "down", "recovered", "tls_expiring", "agent_offline" or "agent_online"`
 		}
 	}
 	var out []string

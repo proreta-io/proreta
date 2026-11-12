@@ -11,6 +11,8 @@ import (
 // undecryptable); every other value is a channel type (notification_channels.type).
 const channelTypeUnknown = "unknown"
 
+var speculaStatuses = []string{"pending", "online", "offline", "revoked"}
+
 // Metrics are the jobs metrics, served on the admin port.
 type Metrics struct {
 	deliveries   *prometheus.CounterVec
@@ -25,6 +27,10 @@ type Metrics struct {
 	heartbeatsMissed prometheus.Counter
 	// statusSnapshots counts status page snapshots stored by the rebuild task.
 	statusSnapshots prometheus.Counter
+	// speculaAgents is the number of Specula by status; speculaIncidents counts the incidents
+	// opened (event offline) and resolved (online) by the offline task.
+	speculaAgents    *prometheus.GaugeVec
+	speculaIncidents *prometheus.CounterVec
 	// mail* are the outgoing email metrics (the mail outbox).
 	mail            *prometheus.CounterVec
 	mailDuration    prometheus.Histogram
@@ -63,6 +69,12 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		statusSnapshots: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "proreta_jobs_status_page_snapshots_total", Help: "Status page snapshots rebuilt and stored.",
 		}),
+		speculaAgents: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "proreta_jobs_specula_agents", Help: "Specula by status (pending, online, offline, revoked), all tenants.",
+		}, []string{"status"}),
+		speculaIncidents: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "proreta_jobs_specula_incidents_total", Help: "Specula incidents opened (offline) and resolved (online).",
+		}, []string{"event"}),
 		mail: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "proreta_jobs_mail_total", Help: "Mail attempts recorded, by message kind and result (sent, retry, failed).",
 		}, []string{"kind", "result"}),
@@ -87,10 +99,16 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			m.deliveries.WithLabelValues(t, s)
 		}
 	}
+	for _, s := range speculaStatuses {
+		m.speculaAgents.WithLabelValues(s)
+	}
+	for _, e := range []string{"offline", "online"} {
+		m.speculaIncidents.WithLabelValues(e)
+	}
 	for _, r := range []string{keptRollupsIncomplete, keptError} {
 		m.partitionsKept.WithLabelValues(r)
 	}
 	reg.MustRegister(m.deliveries, m.duration, m.pending, m.claimErrors, m.housekeeping, m.lastSuccess, m.partitionsKept, m.heartbeatsMissed, m.statusSnapshots,
-		m.mail, m.mailDuration, m.mailPending, m.mailClaimErrors)
+		m.speculaAgents, m.speculaIncidents, m.mail, m.mailDuration, m.mailPending, m.mailClaimErrors)
 	return m
 }

@@ -55,7 +55,7 @@ func TestIntegrationNotificationChannels(t *testing.T) {
 			{"name", "''"},
 			{"name", "'" + strings.Repeat("x", 61) + "'"},
 			{"events", "'{}'"},
-			{"events", "'{down,agent_offline}'"},
+			{"events", "'{down,agent_sleeping}'"},
 			{"mention", "'{@everyone}'"},
 			{"mention", "'{<https://evil|x>}'"},
 			{"mention", "'{@here,@channel,<@U123>,<@U456>}'"},

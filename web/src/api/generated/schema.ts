@@ -2588,7 +2588,8 @@ export interface components {
      *     example private, address), `bad_port` (a connection or redirect to a port other than 443),
      *     `redirect` (too many redirects or a redirect to a non-HTTPS URL), `unexpected_status`
      *     (the answer's status did not match `expectedStatus`), `other` (any other failure) and,
-     *     for heartbeats, `heartbeat_missed` (no ping before the deadline). New values may be added:
+     *     for heartbeats, `heartbeat_missed` (no ping before the deadline) and, for a monitor that runs on
+     *     a Specula, `agent_offline` (the Specula went silent). New values may be added:
      *     clients must show an unknown value as it is.
      * @example timeout
      */
@@ -2813,10 +2814,10 @@ export interface components {
      */
     ChannelType: "slack_webhook" | "webhook";
     /**
-     * @description `down`: a monitor went down (and reminders while it stays down); `recovered`: it is back up; `tls_expiring`: its TLS certificate expires within 14 days
+     * @description `down`: a monitor went down (and reminders while it stays down); `recovered`: it is back up; `tls_expiring`: its TLS certificate expires within 14 days; `agent_offline`: a Specula has been silent for 3 minutes; `agent_online`: it is heard again
      * @enum {string}
      */
-    ChannelEvent: "down" | "recovered" | "tls_expiring";
+    ChannelEvent: "down" | "recovered" | "tls_expiring" | "agent_offline" | "agent_online";
     ChannelEvents: components["schemas"]["ChannelEvent"][];
     /**
      * @description Slack mentions put in front of `down` and reminder messages (Slack channels only; a `webhook` channel must have none); each is `@here`, `@channel`, `<!subteam^ID>` or `<@UID>` (400 otherwise)
@@ -2868,11 +2869,13 @@ export interface components {
     WebhookContentType: "json" | "text";
     /**
      * @description The body of the message a `webhook` channel sends, with placeholders written `{{name}}`.
-     *     Known names: `event` (`opened`, `resolved`, `reminder`, `tls_expiring`, `test`), `status`
-     *     (`down` or `up`), `monitor.id`, `monitor.name`, `monitor.url`, `monitor.type`,
+     *     Known names: `event` (`opened`, `resolved`, `reminder`, `tls_expiring`, `agent_offline`,
+     *     `agent_online`, `test`), `status` (`down`, `up`, `offline` or `online`), `monitor.id`, `monitor.name`, `monitor.url`, `monitor.type`,
      *     `project.name`, `organization.name`, `incident.id`, `incident.startedAt` and
      *     `incident.resolvedAt` (RFC 3339, UTC), `incident.duration` (for example `5m`),
-     *     `error.kind`, `tls.expiresAt`, `tls.daysLeft` and `link` (the monitor in the dashboard). A
+     *     `specula.id` and `specula.name` (the Specula events only; `monitor.*` is empty for them),
+     *     `error.kind`, `tls.expiresAt`, `tls.daysLeft` and `link` (the monitor in the dashboard, the
+     *     Specula page for the Specula events). A
      *     value that does not exist for the event is empty. An unknown name is 422. With `json` the
      *     template rendered with sample data must be one valid JSON document.
      */

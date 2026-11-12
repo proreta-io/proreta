@@ -86,10 +86,12 @@ type Deliverer struct {
 
 // delivery is one claimed outbox row.
 type delivery struct {
-	ID        uuid.UUID
-	TenantID  uuid.UUID
-	Kind      string
-	MonitorID uuid.UUID
+	ID       uuid.UUID
+	TenantID uuid.UUID
+	Kind     string
+	// MonitorID is nil for the Specula events, which carry SpeculaID instead.
+	MonitorID *uuid.UUID
+	SpeculaID *uuid.UUID
 	// IncidentID is nil for tls_expiring.
 	IncidentID *uuid.UUID
 	ChannelID  uuid.UUID
@@ -192,14 +194,14 @@ func (r *Deliverer) claim(ctx context.Context, n int) ([]delivery, error) {
 	defer cancel()
 	var out []delivery
 	err := db.WithTx(ctx, r.d.Pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT id, tenant_id, kind, monitor_id, incident_id, channel_id, payload, attempts, claim_token FROM claim_deliveries($1)`, n)
+		rows, err := tx.Query(ctx, `SELECT id, tenant_id, kind, monitor_id, incident_id, channel_id, payload, attempts, claim_token, specula_id FROM claim_deliveries($1)`, n)
 		if err != nil {
 			return err
 		}
 		out, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (delivery, error) {
 			var dl delivery
 			var attempts int32
-			err := row.Scan(&dl.ID, &dl.TenantID, &dl.Kind, &dl.MonitorID, &dl.IncidentID, &dl.ChannelID, &dl.Payload, &attempts, &dl.Token)
+			err := row.Scan(&dl.ID, &dl.TenantID, &dl.Kind, &dl.MonitorID, &dl.IncidentID, &dl.ChannelID, &dl.Payload, &attempts, &dl.Token, &dl.SpeculaID)
 			dl.Attempts = int(attempts)
 			return dl, err
 		})
@@ -215,12 +217,23 @@ func (r *Deliverer) claim(ctx context.Context, n int) ([]delivery, error) {
 // contains the webhook URL or a raw transport error.
 func (r *Deliverer) deliver(ctx context.Context, dl delivery) {
 	ctx, _ = logging.WithFields(ctx)
-	log := r.d.Log.With("delivery_id", dl.ID, "monitor_id", dl.MonitorID, "kind", dl.Kind)
+	log := r.d.Log.With("delivery_id", dl.ID, "monitor_id", dl.MonitorID, "specula_id", dl.SpeculaID, "kind", dl.Kind)
 
 	var target notify.Target
 	stillDown, routed := true, true
 	err := r.tenantTx(ctx, dl.TenantID, func(tx pgx.Tx) error {
 		var err error
+		if dl.SpeculaID != nil {
+			var hook notify.WebhookContext
+			if hook, routed, err = r.d.Channels.LoadSpeculaContext(ctx, tx, *dl.SpeculaID, dl.ChannelID); err != nil {
+				return err
+			}
+			if target, err = r.d.Channels.DeliveryTarget(ctx, tx, dl.TenantID, dl.ChannelID); err != nil {
+				return err
+			}
+			target.Hook = hook
+			return nil
+		}
 		if dl.Kind == notify.DeliveryReminder && dl.IncidentID != nil {
 			// A reminder queued before the incident resolved (or the monitor was paused or
 			// deleted) must not say the monitor is still down.
@@ -232,11 +245,11 @@ func (r *Deliverer) deliver(ctx context.Context, dl delivery) {
 			return err
 		}
 		if target.Type == notify.TypeWebhook && !target.Deleted {
-			if target.Hook, err = r.d.Channels.LoadWebhookContext(ctx, tx, dl.MonitorID); err != nil {
+			if target.Hook, err = r.d.Channels.LoadWebhookContext(ctx, tx, *dl.MonitorID); err != nil {
 				return err
 			}
 		}
-		routed, err = incidents.StillRouted(ctx, tx, dl.TenantID, dl.MonitorID, dl.ChannelID)
+		routed, err = incidents.StillRouted(ctx, tx, dl.TenantID, *dl.MonitorID, dl.ChannelID)
 		return err
 	})
 	var reason string

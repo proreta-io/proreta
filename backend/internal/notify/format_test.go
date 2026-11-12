@@ -122,9 +122,10 @@ func TestFormatRejectsBadPayloads(t *testing.T) {
 		kind string
 		raw  string
 	}{
-		"not json":         {DeliveryOpened, "nope"},
-		"unknown kind":     {"agent_offline", `{"monitorName":"a"}`},
-		"tls without date": {DeliveryTLSExpiring, `{"monitorName":"a","daysLeft":3}`},
+		"not json":              {DeliveryOpened, "nope"},
+		"unknown kind":          {"sleeping", `{"monitorName":"a"}`},
+		"agent without specula": {DeliveryAgentOnline, `{"monitorName":"a"}`},
+		"tls without date":      {DeliveryTLSExpiring, `{"monitorName":"a","daysLeft":3}`},
 	} {
 		if _, err := Format(c.kind, []byte(c.raw), publicURL); !errors.Is(err, ErrBadPayload) {
 			t.Errorf("%s: err = %v", name, err)
@@ -202,5 +203,34 @@ func TestMessageMentions(t *testing.T) {
 	}
 	if _, err := Message("nope", reminder, publicURL, nil); !errors.Is(err, ErrBadPayload) {
 		t.Fatalf("bad kind: %v", err)
+	}
+}
+
+func TestFormatAgentEvents(t *testing.T) {
+	id := uuid.MustParse("01920000-0000-7000-8000-0000000000bb")
+	started := time.Date(2026, 10, 20, 9, 5, 7, 0, time.UTC)
+	off := mustJSON(t, map[string]any{"speculaId": id, "speculaName": "Office <net>", "startedAt": started, "monitorCount": 2})
+	got, err := Message(DeliveryAgentOffline, off, publicURL, []string{"@here"})
+	want := "<!here> :red_circle: Specula *Office &lt;net&gt;* is offline\n2 monitors show unknown until it is back\nSince: 2026-10-20 09:05:07 UTC\n<https://proreta.example.com/specula|Open in Proreta>"
+	if err != nil || got != want {
+		t.Fatalf("offline = %q, %v", got, err)
+	}
+	on := mustJSON(t, map[string]any{"speculaId": id, "speculaName": "Office", "durationSeconds": 725})
+	got, err = Message(DeliveryAgentOnline, on, publicURL, []string{"@here"})
+	if err != nil || got != ":large_green_circle: Specula *Office* is back online after 12m\n<https://proreta.example.com/specula|Open in Proreta>" {
+		t.Fatalf("online = %q, %v", got, err) // no mention: only the alarm calls for attention
+	}
+
+	v, err := WebhookValues(DeliveryAgentOffline, off, publicURL, WebhookContext{OrganizationName: "Acme"})
+	if err != nil || v["event"] != "agent_offline" || v["status"] != "offline" || v["specula.name"] != "Office <net>" ||
+		v["specula.id"] != id.String() || v["monitor.id"] != "" || v["link"] != publicURL+"/specula" || v["organization.name"] != "Acme" {
+		t.Fatalf("values = %v, %v", v, err)
+	}
+}
+
+func TestValidateEventsAgent(t *testing.T) {
+	got, msg := ValidateEvents([]string{"agent_online", "down", "agent_offline"})
+	if msg != "" || strings.Join(got, ",") != "down,agent_offline,agent_online" {
+		t.Fatalf("got %v %q", got, msg)
 	}
 }

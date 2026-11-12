@@ -19,6 +19,9 @@ const (
 	DeliveryTLSExpiring = "tls_expiring"
 	// DeliveryReminder is queued by enqueue_incident_reminders while an incident stays open.
 	DeliveryReminder = "reminder"
+	// DeliveryAgentOffline and DeliveryAgentOnline are queued by specula_sync_offline.
+	DeliveryAgentOffline = "agent_offline"
+	DeliveryAgentOnline  = "agent_online"
 )
 
 // Payload is the outbox payload written by internal/incidents and enqueue_incident_reminders.
@@ -34,6 +37,10 @@ type Payload struct {
 	DurationSeconds int64      `json:"durationSeconds,omitempty"`
 	TLSNotAfter     *time.Time `json:"tlsNotAfter,omitempty"`
 	DaysLeft        *int       `json:"daysLeft,omitempty"`
+	// SpeculaID, SpeculaName and MonitorCount are set for agent_offline and agent_online.
+	SpeculaID    *uuid.UUID `json:"speculaId,omitempty"`
+	SpeculaName  string     `json:"speculaName,omitempty"`
+	MonitorCount int        `json:"monitorCount,omitempty"`
 }
 
 // ErrBadPayload means an outbox row cannot be turned into a message; retrying will not help.
@@ -58,6 +65,14 @@ func Format(kind string, raw []byte, publicURL string) (string, error) {
 		return FormatTLSExpiring(p), nil
 	case DeliveryReminder:
 		return FormatReminder(p), nil
+	case DeliveryAgentOffline, DeliveryAgentOnline:
+		if p.SpeculaID == nil {
+			return "", ErrBadPayload
+		}
+		if kind == DeliveryAgentOnline {
+			return FormatAgentOnline(p, publicURL), nil
+		}
+		return FormatAgentOffline(p, publicURL), nil
 	}
 	return "", ErrBadPayload
 }
@@ -66,7 +81,7 @@ func Format(kind string, raw []byte, publicURL string) (string, error) {
 // (opened and reminder); other kinds never mention anybody.
 func Message(kind string, raw []byte, publicURL string, mention []string) (string, error) {
 	text, err := Format(kind, raw, publicURL)
-	if err != nil || (kind != DeliveryOpened && kind != DeliveryReminder) {
+	if err != nil || (kind != DeliveryOpened && kind != DeliveryReminder && kind != DeliveryAgentOffline) {
 		return text, err
 	}
 	var parts []string
@@ -94,6 +109,30 @@ func FormatOpened(p Payload, publicURL string) string {
 	}
 	fmt.Fprintf(&b, "\n<%s/monitors/%s|Open in Proreta>", Escape(publicURL), p.MonitorID)
 	return b.String()
+}
+
+// FormatAgentOffline: the Specula went silent; its monitors show unknown meanwhile.
+func FormatAgentOffline(p Payload, publicURL string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, ":red_circle: Specula *%s* is offline", Escape(p.SpeculaName))
+	if p.MonitorCount > 0 {
+		unit := "monitors show"
+		if p.MonitorCount == 1 {
+			unit = "monitor shows"
+		}
+		fmt.Fprintf(&b, "\n%d %s unknown until it is back", p.MonitorCount, unit)
+	}
+	if p.StartedAt != nil {
+		b.WriteString("\nSince: " + p.StartedAt.UTC().Format("2006-01-02 15:04:05") + " UTC")
+	}
+	fmt.Fprintf(&b, "\n<%s/specula|Open in Proreta>", Escape(publicURL))
+	return b.String()
+}
+
+// FormatAgentOnline: `:large_green_circle: Specula *{name}* is back online after {duration}`.
+func FormatAgentOnline(p Payload, publicURL string) string {
+	return fmt.Sprintf(":large_green_circle: Specula *%s* is back online after %s\n<%s/specula|Open in Proreta>",
+		Escape(p.SpeculaName), HumanDuration(time.Duration(p.DurationSeconds)*time.Second), Escape(publicURL))
 }
 
 // reasonText is the Reason line of an opened message: the error kind, with an explanation for

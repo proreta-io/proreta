@@ -30,7 +30,7 @@ var Placeholders = []string{
 	"monitor.id", "monitor.name", "monitor.url", "monitor.type",
 	"project.name", "organization.name",
 	"incident.id", "incident.startedAt", "incident.resolvedAt", "incident.duration",
-	"error.kind", "tls.expiresAt", "tls.daysLeft", "link",
+	"specula.id", "specula.name", "error.kind", "tls.expiresAt", "tls.daysLeft", "link",
 }
 
 // Template defaults, used when a channel is created without a template.
@@ -201,6 +201,8 @@ func SampleData(publicURL string) map[string]string {
 		"incident.startedAt":  "2026-01-02T03:04:05Z",
 		"incident.resolvedAt": "2026-01-02T03:09:05Z",
 		"incident.duration":   "5m",
+		"specula.id":          "0190a8d0-0000-7000-8000-000000000003",
+		"specula.name":        "Office network",
 		"error.kind":          "timeout",
 		"tls.expiresAt":       "2026-02-01T00:00:00Z",
 		"tls.daysLeft":        "30",

@@ -155,7 +155,7 @@ func TestIntegrationChannelsAPI(t *testing.T) {
 	// mentions outside the pattern.
 	for _, body := range []string{
 		`{"name":"x","webhookUrl":"` + slackURL + `","extra":1}`,
-		`{"name":"x","webhookUrl":"` + slackURL + `","events":["agent_offline"]}`,
+		`{"name":"x","webhookUrl":"` + slackURL + `","events":["agent_sleeping"]}`,
 		`{"name":"x","webhookUrl":"` + slackURL + `","events":[]}`,
 		`{"name":"x","webhookUrl":"` + slackURL + `","mention":["@here","@channel","<@U1>","<@U2>"]}`,
 		`{"name":"x","webhookUrl":"` + slackURL + `","reminderMinutes":1441}`,

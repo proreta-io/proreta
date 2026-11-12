@@ -5,7 +5,7 @@ A webhook channel sends every alert of its events to an `https` endpoint you cho
 Owners and maintainers of a project (or of the organization, for an organization-wide channel) create channels under **Settings → Notification channels → Add channel → Webhook**. The permission is the same as for Slack channels (`channel.manage`, see [Roles and permissions](../roles.md)).
 
 ## What is sent
-For each event of the channel (`down`, `recovered`, `tls_expiring`, and reminders while an incident stays open) Proreta renders the template and sends:
+For each event of the channel (`down`, `recovered`, `tls_expiring`, `agent_offline`, `agent_online`, and reminders while an incident stays open) Proreta renders the template and sends:
 
 - `POST <your URL>`
 - `Content-Type: application/json` for the content type **JSON**, `text/plain; charset=utf-8` for **Plain text**
@@ -19,14 +19,15 @@ Write a placeholder as `{{name}}` (spaces inside the braces are ignored). A name
 
 | Name | Value |
 |---|---|
-| `event` | `opened`, `resolved`, `reminder`, `tls_expiring` or `test` |
-| `status` | `down` (opened, reminder, test) or `up` (resolved, tls_expiring) |
+| `event` | `opened`, `resolved`, `reminder`, `tls_expiring`, `agent_offline`, `agent_online` or `test` |
+| `status` | `down` (opened, reminder, test), `up` (resolved, tls_expiring), `offline` or `online` (the Specula events) |
 | `monitor.id`, `monitor.name`, `monitor.type` | The monitor's id, name and type (`http` or `heartbeat`) |
 | `monitor.url` | The monitor URL without query string or fragment (they often carry tokens) |
 | `project.name`, `organization.name` | Names of the monitor's project and of the organization |
 | `incident.id` | The incident id (not for `tls_expiring`) |
 | `incident.startedAt`, `incident.resolvedAt` | RFC 3339, UTC; `resolvedAt` only when the incident is resolved |
 | `incident.duration` | Human readable, for example `5m` or `2h 5m`; `resolved` and `reminder` only |
+| `specula.id`, `specula.name` | The Specula; `agent_offline` and `agent_online` only (`monitor.*` is empty for them and `link` opens the Specula page) |
 | `error.kind` | Why the monitor went down, for example `timeout` or `heartbeat_missed` |
 | `tls.expiresAt`, `tls.daysLeft` | `tls_expiring` only |
 | `link` | The monitor in the dashboard, built from the public URL of the installation |
