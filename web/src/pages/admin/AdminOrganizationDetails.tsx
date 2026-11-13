@@ -30,6 +30,7 @@ import { formatDate, formatDateTime } from "../../lib/format";
 import AdminOrganizationInvitations from "./AdminOrganizationInvitations";
 import AdminOrganizationMembers from "./AdminOrganizationMembers";
 import AdminOrganizationProjects from "./AdminOrganizationProjects";
+import AdminOrganizationSettings from "./AdminOrganizationSettings";
 import { OrganizationStatusBadge } from "./OrganizationStatusBadge";
 
 /** The message of a failed admin change: the field error of a 422, otherwise the problem. */
@@ -102,6 +103,7 @@ function OrganizationDetails({ id }: { id: string }) {
       <AdminOrganizationMembers organization={organization.data} />
       <AdminOrganizationInvitations organization={organization.data} />
       <AdminOrganizationProjects organization={organization.data} />
+      <AdminOrganizationSettings organization={organization.data} />
     </section>
   );
 }

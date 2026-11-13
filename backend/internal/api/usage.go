@@ -16,11 +16,15 @@ func (s *server) GetUsage(ctx context.Context, _ gen.GetUsageRequestObject) (gen
 	if err != nil {
 		return nil, err
 	}
-	return gen.GetUsage200JSONResponse{
+	return gen.GetUsage200JSONResponse(toUsage(u)), nil
+}
+
+func toUsage(u plans.Usage) gen.Usage {
+	return gen.Usage{
 		Plan: gen.PlanRef{Key: u.Plan.Key, Name: u.Plan.Name},
 		Limits: gen.ResourceCounts{Monitors: u.Limits.Of(plans.ResourceMonitor), Heartbeats: u.Limits.Of(plans.ResourceHeartbeat), Channels: u.Limits.Of(plans.ResourceChannel),
 			Members: u.Limits.Of(plans.ResourceMember), Projects: u.Limits.Of(plans.ResourceProject), StatusPages: u.Limits.Of(plans.ResourceStatusPage), Specula: u.Limits.Of(plans.ResourceAgent)},
 		Usage: gen.ResourceCounts{Monitors: u.Counts.Monitors, Heartbeats: u.Counts.Heartbeats, Channels: u.Counts.Channels, Members: u.Counts.Members,
 			Projects: u.Counts.Projects, StatusPages: u.Counts.StatusPages, Specula: u.Counts.Agents},
-	}, nil
+	}
 }

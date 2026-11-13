@@ -2246,6 +2246,183 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/organizations/{organizationId}/usage": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+      };
+      cookie?: never;
+    };
+    /**
+     * Plan, limits and usage of an organization
+     * @description The same document the organization's own people read from `GET /api/v1/usage`: the plan, its limits and what the organization uses. A deleted organization has no quota to resolve (409 `urn:proreta:problem:organization-deleted`). Platform admins only.
+     */
+    get: operations["adminGetOrganizationUsage"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/organizations/{organizationId}/auth-domains": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+      };
+      cookie?: never;
+    };
+    /**
+     * Sign-in domains of an organization
+     * @description The Google Workspace domains the organization claimed (what its owner reads from `GET /api/v1/organization/auth-domains`). Claiming a domain stays with the owner, who has to prove control of it with a Google sign-in. Platform admins only.
+     */
+    get: operations["adminListOrganizationAuthDomains"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/organizations/{organizationId}/auth-domains/{domainId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+        /** @description Sign-in domain id; a value that is not a UUID is answered with 400 */
+        domainId: components["parameters"]["AuthDomainId"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Release a sign-in domain of an organization
+     * @description Stops auto-join for the domain and frees it for other organizations; members who already joined stay. A deleted organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in the organization as `admin.auth_domain.deleted`. Platform admins only.
+     */
+    delete: operations["adminDeleteOrganizationAuthDomain"];
+    options?: never;
+    head?: never;
+    /**
+     * Change a sign-in domain of an organization
+     * @description Changes the default role or turns auto-join off and on, as `PATCH /api/v1/organization/auth-domains/{domainId}`. A deleted organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in the organization as `admin.auth_domain.updated`; nothing is written when nothing changes. Platform admins only.
+     */
+    patch: operations["adminUpdateOrganizationAuthDomain"];
+    trace?: never;
+  };
+  "/api/v1/admin/organizations/{organizationId}/channels": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+      };
+      cookie?: never;
+    };
+    /**
+     * Notification channels of an organization
+     * @description Every channel of the organization, those of every project and the organization-wide ones, with the same fields the owner sees. The destination URL, headers and tokens are write-only and never returned. Read-only. Platform admins only.
+     */
+    get: operations["adminListOrganizationChannels"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/organizations/{organizationId}/status-pages": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+      };
+      cookie?: never;
+    };
+    /**
+     * Status pages of an organization
+     * @description Every status page of the organization, those of every project and the organization-level ones, with the same fields the owner sees. The password hash is never returned. Read-only. Platform admins only.
+     */
+    get: operations["adminListOrganizationStatusPages"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/organizations/{organizationId}/specula": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+      };
+      cookie?: never;
+    };
+    /**
+     * Specula of an organization
+     * @description Every Specula of the organization, revoked ones included, with the projects each may serve. Platform admins only.
+     */
+    get: operations["adminListOrganizationSpecula"];
+    put?: never;
+    /**
+     * Register a Specula in an organization
+     * @description Same rules as `POST /api/v1/specula`, including the plan limit (409 `urn:proreta:problem:plan-limit-reached`). The token is returned once and cannot be read again. A deleted organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in the organization as `admin.specula.created`. Platform admins only.
+     */
+    post: operations["adminCreateOrganizationSpecula"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/organizations/{organizationId}/specula/{speculaId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+        /** @description Specula id; a value that is not a UUID is answered with 400 */
+        speculaId: components["parameters"]["SpeculaId"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Revoke a Specula of an organization
+     * @description Revokes the token at once, as `DELETE /api/v1/specula/{speculaId}`; a revoked Specula cannot be restored. A deleted organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in the organization as `admin.specula.revoked`. Platform admins only.
+     */
+    delete: operations["adminRevokeOrganizationSpecula"];
+    options?: never;
+    head?: never;
+    /**
+     * Change a Specula of an organization
+     * @description Renames a Specula or changes the projects that may use it, as `PATCH /api/v1/specula/{speculaId}`. A revoked Specula is 404. A deleted organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in the organization as `admin.specula.updated` (`fields`); nothing is written when nothing changes. Platform admins only.
+     */
+    patch: operations["adminUpdateOrganizationSpecula"];
+    trace?: never;
+  };
   "/api/v1/admin/email": {
     parameters: {
       query?: never;
@@ -7425,6 +7602,325 @@ export interface operations {
       403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
       409: components["responses"]["Conflict"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminGetOrganizationUsage: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The plan and usage */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Usage"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminListOrganizationAuthDomains: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The claimed domains */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AuthDomainList"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminDeleteOrganizationAuthDomain: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+        /** @description Sign-in domain id; a value that is not a UUID is answered with 400 */
+        domainId: components["parameters"]["AuthDomainId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Released */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminUpdateOrganizationAuthDomain: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+        /** @description Sign-in domain id; a value that is not a UUID is answered with 400 */
+        domainId: components["parameters"]["AuthDomainId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AuthDomainUpdate"];
+      };
+    };
+    responses: {
+      /** @description Changed */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AuthDomain"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminListOrganizationChannels: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The channels */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ChannelList"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminListOrganizationStatusPages: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The status pages */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["StatusPageList"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminListOrganizationSpecula: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The Specula */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SpeculaList"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminCreateOrganizationSpecula: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SpeculaCreate"];
+      };
+    };
+    responses: {
+      /** @description The Specula and its token */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SpeculaCreated"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      422: components["responses"]["UnprocessableEntity"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminRevokeOrganizationSpecula: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+        /** @description Specula id; a value that is not a UUID is answered with 400 */
+        speculaId: components["parameters"]["SpeculaId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Revoked */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminUpdateOrganizationSpecula: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description Organization id; a value that is not a UUID is answered with 400 */
+        organizationId: components["parameters"]["OrganizationId"];
+        /** @description Specula id; a value that is not a UUID is answered with 400 */
+        speculaId: components["parameters"]["SpeculaId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SpeculaUpdate"];
+      };
+    };
+    responses: {
+      /** @description Changed */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["Specula"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      422: components["responses"]["UnprocessableEntity"];
       default: components["responses"]["Error"];
     };
   };

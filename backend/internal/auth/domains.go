@@ -78,6 +78,10 @@ func (s *Service) ListAuthDomains(ctx context.Context, tenantID uuid.UUID) ([]Do
 // linked with that hd within DomainProofWindow, and a new claim always starts with the viewer role
 // (defaultRole may only be empty or viewer; raise it with UpdateAuthDomain).
 func (s *Service) CreateAuthDomain(ctx context.Context, a Actor, domain, defaultRole string, enabled bool) (Domain, error) {
+	if a.platform {
+		// The claim proves control with the owner's own Google sign-in; the platform admin cannot give it.
+		return Domain{}, authz.ErrForbidden
+	}
 	domain = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(domain)), ".")
 	var verr validation.Error
 	if len(domain) < 3 || len(domain) > 253 || !domainPattern.MatchString(domain) {
@@ -197,6 +201,9 @@ func (s *Service) DeleteAuthDomain(ctx context.Context, a Actor, id uuid.UUID) e
 // requireOwner re-reads the actor's role in the transaction (the operation table checked it at the
 // start of the request).
 func requireOwner(ctx context.Context, tx pgx.Tx, a Actor) error {
+	if a.platform {
+		return nil
+	}
 	role, err := authdb.New(tx).GetMembershipRole(ctx, authdb.GetMembershipRoleParams{TenantID: a.TenantID, UserID: a.UserID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrUnauthenticated
@@ -211,8 +218,12 @@ func requireOwner(ctx context.Context, tx pgx.Tx, a Actor) error {
 }
 
 func (s *Service) auditDomain(ctx context.Context, tx pgx.Tx, a Actor, d Domain, change string) error {
+	action := ActionAuthDomainChanged
+	if a.platform {
+		action = ActionAdminAuthDomainPrefix + change
+	}
 	return audit.Record(ctx, tx, audit.Entry{
-		TenantID: a.TenantID, ActorUserID: &a.UserID, Action: ActionAuthDomainChanged,
+		TenantID: a.TenantID, ActorUserID: &a.UserID, Action: action,
 		EntityType: "auth_domain", EntityID: d.ID.String(), IP: a.IP,
 		Metadata: map[string]any{"change": change, "domain": d.Domain, "defaultRole": d.DefaultRole, "enabled": d.Enabled},
 	})

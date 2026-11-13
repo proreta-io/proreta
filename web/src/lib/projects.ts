@@ -95,7 +95,7 @@ export function defaultProjectFor(
 /** "Organization-wide" for a channel without a project, the project's name otherwise. */
 export function channelScopeLabel(
   projectId: string | null | undefined,
-  projects: Project[] | undefined,
+  projects: Pick<Project, "id" | "name">[] | undefined,
 ): string {
   if (!projectId) return "Organization-wide";
   return projects?.find((p) => p.id === projectId)?.name ?? "Another project";

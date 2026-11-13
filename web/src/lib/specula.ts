@@ -72,7 +72,10 @@ export const STATUS_HINTS: Record<SpeculaStatus, string> = {
 };
 
 /** Who may use a Specula, in words; project names fall back to a count when unknown. */
-export function sharedWith(s: Specula, projects: Project[] | undefined): string {
+export function sharedWith(
+  s: Specula,
+  projects: Pick<Project, "id" | "name">[] | undefined,
+): string {
   if (s.allProjects) return "All projects";
   if (s.projectIds.length === 0) return "Projects you see";
   const names = s.projectIds.map((id) => projects?.find((p) => p.id === id)?.name).filter(Boolean);

@@ -7,9 +7,10 @@ import {
   queryKeys,
   revokeSpecula,
   updateSpecula,
-  type Project,
   type Specula,
+  type SpeculaCreate,
   type SpeculaCreated,
+  type SpeculaUpdate,
 } from "../api/endpoints";
 import { useToast } from "../components/Toasts";
 import {
@@ -52,11 +53,30 @@ import {
 import { useNow } from "../lib/useNow";
 import { useProjectScope } from "../lib/useProjectScope";
 
+/** A project a Specula can be limited to. */
+type ProjectChoice = { id: string; name: string };
+
 const STATUS_TONES: Record<Specula["status"], BadgeTone> = {
   pending: "neutral",
   online: "success",
   offline: "warning",
   revoked: "deleted",
+};
+
+/** What the Specula screens call and refresh; the admin panel swaps them for its organization's. */
+export interface SpeculaOps {
+  create: (body: SpeculaCreate) => Promise<SpeculaCreated>;
+  update: (id: string, body: SpeculaUpdate) => Promise<unknown>;
+  revoke: (id: string) => Promise<unknown>;
+  /** The keys to refresh after a change. */
+  keys: readonly (readonly unknown[])[];
+}
+
+const ownerOps: SpeculaOps = {
+  create: createSpecula,
+  update: updateSpecula,
+  revoke: revokeSpecula,
+  keys: [queryKeys.specula, queryKeys.monitors, queryKeys.usage],
 };
 
 const codeBlock =
@@ -170,28 +190,28 @@ export default function SpeculaPage() {
   );
 }
 
-function SpeculaTable({
+export function SpeculaTable({
   items,
   projects,
   manage,
   onEdit,
+  ops = ownerOps,
 }: {
   items: Specula[];
-  projects: Project[] | undefined;
+  projects: ProjectChoice[] | undefined;
   manage: boolean;
   onEdit: (s: Specula) => void;
+  ops?: SpeculaOps;
 }) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const now = useNow(15_000);
   const [revoking, setRevoking] = useState<Specula | null>(null);
   const revoke = useMutation({
-    mutationFn: (s: Specula) => revokeSpecula(s.id),
+    mutationFn: (s: Specula) => ops.revoke(s.id),
     onSuccess: (_, s) => {
       setRevoking(null);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.specula });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.monitors });
+      for (const queryKey of ops.keys) void queryClient.invalidateQueries({ queryKey });
       toast(`${s.name} revoked`);
     },
     onError: (err) => {
@@ -282,20 +302,22 @@ function SpeculaTable({
   );
 }
 
-function SpeculaForm({
+export function SpeculaForm({
   mode,
   id,
   initial,
   projects,
   onCancel,
   onSaved,
+  ops = ownerOps,
 }: {
   mode: "create" | "edit";
   id?: string;
   initial: SpeculaFormValues;
-  projects: Project[] | undefined;
+  projects: ProjectChoice[] | undefined;
   onCancel: () => void;
   onSaved: (created?: SpeculaCreated) => void;
+  ops?: SpeculaOps;
 }) {
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -306,12 +328,10 @@ function SpeculaForm({
   const save = useMutation({
     mutationFn: (v: SpeculaFormValues): Promise<SpeculaCreated | undefined> =>
       mode === "create"
-        ? createSpecula(toSpeculaRequest(v))
-        : updateSpecula(id!, toSpeculaRequest(v)).then(() => undefined),
+        ? ops.create(toSpeculaRequest(v))
+        : ops.update(id!, toSpeculaRequest(v)).then(() => undefined),
     onSuccess: (saved) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.specula });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.monitors });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
+      for (const queryKey of ops.keys) void queryClient.invalidateQueries({ queryKey });
       if (mode === "create") onSaved(saved);
       else {
         toast("Changes saved");
@@ -429,7 +449,7 @@ function SpeculaForm({
 }
 
 /** The one-time token after registering: Proreta keeps only a hash and cannot show it again. */
-function TokenPanel({ created, onDone }: { created: SpeculaCreated; onDone: () => void }) {
+export function TokenPanel({ created, onDone }: { created: SpeculaCreated; onDone: () => void }) {
   const url = window.location.origin;
   return (
     <section

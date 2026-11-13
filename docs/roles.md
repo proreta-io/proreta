@@ -52,6 +52,10 @@ Operations marked `public` need no session. Operations marked `platform admin` a
 | `AdminDeleteOrganization` | `DELETE /api/v1/admin/organizations/{organizationId}` | `platform admin` |
 | `AdminGetOrganization` | `GET /api/v1/admin/organizations/{organizationId}` | `platform admin` |
 | `AdminUpdateOrganization` | `PATCH /api/v1/admin/organizations/{organizationId}` | `platform admin` |
+| `AdminListOrganizationAuthDomains` | `GET /api/v1/admin/organizations/{organizationId}/auth-domains` | `platform admin` |
+| `AdminDeleteOrganizationAuthDomain` | `DELETE /api/v1/admin/organizations/{organizationId}/auth-domains/{domainId}` | `platform admin` |
+| `AdminUpdateOrganizationAuthDomain` | `PATCH /api/v1/admin/organizations/{organizationId}/auth-domains/{domainId}` | `platform admin` |
+| `AdminListOrganizationChannels` | `GET /api/v1/admin/organizations/{organizationId}/channels` | `platform admin` |
 | `AdminListOrganizationInvitations` | `GET /api/v1/admin/organizations/{organizationId}/invitations` | `platform admin` |
 | `AdminCreateOrganizationInvitation` | `POST /api/v1/admin/organizations/{organizationId}/invitations` | `platform admin` |
 | `AdminRevokeOrganizationInvitation` | `POST /api/v1/admin/organizations/{organizationId}/invitations/{invitationId}/revoke` | `platform admin` |
@@ -66,6 +70,12 @@ Operations marked `public` need no session. Operations marked `platform admin` a
 | `AdminListOrganizationProjectMembers` | `GET /api/v1/admin/organizations/{organizationId}/projects/{projectId}/members` | `platform admin` |
 | `AdminRemoveOrganizationProjectMember` | `DELETE /api/v1/admin/organizations/{organizationId}/projects/{projectId}/members/{userId}` | `platform admin` |
 | `AdminPutOrganizationProjectMember` | `PUT /api/v1/admin/organizations/{organizationId}/projects/{projectId}/members/{userId}` | `platform admin` |
+| `AdminListOrganizationSpecula` | `GET /api/v1/admin/organizations/{organizationId}/specula` | `platform admin` |
+| `AdminCreateOrganizationSpecula` | `POST /api/v1/admin/organizations/{organizationId}/specula` | `platform admin` |
+| `AdminRevokeOrganizationSpecula` | `DELETE /api/v1/admin/organizations/{organizationId}/specula/{speculaId}` | `platform admin` |
+| `AdminUpdateOrganizationSpecula` | `PATCH /api/v1/admin/organizations/{organizationId}/specula/{speculaId}` | `platform admin` |
+| `AdminListOrganizationStatusPages` | `GET /api/v1/admin/organizations/{organizationId}/status-pages` | `platform admin` |
+| `AdminGetOrganizationUsage` | `GET /api/v1/admin/organizations/{organizationId}/usage` | `platform admin` |
 | `AdminListOrganizationUsers` | `GET /api/v1/admin/organizations/{organizationId}/users` | `platform admin` |
 | `AdminGetRegistration` | `GET /api/v1/admin/registration` | `platform admin` |
 | `AdminUpdateRegistration` | `PUT /api/v1/admin/registration` | `platform admin` |

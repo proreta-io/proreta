@@ -3916,6 +3916,320 @@ paths:
           $ref: "#/components/responses/Conflict"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/admin/organizations/{organizationId}/usage:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      operationId: adminGetOrganizationUsage
+      x-experimental: true
+      summary: Plan, limits and usage of an organization
+      description: |
+        The same document the organization's own people read from `GET /api/v1/usage`: the plan, its limits and what the organization uses. A deleted organization has no quota to resolve (409 `urn:proreta:problem:organization-deleted`). Platform admins only.
+      tags: [admin]
+      responses:
+        "200":
+          description: The plan and usage
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Usage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/organizations/{organizationId}/auth-domains:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      operationId: adminListOrganizationAuthDomains
+      x-experimental: true
+      summary: Sign-in domains of an organization
+      description: |
+        The Google Workspace domains the organization claimed (what its owner reads from `GET /api/v1/organization/auth-domains`). Claiming a domain stays with the owner, who has to prove control of it with a Google sign-in. Platform admins only.
+      tags: [admin]
+      responses:
+        "200":
+          description: The claimed domains
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthDomainList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/organizations/{organizationId}/auth-domains/{domainId}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/AuthDomainId"
+    patch:
+      operationId: adminUpdateOrganizationAuthDomain
+      x-experimental: true
+      summary: Change a sign-in domain of an organization
+      description: |
+        Changes the default role or turns auto-join off and on, as `PATCH /api/v1/organization/auth-domains/{domainId}`. A deleted organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in the organization as `admin.auth_domain.updated`; nothing is written when nothing changes. Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthDomainUpdate"
+      responses:
+        "200":
+          description: Changed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthDomain"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: adminDeleteOrganizationAuthDomain
+      x-experimental: true
+      summary: Release a sign-in domain of an organization
+      description: |
+        Stops auto-join for the domain and frees it for other organizations; members who already joined stay. A deleted organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in the organization as `admin.auth_domain.deleted`. Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Released
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/organizations/{organizationId}/channels:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      operationId: adminListOrganizationChannels
+      x-experimental: true
+      summary: Notification channels of an organization
+      description: |
+        Every channel of the organization, those of every project and the organization-wide ones, with the same fields the owner sees. The destination URL, headers and tokens are write-only and never returned. Read-only. Platform admins only.
+      tags: [admin]
+      responses:
+        "200":
+          description: The channels
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/organizations/{organizationId}/status-pages:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      operationId: adminListOrganizationStatusPages
+      x-experimental: true
+      summary: Status pages of an organization
+      description: |
+        Every status page of the organization, those of every project and the organization-level ones, with the same fields the owner sees. The password hash is never returned. Read-only. Platform admins only.
+      tags: [admin]
+      responses:
+        "200":
+          description: The status pages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusPageList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/organizations/{organizationId}/specula:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      operationId: adminListOrganizationSpecula
+      x-experimental: true
+      summary: Specula of an organization
+      description: |
+        Every Specula of the organization, revoked ones included, with the projects each may serve. Platform admins only.
+      tags: [admin]
+      responses:
+        "200":
+          description: The Specula
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpeculaList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: adminCreateOrganizationSpecula
+      x-experimental: true
+      summary: Register a Specula in an organization
+      description: |
+        Same rules as `POST /api/v1/specula`, including the plan limit (409 `urn:proreta:problem:plan-limit-reached`). The token is returned once and cannot be read again. A deleted organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in the organization as `admin.specula.created`. Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SpeculaCreate"
+      responses:
+        "201":
+          description: The Specula and its token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpeculaCreated"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/organizations/{organizationId}/specula/{speculaId}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/SpeculaId"
+    patch:
+      operationId: adminUpdateOrganizationSpecula
+      x-experimental: true
+      summary: Change a Specula of an organization
+      description: |
+        Renames a Specula or changes the projects that may use it, as `PATCH /api/v1/specula/{speculaId}`. A revoked Specula is 404. A deleted organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in the organization as `admin.specula.updated` (`fields`); nothing is written when nothing changes. Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SpeculaUpdate"
+      responses:
+        "200":
+          description: Changed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Specula"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: adminRevokeOrganizationSpecula
+      x-experimental: true
+      summary: Revoke a Specula of an organization
+      description: |
+        Revokes the token at once, as `DELETE /api/v1/specula/{speculaId}`; a revoked Specula cannot be restored. A deleted organization cannot be changed (409 `urn:proreta:problem:organization-deleted`). Audited in the organization as `admin.specula.revoked`. Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Revoked
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/admin/email:
     get:
       operationId: adminGetEmailSettings

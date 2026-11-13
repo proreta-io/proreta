@@ -22,11 +22,15 @@ import (
 
 	"github.com/proreta-io/proreta/backend/internal/auth"
 	"github.com/proreta-io/proreta/backend/internal/mail"
+	"github.com/proreta-io/proreta/backend/internal/notify"
+	"github.com/proreta-io/proreta/backend/internal/plans"
 	"github.com/proreta-io/proreta/backend/internal/platform/db"
 	"github.com/proreta-io/proreta/backend/internal/platform/uuidv7"
 	"github.com/proreta-io/proreta/backend/internal/platform/validation"
 	"github.com/proreta-io/proreta/backend/internal/platformsettings"
 	"github.com/proreta-io/proreta/backend/internal/projects"
+	"github.com/proreta-io/proreta/backend/internal/specula"
+	"github.com/proreta-io/proreta/backend/internal/statuspages"
 )
 
 // Tenant statuses an admin may set.
@@ -91,6 +95,12 @@ type Options struct {
 	Settings *mail.Settings
 	// Registration holds the registration switch the panel changes; needed for its operations.
 	Registration *platformsettings.Registration
+	// Plans, Channels, Specula and StatusPages are read (Specula also changed) inside the target
+	// organization for the organization settings; each is needed for its operations.
+	Plans       *plans.Service
+	Channels    *notify.Service
+	Specula     *specula.Service
+	StatusPages *statuspages.Service
 }
 
 // Service implements the admin operations.
@@ -104,6 +114,10 @@ type Service struct {
 	mail         *mail.Queue
 	mailSettings *mail.Settings
 	registration *platformsettings.Registration
+	plans        *plans.Service
+	channels     *notify.Service
+	specula      *specula.Service
+	statusPages  *statuspages.Service
 }
 
 // NewService builds the service. The auth service hashes temporary passwords through its bounded
@@ -113,9 +127,10 @@ func NewService(pool *db.Pool, authSvc *auth.Service, opts Options) (*Service, e
 		opts.Logger = slog.Default()
 	}
 	s := &Service{pool: pool, auth: authSvc, log: opts.Logger, mail: opts.Mail, mailSettings: opts.Settings, registration: opts.Registration, projects: opts.Projects,
+		plans: opts.Plans, channels: opts.Channels, specula: opts.Specula, statusPages: opts.StatusPages,
 		actions: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "proreta_admin_actions_total",
-			Help: "Platform admin changes by audit action (admin.organization.plan_changed, admin.organization.suspended, admin.organization.unsuspended, admin.organization.deleted, admin.user.password_reset, admin.user.disabled, admin.user.enabled, admin.user.sessions_revoked, admin.user.platform_admin_granted, admin.user.platform_admin_revoked, admin.email_settings.updated, admin.email_test.sent, admin.registration_settings.updated, admin.retention_settings.updated, admin.member.added, admin.member.role_changed, admin.member.removed, admin.invitation.created, admin.invitation.revoked, admin.project.created, admin.project.updated, admin.project.deleted, admin.project_member.added, admin.project_member.updated, admin.project_member.removed).",
+			Help: "Platform admin changes by audit action (admin.organization.plan_changed, admin.organization.suspended, admin.organization.unsuspended, admin.organization.deleted, admin.user.password_reset, admin.user.disabled, admin.user.enabled, admin.user.sessions_revoked, admin.user.platform_admin_granted, admin.user.platform_admin_revoked, admin.email_settings.updated, admin.email_test.sent, admin.registration_settings.updated, admin.retention_settings.updated, admin.member.added, admin.member.role_changed, admin.member.removed, admin.invitation.created, admin.invitation.revoked, admin.project.created, admin.project.updated, admin.project.deleted, admin.project_member.added, admin.project_member.updated, admin.project_member.removed, admin.auth_domain.updated, admin.auth_domain.deleted, admin.specula.created, admin.specula.updated, admin.specula.revoked).",
 		}, []string{"action"}),
 	}
 	if opts.Registerer != nil {
