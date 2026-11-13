@@ -120,6 +120,12 @@ func TestIntegrationGateway(t *testing.T) {
 		}
 	})
 
+	t.Run("hello with a long multi-byte hostname is stored cut on a rune", func(t *testing.T) {
+		if code, b := call(t, srv, token, "/hello", wire.HelloRequest{Version: "1", Hostname: strings.Repeat("ж", 200)}); code != http.StatusOK {
+			t.Fatalf("hello: %d %s", code, b)
+		}
+	})
+
 	var job wire.Job
 	t.Run("claim hands out the job with its decrypted request", func(t *testing.T) {
 		if code, _ := call(t, srv, token, "/claim", wire.ClaimRequest{Max: 0}); code != http.StatusBadRequest {
@@ -195,6 +201,49 @@ func TestIntegrationGateway(t *testing.T) {
 		if code, _ := call(t, srv, token, "/results", wire.ResultsRequest{}); code != http.StatusBadRequest {
 			t.Fatalf("empty: %d", code)
 		}
+	})
+
+	t.Run("a result the database refuses is rejected alone and keeps its lease", func(t *testing.T) {
+		// latency 7 stands in for any permanent database error (here a check violation).
+		pgtest.MustExec(t, admin, `CREATE FUNCTION refuse_seven() RETURNS trigger LANGUAGE plpgsql AS $$
+			BEGIN IF NEW.latency_ms = 7 THEN RAISE EXCEPTION 'refused' USING ERRCODE = '23514'; END IF; RETURN NEW; END $$`,
+			`CREATE TRIGGER refuse_seven BEFORE INSERT ON check_results FOR EACH ROW EXECUTE FUNCTION refuse_seven()`,
+			`UPDATE tenants SET plan_key = 'community' WHERE id = '`+tenantA+`'`)
+		now := time.Now().UTC()
+		var batch []wire.Result
+		var ids []uuid.UUID
+		for i, lat := range []int{1, 7, 2} {
+			mm := newMonitor(tenantA, "Batch "+string(rune('a'+i)), "https://batch.example.com/", &monitors.HTTPSettings{})
+			assign(mm, tenantA)
+			var lease uuid.UUID
+			if err := admin.QueryRow(ctx, `UPDATE monitor_location_state SET lease_token = gen_random_uuid(), lease_until = now() + interval '30 seconds'
+				WHERE monitor_id = $1 AND location_id = $2 RETURNING lease_token`, mm.ID, s.LocationID).Scan(&lease); err != nil {
+				t.Fatal(err)
+			}
+			ids = append(ids, mm.ID)
+			// Distinct times: the results table's key does not include the monitor.
+			batch = append(batch, wire.Result{MonitorID: mm.ID, LeaseToken: lease, CheckedAt: now.Add(-time.Duration(i+1) * time.Second), OK: true, StatusCode: 200, LatencyMs: lat})
+		}
+		code, b := call(t, srv, token, "/results", wire.ResultsRequest{Results: batch})
+		var out wire.ResultsResponse
+		if code != http.StatusOK || json.Unmarshal(b, &out) != nil || len(out.Outcomes) != 3 {
+			t.Fatalf("results: %d %s", code, b)
+		}
+		if got := []string{out.Outcomes[0].Outcome, out.Outcomes[1].Outcome, out.Outcomes[2].Outcome}; strings.Join(got, ",") != wire.OutcomeRecorded+","+wire.OutcomeRejected+","+wire.OutcomeRecorded {
+			t.Fatalf("outcomes %v", got)
+		}
+		var held []bool
+		for _, id := range ids {
+			var h bool
+			if err := admin.QueryRow(ctx, `SELECT lease_token IS NOT NULL FROM monitor_location_state WHERE monitor_id = $1 AND location_id = $2`, id, s.LocationID).Scan(&h); err != nil {
+				t.Fatal(err)
+			}
+			held = append(held, h)
+		}
+		if held[0] || !held[1] || held[2] {
+			t.Fatalf("leases held (first, failed, last) = %v, want false true false", held)
+		}
+		pgtest.MustExec(t, admin, `DROP TRIGGER refuse_seven ON check_results`)
 	})
 
 	t.Run("a Specula cannot report on another organization's monitor", func(t *testing.T) {
