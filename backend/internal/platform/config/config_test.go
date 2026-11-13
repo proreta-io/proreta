@@ -654,3 +654,24 @@ func TestLoadSpecula(t *testing.T) {
 		t.Error("plain http accepted for a remote host")
 	}
 }
+
+func TestStatusPageDomainRules(t *testing.T) {
+	e := apiEnv(t)
+	e["PRORETA_PUBLIC_URL"] = "https://proreta.klr-ops.net"
+	e["PRORETA_STATUSPAGE_CNAME_TARGET"] = "customers.example.net"
+	e["PRORETA_STATUSPAGE_INSTALLATION_HOSTS"] = "app.example.net"
+	cfg, err := LoadAPI(env(e))
+	if err != nil || cfg.StatusPageCNAMETarget != "customers.example.net" ||
+		strings.Join(cfg.StatusPageInstallationHosts, ",") != "app.example.net,proreta.klr-ops.net" ||
+		strings.Join(cfg.StatusPageForbiddenSuffixes, ",") != "klr-ops.net" {
+		t.Fatalf("%+v, %v", cfg, err)
+	}
+	e["PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES"] = "corp.example.com"
+	if cfg, err = LoadAPI(env(e)); err != nil || strings.Join(cfg.StatusPageForbiddenSuffixes, ",") != "corp.example.com" {
+		t.Fatalf("explicit suffixes: %v, %v", cfg.StatusPageForbiddenSuffixes, err)
+	}
+	e["PRORETA_STATUSPAGE_CNAME_TARGET"] = "Not A Host"
+	if _, err = LoadAPI(env(e)); err == nil || !strings.Contains(err.Error(), "PRORETA_STATUSPAGE_CNAME_TARGET") {
+		t.Fatalf("bad target accepted: %v", err)
+	}
+}

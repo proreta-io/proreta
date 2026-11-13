@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"golang.org/x/net/publicsuffix"
 
 	"github.com/proreta-io/proreta/backend/internal/platform/crypto"
 	"github.com/proreta-io/proreta/backend/internal/platform/logging"
@@ -117,7 +118,16 @@ type API struct {
 	// StatusPageCustomDomains turns on status pages on a customer's own domain
 	// (PRORETA_STATUS_PAGE_CUSTOM_DOMAINS, default false); off, the domain operations answer 404.
 	StatusPageCustomDomains bool
-	OAuth                   OAuth
+	// StatusPageCNAMETarget is where a custom domain's CNAME must point
+	// (PRORETA_STATUSPAGE_CNAME_TARGET); empty means domains stay verified and never become active.
+	StatusPageCNAMETarget string
+	// StatusPageInstallationHosts are the host names of this installation, which no customer may
+	// claim: the host of PRORETA_PUBLIC_URL and PRORETA_STATUSPAGE_INSTALLATION_HOSTS.
+	StatusPageInstallationHosts []string
+	// StatusPageForbiddenSuffixes are domains no customer may claim a name under
+	// (PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES); the registrable domain of PRORETA_PUBLIC_URL when unset.
+	StatusPageForbiddenSuffixes []string
+	OAuth                       OAuth
 }
 
 // OAuth holds the OAuth client credentials. A provider without both values is off.
@@ -267,10 +277,36 @@ func LoadAPI(lookup LookupFunc) (API, error) {
 		l.fail("PRORETA_HTTP_ADDR", "must differ from PRORETA_ADMIN_ADDR")
 	}
 	l.cookieMatchesURL(cfg.CookieSecure, cfg.PublicURL)
+	l.statusPageDomains(&cfg)
 	if !cfg.PasswordLoginEnabled && !cfg.OAuth.GoogleEnabled() && !cfg.OAuth.GitHubEnabled() {
 		l.fail("PRORETA_PASSWORD_LOGIN_ENABLED", "false needs at least one OAuth provider (PRORETA_OAUTH_GOOGLE_* or PRORETA_OAUTH_GITHUB_*)")
 	}
 	return cfg, l.err()
+}
+
+// statusPageDomains reads the installation's side of the custom domain rules. The public URL's own
+// host is always forbidden, and so is everything under the operator's list, which defaults to the
+// registrable domain of the public URL.
+func (l *loader) statusPageDomains(cfg *API) {
+	if t := l.optional("PRORETA_STATUSPAGE_CNAME_TARGET"); t != "" {
+		if len(t) > 253 || !domainName.MatchString(t) {
+			l.fail("PRORETA_STATUSPAGE_CNAME_TARGET", fmt.Sprintf("%q is not a lowercase domain name such as customers.example.com", t))
+		} else {
+			cfg.StatusPageCNAMETarget = t
+		}
+	}
+	cfg.StatusPageInstallationHosts = l.domains("PRORETA_STATUSPAGE_INSTALLATION_HOSTS")
+	if u, err := url.Parse(cfg.PublicURL); err == nil && u.Hostname() != "" {
+		if h := strings.ToLower(u.Hostname()); !slices.Contains(cfg.StatusPageInstallationHosts, h) {
+			cfg.StatusPageInstallationHosts = append(cfg.StatusPageInstallationHosts, h)
+		}
+	}
+	cfg.StatusPageForbiddenSuffixes = l.domains("PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES")
+	if l.optional("PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES") == "" && len(cfg.StatusPageInstallationHosts) > 0 {
+		if d, err := publicsuffix.EffectiveTLDPlusOne(cfg.StatusPageInstallationHosts[len(cfg.StatusPageInstallationHosts)-1]); err == nil {
+			cfg.StatusPageForbiddenSuffixes = []string{d}
+		}
+	}
 }
 
 // oauth reads the client credentials of each provider: both the id and the secret, or neither.

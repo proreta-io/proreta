@@ -67,11 +67,16 @@ func newRegistrationServerWithSlack(t *testing.T, env *pgtest.Env, opts auth.Opt
 		t.Fatal(err)
 	}
 	sched := scheduler.New()
-	h, err := api.NewHandler(api.Config{Version: "test", Commit: "test", CookieSecure: true, TrustedProxyHops: 1, RegistrationEnabled: registration, PublicURL: heartbeatPublicURL},
+	cfg := api.Config{Version: "test", Commit: "test", CookieSecure: true, TrustedProxyHops: 1, RegistrationEnabled: registration, PublicURL: heartbeatPublicURL}
+	pageOpts := statuspages.Options{HashParams: &testHashParams}
+	if domainsHook != nil {
+		domainsHook(&cfg, &pageOpts)
+	}
+	h, err := api.NewHandler(cfg,
 		api.Deps{
 			Auth: svc, Monitors: monitors.NewService(pool, sched, incidents.NewService(sched)), Queries: queries.New(pool, nil),
 			Channels: notify.NewService(pool, keys, sender, "https://proreta.example.com"), Plans: plans.NewService(pool), Projects: projects.NewService(pool), Specula: specula.NewService(pool), Logger: log,
-			StatusPages:  statuspages.NewService(pool, statuspages.Options{HashParams: &testHashParams}),
+			StatusPages:  statuspages.NewService(pool, pageOpts),
 			Entitlements: entitlements.NewService(pool),
 		})
 	if err != nil {
@@ -81,6 +86,10 @@ func newRegistrationServerWithSlack(t *testing.T, env *pgtest.Env, opts auth.Opt
 	t.Cleanup(srv.Close)
 	return &client{t: t, srv: srv}
 }
+
+// domainsHook lets a test turn on custom domains in the server newRegistrationServer builds (the
+// tests of this package do not run in parallel).
+var domainsHook func(*api.Config, *statuspages.Options)
 
 // testHashParams keep argon2id cheap in tests.
 var testHashParams = crypto.Argon2Params{Memory: 64, Iterations: 1, Parallelism: 1, SaltLength: 16, KeyLength: 32}
