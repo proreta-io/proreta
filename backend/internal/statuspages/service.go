@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/proreta-io/proreta/backend/internal/audit"
+	"github.com/proreta-io/proreta/backend/internal/auth"
 	"github.com/proreta-io/proreta/backend/internal/authz"
 	"github.com/proreta-io/proreta/backend/internal/plans"
 	"github.com/proreta-io/proreta/backend/internal/platform/clock"
@@ -96,6 +97,8 @@ type Options struct {
 	Logger *slog.Logger
 	// HashParams are the argon2id parameters of page passwords; nil means the default.
 	HashParams *crypto.Argon2Params
+	// Domains configure the custom domain operations; the zero value leaves verification off.
+	Domains DomainOptions
 }
 
 // Service implements the status page configuration (api) and the snapshot rebuild (jobs).
@@ -104,6 +107,9 @@ type Service struct {
 	clock  clock.Clock
 	log    *slog.Logger
 	params crypto.Argon2Params
+	dom    DomainOptions
+	// verifyMinute and verifyHour limit "verify now" per organization (per api replica).
+	verifyMinute, verifyHour *auth.Limiter
 }
 
 // NewService returns a Service.
@@ -118,6 +124,9 @@ func NewService(pool *db.Pool, o Options) *Service {
 	if o.HashParams != nil {
 		s.params = *o.HashParams
 	}
+	s.dom = o.Domains
+	s.verifyMinute = auth.NewLimiter(verifyPerMinute, time.Minute, 10_000, s.clock)
+	s.verifyHour = auth.NewLimiter(verifyPerHour, time.Hour, 10_000, s.clock)
 	return s
 }
 
@@ -445,6 +454,10 @@ func (s *Service) Delete(ctx context.Context, a Actor, id uuid.UUID) error {
 		if err := a.checkManage(cur.ProjectID); err != nil {
 			return err
 		}
+		hosts, err := releaseAudit(ctx, q, a.TenantID, id)
+		if err != nil {
+			return err
+		}
 		if err := q.SoftDeletePage(ctx, statuspagesdb.SoftDeletePageParams{TenantID: a.TenantID, ID: id}); err != nil {
 			return fmt.Errorf("statuspages: delete: %w", err)
 		}
@@ -453,6 +466,12 @@ func (s *Service) Delete(ctx context.Context, a Actor, id uuid.UUID) error {
 		}
 		if err := q.DeleteSnapshot(ctx, statuspagesdb.DeleteSnapshotParams{TenantID: a.TenantID, PageID: id}); err != nil {
 			return fmt.Errorf("statuspages: delete snapshot: %w", err)
+		}
+		// The database releases the page's domains with the delete itself; the audit rows say so.
+		for _, h := range hosts {
+			if err := s.audit(ctx, tx, a, ActionDomainRemoved, id, map[string]any{"pageId": id.String(), "host": h, "by": "page"}); err != nil {
+				return err
+			}
 		}
 		return s.audit(ctx, tx, a, ActionDeleted, id, map[string]any{"slug": cur.Slug})
 	})
