@@ -459,6 +459,15 @@ func TestIntegrationAdminPanel(t *testing.T) {
 		}
 	})
 
+	t.Run("the community plan can be assigned and is audited", func(t *testing.T) {
+		if r := c.do(http.MethodPatch, "/api/v1/admin/organizations/"+tenantA, `{"planKey":"community"}`, ah); r.code != http.StatusOK || r.body["planKey"] != "community" || r.body["planName"] != "Community" {
+			t.Fatalf("assign community: %d %s", r.code, r.raw)
+		}
+		if n := countRows(t, env, `SELECT count(*) FROM audit_log WHERE action = 'admin.organization.plan_changed' AND tenant_id = $1 AND metadata->>'to' = 'community'`, tenantA); n != 1 {
+			t.Fatalf("community audit rows: %d", n)
+		}
+	})
+
 	t.Run("a plan change waits for a quota check holding the tenant row", func(t *testing.T) {
 		admin := env.AdminConn(t)
 		tx, err := admin.Begin(ctx)

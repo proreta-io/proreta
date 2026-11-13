@@ -31,7 +31,6 @@ import AdminOrganizationInvitations from "./AdminOrganizationInvitations";
 import AdminOrganizationMembers from "./AdminOrganizationMembers";
 import AdminOrganizationProjects from "./AdminOrganizationProjects";
 import { OrganizationStatusBadge } from "./OrganizationStatusBadge";
-import { HIDDEN_PLANS } from "../../lib/usage";
 
 /** The message of a failed admin change: the field error of a 422, otherwise the problem. */
 function changeError(err: unknown): string {
@@ -172,13 +171,9 @@ function OrganizationInfo({ organization }: { organization: AdminOrganization })
     update.mutate({ planKey: plan });
   }
 
-  // `community` stays out of the picker until self-hosted packaging, unless the organization
-  // is already on it.
-  const planOptions = (
-    plans.data?.plans ?? [
-      { key: organization.planKey, name: organization.planName, organizations: 0 },
-    ]
-  ).filter((p) => !HIDDEN_PLANS.includes(p.key) || p.key === organization.planKey);
+  const planOptions = plans.data?.plans ?? [
+    { key: organization.planKey, name: organization.planName, organizations: 0 },
+  ];
 
   return (
     <>
@@ -242,7 +237,7 @@ function OrganizationInfo({ organization }: { organization: AdminOrganization })
         <form onSubmit={onSavePlan} className="flex max-w-[560px] flex-col gap-2">
           <Field
             label="Plan"
-            hint="Existing monitors are kept when the new plan allows fewer; only new ones are refused."
+            hint="Existing monitors are kept when the new plan allows fewer; only new ones are refused. Community removes all quotas."
             error={planError}
           >
             {(c) => (

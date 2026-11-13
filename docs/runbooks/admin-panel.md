@@ -24,7 +24,7 @@ Audit rows (`entity_type` `user`, no email in the metadata, written to the user'
 |---|---|---|---|
 | Overview | `/admin` | Counts: organizations (active, suspended, deleted), active users, monitors, heartbeats, organizations per plan | none |
 | List and search organizations | `/admin/organizations` | Search by name, slug, organization id or the email of a member; 25 per page | none |
-| Change plan | organization details, plan selector | The organization's limits change at once (see "Plans and existing usage") | `admin.organization.plan_changed` with `from`, `to` |
+| Change plan | organization details, plan selector | The organization's limits change at once (see "Plans and existing usage"); `community` has no quotas at all | `admin.organization.plan_changed` with `from`, `to` |
 | Suspend / unsuspend | organization details | See "Suspension" | `admin.organization.suspended` / `admin.organization.unsuspended` |
 | Delete | organization details | Soft delete, see "Deletion" | `admin.organization.deleted` |
 | Reset a password | organization details, Members table | New temporary password, all sessions of the user deleted. Independent of email: always available | `admin.user.password_reset` with the number of sessions deleted |
