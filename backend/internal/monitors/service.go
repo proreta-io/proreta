@@ -757,6 +757,10 @@ func (s *Service) Delete(ctx context.Context, a Actor, id uuid.UUID) error {
 		if err := q.SoftDeleteMonitor(ctx, monitorsdb.SoftDeleteMonitorParams{TenantID: a.TenantID, ID: id}); err != nil {
 			return fmt.Errorf("delete monitor: %w", err)
 		}
+		// Parks the schedule (next_run_at infinity) and drops a lease in flight.
+		if err := s.sched.Restart(ctx, tx, id); err != nil {
+			return err
+		}
 		// A published status page drops the component at once.
 		if err := statuspages.RefreshForMonitor(ctx, tx, a.TenantID, id, time.Now()); err != nil {
 			return err

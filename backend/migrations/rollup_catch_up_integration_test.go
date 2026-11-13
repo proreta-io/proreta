@@ -159,14 +159,16 @@ func TestIntegrationRollupCatchUp(t *testing.T) {
 	})
 }
 
-// reset_monitor_runtime leaves a soft-deleted monitor's schedule alone.
-func TestIntegrationResetMonitorRuntimeSkipsDeleted(t *testing.T) {
+// reset_monitor_runtime parks the schedule (next_run_at infinity) of a paused or deleted monitor
+// and gives a running one a near, finite time.
+func TestIntegrationResetMonitorRuntimeParksPausedAndDeleted(t *testing.T) {
 	env := pgtest.New(t, pgtest.DBName("resetdeleted"))
 	ctx := context.Background()
 	admin := env.AdminConn(t)
 	api := env.Conn(t, env.APIURL)
 	pgtest.MustExec(t, admin, `INSERT INTO tenants (id, slug, name) VALUES ('`+tenantA+`', 'a', 'A')`)
 	live := seedMonitor(t, admin, tenantA, "now() + interval '1 hour'", false, false)
+	paused := seedMonitor(t, admin, tenantA, "now() + interval '1 hour'", true, false)
 	deleted := seedMonitor(t, admin, tenantA, "now() + interval '1 hour'", false, true)
 	reset := func(id string) int {
 		t.Helper()
@@ -182,12 +184,31 @@ func TestIntegrationResetMonitorRuntimeSkipsDeleted(t *testing.T) {
 		if err := tx.QueryRow(ctx, `SELECT reset_monitor_runtime($1)`, id).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
 		return n
 	}
-	if n := reset(live); n != 1 {
-		t.Fatalf("live monitor: reset %d locations, want 1", n)
+	parked := func(id string) bool {
+		t.Helper()
+		var p bool
+		if err := admin.QueryRow(ctx, `SELECT next_run_at = 'infinity' FROM monitor_location_state WHERE monitor_id = $1`, id).Scan(&p); err != nil {
+			t.Fatal(err)
+		}
+		return p
 	}
-	if n := reset(deleted); n != 0 {
-		t.Fatalf("deleted monitor: reset %d locations, want 0", n)
+	for id, wantParked := range map[string]bool{live: false, paused: true, deleted: true} {
+		if n := reset(id); n != 1 {
+			t.Fatalf("reset %s: %d locations, want 1", id, n)
+		}
+		if parked(id) != wantParked {
+			t.Fatalf("monitor %s: parked = %v, want %v", id, parked(id), wantParked)
+		}
+	}
+	// Resume: the flag flips, the reset sets a finite time again.
+	pgtest.MustExec(t, admin, `UPDATE monitors SET paused = false WHERE id = '`+paused+`'`)
+	reset(paused)
+	if parked(paused) {
+		t.Fatal("a resumed monitor must be due again")
 	}
 }

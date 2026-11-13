@@ -387,7 +387,8 @@ func TestIntegrationPauseFencesAndURLChangeRestarts(t *testing.T) {
 		var x row
 		if err := admin.QueryRow(ctx, `
 			SELECT s.status, ms.status, s.consecutive_failures, s.lease_token IS NOT NULL,
-			       ms.tls_expires_at IS NOT NULL OR ms.tls_warned_not_after IS NOT NULL, s.next_run_at - now()
+			       ms.tls_expires_at IS NOT NULL OR ms.tls_warned_not_after IS NOT NULL,
+			       CASE WHEN s.next_run_at = 'infinity' THEN interval '1 year' ELSE s.next_run_at - now() END
 			FROM monitor_location_state s JOIN monitor_state ms ON ms.monitor_id = s.monitor_id
 			WHERE s.monitor_id = $1`, id).Scan(&x.lsStatus, &x.msStatus, &x.failures, &x.leased, &x.tls, &x.delay); err != nil {
 			t.Fatal(err)
