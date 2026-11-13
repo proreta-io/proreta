@@ -33,6 +33,11 @@ const (
 	ActionCreated = "specula.created"
 	ActionUpdated = "specula.updated"
 	ActionRevoked = "specula.revoked"
+
+	// The names written instead when the platform admin acts (Actor.Admin).
+	AdminActionCreated = "admin.specula.created"
+	AdminActionUpdated = "admin.specula.updated"
+	AdminActionRevoked = "admin.specula.revoked"
 )
 
 // TokenPrefix starts every Specula token, so a leaked one is recognisable.
@@ -73,6 +78,8 @@ type Actor struct {
 	TenantID uuid.UUID
 	UserID   uuid.UUID
 	IP       netip.Addr
+	// Admin marks a platform admin acting in the organization: the audit rows carry the admin.* names.
+	Admin bool
 }
 
 // Specula is one registered executor.
@@ -152,7 +159,7 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Specula,
 			}
 			return fmt.Errorf("create: %w", err)
 		}
-		if err := s.audit(ctx, tx, a, ActionCreated, id, map[string]any{"allProjects": in.AllProjects, "projectCount": len(projects)}); err != nil {
+		if err := s.audit(ctx, tx, a, pick(a, ActionCreated, AdminActionCreated), id, map[string]any{"allProjects": in.AllProjects, "projectCount": len(projects)}); err != nil {
 			return err
 		}
 		out, err = get(ctx, tx, a.TenantID, id)
@@ -270,7 +277,7 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 				}
 			}
 		}
-		if err := s.audit(ctx, tx, a, ActionUpdated, id, map[string]any{"fields": changed}); err != nil {
+		if err := s.audit(ctx, tx, a, pick(a, ActionUpdated, AdminActionUpdated), id, map[string]any{"fields": changed}); err != nil {
 			return err
 		}
 		out, err = get(ctx, tx, a.TenantID, id)
@@ -290,9 +297,16 @@ func (s *Service) Revoke(ctx context.Context, a Actor, id uuid.UUID) error {
 		if !revoked {
 			return ErrNotFound
 		}
-		return s.audit(ctx, tx, a, ActionRevoked, id, nil)
+		return s.audit(ctx, tx, a, pick(a, ActionRevoked, AdminActionRevoked), id, nil)
 	})
 	return wrap(err)
+}
+
+func pick(a Actor, customer, admin string) string {
+	if a.Admin {
+		return admin
+	}
+	return customer
 }
 
 func (s *Service) audit(ctx context.Context, tx pgx.Tx, a Actor, action string, id uuid.UUID, meta map[string]any) error {

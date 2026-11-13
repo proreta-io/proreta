@@ -120,6 +120,11 @@ export const queryKeys = {
   adminUser: (id: string) => ["admin", "user", id] as const,
   adminMembers: (id: string) => ["admin", "organization", id, "members"] as const,
   adminInvitations: (id: string) => ["admin", "organization", id, "invitations"] as const,
+  adminUsage: (id: string) => ["admin", "organization", id, "usage"] as const,
+  adminAuthDomains: (id: string) => ["admin", "organization", id, "auth-domains"] as const,
+  adminChannels: (id: string) => ["admin", "organization", id, "channels"] as const,
+  adminStatusPages: (id: string) => ["admin", "organization", id, "status-pages"] as const,
+  adminSpecula: (id: string) => ["admin", "organization", id, "specula"] as const,
   organizations: ["organizations"] as const,
   members: ["members"] as const,
   invitations: ["invitations"] as const,
@@ -756,4 +761,82 @@ export const removeAdminProjectMember = (
       "/api/v1/admin/organizations/{organizationId}/projects/{projectId}/members/{userId}",
       { params: { path: { organizationId, projectId, userId } } },
     ),
+  );
+
+// Settings of an organization as its owner sees them (platform admin only).
+const orgPath = (organizationId: string) => ({ params: { path: { organizationId } } });
+
+export const getAdminUsage = (organizationId: string) =>
+  unwrap(client.GET("/api/v1/admin/organizations/{organizationId}/usage", orgPath(organizationId)));
+
+export const listAdminAuthDomains = (organizationId: string) =>
+  unwrap(
+    client.GET(
+      "/api/v1/admin/organizations/{organizationId}/auth-domains",
+      orgPath(organizationId),
+    ),
+  );
+
+export const updateAdminAuthDomain = (
+  organizationId: string,
+  domainId: string,
+  body: AuthDomainUpdate,
+) =>
+  unwrap(
+    client.PATCH("/api/v1/admin/organizations/{organizationId}/auth-domains/{domainId}", {
+      params: { path: { organizationId, domainId } },
+      body,
+    }),
+  );
+
+export const deleteAdminAuthDomain = (organizationId: string, domainId: string) =>
+  unwrap(
+    client.DELETE("/api/v1/admin/organizations/{organizationId}/auth-domains/{domainId}", {
+      params: { path: { organizationId, domainId } },
+    }),
+  );
+
+export const listAdminChannels = (organizationId: string) =>
+  unwrap(
+    client.GET("/api/v1/admin/organizations/{organizationId}/channels", orgPath(organizationId)),
+  );
+
+export const listAdminStatusPages = (organizationId: string) =>
+  unwrap(
+    client.GET(
+      "/api/v1/admin/organizations/{organizationId}/status-pages",
+      orgPath(organizationId),
+    ),
+  );
+
+export const listAdminSpecula = (organizationId: string) =>
+  unwrap(
+    client.GET("/api/v1/admin/organizations/{organizationId}/specula", orgPath(organizationId)),
+  );
+
+export const createAdminSpecula = (organizationId: string, body: SpeculaCreate) =>
+  unwrap(
+    client.POST("/api/v1/admin/organizations/{organizationId}/specula", {
+      ...orgPath(organizationId),
+      body,
+    }),
+  );
+
+export const updateAdminSpecula = (
+  organizationId: string,
+  speculaId: string,
+  body: SpeculaUpdate,
+) =>
+  unwrap(
+    client.PATCH("/api/v1/admin/organizations/{organizationId}/specula/{speculaId}", {
+      params: { path: { organizationId, speculaId } },
+      body,
+    }),
+  );
+
+export const revokeAdminSpecula = (organizationId: string, speculaId: string) =>
+  unwrap(
+    client.DELETE("/api/v1/admin/organizations/{organizationId}/specula/{speculaId}", {
+      params: { path: { organizationId, speculaId } },
+    }),
   );

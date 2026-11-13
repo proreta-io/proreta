@@ -26,6 +26,10 @@ const (
 	ActionAdminInvitationRevoked = "admin.invitation.revoked"
 )
 
+// ActionAdminAuthDomainPrefix starts the audit names of a sign-in domain changed by the platform admin:
+// admin.auth_domain.updated and admin.auth_domain.deleted (claiming stays with the owner).
+const ActionAdminAuthDomainPrefix = "admin.auth_domain."
+
 // ErrUserNotFound means no account matches the id or email.
 var ErrUserNotFound = errors.New("auth: user not found")
 

@@ -441,6 +441,16 @@ var operations = map[string]Permission{
 	"adminlistorganizationprojectmembers":  PlatformAdmin,
 	"adminputorganizationprojectmember":    PlatformAdmin,
 	"adminremoveorganizationprojectmember": PlatformAdmin,
+	"admingetorganizationusage":            PlatformAdmin,
+	"adminlistorganizationauthdomains":     PlatformAdmin,
+	"adminupdateorganizationauthdomain":    PlatformAdmin,
+	"admindeleteorganizationauthdomain":    PlatformAdmin,
+	"adminlistorganizationchannels":        PlatformAdmin,
+	"adminlistorganizationstatuspages":     PlatformAdmin,
+	"adminlistorganizationspecula":         PlatformAdmin,
+	"admincreateorganizationspecula":       PlatformAdmin,
+	"adminupdateorganizationspecula":       PlatformAdmin,
+	"adminrevokeorganizationspecula":       PlatformAdmin,
 }
 
 // whileMustChangePassword lists the only operations a session may call while its user has to

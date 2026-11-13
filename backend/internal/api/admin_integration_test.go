@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -18,6 +19,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/auth"
 	"github.com/proreta-io/proreta/backend/internal/incidents"
 	"github.com/proreta-io/proreta/backend/internal/monitors"
+	"github.com/proreta-io/proreta/backend/internal/notify"
 	"github.com/proreta-io/proreta/backend/internal/plans"
 	"github.com/proreta-io/proreta/backend/internal/platform/crypto"
 	"github.com/proreta-io/proreta/backend/internal/platform/logging"
@@ -25,6 +27,8 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/projects"
 	"github.com/proreta-io/proreta/backend/internal/queries"
 	"github.com/proreta-io/proreta/backend/internal/scheduler"
+	"github.com/proreta-io/proreta/backend/internal/specula"
+	"github.com/proreta-io/proreta/backend/internal/statuspages"
 	"github.com/proreta-io/proreta/backend/internal/testsupport/pgtest"
 )
 
@@ -47,14 +51,22 @@ func newAdminServer(t *testing.T, env *pgtest.Env, logs *lockedBuffer) *client {
 	}
 	pgtest.MustExec(t, env.AdminConn(t), `UPDATE users SET password_must_change = false WHERE email = '`+adminLogin+`'`)
 	registration := platformsettings.NewRegistration(pool, true, log)
-	adminSvc, err := admin.NewService(pool, svc, admin.Options{Logger: log, Registerer: prometheus.NewRegistry(), Registration: registration, Projects: projects.NewService(pool)})
+	keys, err := crypto.NewKeyring(map[string][]byte{"k1": bytes.Repeat([]byte{7}, 32)}, "k1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plansSvc, speculaSvc := plans.NewService(pool), specula.NewService(pool)
+	channelsSvc := notify.NewService(pool, keys, &fakeSlack{}, "https://proreta.example.com")
+	pagesSvc := statuspages.NewService(pool, statuspages.Options{HashParams: &testHashParams})
+	adminSvc, err := admin.NewService(pool, svc, admin.Options{Logger: log, Registerer: prometheus.NewRegistry(), Registration: registration, Projects: projects.NewService(pool),
+		Plans: plansSvc, Channels: channelsSvc, Specula: speculaSvc, StatusPages: pagesSvc})
 	if err != nil {
 		t.Fatal(err)
 	}
 	sched := scheduler.New()
 	h, err := api.NewHandler(api.Config{Version: "test", Commit: "test", CookieSecure: true, TrustedProxyHops: 1, RegistrationEnabled: true, PublicURL: heartbeatPublicURL},
 		api.Deps{Auth: svc, Monitors: monitors.NewService(pool, sched, incidents.NewService(sched)), Queries: queries.New(pool, nil),
-			Plans: plans.NewService(pool), Projects: projects.NewService(pool), Admin: adminSvc, Registration: registration, Logger: log, Pings: api.NewPingMetrics(prometheus.NewRegistry())})
+			Plans: plansSvc, Projects: projects.NewService(pool), Specula: speculaSvc, Channels: channelsSvc, StatusPages: pagesSvc, Admin: adminSvc, Registration: registration, Logger: log, Pings: api.NewPingMetrics(prometheus.NewRegistry())})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,6 +90,13 @@ func adminCalls(t *testing.T, tenantID, userID string) []struct{ method, path, b
 		for method := range spec.Paths.Value(path).Operations() {
 			body := ""
 			switch {
+			case strings.Contains(path, "/specula"):
+				switch method {
+				case http.MethodPost, http.MethodPatch:
+					body = `{"name":"Prod"}`
+				}
+			case strings.Contains(path, "/auth-domains/") && method == http.MethodPatch:
+				body = `{"enabled":false}`
 			case strings.Contains(path, "/projects"):
 				switch method {
 				case http.MethodPost, http.MethodPatch:
@@ -105,11 +124,11 @@ func adminCalls(t *testing.T, tenantID, userID string) []struct{ method, path, b
 				body = `{"role":"member"}`
 			}
 			out = append(out, struct{ method, path, body string }{method,
-				strings.NewReplacer("{tenantId}", tenantID, "{organizationId}", tenantID, "{userId}", userID, "{invitationId}", userID, "{projectId}", userID).Replace(path), body})
+				strings.NewReplacer("{tenantId}", tenantID, "{organizationId}", tenantID, "{userId}", userID, "{invitationId}", userID, "{projectId}", userID, "{domainId}", userID, "{speculaId}", userID).Replace(path), body})
 		}
 	}
-	if len(out) != 36 {
-		t.Fatalf("%d admin operations in the spec, want 36", len(out))
+	if len(out) != 46 {
+		t.Fatalf("%d admin operations in the spec, want 46", len(out))
 	}
 	return out
 }

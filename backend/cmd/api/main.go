@@ -102,10 +102,6 @@ func run() error {
 	// is the value until a choice is stored.
 	registration := platformsettings.NewRegistration(pool, cfg.RegistrationEnabled, log)
 	projectsSvc := projects.NewService(pool)
-	adminSvc, err := admin.NewService(pool, authSvc, admin.Options{Logger: log, Registerer: reg, Mail: mailQueue, Settings: mailSettings, Registration: registration, Projects: projectsSvc})
-	if err != nil {
-		return err
-	}
 
 	flow, err := oauthFlow(cfg)
 	if err != nil {
@@ -131,6 +127,15 @@ func run() error {
 		}
 		monitorSvc.WithRequestKeys(requestKeys)
 	}
+	plansSvc := plans.NewService(pool)
+	speculaSvc := specula.NewService(pool)
+	channelsSvc := notify.NewService(pool, keys, slack, cfg.PublicURL).WithWebhook(notify.NewWebhookNotifier(notifyClient))
+	pagesSvc := statuspages.NewService(pool, statuspages.Options{Logger: log})
+	adminSvc, err := admin.NewService(pool, authSvc, admin.Options{Logger: log, Registerer: reg, Mail: mailQueue, Settings: mailSettings, Registration: registration, Projects: projectsSvc,
+		Plans: plansSvc, Channels: channelsSvc, Specula: speculaSvc, StatusPages: pagesSvc})
+	if err != nil {
+		return err
+	}
 	handler, err := api.NewHandler(api.Config{
 		Version:              version,
 		Commit:               commit,
@@ -142,11 +147,11 @@ func run() error {
 	}, api.Deps{
 		Auth:     authSvc,
 		Monitors: monitorSvc,
-		Specula:  specula.NewService(pool),
+		Specula:  speculaSvc,
 		Queries:  queries.New(pool, nil),
-		Channels: notify.NewService(pool, keys, slack, cfg.PublicURL).WithWebhook(notify.NewWebhookNotifier(notifyClient)),
-		Plans:    plans.NewService(pool), Projects: projectsSvc,
-		StatusPages:  statuspages.NewService(pool, statuspages.Options{Logger: log}),
+		Channels: channelsSvc,
+		Plans:    plansSvc, Projects: projectsSvc,
+		StatusPages:  pagesSvc,
 		Admin:        adminSvc,
 		Registration: registration,
 		OAuth:        flow,
