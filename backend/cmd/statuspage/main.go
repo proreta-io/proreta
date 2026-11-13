@@ -1,7 +1,8 @@
 // Command statuspage serves the public status pages under /status/<slug>: HTML, JSON,
 // RSS, a badge and an embed script, from snapshots prepared by the api and jobs. It runs as the
-// database role proreta_statuspage, which may only call status_page_snapshot(slug), and keeps no
-// sessions.
+// database role proreta_statuspage, which may only call status_page_snapshot(slug) and the two host
+// definers, and keeps no sessions. With PRORETA_STATUS_PAGE_CUSTOM_DOMAINS it also serves a page at
+// the root of a verified customer domain.
 package main
 
 import (
@@ -41,6 +42,9 @@ func run() error {
 	log := logging.New(os.Stdout, cfg.LogLevel).With("service", "statuspage", "version", version)
 	if config.CookieInsecureOverHTTPS(cfg.CookieSecure, cfg.PublicURL) {
 		log.Warn("PRORETA_COOKIE_SECURE is false while PRORETA_PUBLIC_URL is https: cookies are sent without the Secure attribute")
+	}
+	if cfg.CustomDomains && cfg.AbuseURL == "" {
+		log.Warn("PRORETA_ABUSE_URL is empty: pages on customer domains show no \"Report abuse\" link")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()

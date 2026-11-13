@@ -24,7 +24,9 @@ type dnsServer struct {
 	queries  atomic.Int32
 }
 
-func newDNSServer(t *testing.T) *dnsServer {
+// newDNSServer fills the records with setup before the server goroutine starts, so the race
+// detector sees no unsynchronised access.
+func newDNSServer(t *testing.T, setup func(*dnsServer)) *dnsServer {
 	t.Helper()
 	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
 	if err != nil {
@@ -32,6 +34,7 @@ func newDNSServer(t *testing.T) *dnsServer {
 	}
 	s := &dnsServer{addr: pc.LocalAddr().String(), txt: map[string][]string{}, cname: map[string]string{}, addrs: map[string]bool{},
 		servfail: map[string]bool{}, silent: map[string]bool{}}
+	setup(s)
 	t.Cleanup(func() { pc.Close() })
 	go func() {
 		buf := make([]byte, 1500)
@@ -114,18 +117,19 @@ func newTestResolver(t *testing.T, s *dnsServer, mod func(*NetResolverConfig)) *
 }
 
 func TestNetResolverTXT(t *testing.T) {
-	s := newDNSServer(t)
 	long := strings.Repeat("x", 200)
-	s.txt["_proreta-status.status.acme.com"] = []string{"v=spf1 -all", TXTValue(testToken), long}
-	s.txt["many.acme.com"] = func() []string {
-		var v []string
-		for i := range 20 {
-			v = append(v, strings.Repeat("a", i+1))
-		}
-		return v
-	}()
-	s.servfail["broken.acme.com"] = true
-	s.silent["slow.acme.com"] = true
+	s := newDNSServer(t, func(s *dnsServer) {
+		s.txt["_proreta-status.status.acme.com"] = []string{"v=spf1 -all", TXTValue(testToken), long}
+		s.txt["many.acme.com"] = func() []string {
+			var v []string
+			for i := range 20 {
+				v = append(v, strings.Repeat("a", i+1))
+			}
+			return v
+		}()
+		s.servfail["broken.acme.com"] = true
+		s.silent["slow.acme.com"] = true
+	})
 	r := newTestResolver(t, s, func(c *NetResolverConfig) { c.MaxTXTLength = 100 })
 	ctx := context.Background()
 
@@ -152,15 +156,16 @@ func TestNetResolverTXT(t *testing.T) {
 }
 
 func TestNetResolverCNAMEAndProbe(t *testing.T) {
-	s := newDNSServer(t)
-	s.cname["status.acme.com"] = "edge.cdn.net"
-	s.cname["edge.cdn.net"] = testTarget
-	s.addrs[testTarget] = true
-	s.addrs["plain.acme.com"] = true
-	s.cname["other.acme.com"] = "elsewhere.example.org"
-	s.addrs["elsewhere.example.org"] = true
-	s.txt[TXTName("status.acme.com")] = []string{TXTValue(testToken)}
-	s.servfail["down.acme.com"] = true
+	s := newDNSServer(t, func(s *dnsServer) {
+		s.cname["status.acme.com"] = "edge.cdn.net"
+		s.cname["edge.cdn.net"] = testTarget
+		s.addrs[testTarget] = true
+		s.addrs["plain.acme.com"] = true
+		s.cname["other.acme.com"] = "elsewhere.example.org"
+		s.addrs["elsewhere.example.org"] = true
+		s.txt[TXTName("status.acme.com")] = []string{TXTValue(testToken)}
+		s.servfail["down.acme.com"] = true
+	})
 	r := newTestResolver(t, s, nil)
 	ctx := context.Background()
 
@@ -183,8 +188,9 @@ func TestNetResolverCNAMEAndProbe(t *testing.T) {
 	if got := Probe(ctx, r, "other.acme.com", testToken, testTarget); got != (Facts{Missing, Missing}) {
 		t.Fatalf("probe elsewhere: %+v", got)
 	}
-	dead := newDNSServer(t)
-	dead.silent["status.acme.com"], dead.silent[TXTName("status.acme.com")] = true, true
+	dead := newDNSServer(t, func(s *dnsServer) {
+		s.silent["status.acme.com"], s.silent[TXTName("status.acme.com")] = true, true
+	})
 	rd := newTestResolver(t, dead, nil)
 	if got := Probe(ctx, rd, "status.acme.com", testToken, testTarget); got != (Facts{Unknown, Unknown}) {
 		t.Fatalf("a resolver that never answers must give unknown, got %+v", got)
@@ -192,8 +198,7 @@ func TestNetResolverCNAMEAndProbe(t *testing.T) {
 }
 
 func TestNetResolverInjectedDialAndServerForms(t *testing.T) {
-	s := newDNSServer(t)
-	s.txt["a.acme.com"] = []string{"hello"}
+	s := newDNSServer(t, func(s *dnsServer) { s.txt["a.acme.com"] = []string{"hello"} })
 	var dialed atomic.Int32
 	r, err := NewNetResolver(NetResolverConfig{Server: "192.0.2.53", Timeout: time.Second, Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 		dialed.Add(1)

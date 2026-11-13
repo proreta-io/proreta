@@ -213,7 +213,7 @@
         "registrationEnabled": {
           "type": "boolean",
           "title": "self-service registration",
-          "description": "PRORETA_REGISTRATION_ENABLED: anyone can create an organization; addresses are verified only when email is enabled, and nothing requires it (chart default false)"
+          "description": "PRORETA_REGISTRATION_ENABLED: anyone can create an organization; addresses are verified only when the platform admin turns on email verification under Admin, Email (needs a working SMTP test; off by default), and nothing requires it (chart default false)"
         },
         "passwordLoginEnabled": {
           "type": "boolean",

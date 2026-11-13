@@ -31,8 +31,8 @@ const (
 	flushInterval       = time.Second
 	drainTimeout        = 15 * time.Second
 	callTimeout         = 20 * time.Second
-	// A result older than this is no longer accepted by the gateway.
-	maxResultAge = 9 * time.Minute
+	// A result older than this is no longer accepted by the gateway (its window is one minute).
+	maxResultAge = 50 * time.Second
 	maxQueued    = 2000
 )
 

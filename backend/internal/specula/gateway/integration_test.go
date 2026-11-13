@@ -272,6 +272,43 @@ func TestIntegrationGateway(t *testing.T) {
 		}
 	})
 
+	t.Run("checkedAt only moves the schedule inside a one minute window", func(t *testing.T) {
+		pgtest.MustExec(t, admin, `UPDATE monitor_location_state SET next_run_at = now() - interval '1 minute', lease_token = NULL, lease_until = NULL WHERE monitor_id = '`+m.ID.String()+`'`)
+		code, b := call(t, srv, token, "/claim", wire.ClaimRequest{Max: 10})
+		var out wire.ClaimResponse
+		if code != http.StatusOK || json.Unmarshal(b, &out) != nil || len(out.Jobs) != 1 {
+			t.Fatalf("claim: %d %s", code, b)
+		}
+		lease := out.Jobs[0].LeaseToken
+		nextRun := func() time.Time {
+			var at time.Time
+			if err := admin.QueryRow(ctx, `SELECT next_run_at FROM monitor_location_state WHERE monitor_id = $1`, m.ID).Scan(&at); err != nil {
+				t.Fatal(err)
+			}
+			return at
+		}
+		send := func(at time.Time) string {
+			_, b := call(t, srv, token, "/results", wire.ResultsRequest{Results: []wire.Result{{MonitorID: m.ID, LeaseToken: lease, CheckedAt: at, OK: true, StatusCode: 200}}})
+			var out wire.ResultsResponse
+			if json.Unmarshal(b, &out) != nil || len(out.Outcomes) != 1 {
+				t.Fatalf("results: %s", b)
+			}
+			return out.Outcomes[0].Outcome
+		}
+		before := nextRun()
+		for name, at := range map[string]time.Time{"9 minutes old": time.Now().Add(-9 * time.Minute), "2 minutes ahead": time.Now().Add(2 * time.Minute)} {
+			if got := send(at); got != wire.OutcomeRejected {
+				t.Fatalf("%s: %s, want rejected", name, got)
+			}
+			if !nextRun().Equal(before) {
+				t.Fatalf("%s moved next_run_at", name)
+			}
+		}
+		if got := send(time.Now().Add(-30 * time.Second)); got != wire.OutcomeRecorded {
+			t.Fatalf("30 seconds old: %s, want recorded", got)
+		}
+	})
+
 	t.Run("without request keys a job with a sealed request fails visibly instead of being sent", func(t *testing.T) {
 		pgtest.MustExec(t, admin, `UPDATE monitor_location_state SET next_run_at = now() - interval '1 minute', lease_token = NULL, lease_until = NULL WHERE monitor_id = '`+m.ID.String()+`'`)
 		plain := build(nil)

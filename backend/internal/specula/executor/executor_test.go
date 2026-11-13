@@ -184,6 +184,7 @@ func TestSkipsExpiredLeasesAndDropsOldResults(t *testing.T) {
 		t.Fatalf("an expired lease was run (%d) or queued (%d)", ran.Load(), e.queued())
 	}
 	e.enqueue(wire.Result{MonitorID: uuid.New(), CheckedAt: time.Now().Add(-time.Hour)})
+	e.enqueue(wire.Result{MonitorID: uuid.New(), CheckedAt: time.Now().Add(-maxResultAge - time.Second)})
 	e.enqueue(wire.Result{MonitorID: uuid.New(), CheckedAt: time.Now()})
 	if batch := e.takeBatch(); len(batch) != 1 {
 		t.Fatalf("batch %d, want only the fresh result", len(batch))

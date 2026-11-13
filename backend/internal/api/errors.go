@@ -149,6 +149,12 @@ func writeError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 		// recently), so it reveals nothing about other organizations' pages.
 		p.Type, p.Title, p.Status = problemSlugTaken, "This address is not available", http.StatusConflict
 		p.Detail = "Status page addresses are shared by every organization on this Proreta; choose another."
+	case errors.Is(err, statuspages.ErrPageDomainLimit):
+		p.Type, p.Title, p.Status = problemPlanLimitReached, "Domain limit of the page reached", http.StatusConflict
+		p.Detail = fmt.Sprintf("A status page can have at most %d domains.", statuspages.MaxDomainsPerPage)
+		p.Limit = string(plans.ResourceStatusPageDomain)
+		perPage := statuspages.MaxDomainsPerPage
+		p.Max = &perPage
 	case errors.Is(err, errCustomDomainsDisabled):
 		p.Type, p.Title, p.Status = problemCustomDomainsOff, "Custom domains are not turned on", http.StatusNotFound
 		p.Detail = "This installation does not offer status pages on a customer's own domain."

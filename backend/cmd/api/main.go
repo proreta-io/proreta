@@ -31,6 +31,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/scheduler"
 	"github.com/proreta-io/proreta/backend/internal/specula"
 	"github.com/proreta-io/proreta/backend/internal/statuspages"
+	"github.com/proreta-io/proreta/backend/internal/statuspages/domains"
 	"github.com/proreta-io/proreta/backend/migrations"
 )
 
@@ -130,7 +131,12 @@ func run() error {
 	plansSvc := plans.NewService(pool)
 	speculaSvc := specula.NewService(pool)
 	channelsSvc := notify.NewService(pool, keys, slack, cfg.PublicURL).WithWebhook(notify.NewWebhookNotifier(notifyClient))
-	pagesSvc := statuspages.NewService(pool, statuspages.Options{Logger: log})
+	dnsResolver, err := domains.NewNetResolver(domains.NetResolverConfig{Server: cfg.DNS.Resolver, Timeout: cfg.DNS.Timeout})
+	if err != nil {
+		return err
+	}
+	pagesSvc := statuspages.NewService(pool, statuspages.Options{Logger: log, Domains: statuspages.DomainOptions{
+		Resolver: dnsResolver, Rules: domains.NewRules(cfg.StatusPageInstallationHosts, cfg.StatusPageForbiddenSuffixes), CNAMETarget: cfg.StatusPageCNAMETarget}})
 	adminSvc, err := admin.NewService(pool, authSvc, admin.Options{Logger: log, Registerer: reg, Mail: mailQueue, Settings: mailSettings, Registration: registration, Projects: projectsSvc,
 		Plans: plansSvc, Channels: channelsSvc, Specula: speculaSvc, StatusPages: pagesSvc})
 	if err != nil {

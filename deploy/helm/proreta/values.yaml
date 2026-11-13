@@ -32,7 +32,8 @@ config:
   # PRORETA_REGISTRATION_ENABLED (api only): self-service registration of new organizations. Off by
   # default: the platform admin owns the "default" organization and invites colleagues (invitations
   # work either way). Turn it on only to let others create their own organizations; an address is
-  # verified by email only when `email` is enabled, and nothing requires it. This is the value in
+  # verified by email only when the platform admin turns on email verification under Admin, Email (it
+  # needs a successful SMTP test and is off by default), and nothing requires it. This is the value in
   # use until the platform admin chooses one under Admin, Registration; that choice is stored in the
   # database and wins, and "follow the installation's configuration" returns to this value.
   registrationEnabled: false

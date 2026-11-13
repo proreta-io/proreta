@@ -81,7 +81,7 @@ func TestCanMatrix(t *testing.T) {
 			t.Errorf("public operation %s refused", op)
 		}
 	}
-	// The platform admin operations are decided by the flag: any role passes the table.
+	// The platform admin operations are decided by the flag: no role passes without it.
 	for _, op := range Operations() {
 		if seen[op] {
 			continue
@@ -91,12 +91,15 @@ func TestCanMatrix(t *testing.T) {
 			continue
 		}
 		for _, r := range roles {
-			if !Can(Actor{Role: r}, op) {
-				t.Errorf("Can(%s, %s) = false for a platform admin operation", r, op)
+			if Can(Actor{UserID: uuid.New(), Role: r}, op) {
+				t.Errorf("Can(%s, %s) = true without the platform admin flag", r, op)
+			}
+			if !Can(Actor{UserID: uuid.New(), Role: r, PlatformAdmin: true}, op) {
+				t.Errorf("Can(%s, %s) = false with the platform admin flag", r, op)
 			}
 		}
-		if Can(Actor{}, op) {
-			t.Errorf("%s allowed without a role", op)
+		if Can(Actor{PlatformAdmin: true}, op) {
+			t.Errorf("%s allowed to somebody who belongs to nothing", op)
 		}
 	}
 	for _, min := range expectedMinimum {
