@@ -56,6 +56,8 @@ No metric is labelled per organization, monitor, incident, user, channel, URL, h
 | `proreta_jobs_housekeeping_runs_total` | counter | `task`, `result` (`ok`, `skipped`, `error`) | Housekeeping runs; `task` is `ensure_partitions`, `compute_rollups`, `drop_expired_partitions` (the retention task, implemented by `list_droppable_partitions` / `detach_expired_partition` / `drop_detached_partition`), `purge_expired_sessions`, `purge_mail_outbox` (hourly), `purge_email_verifications` and `purge_password_resets` (daily), `evaluate_heartbeats` (every 30 s), `enqueue_incident_reminders` (every minute) or `rebuild_status_pages` (every 30 s) |
 | `proreta_jobs_housekeeping_last_success_timestamp_seconds` | gauge | `task` | Unix time of the last successful run of each task |
 | `proreta_jobs_partitions_kept_total` | counter | `reason` (`rollups_incomplete`, `error`) | Expired `check_results` partitions the retention task kept back; each one is also logged at warn level with the partition name |
+| `proreta_jobs_specula_agents` | gauge | `status` | Specula by status: `pending`, `online`, `offline`, `revoked`, all organizations |
+| `proreta_jobs_specula_incidents_total` | counter | `event` | Specula incidents opened (`offline`) and resolved (`online`) by `specula_mark_unreachable` |
 | `proreta_jobs_heartbeats_missed_total` | counter | | Missed heartbeat deadlines applied as failures by `evaluate_heartbeats` (one per deadline; a heartbeat that stays silent is not counted again) |
 | `proreta_jobs_status_page_snapshots_total` | counter | | Status page snapshots rebuilt and stored by `rebuild_status_pages` (one per published page and run); a failing page is logged at error level with its organization and page id |
 

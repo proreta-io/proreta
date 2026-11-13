@@ -371,7 +371,7 @@ func checkWebhookFields(verr *validation.Error, channelType string, contentType,
 // Create validates in, checks the tenant's channel quota (a *plans.LimitError when it is used
 // up) and stores the channel with its webhook URL encrypted under the active key.
 func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Channel, error) {
-	f := channelFields{events: AllEvents, mention: []string{}}
+	f := channelFields{events: DefaultEvents, mention: []string{}}
 	var verr validation.Error
 	if in.Type == "" {
 		in.Type = TypeSlack
@@ -736,6 +736,23 @@ func (s *Service) LoadWebhookContext(ctx context.Context, tx pgx.Tx, monitorID u
 		return WebhookContext{}, fmt.Errorf("notify: webhook context: %w", err)
 	}
 	return c, nil
+}
+
+// LoadSpeculaContext is the Specula counterpart of LoadWebhookContext: the organization name for a
+// template, and whether the channel may still serve the Specula (shared with the channel's
+// project). A Specula that no longer exists is not routed. tx must be a tenant transaction.
+func (s *Service) LoadSpeculaContext(ctx context.Context, tx pgx.Tx, speculaID, channelID uuid.UUID) (WebhookContext, bool, error) {
+	var c WebhookContext
+	var routed bool
+	err := tx.QueryRow(ctx, `SELECT routed, organization_name FROM specula_delivery_context($1, $2)`, speculaID, channelID).
+		Scan(&routed, &c.OrganizationName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return WebhookContext{}, false, nil
+	}
+	if err != nil {
+		return WebhookContext{}, false, fmt.Errorf("notify: specula context: %w", err)
+	}
+	return c, routed, nil
 }
 
 // PreviewTemplate renders a template with sample data without sending anything. The error is a

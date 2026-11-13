@@ -5,8 +5,11 @@ export const WEBHOOK_URL_MAX = 2048;
 
 /** Mirrors the server list; the server rejects every other name. */
 export const placeholders: { name: string; help: string }[] = [
-  { name: "event", help: "opened, resolved, reminder, tls_expiring or test" },
-  { name: "status", help: "down or up" },
+  {
+    name: "event",
+    help: "opened, resolved, reminder, tls_expiring, agent_offline, agent_online or test",
+  },
+  { name: "status", help: "down, up, offline or online" },
   { name: "monitor.id", help: "Monitor id" },
   { name: "monitor.name", help: "Monitor name" },
   { name: "monitor.url", help: "Monitor URL without query string" },
@@ -17,6 +20,8 @@ export const placeholders: { name: string; help: string }[] = [
   { name: "incident.startedAt", help: "RFC 3339, UTC" },
   { name: "incident.resolvedAt", help: "RFC 3339, UTC; empty while down" },
   { name: "incident.duration", help: "For example 5m; resolved and reminder only" },
+  { name: "specula.id", help: "Specula id; Specula events only" },
+  { name: "specula.name", help: "Specula name; Specula events only" },
   { name: "error.kind", help: "Why the monitor went down" },
   { name: "tls.expiresAt", help: "TLS expiry events only" },
   { name: "tls.daysLeft", help: "TLS expiry events only" },

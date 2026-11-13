@@ -87,6 +87,9 @@ var definerCalls = map[string]string{
 	"specula_agents_sync_location": `SELECT specula_agents_sync_location()`,
 	"monitor_set_location":         `SELECT monitor_set_location(gen_random_uuid(), gen_random_uuid())`,
 	"specula_mark_unreachable":     `SELECT specula_mark_unreachable()`,
+	"specula_sync_offline":         `SELECT * FROM specula_sync_offline()`,
+	"specula_status_counts":        `SELECT * FROM specula_status_counts()`,
+	"specula_delivery_context":     `SELECT * FROM specula_delivery_context(gen_random_uuid(), gen_random_uuid())`,
 }
 
 // Every definer function in the allow-list is executable by exactly the roles listed there: a

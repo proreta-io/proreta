@@ -80,7 +80,20 @@ func WebhookValues(kind string, raw []byte, publicURL string, c WebhookContext) 
 		"error.kind":        p.Reason,
 		"link":              trimSlash(publicURL) + "/monitors/" + p.MonitorID.String(),
 	}
+	if (kind == DeliveryAgentOffline || kind == DeliveryAgentOnline) && p.SpeculaID == nil {
+		return nil, ErrBadPayload
+	}
+	if p.SpeculaID != nil {
+		v["specula.id"], v["specula.name"] = p.SpeculaID.String(), p.SpeculaName
+		v["link"] = trimSlash(publicURL) + "/specula"
+		v["monitor.id"] = ""
+	}
 	switch kind {
+	case DeliveryAgentOffline:
+		v["event"], v["status"] = "agent_offline", "offline"
+	case DeliveryAgentOnline:
+		v["event"], v["status"] = "agent_online", "online"
+		v["incident.duration"] = HumanDuration(time.Duration(p.DurationSeconds) * time.Second)
 	case DeliveryOpened:
 		v["event"], v["status"] = "opened", "down"
 	case DeliveryReminder:

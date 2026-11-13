@@ -53,7 +53,7 @@ When a project may use at least one Specula, the monitor form has a **Run from**
 |---|---|
 | Waiting | Registered, never connected. |
 | Online | Heard from in the last 90 seconds (it reports every minute). |
-| Offline | Connected before, silent for longer. Its monitors are not being checked. After 3 minutes without a call they show **unknown**, not *down*, so a lost link does not look like an outage of your services. They return to up or down with the first check after it reconnects. |
+| Offline | Connected before, silent for longer. Its monitors are not being checked. After 3 minutes without a call they show **unknown**, not *down*, so a lost link does not look like an outage of your services. They return to up or down with the first check after it reconnects. At the same moment an **incident** with the reason `agent_offline` opens (it lists the monitors that run there, and ends when the Specula is heard again), and channels that receive the event *Specula offline* are told. A Specula that never connected, or is revoked, opens none. |
 | Revoked | The token no longer works. Its monitors show *unknown* at once. |
 
 ## Change who can use it, rename, revoke
@@ -67,8 +67,11 @@ Owners and maintainers register, edit and revoke Specula and see all of them. Me
 ## Audit
 `specula.created`, `specula.updated` (field names only) and `specula.revoked`. Tokens are never recorded.
 
+## Notifications
+Under **Settings → Notification channels** a Slack or webhook channel can subscribe to **Specula offline** and **Specula back online**; new channels do not receive them until you add them. A channel of a single project only receives events of a Specula that is shared with that project; an organization-wide channel receives all of them. In a webhook template the events are `agent_offline` and `agent_online`, `status` is `offline` or `online`, `specula.id` and `specula.name` are filled, `monitor.*` is empty and `link` opens the Specula page. Metrics (jobs): `proreta_jobs_specula_agents{status}` (pending, online, offline, revoked) and `proreta_jobs_specula_incidents_total{event}` (offline, online).
+
 ## Limits
-- Going offline or being revoked does not open an incident or send a notification yet; the monitors show *unknown*. Watch the Specula page, or alert on the executor's own metrics.
-- The plan limits how many Specula an organization may have (`max_agents`: `free` 1, `internal` 20, `community` unlimited). Revoked ones do not count; at the limit, registering another fails with "plan limit reached" until you revoke one. The operator can override it per organization in `tenants.limits`.
+- Going offline opens an incident and notifies; revoking does not (it is deliberate): the incident of a revoked Specula ends and no *back online* message follows. The silence threshold is fixed at 3 minutes and the check runs every minute, so the message comes 3 to 4 minutes after the last call. The incident is not reminded while it stays open.
 - HTTP, HTTPS and TCP checks only.
+- The plan limits how many Specula an organization may have (`max_agents`: `free` 1, `internal` 20, `community` unlimited). Revoked ones do not count; at the limit, registering another fails with "plan limit reached" until you revoke one. The operator can override it per organization in `tenants.limits`.
 - A token has no expiry; rotate by registering a new Specula and revoking the old one.

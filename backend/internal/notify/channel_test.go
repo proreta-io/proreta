@@ -25,7 +25,7 @@ func TestValidateEvents(t *testing.T) {
 	if msg != "" || !slices.Equal(got, []string{"down", "tls_expiring"}) {
 		t.Fatalf("got %v %q", got, msg)
 	}
-	for _, bad := range [][]string{nil, {}, {"agent_offline"}, {"down", "DOWN"}} {
+	for _, bad := range [][]string{nil, {}, {"agent_sleeping"}, {"down", "DOWN"}} {
 		if _, msg := ValidateEvents(bad); msg == "" {
 			t.Errorf("%v accepted", bad)
 		}

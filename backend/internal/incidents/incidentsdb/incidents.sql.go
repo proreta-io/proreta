@@ -120,7 +120,7 @@ type InsertDeliveryParams struct {
 	ID         uuid.UUID
 	TenantID   uuid.UUID
 	Kind       string
-	MonitorID  uuid.UUID
+	MonitorID  *uuid.UUID
 	IncidentID *uuid.UUID
 	ChannelID  uuid.UUID
 	Payload    []byte

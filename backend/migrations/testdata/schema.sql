@@ -117,6 +117,7 @@ incidents.5 resolve_reason text
 incidents.6 reason text
 incidents.7 created_at timestamp with time zone not null default now()
 incidents.8 monitor_id uuid
+incidents.9 specula_id uuid
 invitations.1 id uuid not null
 invitations.2 tenant_id uuid not null
 invitations.3 role text not null
@@ -204,7 +205,7 @@ notification_channels.15 body_template text
 notification_deliveries.1 id uuid not null
 notification_deliveries.2 tenant_id uuid not null
 notification_deliveries.3 kind text not null
-notification_deliveries.4 monitor_id uuid not null
+notification_deliveries.4 monitor_id uuid
 notification_deliveries.5 incident_id uuid
 notification_deliveries.6 channel_id uuid not null
 notification_deliveries.7 payload jsonb not null
@@ -216,6 +217,7 @@ notification_deliveries.12 last_error text
 notification_deliveries.13 created_at timestamp with time zone not null default now()
 notification_deliveries.14 sent_at timestamp with time zone
 notification_deliveries.15 claim_token uuid
+notification_deliveries.16 specula_id uuid
 org_auth_domains.1 id uuid not null
 org_auth_domains.2 tenant_id uuid not null
 org_auth_domains.3 domain text not null
@@ -406,9 +408,11 @@ incident_monitors incident_monitors_tenant_id_incident_id_fkey FOREIGN KEY (tena
 incident_monitors incident_monitors_tenant_id_monitor_id_fkey FOREIGN KEY (tenant_id, monitor_id) REFERENCES monitors(tenant_id, id)
 incidents incidents_check CHECK (((resolved_at IS NULL) = (resolve_reason IS NULL)))
 incidents incidents_monitor_fkey FOREIGN KEY (tenant_id, monitor_id) REFERENCES monitors(tenant_id, id)
+incidents incidents_one_owner_check CHECK (((monitor_id IS NULL) OR (specula_id IS NULL)))
 incidents incidents_pkey PRIMARY KEY (id)
 incidents incidents_reason_check CHECK (((length(reason) >= 1) AND (length(reason) <= 64)))
-incidents incidents_resolve_reason_check CHECK ((resolve_reason = ANY (ARRAY['recovered'::text, 'paused'::text, 'deleted'::text, 'url_changed'::text, 'location_changed'::text])))
+incidents incidents_resolve_reason_check CHECK ((resolve_reason = ANY (ARRAY['recovered'::text, 'paused'::text, 'deleted'::text, 'url_changed'::text, 'location_changed'::text, 'revoked'::text])))
+incidents incidents_specula_fkey FOREIGN KEY (tenant_id, specula_id) REFERENCES specula_agents(tenant_id, id)
 incidents incidents_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id)
 incidents incidents_tenant_id_id_key UNIQUE (tenant_id, id)
 invitations invitations_accepted_by_fkey FOREIGN KEY (accepted_by) REFERENCES users(id)
@@ -482,7 +486,7 @@ notification_channels notification_channels_body_template_check CHECK ((char_len
 notification_channels notification_channels_config_encrypted_check CHECK (((length(config_encrypted) >= 1) AND (length(config_encrypted) <= 4096)))
 notification_channels notification_channels_config_present CHECK (((deleted_at IS NOT NULL) OR (config_encrypted IS NOT NULL)))
 notification_channels notification_channels_content_type_check CHECK ((content_type = ANY (ARRAY['json'::text, 'text'::text])))
-notification_channels notification_channels_events_check CHECK ((((cardinality(events) >= 1) AND (cardinality(events) <= 3)) AND (events <@ ARRAY['down'::text, 'recovered'::text, 'tls_expiring'::text])))
+notification_channels notification_channels_events_check CHECK ((((cardinality(events) >= 1) AND (cardinality(events) <= 5)) AND (events <@ ARRAY['down'::text, 'recovered'::text, 'tls_expiring'::text, 'agent_offline'::text, 'agent_online'::text])))
 notification_channels notification_channels_mention_check CHECK (((cardinality(mention) <= 3) AND (array_to_string(mention, ' '::text) ~ '^((@here|@channel|<!subteam\^[A-Z0-9]{2,20}>|<@[UW][A-Z0-9]{2,20}>)( |$))*$'::text)))
 notification_channels notification_channels_name_check CHECK (((length(name) >= 1) AND (length(name) <= 60)))
 notification_channels notification_channels_pkey PRIMARY KEY (id)
@@ -498,11 +502,13 @@ notification_deliveries notification_deliveries_check CHECK (((status = 'in_prog
 notification_deliveries notification_deliveries_check1 CHECK (((status = 'sent'::text) = (sent_at IS NOT NULL)))
 notification_deliveries notification_deliveries_check2 CHECK (((kind = 'tls_expiring'::text) OR (incident_id IS NOT NULL)))
 notification_deliveries notification_deliveries_claim_token_check CHECK (((status = 'in_progress'::text) = (claim_token IS NOT NULL)))
-notification_deliveries notification_deliveries_kind_check CHECK ((kind = ANY (ARRAY['opened'::text, 'resolved'::text, 'tls_expiring'::text, 'reminder'::text])))
+notification_deliveries notification_deliveries_kind_check CHECK ((kind = ANY (ARRAY['opened'::text, 'resolved'::text, 'tls_expiring'::text, 'reminder'::text, 'agent_offline'::text, 'agent_online'::text])))
 notification_deliveries notification_deliveries_last_error_check CHECK ((length(last_error) <= 500))
 notification_deliveries notification_deliveries_payload_check CHECK ((jsonb_typeof(payload) = 'object'::text))
 notification_deliveries notification_deliveries_pkey PRIMARY KEY (id)
+notification_deliveries notification_deliveries_specula_fkey FOREIGN KEY (tenant_id, specula_id) REFERENCES specula_agents(tenant_id, id)
 notification_deliveries notification_deliveries_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'in_progress'::text, 'sent'::text, 'failed'::text])))
+notification_deliveries notification_deliveries_subject_check CHECK ((((kind = ANY (ARRAY['agent_offline'::text, 'agent_online'::text])) = (specula_id IS NOT NULL)) AND ((specula_id IS NOT NULL) <> (monitor_id IS NOT NULL))))
 notification_deliveries notification_deliveries_tenant_id_channel_id_fkey FOREIGN KEY (tenant_id, channel_id) REFERENCES notification_channels(tenant_id, id)
 notification_deliveries notification_deliveries_tenant_id_incident_id_fkey FOREIGN KEY (tenant_id, incident_id) REFERENCES incidents(tenant_id, id)
 notification_deliveries notification_deliveries_tenant_id_monitor_id_fkey FOREIGN KEY (tenant_id, monitor_id) REFERENCES monitors(tenant_id, id)
@@ -632,6 +638,7 @@ CREATE UNIQUE INDEX heartbeat_tokens_token_hash_key ON public.heartbeat_tokens U
 CREATE INDEX incident_monitors_monitor_idx ON public.incident_monitors USING btree (tenant_id, monitor_id)
 CREATE UNIQUE INDEX incident_monitors_pkey ON public.incident_monitors USING btree (incident_id, monitor_id)
 CREATE UNIQUE INDEX incidents_one_open_per_monitor_idx ON public.incidents USING btree (monitor_id) WHERE ((resolved_at IS NULL) AND (monitor_id IS NOT NULL))
+CREATE UNIQUE INDEX incidents_one_open_per_specula_idx ON public.incidents USING btree (specula_id) WHERE ((resolved_at IS NULL) AND (specula_id IS NOT NULL))
 CREATE UNIQUE INDEX incidents_pkey ON public.incidents USING btree (id)
 CREATE UNIQUE INDEX incidents_tenant_id_id_key ON public.incidents USING btree (tenant_id, id)
 CREATE INDEX incidents_tenant_started_idx ON public.incidents USING btree (tenant_id, started_at DESC)
@@ -667,6 +674,7 @@ CREATE INDEX notification_deliveries_lease_idx ON public.notification_deliveries
 CREATE INDEX notification_deliveries_monitor_open_idx ON public.notification_deliveries USING btree (monitor_id, created_at, id) WHERE (status = ANY (ARRAY['pending'::text, 'in_progress'::text]))
 CREATE UNIQUE INDEX notification_deliveries_pkey ON public.notification_deliveries USING btree (id)
 CREATE INDEX notification_deliveries_ready_idx ON public.notification_deliveries USING btree (next_attempt_at) WHERE (status = 'pending'::text)
+CREATE INDEX notification_deliveries_specula_open_idx ON public.notification_deliveries USING btree (specula_id, created_at, id) WHERE ((specula_id IS NOT NULL) AND (status = ANY (ARRAY['pending'::text, 'in_progress'::text])))
 CREATE INDEX notification_deliveries_tenant_created_idx ON public.notification_deliveries USING btree (tenant_id, created_at DESC)
 CREATE UNIQUE INDEX org_auth_domains_domain_key ON public.org_auth_domains USING btree (domain)
 CREATE UNIQUE INDEX org_auth_domains_pkey ON public.org_auth_domains USING btree (id)
@@ -723,8 +731,11 @@ check_results tenant_isolation cmd=* permissive=true to=public using (tenant_id 
 heartbeat_tokens owner_heartbeat_ping cmd=w permissive=true to=proreta_owner using true check true
 heartbeat_tokens owner_heartbeat_read cmd=r permissive=true to=proreta_owner using true
 heartbeat_tokens tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
+incident_monitors owner_specula_offline_incident_monitors cmd=a permissive=true to=proreta_owner check true
 incident_monitors tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
 incidents owner_reminder_read cmd=r permissive=true to=proreta_owner using true
+incidents owner_specula_offline_incident_insert cmd=a permissive=true to=proreta_owner check true
+incidents owner_specula_offline_incident_resolve cmd=w permissive=true to=proreta_owner using true check true
 incidents tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
 invitations owner_invitation_lookup cmd=r permissive=true to=proreta_owner using true
 invitations tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
@@ -735,6 +746,7 @@ monitor_channels tenant_isolation cmd=* permissive=true to=public using (tenant_
 monitor_location_state owner_claim_lease cmd=w permissive=true to=proreta_owner using true check true
 monitor_location_state owner_claim_read cmd=r permissive=true to=proreta_owner using true
 monitor_location_state tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
+monitor_locations owner_specula_offline_locations cmd=r permissive=true to=proreta_owner using true
 monitor_locations tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
 monitor_state owner_specula_unreachable_read cmd=r permissive=true to=proreta_owner using true
 monitor_state owner_specula_unreachable_write cmd=w permissive=true to=proreta_owner using true check true
@@ -839,9 +851,12 @@ reset_monitor_runtime(uuid) owner=proreta_owner definer=true acl=proreta_api=X/p
 specula_agents_sync_location() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner
 specula_authenticate(bytea) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_create(uuid,text,bytea,boolean,uuid[],uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+specula_delivery_context(uuid,uuid) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_hello(uuid,text,text) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_mark_unreachable(interval) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_revoke(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+specula_status_counts(interval) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+specula_sync_offline(interval) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 status_page_published_pages() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 status_page_slug_held(text) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 status_page_snapshot(text) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_statuspage=X/proreta_owner
@@ -1727,7 +1742,7 @@ AS $function$
     ORDER BY lower(t.name), t.id
 $function$
 CREATE OR REPLACE FUNCTION public.claim_deliveries(n integer)
- RETURNS TABLE(id uuid, tenant_id uuid, kind text, monitor_id uuid, incident_id uuid, channel_id uuid, payload jsonb, attempts integer, created_at timestamp with time zone, claim_token uuid)
+ RETURNS TABLE(id uuid, tenant_id uuid, kind text, monitor_id uuid, incident_id uuid, channel_id uuid, payload jsonb, attempts integer, created_at timestamp with time zone, claim_token uuid, specula_id uuid)
  LANGUAGE sql
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
@@ -1765,7 +1780,8 @@ AS $function$
           AND NOT EXISTS (
               SELECT 1
               FROM notification_deliveries AS o
-              WHERE o.monitor_id = d.monitor_id
+              WHERE o.monitor_id IS NOT DISTINCT FROM d.monitor_id
+                AND o.specula_id IS NOT DISTINCT FROM d.specula_id
                 AND o.channel_id = d.channel_id
                 AND o.status IN ('pending', 'in_progress')
                 AND (o.created_at, o.id) < (d.created_at, d.id)
@@ -1775,11 +1791,13 @@ AS $function$
         FOR UPDATE OF d SKIP LOCKED
     )
     UPDATE notification_deliveries AS d
-    SET status = 'in_progress', lease_until = now() + interval '2 minutes', claim_token = gen_random_uuid()
+    SET status = 'in_progress',
+        lease_until = now() + interval '2 minutes',
+        claim_token = gen_random_uuid()
     FROM ready
     WHERE d.id = ready.id
     RETURNING d.id, d.tenant_id, d.kind, d.monitor_id, d.incident_id, d.channel_id, d.payload, d.attempts, d.created_at,
-              d.claim_token
+              d.claim_token, d.specula_id
 $function$
 CREATE OR REPLACE FUNCTION public.claim_due_monitors(n integer, p_location text)
  RETURNS TABLE(tenant_id uuid, monitor_id uuid, location_id uuid, lease_token uuid, lease_until timestamp with time zone, url text, expected_status text, failure_threshold integer, interval_seconds integer, timeout_seconds integer, next_run_at timestamp with time zone, method text, request text, monitor_type text, host text, port integer)
@@ -2582,6 +2600,21 @@ BEGIN
     END IF;
 END
 $function$
+CREATE OR REPLACE FUNCTION public.specula_delivery_context(p_specula_id uuid, p_channel_id uuid)
+ RETURNS TABLE(routed boolean, organization_name text)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    SELECT (c.project_id IS NULL OR s.all_projects
+            OR EXISTS (SELECT 1 FROM specula_projects AS sp
+                       WHERE sp.specula_id = s.id AND sp.project_id = c.project_id)),
+           t.name
+    FROM specula_agents AS s
+    JOIN tenants AS t ON t.id = s.tenant_id
+    JOIN notification_channels AS c ON c.tenant_id = s.tenant_id AND c.id = p_channel_id
+    WHERE s.tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid AND s.id = p_specula_id
+$function$
 CREATE OR REPLACE FUNCTION public.specula_hello(p_specula_id uuid, p_version text, p_hostname text)
  RETURNS boolean
  LANGUAGE sql
@@ -2641,6 +2674,98 @@ BEGIN
     END IF;
     UPDATE probe_locations SET status = 'disabled' WHERE id = loc;
     RETURN true;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.specula_status_counts(p_after interval DEFAULT '00:03:00'::interval)
+ RETURNS TABLE(status text, n bigint)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    SELECT CASE WHEN revoked_at IS NOT NULL THEN 'revoked'
+                WHEN last_seen_at IS NULL THEN 'pending'
+                WHEN last_seen_at < now() - p_after THEN 'offline'
+                ELSE 'online' END AS status,
+           count(*) AS n
+    FROM specula_agents
+    GROUP BY 1
+$function$
+CREATE OR REPLACE FUNCTION public.specula_sync_offline(p_after interval DEFAULT '00:03:00'::interval)
+ RETURNS TABLE(opened integer, resolved integer)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    a record;
+    v_id uuid;
+    v_started timestamptz;
+    v_count integer;
+    v_now timestamptz := now();
+BEGIN
+    opened := 0;
+    resolved := 0;
+    PERFORM pg_advisory_xact_lock(hashtext('proreta.specula_sync_offline'));
+
+    FOR a IN
+        SELECT s.tenant_id, s.id, s.name, s.all_projects, s.location_id
+        FROM specula_agents AS s
+        JOIN tenants AS t ON t.id = s.tenant_id AND t.status = 'active' AND t.deleted_at IS NULL
+        WHERE s.revoked_at IS NULL AND s.last_seen_at < v_now - p_after
+          AND NOT EXISTS (SELECT 1 FROM incidents AS i WHERE i.specula_id = s.id AND i.resolved_at IS NULL)
+        ORDER BY s.id
+    LOOP
+        v_id := uuidv7_now();
+        INSERT INTO incidents (id, tenant_id, specula_id, started_at, reason)
+        VALUES (v_id, a.tenant_id, a.id, v_now, 'agent_offline');
+        INSERT INTO incident_monitors (tenant_id, incident_id, monitor_id)
+        SELECT a.tenant_id, v_id, m.id
+        FROM monitor_locations AS ml
+        JOIN monitors AS m ON m.tenant_id = ml.tenant_id AND m.id = ml.monitor_id AND m.deleted_at IS NULL
+        WHERE ml.tenant_id = a.tenant_id AND ml.location_id = a.location_id;
+        GET DIAGNOSTICS v_count = ROW_COUNT;
+        INSERT INTO notification_deliveries (id, tenant_id, kind, specula_id, incident_id, channel_id, payload)
+        SELECT uuidv7_now(), a.tenant_id, 'agent_offline', a.id, v_id, c.id,
+               jsonb_build_object('speculaId', a.id, 'speculaName', a.name, 'incidentId', v_id,
+                                  'reason', 'agent_offline', 'startedAt', v_now, 'monitorCount', v_count)
+        FROM notification_channels AS c
+        WHERE c.tenant_id = a.tenant_id AND c.deleted_at IS NULL AND c.status = 'active'
+          AND 'agent_offline' = ANY (c.events)
+          AND (c.project_id IS NULL OR a.all_projects
+               OR EXISTS (SELECT 1 FROM specula_projects AS sp
+                          WHERE sp.specula_id = a.id AND sp.project_id = c.project_id));
+        opened := opened + 1;
+    END LOOP;
+
+    FOR a IN
+        SELECT s.tenant_id, s.id, s.name, s.all_projects, i.id AS incident_id, i.started_at,
+               s.revoked_at IS NOT NULL AS revoked
+        FROM incidents AS i
+        JOIN specula_agents AS s ON s.tenant_id = i.tenant_id AND s.id = i.specula_id
+        WHERE i.resolved_at IS NULL
+          AND (s.revoked_at IS NOT NULL OR s.last_seen_at >= v_now - p_after)
+        ORDER BY i.id
+    LOOP
+        v_started := a.started_at;
+        UPDATE incidents SET resolved_at = greatest(v_now, v_started),
+                             resolve_reason = CASE WHEN a.revoked THEN 'revoked' ELSE 'recovered' END
+        WHERE tenant_id = a.tenant_id AND id = a.incident_id;
+        IF NOT a.revoked THEN
+            INSERT INTO notification_deliveries (id, tenant_id, kind, specula_id, incident_id, channel_id, payload)
+            SELECT uuidv7_now(), a.tenant_id, 'agent_online', a.id, a.incident_id, c.id,
+                   jsonb_build_object('speculaId', a.id, 'speculaName', a.name, 'incidentId', a.incident_id,
+                                      'reason', 'agent_offline', 'startedAt', v_started, 'resolvedAt', v_now,
+                                      'durationSeconds', greatest(floor(extract(epoch FROM v_now - v_started)), 0)::bigint)
+            FROM notification_channels AS c
+            WHERE c.tenant_id = a.tenant_id AND c.deleted_at IS NULL AND c.status = 'active'
+              AND 'agent_online' = ANY (c.events)
+              AND (c.project_id IS NULL OR a.all_projects
+                   OR EXISTS (SELECT 1 FROM specula_projects AS sp
+                              WHERE sp.specula_id = a.id AND sp.project_id = c.project_id));
+        END IF;
+        resolved := resolved + 1;
+    END LOOP;
+    RETURN NEXT;
 END
 $function$
 CREATE OR REPLACE FUNCTION public.status_page_published_pages()

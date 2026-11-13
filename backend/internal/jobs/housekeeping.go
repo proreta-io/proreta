@@ -85,7 +85,7 @@ func DefaultTasks(m *Metrics, log *slog.Logger, mon *monitors.Service) []Task {
 		{Name: "purge_mail_outbox", Every: time.Hour, LockKey: lockPurgeMail, Run: purgeMail},
 		{Name: "purge_email_verifications", Every: 24 * time.Hour, LockKey: lockPurgeVerifs, Run: scalar(`SELECT purge_email_verifications()`)},
 		{Name: "purge_password_resets", Every: 24 * time.Hour, LockKey: lockPurgeResets, Run: scalar(`SELECT purge_password_resets()`)},
-		{Name: "specula_mark_unreachable", Every: time.Minute, LockKey: lockSpeculaGone, Run: scalar(`SELECT specula_mark_unreachable()`)},
+		{Name: "specula_mark_unreachable", Every: time.Minute, LockKey: lockSpeculaGone, Run: speculaOffline(m)},
 		{Name: "enqueue_incident_reminders", Every: ReminderEvery, LockKey: lockReminders, Run: enqueueReminders},
 	}
 }
@@ -109,6 +109,48 @@ func evaluateHeartbeats(mon *monitors.Service, m *Metrics) func(context.Context,
 		n, err := mon.EvaluateHeartbeats(ctx)
 		m.heartbeatsMissed.Add(float64(n))
 		return n, err
+	}
+}
+
+// SpeculaOfflineAfter is how long a Specula may be silent before its monitors show unknown and its
+// "agent offline" incident opens; it is also how long a returning Specula must be heard before the
+// incident resolves.
+const SpeculaOfflineAfter = 3 * time.Minute
+
+// speculaOffline marks the monitors of silent Specula unknown, opens and resolves the Specula
+// incidents (queueing agent_offline / agent_online in the same transaction), and refreshes the
+// Specula status gauge. The result is the number of monitors marked unknown.
+func speculaOffline(m *Metrics) func(context.Context, pgx.Tx, time.Time) (int, error) {
+	return func(ctx context.Context, tx pgx.Tx, _ time.Time) (int, error) {
+		secs := SpeculaOfflineAfter.Seconds()
+		var marked int32
+		if err := tx.QueryRow(ctx, `SELECT specula_mark_unreachable(make_interval(secs => $1))`, secs).Scan(&marked); err != nil {
+			return 0, err
+		}
+		var opened, resolved int32
+		if err := tx.QueryRow(ctx, `SELECT opened, resolved FROM specula_sync_offline(make_interval(secs => $1))`, secs).Scan(&opened, &resolved); err != nil {
+			return 0, err
+		}
+		m.speculaIncidents.WithLabelValues("offline").Add(float64(opened))
+		m.speculaIncidents.WithLabelValues("online").Add(float64(resolved))
+		rows, err := tx.Query(ctx, `SELECT status, n FROM specula_status_counts(make_interval(secs => $1))`, secs)
+		if err != nil {
+			return 0, err
+		}
+		counts, err := pgx.CollectRows(rows, pgx.RowToStructByPos[struct {
+			Status string
+			N      int64
+		}])
+		if err != nil {
+			return 0, err
+		}
+		for _, s := range speculaStatuses {
+			m.speculaAgents.WithLabelValues(s).Set(0)
+		}
+		for _, c := range counts {
+			m.speculaAgents.WithLabelValues(c.Status).Set(float64(c.N))
+		}
+		return int(marked), nil
 	}
 }
 

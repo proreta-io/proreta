@@ -106,7 +106,7 @@ func TestIntegrationChannels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ops.Name != "ops" || !slices.Equal(ops.Events, notify.AllEvents) || len(ops.Mention) != 0 || ops.ReminderMinutes != 0 ||
+	if ops.Name != "ops" || !slices.Equal(ops.Events, notify.DefaultEvents) || len(ops.Mention) != 0 || ops.ReminderMinutes != 0 ||
 		ops.Status != notify.StatusActive || ops.Type != notify.TypeSlack {
 		t.Fatalf("defaults: %+v", ops)
 	}
