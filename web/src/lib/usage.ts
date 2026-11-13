@@ -28,9 +28,6 @@ export function atHeartbeatLimit(usage: Usage | undefined): boolean {
   return usage !== undefined && usage.usage.heartbeats >= usage.limits.heartbeats;
 }
 
-/** Plans the platform admin cannot assign yet: `community` waits for self-hosted packaging. */
-export const HIDDEN_PLANS: readonly string[] = ["community"];
-
 /** "3 monitors", "1 monitor", "unlimited monitors": a count or limit with its noun. */
 export function countOf(n: number, one: string, many: string): string {
   if (isUnlimited(n)) return `unlimited ${many}`;

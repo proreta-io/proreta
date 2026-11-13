@@ -221,7 +221,7 @@ describe("admin organization details", () => {
     });
   }
 
-  it("does not offer the community plan until self-hosted packaging", async () => {
+  it("offers the community plan", async () => {
     details({
       "GET /api/v1/admin/stats": () =>
         json({
@@ -236,7 +236,7 @@ describe("admin organization details", () => {
         within(select)
           .getAllByRole("option")
           .map((o) => o.textContent),
-      ).toEqual(["Free", "Internal"]),
+      ).toEqual(["Community", "Free", "Internal"]),
     );
   });
 
