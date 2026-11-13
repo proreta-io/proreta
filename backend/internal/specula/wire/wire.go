@@ -91,7 +91,7 @@ const (
 	OutcomeRecorded = "recorded"
 	// OutcomeStale: the lease expired or was replaced; the result is discarded and must not be resent.
 	OutcomeStale = "stale"
-	// OutcomeRejected: the result is malformed; it must not be resent.
+	// OutcomeRejected: the result is malformed or the database refused it for good; it must not be resent.
 	OutcomeRejected = "rejected"
 )
 

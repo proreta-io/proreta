@@ -641,6 +641,30 @@ func TestIntegrationHousekeeping(t *testing.T) {
 		}
 	})
 
+	t.Run("purge_expired_sessions deletes a backlog in batches and keeps live sessions", func(t *testing.T) {
+		pgtest.MustExec(t, e.admin,
+			`INSERT INTO sessions (id, user_id, tenant_id, token_hash, csrf_token, expires_at)
+				SELECT gen_random_uuid(), '`+userID+`', '`+tenantA+`', sha256(convert_to('old' || i, 'UTF8')), 'c', now() - interval '1 minute'
+				FROM generate_series(1, 2500) AS i`,
+			`INSERT INTO sessions (id, user_id, tenant_id, token_hash, csrf_token, expires_at)
+				SELECT gen_random_uuid(), '`+userID+`', '`+tenantA+`', sha256(convert_to('new' || i, 'UTF8')), 'c', now() + interval '1 hour'
+				FROM generate_series(1, 50) AS i`)
+		liveBefore := count(`SELECT count(*) FROM sessions WHERE expires_at > now()`)
+		var one int
+		if err := e.Conn(t, e.WorkerURL).QueryRow(e.ctx, `SELECT purge_expired_sessions()`).Scan(&one); err != nil || one != jobs.PurgeBatch {
+			t.Fatalf("one call deleted %d (err %v), want %d", one, err, jobs.PurgeBatch)
+		}
+		if got := h.RunTask(e.ctx, task("purge_expired_sessions")); got != "ok" {
+			t.Fatalf("run: %s", got)
+		}
+		if n := count(`SELECT count(*) FROM sessions WHERE expires_at < now()`); n != 0 {
+			t.Fatalf("%d expired sessions left", n)
+		}
+		if n := count(`SELECT count(*) FROM sessions WHERE expires_at > now()`); n != liveBefore {
+			t.Fatalf("live sessions: %d, want %d", n, liveBefore)
+		}
+	})
+
 	t.Run("enqueue_incident_reminders queues due reminders once", func(t *testing.T) {
 		mon := e.monitor(tenantA, "Down")
 		pgtest.MustExec(t, e.admin,

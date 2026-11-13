@@ -161,7 +161,7 @@ components:
           type: string
           description: |
             `recorded`: stored and applied. `stale`: the lease expired or was completed, or this is a
-            repeat; discard it. `rejected`: malformed; discard it.
+            repeat; discard it. `rejected`: malformed, or refused by the database for good; discard it.
           enum: [recorded, stale, rejected]
     ResultsResponse:
       type: object

@@ -343,6 +343,13 @@ func TestIntegrationOAuthHTTPInviteAndLink(t *testing.T) {
 	if got := s.callback("google", q("lk", state), cookie, map[string]string{"Cookie": invited["Cookie"]}); got.location != "/profile?error=session_expired" {
 		t.Fatalf("link with another session: %+v", got)
 	}
+	// A password change that became due since the link started blocks it, as it does at the start.
+	cookie, state = s.start("google", `{"intent":"link"}`, owner)
+	pgtest.MustExec(t, env.AdminConn(t), `UPDATE users SET password_must_change = true WHERE email = '`+adminLogin+`'`)
+	if got := s.callback("google", q("lk", state), cookie, map[string]string{"Cookie": owner["Cookie"]}); got.location != "/profile?error=session_expired" {
+		t.Fatalf("link with a password change due: %+v", got)
+	}
+	pgtest.MustExec(t, env.AdminConn(t), `UPDATE users SET password_must_change = false WHERE email = '`+adminLogin+`'`)
 	cookie, state = s.start("google", `{"intent":"link"}`, owner)
 	if got := s.callback("google", q("lk", state), cookie, map[string]string{"Cookie": owner["Cookie"]}); got.location != "/profile?linked=google" ||
 		got.cookies[api.SessionCookie] != nil {

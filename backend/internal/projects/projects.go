@@ -205,16 +205,14 @@ func get(ctx context.Context, tx pgx.Tx, a Actor, id uuid.UUID) (Project, error)
 	if !ok {
 		return Project{}, ErrNotFound
 	}
-	rows, err := projectsdb.New(tx).ListProjects(ctx, a.TenantID)
+	r, err := projectsdb.New(tx).GetProject(ctx, projectsdb.GetProjectParams{TenantID: a.TenantID, ID: id})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Project{}, ErrNotFound
+	}
 	if err != nil {
 		return Project{}, fmt.Errorf("projects: get: %w", err)
 	}
-	for _, r := range rows {
-		if r.ID == id {
-			return fromRow(r, role), nil
-		}
-	}
-	return Project{}, ErrNotFound
+	return fromRow(projectsdb.ListProjectsRow(r), role), nil
 }
 
 func fromRow(r projectsdb.ListProjectsRow, role authz.Role) Project {

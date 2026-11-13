@@ -606,6 +606,7 @@ func TestIntegrationPlatformAdminFirstSignIn(t *testing.T) {
 	env := pgtest.New(t, pgtest.DBName("apiadminfirst"))
 	c := newAdminServer(t, env, &lockedBuffer{})
 	pgtest.MustExec(t, env.AdminConn(t), `UPDATE users SET password_must_change = true WHERE email = '`+adminLogin+`'`)
+	pgtest.MustExec(t, env.AdminConn(t), `UPDATE users SET email_verified_at = now() WHERE email = '`+adminLogin+`'`)
 	cookie, csrf := c.login()
 	h := withCSRF(cookie, csrf)
 	if r := c.do(http.MethodGet, "/api/v1/auth/me", "", h); r.code != http.StatusOK || r.body["mustChangePassword"] != true {
@@ -617,6 +618,9 @@ func TestIntegrationPlatformAdminFirstSignIn(t *testing.T) {
 	r := c.do(http.MethodPost, "/api/v1/auth/password", `{"currentPassword":"`+adminPassword+`","newPassword":"a new admin passphrase"}`, h)
 	if r.code != http.StatusOK || r.body["mustChangePassword"] != false {
 		t.Fatalf("change: %d %s", r.code, r.raw)
+	}
+	if u, _ := r.body["user"].(map[string]any); u["emailVerified"] != true {
+		t.Fatalf("a verified user's change response says unverified: %s", r.raw)
 	}
 	cookie, csrf = session(t, r)
 	if r := c.do(http.MethodGet, "/api/v1/admin/stats", "", withCSRF(cookie, csrf)); r.code != http.StatusOK {

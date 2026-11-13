@@ -104,6 +104,51 @@ func (q *Queries) GetMemberRoles(ctx context.Context, arg GetMemberRolesParams) 
 	return i, err
 }
 
+const getProject = `-- name: GetProject :one
+SELECT p.id, p.name, p.slug, p.is_default, p.all_members, p.created_at, p.updated_at,
+       (SELECT count(*) FROM monitors AS m
+        WHERE m.tenant_id = p.tenant_id AND m.project_id = p.id AND m.deleted_at IS NULL)::bigint AS monitor_count,
+       (SELECT count(*) FROM notification_channels AS c
+        WHERE c.tenant_id = p.tenant_id AND c.project_id = p.id AND c.deleted_at IS NULL)::bigint AS channel_count
+FROM projects AS p
+WHERE p.tenant_id = $1 AND p.id = $2 AND p.deleted_at IS NULL
+`
+
+type GetProjectParams struct {
+	TenantID uuid.UUID
+	ID       uuid.UUID
+}
+
+type GetProjectRow struct {
+	ID           uuid.UUID
+	Name         string
+	Slug         string
+	IsDefault    bool
+	AllMembers   bool
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	MonitorCount int64
+	ChannelCount int64
+}
+
+// One live project with the counts of ListProjects.
+func (q *Queries) GetProject(ctx context.Context, arg GetProjectParams) (GetProjectRow, error) {
+	row := q.db.QueryRow(ctx, getProject, arg.TenantID, arg.ID)
+	var i GetProjectRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.IsDefault,
+		&i.AllMembers,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.MonitorCount,
+		&i.ChannelCount,
+	)
+	return i, err
+}
+
 const insertProject = `-- name: InsertProject :exec
 INSERT INTO projects (id, tenant_id, name, slug)
 VALUES ($1, $2, $3, $4)

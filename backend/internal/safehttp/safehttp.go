@@ -227,14 +227,16 @@ func (g *guard) dialContext(ctx context.Context, network, addr string) (net.Conn
 		}
 	}
 	var lastErr error
-	for _, ip := range ips {
+	for i, ip := range ips {
 		target := netip.AddrPortFrom(ip.Unmap(), dialPort).String()
 		var conn net.Conn
+		actx, cancel := attemptContext(ctx, len(ips)-i)
 		if g.override != nil {
-			conn, err = g.override(ctx, network, target)
+			conn, err = g.override(actx, network, target)
 		} else {
-			conn, err = g.dialer.DialContext(ctx, network, target)
+			conn, err = g.dialer.DialContext(actx, network, target)
 		}
+		cancel()
 		if err == nil {
 			return conn, nil
 		}
@@ -244,6 +246,19 @@ func (g *guard) dialContext(ctx context.Context, network, addr string) (net.Conn
 		}
 	}
 	return nil, lastErr
+}
+
+// minAttempt is the least a dial attempt gets while budget remains.
+const minAttempt = 250 * time.Millisecond
+
+// attemptContext gives one of the left remaining addresses a share of the time that is left, so an
+// address that never answers (a blackholed AAAA) cannot use up the budget of the ones after it.
+func attemptContext(ctx context.Context, left int) (context.Context, context.CancelFunc) {
+	dl, ok := ctx.Deadline()
+	if !ok || left <= 1 {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, max(time.Until(dl)/time.Duration(left), minAttempt))
 }
 
 func (g *guard) resolve(ctx context.Context, host string) ([]netip.Addr, error) {

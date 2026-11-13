@@ -84,7 +84,7 @@ func DefaultTasks(m *Metrics, log *slog.Logger, mon *monitors.Service) []Task {
 		{Name: "ensure_partitions", Every: 24 * time.Hour, LockKey: lockEnsurePartitions, Run: scalar(`SELECT ensure_partitions()`)},
 		{Name: "compute_rollups", Every: 5 * time.Minute, LockKey: lockComputeRollups, Run: computeRollups},
 		{Name: "drop_expired_partitions", Every: 24 * time.Hour, LockKey: lockDropPartitions, RunOutsideTx: r.dropExpiredPartitions},
-		{Name: "purge_expired_sessions", Every: time.Hour, LockKey: lockPurgeSessions, Run: scalar(`SELECT purge_expired_sessions()`)},
+		{Name: "purge_expired_sessions", Every: time.Hour, LockKey: lockPurgeSessions, Run: purgeSessions},
 		{Name: "purge_mail_outbox", Every: time.Hour, LockKey: lockPurgeMail, Run: purgeMail},
 		{Name: "purge_notification_deliveries", Every: time.Hour, LockKey: lockPurgeDeliveries, Run: purgeRetained(m, "notification_deliveries", "purge_notification_deliveries", func(d, _ int) int { return d })},
 		{Name: "purge_result_rollups", Every: 6 * time.Hour, LockKey: lockPurgeRollups, Run: purgeRetained(m, "result_rollups_hourly", "purge_result_rollups", func(_, mo int) int { return mo })},
@@ -172,6 +172,22 @@ func purgeMail(ctx context.Context, tx pgx.Tx, _ time.Time) (int, error) {
 	var n int32
 	err := tx.QueryRow(ctx, `SELECT purge_mail_outbox(make_interval(secs => $1))`, MailRetention.Seconds()).Scan(&n)
 	return int(n), err
+}
+
+// purgeSessions deletes expired sessions in batches of PurgeBatch, at most PurgeMaxBatches per run.
+func purgeSessions(ctx context.Context, tx pgx.Tx, _ time.Time) (int, error) {
+	total := 0
+	for range PurgeMaxBatches {
+		var n int32
+		if err := tx.QueryRow(ctx, `SELECT purge_expired_sessions()`).Scan(&n); err != nil {
+			return total, err
+		}
+		total += int(n)
+		if n < PurgeBatch {
+			break
+		}
+	}
+	return total, nil
 }
 
 // PurgeBatch is the size of one purge_* batch (fixed in the SQL functions); a run repeats batches
