@@ -43,7 +43,7 @@ WHERE id = @id;
 -- name: LockUserForPasswordChange :one
 -- The password change re-reads the credential it verified; FOR UPDATE makes concurrent changes
 -- and resets wait for each other.
-SELECT email, password_hash, status, updated_at
+SELECT email, password_hash, status, updated_at, email_verified_at
 FROM users
 WHERE id = @id
 FOR UPDATE;

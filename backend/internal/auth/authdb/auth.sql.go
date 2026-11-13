@@ -389,17 +389,18 @@ func (q *Queries) LockUserCredential(ctx context.Context, id uuid.UUID) (LockUse
 }
 
 const lockUserForPasswordChange = `-- name: LockUserForPasswordChange :one
-SELECT email, password_hash, status, updated_at
+SELECT email, password_hash, status, updated_at, email_verified_at
 FROM users
 WHERE id = $1
 FOR UPDATE
 `
 
 type LockUserForPasswordChangeRow struct {
-	Email        string
-	PasswordHash *string
-	Status       string
-	UpdatedAt    time.Time
+	Email           string
+	PasswordHash    *string
+	Status          string
+	UpdatedAt       time.Time
+	EmailVerifiedAt *time.Time
 }
 
 // The password change re-reads the credential it verified; FOR UPDATE makes concurrent changes
@@ -412,6 +413,7 @@ func (q *Queries) LockUserForPasswordChange(ctx context.Context, id uuid.UUID) (
 		&i.PasswordHash,
 		&i.Status,
 		&i.UpdatedAt,
+		&i.EmailVerifiedAt,
 	)
 	return i, err
 }

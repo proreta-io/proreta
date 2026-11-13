@@ -191,8 +191,8 @@ func (s *server) OauthCallback(ctx context.Context, req gen.OauthCallbackRequest
 
 	if st.Intent == oauth.IntentLink {
 		p, err := s.resolve(r)
-		if err != nil || p.UserID != st.UserID {
-			// Signed out, or another user signed in, since the link started.
+		if err != nil || p.UserID != st.UserID || p.MustChangePassword {
+			// Signed out, another user signed in, or a password change became due, since the link started.
 			s.auth.RecordOAuthFailure(ctx, provider, oauthSessionExpired, uuid.Nil, nil, ip)
 			return fail(target, oauthSessionExpired)
 		}
