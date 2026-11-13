@@ -119,6 +119,13 @@ var definerAllowList = map[string][]string{
 	"platform_registration_override": {"proreta_api"},
 	"admin_registration_get":         {"proreta_api"},
 	"admin_registration_set":         {"proreta_api"},
+	// Retention of finished deliveries and hourly rollups: jobs reads the choices and purges, the
+	// platform admin changes them.
+	"platform_retention_overrides":  {"proreta_worker"},
+	"admin_retention_get":           {"proreta_api"},
+	"admin_retention_set":           {"proreta_api"},
+	"purge_notification_deliveries": {"proreta_worker"},
+	"purge_result_rollups":          {"proreta_worker"},
 	// Pause, resume and URL change reset the schedule within the caller's tenant.
 	"reset_monitor_runtime": {"proreta_api"},
 	// The public heartbeat ping finds its heartbeat by token hash before the tenant is known, and
@@ -170,6 +177,7 @@ var extraPolicies = map[string]struct {
 	// claim_deliveries and finish_delivery.
 	"notification_deliveries.owner_delivery_read":   {cmd: "r", roles: []string{"proreta_owner"}},
 	"notification_deliveries.owner_delivery_update": {cmd: "w", roles: []string{"proreta_owner"}},
+	"notification_deliveries.owner_delivery_purge":  {cmd: "d", roles: []string{"proreta_owner"}},
 	// heartbeat_ping and list_due_heartbeats.
 	"heartbeat_tokens.owner_heartbeat_read": {cmd: "r", roles: []string{"proreta_owner"}},
 	"heartbeat_tokens.owner_heartbeat_ping": {cmd: "w", roles: []string{"proreta_owner"}},

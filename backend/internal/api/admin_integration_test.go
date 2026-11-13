@@ -93,6 +93,8 @@ func adminCalls(t *testing.T, tenantID, userID string) []struct{ method, path, b
 				body = `{"sendInvitations":false,"sendEmailVerification":false,"allowPasswordReset":false}`
 			case method == http.MethodPut && strings.HasSuffix(path, "/registration"):
 				body = `{"enabled":false}`
+			case method == http.MethodPut && strings.HasSuffix(path, "/retention"):
+				body = `{"deliveryDays":10,"rollupMonths":6}`
 			case method == http.MethodPut && strings.HasSuffix(path, "/platform-admin"):
 				body = `{"enabled":true}`
 			case method == http.MethodPut && strings.Contains(path, "/members/"):
@@ -106,8 +108,8 @@ func adminCalls(t *testing.T, tenantID, userID string) []struct{ method, path, b
 				strings.NewReplacer("{tenantId}", tenantID, "{organizationId}", tenantID, "{userId}", userID, "{invitationId}", userID, "{projectId}", userID).Replace(path), body})
 		}
 	}
-	if len(out) != 34 {
-		t.Fatalf("%d admin operations in the spec, want 34", len(out))
+	if len(out) != 36 {
+		t.Fatalf("%d admin operations in the spec, want 36", len(out))
 	}
 	return out
 }
@@ -210,6 +212,45 @@ func TestIntegrationAdminRegistrationSwitch(t *testing.T) {
 	// Two changes, two audit rows (the repeated value wrote none).
 	if n := countRows(t, env, `SELECT count(*) FROM audit_log WHERE action = 'admin.registration_settings.updated'`); n != 2 {
 		t.Fatalf("audit rows = %d, want 2 (environment to disabled, disabled to environment)", n)
+	}
+}
+
+// The platform admin reads and changes the retention of finished data: defaults until a value is
+// chosen, out-of-range numbers are refused (422 with the field), null returns to the default,
+// and an unchanged request writes no audit row.
+func TestIntegrationAdminRetentionSettings(t *testing.T) {
+	env := pgtest.New(t, pgtest.DBName("apiadminretention"))
+	c := newAdminServer(t, env, &lockedBuffer{})
+	adminCookie, adminCSRF := c.login()
+	ah := withCSRF(adminCookie, adminCSRF)
+	const path = "/api/v1/admin/retention"
+
+	r := c.do(http.MethodGet, path, "", ah)
+	if r.code != http.StatusOK || r.body["deliveryDays"] != float64(30) || r.body["rollupMonths"] != float64(13) ||
+		r.body["deliveryDefault"] != true || r.body["rollupDefault"] != true || r.body["updatedAt"] != nil {
+		t.Fatalf("initial: %d %s", r.code, r.raw)
+	}
+	r = c.do(http.MethodPut, path, `{"deliveryDays":14,"rollupMonths":null}`, ah)
+	if r.code != http.StatusOK || r.body["deliveryDays"] != float64(14) || r.body["deliveryDefault"] != false ||
+		r.body["rollupMonths"] != float64(13) || r.body["rollupDefault"] != true || r.body["updatedAt"] == nil {
+		t.Fatalf("set: %d %s", r.code, r.raw)
+	}
+	for _, body := range []string{`{"deliveryDays":6,"rollupMonths":null}`, `{"deliveryDays":366,"rollupMonths":null}`, `{"deliveryDays":null,"rollupMonths":3}`, `{"deliveryDays":null,"rollupMonths":61}`} {
+		if r := c.do(http.MethodPut, path, body, ah); r.code != http.StatusUnprocessableEntity {
+			t.Fatalf("%s: %d %s, want 422", body, r.code, r.raw)
+		}
+	}
+	if r := c.do(http.MethodPut, path, `{"deliveryDays":14}`, ah); r.code != http.StatusBadRequest {
+		t.Fatalf("missing rollupMonths: %d %s", r.code, r.raw)
+	}
+	// Unchanged: nothing is audited.
+	c.do(http.MethodPut, path, `{"deliveryDays":14,"rollupMonths":null}`, ah)
+	r = c.do(http.MethodPut, path, `{"deliveryDays":null,"rollupMonths":null}`, ah)
+	if r.code != http.StatusOK || r.body["deliveryDays"] != float64(30) || r.body["deliveryDefault"] != true {
+		t.Fatalf("back to the defaults: %d %s", r.code, r.raw)
+	}
+	if n := countRows(t, env, `SELECT count(*) FROM audit_log WHERE action = 'admin.retention_settings.updated'`); n != 2 {
+		t.Fatalf("audit rows = %d, want 2", n)
 	}
 }
 

@@ -73,6 +73,9 @@ export default function AdminLayout() {
             <NavLink to="/admin/registration" className={navClass}>
               Registration
             </NavLink>
+            <NavLink to="/admin/retention" className={navClass}>
+              Retention
+            </NavLink>
           </nav>
         </div>
       </header>

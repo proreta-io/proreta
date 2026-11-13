@@ -241,6 +241,9 @@ platform_settings.1 id boolean not null default true
 platform_settings.2 registration_enabled boolean
 platform_settings.3 updated_at timestamp with time zone
 platform_settings.4 updated_by uuid
+platform_settings.5 delivery_retention_days integer
+platform_settings.6 rollup_retention_months integer
+platform_settings.7 retention_updated_at timestamp with time zone
 probe_locations.1 id uuid not null
 probe_locations.2 code text not null
 probe_locations.3 name text not null
@@ -670,6 +673,7 @@ CREATE UNIQUE INDEX notification_channels_pkey ON public.notification_channels U
 CREATE INDEX notification_channels_project_idx ON public.notification_channels USING btree (tenant_id, project_id) WHERE (deleted_at IS NULL)
 CREATE UNIQUE INDEX notification_channels_tenant_id_id_key ON public.notification_channels USING btree (tenant_id, id)
 CREATE INDEX notification_deliveries_channel_open_idx ON public.notification_deliveries USING btree (channel_id) WHERE (status = 'in_progress'::text)
+CREATE INDEX notification_deliveries_finished_idx ON public.notification_deliveries USING btree (created_at) WHERE (status = ANY (ARRAY['sent'::text, 'failed'::text]))
 CREATE INDEX notification_deliveries_incident_channel_idx ON public.notification_deliveries USING btree (incident_id, channel_id, created_at) WHERE (incident_id IS NOT NULL)
 CREATE INDEX notification_deliveries_lease_idx ON public.notification_deliveries USING btree (lease_until) WHERE (status = 'in_progress'::text)
 CREATE INDEX notification_deliveries_monitor_open_idx ON public.notification_deliveries USING btree (monitor_id, created_at, id) WHERE (status = ANY (ARRAY['pending'::text, 'in_progress'::text]))
@@ -756,6 +760,7 @@ monitors owner_claim_read cmd=r permissive=true to=proreta_owner using true
 monitors tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
 notification_channels owner_reminder_read cmd=r permissive=true to=proreta_owner using true
 notification_channels tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
+notification_deliveries owner_delivery_purge cmd=d permissive=true to=proreta_owner using true
 notification_deliveries owner_delivery_read cmd=r permissive=true to=proreta_owner using true
 notification_deliveries owner_delivery_update cmd=w permissive=true to=proreta_owner using true check true
 notification_deliveries owner_reminder_insert cmd=a permissive=true to=proreta_owner check true
@@ -804,6 +809,8 @@ admin_registration_get(uuid) owner=proreta_owner definer=true acl=proreta_api=X/
 admin_registration_set(uuid,boolean,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_require_platform_admin(uuid) owner=proreta_owner definer=false acl=proreta_owner=X/proreta_owner
 admin_reset_user_password(uuid,uuid,text,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+admin_retention_get(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+admin_retention_set(uuid,integer,integer,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_revoke_user_sessions(uuid,uuid,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_set_platform_admin(uuid,uuid,boolean,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_set_tenant_plan(uuid,uuid,text,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
@@ -844,10 +851,13 @@ monitor_set_location(uuid,uuid) owner=proreta_owner definer=true acl=proreta_api
 org_delete_tenant(uuid,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 outbox_pending() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 platform_registration_override() owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+platform_retention_overrides() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 purge_email_verifications() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 purge_expired_sessions() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 purge_mail_outbox(interval) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+purge_notification_deliveries(integer) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 purge_password_resets() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+purge_result_rollups(integer) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 reset_monitor_runtime(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 specula_agents_sync_location() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner
 specula_authenticate(bytea) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
@@ -1348,6 +1358,54 @@ BEGIN
     PERFORM admin_audit(v_tenant, p_actor, p_audit_id, 'admin.user.password_reset', 'user', p_user_id::text,
                         jsonb_build_object('sessionsRevoked', v_n), p_ip);
     RETURN QUERY SELECT v_tenant, v_n;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.admin_retention_get(p_actor uuid)
+ RETURNS TABLE(delivery_days integer, rollup_months integer, updated_at timestamp with time zone)
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+#variable_conflict use_column
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    RETURN QUERY SELECT s.delivery_retention_days, s.rollup_retention_months, s.retention_updated_at FROM platform_settings AS s;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.admin_retention_set(p_actor uuid, p_delivery_days integer, p_rollup_months integer, p_audit_id uuid, p_ip inet)
+ RETURNS boolean
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_old_days   integer;
+    v_old_months integer;
+    v_tenant     uuid;
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    IF p_delivery_days IS NOT NULL AND p_delivery_days NOT BETWEEN 7 AND 365 THEN
+        RAISE EXCEPTION 'admin: delivery retention out of range' USING ERRCODE = 'PRA16';
+    END IF;
+    IF p_rollup_months IS NOT NULL AND p_rollup_months NOT BETWEEN 4 AND 60 THEN
+        RAISE EXCEPTION 'admin: rollup retention out of range' USING ERRCODE = 'PRA17';
+    END IF;
+    SELECT s.delivery_retention_days, s.rollup_retention_months INTO v_old_days, v_old_months
+    FROM platform_settings AS s WHERE s.id FOR UPDATE;
+    IF v_old_days IS NOT DISTINCT FROM p_delivery_days AND v_old_months IS NOT DISTINCT FROM p_rollup_months THEN
+        RETURN false;
+    END IF;
+    UPDATE platform_settings AS s
+    SET delivery_retention_days = p_delivery_days, rollup_retention_months = p_rollup_months,
+        retention_updated_at = now(), updated_by = p_actor
+    WHERE s.id;
+    v_tenant := auth_login_tenant(p_actor);
+    IF v_tenant IS NOT NULL THEN
+        PERFORM admin_audit(v_tenant, p_actor, p_audit_id, 'admin.retention_settings.updated', 'retention_settings', 'retention',
+                            jsonb_build_object('deliveryDays', p_delivery_days, 'rollupMonths', p_rollup_months,
+                                               'previousDeliveryDays', v_old_days, 'previousRollupMonths', v_old_months), p_ip);
+    END IF;
+    RETURN true;
 END
 $function$
 CREATE OR REPLACE FUNCTION public.admin_revoke_user_sessions(p_actor uuid, p_user_id uuid, p_audit_id uuid, p_ip inet)
@@ -2455,6 +2513,14 @@ CREATE OR REPLACE FUNCTION public.platform_registration_override()
 AS $function$
     SELECT s.registration_enabled FROM platform_settings AS s
 $function$
+CREATE OR REPLACE FUNCTION public.platform_retention_overrides()
+ RETURNS TABLE(delivery_days integer, rollup_months integer)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    SELECT s.delivery_retention_days, s.rollup_retention_months FROM platform_settings AS s
+$function$
 CREATE OR REPLACE FUNCTION public.purge_email_verifications()
  RETURNS integer
  LANGUAGE sql
@@ -2502,6 +2568,33 @@ AS $function$
     )
     SELECT count(*)::integer FROM gone
 $function$
+CREATE OR REPLACE FUNCTION public.purge_notification_deliveries(p_days integer)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_n integer;
+BEGIN
+    IF p_days IS NULL OR p_days < 7 THEN
+        RAISE EXCEPTION 'purge: delivery retention below the minimum' USING ERRCODE = '22023';
+    END IF;
+    WITH gone AS (
+        DELETE FROM notification_deliveries AS d
+        WHERE d.id IN (
+            SELECT e.id FROM notification_deliveries AS e
+            WHERE e.status IN ('sent', 'failed') AND e.created_at < now() - make_interval(days => p_days)
+            ORDER BY e.created_at
+            LIMIT 1000
+            FOR UPDATE SKIP LOCKED
+        )
+        RETURNING 1
+    )
+    SELECT count(*)::integer INTO v_n FROM gone;
+    RETURN v_n;
+END
+$function$
 CREATE OR REPLACE FUNCTION public.purge_password_resets()
  RETURNS integer
  LANGUAGE sql
@@ -2520,6 +2613,33 @@ AS $function$
         RETURNING 1
     )
     SELECT count(*)::integer FROM gone
+$function$
+CREATE OR REPLACE FUNCTION public.purge_result_rollups(p_months integer)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_n integer;
+BEGIN
+    IF p_months IS NULL OR p_months < 4 THEN
+        RAISE EXCEPTION 'purge: rollup retention below the minimum' USING ERRCODE = '22023';
+    END IF;
+    WITH gone AS (
+        DELETE FROM result_rollups_hourly AS r
+        WHERE r.ctid IN (
+            SELECT e.ctid FROM result_rollups_hourly AS e
+            WHERE e.hour < now() - make_interval(months => p_months)
+            ORDER BY e.hour
+            LIMIT 1000
+            FOR UPDATE SKIP LOCKED
+        )
+        RETURNING 1
+    )
+    SELECT count(*)::integer INTO v_n FROM gone;
+    RETURN v_n;
+END
 $function$
 CREATE OR REPLACE FUNCTION public.reset_monitor_runtime(p_monitor_id uuid)
  RETURNS integer

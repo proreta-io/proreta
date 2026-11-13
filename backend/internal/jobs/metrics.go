@@ -23,6 +23,8 @@ type Metrics struct {
 	lastSuccess  *prometheus.GaugeVec
 	// partitionsKept counts expired partitions retention could not drop, by reason.
 	partitionsKept *prometheus.CounterVec
+	// purgedRows counts rows deleted by the retention purge tasks, by table.
+	purgedRows *prometheus.CounterVec
 	// heartbeatsMissed counts missed heartbeat deadlines applied to the incident machine.
 	heartbeatsMissed prometheus.Counter
 	// statusSnapshots counts status page snapshots stored by the rebuild task.
@@ -63,6 +65,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		partitionsKept: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "proreta_jobs_partitions_kept_total", Help: "Expired check_results partitions retention kept back, by reason (rollups_incomplete, error).",
 		}, []string{"reason"}),
+		purgedRows: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "proreta_jobs_purged_rows_total", Help: "Rows deleted by the retention purge tasks, by table (notification_deliveries, result_rollups_hourly).",
+		}, []string{"table"}),
 		heartbeatsMissed: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "proreta_jobs_heartbeats_missed_total", Help: "Missed heartbeat deadlines applied as failures.",
 		}),
@@ -105,10 +110,13 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	for _, e := range []string{"offline", "online"} {
 		m.speculaIncidents.WithLabelValues(e)
 	}
+	for _, t := range []string{"notification_deliveries", "result_rollups_hourly"} {
+		m.purgedRows.WithLabelValues(t)
+	}
 	for _, r := range []string{keptRollupsIncomplete, keptError} {
 		m.partitionsKept.WithLabelValues(r)
 	}
-	reg.MustRegister(m.deliveries, m.duration, m.pending, m.claimErrors, m.housekeeping, m.lastSuccess, m.partitionsKept, m.heartbeatsMissed, m.statusSnapshots,
+	reg.MustRegister(m.deliveries, m.duration, m.pending, m.claimErrors, m.housekeeping, m.lastSuccess, m.partitionsKept, m.purgedRows, m.heartbeatsMissed, m.statusSnapshots,
 		m.speculaAgents, m.speculaIncidents, m.mail, m.mailDuration, m.mailPending, m.mailClaimErrors)
 	return m
 }

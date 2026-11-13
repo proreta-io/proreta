@@ -3336,6 +3336,72 @@ paths:
           $ref: "#/components/responses/Forbidden"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/admin/retention:
+    get:
+      operationId: adminGetRetentionSettings
+      x-experimental: true
+      summary: How long finished data is kept
+      description: |
+        How long the jobs worker keeps finished notification deliveries (status `sent` or
+        `failed`; pending ones are never deleted) and hourly rollups of check results.
+        `deliveryDays` and `rollupMonths` are what applies now; `deliveryDefault` and
+        `rollupDefault` say that no choice is stored and the built-in default (30 days, 13
+        months) applies. The audit log and incidents are never purged. Platform admins only.
+      tags: [admin]
+      responses:
+        "200":
+          description: The settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminRetentionSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: adminUpdateRetentionSettings
+      x-experimental: true
+      summary: Change how long finished data is kept
+      description: |
+        Replaces both choices. `deliveryDays` is 7 to 365 and `rollupMonths` 4 to 60 (the
+        status page shows 90 days, so rollups are kept at least 4 months); `null` returns that
+        value to its default (422 for a number out of range). The jobs worker reads the values at
+        each run, so a change applies at its next run (at most an hour) and may delete older
+        rows at once; the deletion cannot be undone. A request that changes nothing does
+        nothing. Audited as `admin.retention_settings.updated` (`deliveryDays`, `rollupMonths`,
+        `previousDeliveryDays`, `previousRollupMonths`; null for a default). Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminRetentionUpdate"
+      responses:
+        "200":
+          description: The settings after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminRetentionSettings"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/admin/organizations/{organizationId}/members:
     parameters:
       - $ref: "#/components/parameters/OrganizationId"
@@ -5894,6 +5960,41 @@ components:
           type: boolean
           nullable: true
           description: "`true` or `false` is the choice; `null` follows the environment again"
+    AdminRetentionSettings:
+      type: object
+      additionalProperties: false
+      required: [deliveryDays, rollupMonths, deliveryDefault, rollupDefault, updatedAt]
+      properties:
+        deliveryDays:
+          type: integer
+          description: Finished notification deliveries older than this many days are deleted
+        rollupMonths:
+          type: integer
+          description: Hourly rollups older than this many months are deleted
+        deliveryDefault:
+          type: boolean
+          description: Whether `deliveryDays` is the built-in default (30)
+        rollupDefault:
+          type: boolean
+          description: Whether `rollupMonths` is the built-in default (13)
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the choices were last changed in the panel; null when they never were
+    AdminRetentionUpdate:
+      type: object
+      additionalProperties: false
+      required: [deliveryDays, rollupMonths]
+      properties:
+        deliveryDays:
+          type: integer
+          nullable: true
+          description: Days, 7 to 365; `null` is the default (30)
+        rollupMonths:
+          type: integer
+          nullable: true
+          description: Months, 4 to 60; `null` is the default (13)
     AdminPlatformAdminUpdate:
       type: object
       additionalProperties: false

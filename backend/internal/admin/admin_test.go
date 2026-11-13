@@ -57,7 +57,7 @@ func TestMapError(t *testing.T) {
 			t.Errorf("%s: %v, want %v", code, got, want)
 		}
 	}
-	for code, field := range map[string]string{"PRA03": "planKey", "PRA04": "status", "PRA15": "enabled"} {
+	for code, field := range map[string]string{"PRA03": "planKey", "PRA04": "status", "PRA15": "enabled", "PRA16": "deliveryDays", "PRA17": "rollupMonths"} {
 		var verr *validation.Error
 		if got := mapError("op", &pgconn.PgError{Code: code}); !errors.As(got, &verr) || verr.Fields[0].Field != field {
 			t.Errorf("%s: %v, want a validation error on %s", code, got, field)

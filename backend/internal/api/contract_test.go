@@ -87,7 +87,7 @@ func concretePath(p string) string {
 var adminOperations = []string{"adminGetStats", "adminListOrganizations", "adminGetOrganization", "adminUpdateOrganization",
 	"adminDeleteOrganization", "adminListOrganizationUsers", "adminResetUserPassword", "adminGetEmailSettings", "adminUpdateEmailSettings",
 	"adminDeleteEmailSettings", "adminUpdateEmailFeatures", "adminSendTestEmail",
-	"adminGetRegistration", "adminUpdateRegistration",
+	"adminGetRegistration", "adminUpdateRegistration", "adminGetRetentionSettings", "adminUpdateRetentionSettings",
 	"adminListAllUsers", "adminGetUser", "adminDisableUser", "adminEnableUser", "adminRevokeUserSessions", "adminSetPlatformAdmin",
 	"adminListOrganizationMembers", "adminAddOrganizationMember", "adminSetOrganizationMember", "adminRemoveOrganizationMember",
 	"adminListOrganizationInvitations", "adminCreateOrganizationInvitation", "adminRevokeOrganizationInvitation",

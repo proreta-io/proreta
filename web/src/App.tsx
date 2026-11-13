@@ -24,6 +24,7 @@ import StatusPageSettings from "./pages/StatusPage";
 import VerifyEmail from "./pages/VerifyEmail";
 import AdminEmail from "./pages/admin/AdminEmail";
 import AdminRegistration from "./pages/admin/AdminRegistration";
+import AdminRetention from "./pages/admin/AdminRetention";
 import AdminUserDetails from "./pages/admin/AdminUserDetails";
 import AdminUsers from "./pages/admin/AdminUsers";
 import AdminOverview from "./pages/admin/AdminOverview";
@@ -72,6 +73,7 @@ export default function App() {
             <Route path="users/:id" element={<AdminUserDetails />} />
             <Route path="email" element={<AdminEmail />} />
             <Route path="registration" element={<AdminRegistration />} />
+            <Route path="retention" element={<AdminRetention />} />
             <Route path="*" element={<NotFound />} />
           </Route>
         </Route>
