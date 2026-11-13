@@ -1943,6 +1943,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/retention": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * How long finished data is kept
+     * @description How long the jobs worker keeps finished notification deliveries (status `sent` or
+     *     `failed`; pending ones are never deleted) and hourly rollups of check results.
+     *     `deliveryDays` and `rollupMonths` are what applies now; `deliveryDefault` and
+     *     `rollupDefault` say that no choice is stored and the built-in default (30 days, 13
+     *     months) applies. The audit log and incidents are never purged. Platform admins only.
+     */
+    get: operations["adminGetRetentionSettings"];
+    /**
+     * Change how long finished data is kept
+     * @description Replaces both choices. `deliveryDays` is 7 to 365 and `rollupMonths` 4 to 60 (the
+     *     status page shows 90 days, so rollups are kept at least 4 months); `null` returns that
+     *     value to its default (422 for a number out of range). The jobs worker reads the values at
+     *     each run, so a change applies at its next run (at most an hour) and may delete older
+     *     rows at once; the deletion cannot be undone. A request that changes nothing does
+     *     nothing. Audited as `admin.retention_settings.updated` (`deliveryDays`, `rollupMonths`,
+     *     `previousDeliveryDays`, `previousRollupMonths`; null for a default). Platform admins only.
+     */
+    put: operations["adminUpdateRetentionSettings"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/organizations/{organizationId}/members": {
     parameters: {
       query?: never;
@@ -3336,6 +3370,27 @@ export interface components {
     AdminRegistrationUpdate: {
       /** @description `true` or `false` is the choice; `null` follows the environment again */
       enabled: boolean | null;
+    };
+    AdminRetentionSettings: {
+      /** @description Finished notification deliveries older than this many days are deleted */
+      deliveryDays: number;
+      /** @description Hourly rollups older than this many months are deleted */
+      rollupMonths: number;
+      /** @description Whether `deliveryDays` is the built-in default (30) */
+      deliveryDefault: boolean;
+      /** @description Whether `rollupMonths` is the built-in default (13) */
+      rollupDefault: boolean;
+      /**
+       * Format: date-time
+       * @description When the choices were last changed in the panel; null when they never were
+       */
+      updatedAt: string | null;
+    };
+    AdminRetentionUpdate: {
+      /** @description Days, 7 to 365; `null` is the default (30) */
+      deliveryDays: number | null;
+      /** @description Months, 4 to 60; `null` is the default (13) */
+      rollupMonths: number | null;
     };
     AdminPlatformAdminUpdate: {
       /** @description `true` grants the platform-admin flag, `false` revokes it */
@@ -6839,6 +6894,61 @@ export interface operations {
       400: components["responses"]["BadRequest"];
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminGetRetentionSettings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The settings */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminRetentionSettings"];
+        };
+      };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminUpdateRetentionSettings: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminRetentionUpdate"];
+      };
+    };
+    responses: {
+      /** @description The settings after the change */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminRetentionSettings"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      422: components["responses"]["UnprocessableEntity"];
       default: components["responses"]["Error"];
     };
   };

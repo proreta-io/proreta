@@ -425,6 +425,8 @@ var operations = map[string]Permission{
 	"adminsendtestemail":                   PlatformAdmin,
 	"admingetregistration":                 PlatformAdmin,
 	"adminupdateregistration":              PlatformAdmin,
+	"admingetretentionsettings":            PlatformAdmin,
+	"adminupdateretentionsettings":         PlatformAdmin,
 	"adminlistorganizationmembers":         PlatformAdmin,
 	"adminaddorganizationmember":           PlatformAdmin,
 	"adminsetorganizationmember":           PlatformAdmin,

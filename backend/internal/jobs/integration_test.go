@@ -894,3 +894,86 @@ func TestIntegrationDeliveryRouteChanged(t *testing.T) {
 		t.Fatalf("delivery after the channel moved: %+v, posts %d", r, len(e.slack.sent()))
 	}
 }
+
+// The retention tasks read the effective retention at every run: the defaults (30 days, 13
+// months) until the platform admin chooses a value, which moves the cut. Only finished
+// deliveries go, and a purge larger than one batch is finished by one run.
+func TestIntegrationRetentionTasks(t *testing.T) {
+	e := newEnv(t, "jobsretention")
+	pool := e.Pool(t, e.WorkerURL, 2)
+	reg := prometheus.NewRegistry()
+	m := jobs.NewMetrics(reg)
+	tasks := jobs.DefaultTasks(m, slog.New(slog.DiscardHandler), nil)
+	task := func(name string) jobs.Task {
+		for _, tk := range tasks {
+			if tk.Name == name {
+				return tk
+			}
+		}
+		t.Fatalf("no %s task", name)
+		return jobs.Task{}
+	}
+	h := jobs.NewHousekeeper(pool, tasks, m, slog.New(slog.DiscardHandler), nil)
+	run := func(name string) {
+		t.Helper()
+		if got := h.RunTask(e.ctx, task(name)); got != "ok" {
+			t.Fatalf("%s = %s", name, got)
+		}
+	}
+	count := func(q string) (n int) {
+		t.Helper()
+		if err := e.admin.QueryRow(e.ctx, q).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	mon := e.monitor(tenantA, "m")
+	row := func(status, age string, n int) {
+		t.Helper()
+		sentAt, lease, token := "NULL", "NULL", "NULL"
+		switch status {
+		case "sent":
+			sentAt = "now()"
+		case "in_progress":
+			lease, token = "now() + interval '1 hour'", "gen_random_uuid()"
+		}
+		pgtest.MustExec(t, e.admin, fmt.Sprintf(`INSERT INTO notification_deliveries (id, tenant_id, kind, monitor_id, channel_id, payload, status, created_at, sent_at, lease_until, claim_token)
+			SELECT gen_random_uuid(), '%s', 'tls_expiring', '%s', '%s', '{}', '%s', now() - interval '%s', %s, %s, %s FROM generate_series(1, %d)`,
+			tenantA, mon, e.channels[tenantA], status, age, sentAt, lease, token, n))
+	}
+	row("sent", "40 days", 2500)
+	row("failed", "31 days", 3)
+	row("pending", "60 days", 2)
+	row("in_progress", "60 days", 2)
+	row("sent", "20 days", 4)
+	run("purge_notification_deliveries")
+	if got := count(`SELECT count(*) FROM notification_deliveries`); got != 8 {
+		t.Fatalf("rows after the default purge = %d, want 8 (4 sent 20 days ago, 4 unfinished)", got)
+	}
+	// The admin shortens the retention to 7 days: the 20 day old rows go, the unfinished stay.
+	pgtest.MustExec(t, e.admin, `UPDATE platform_settings SET delivery_retention_days = 7`)
+	run("purge_notification_deliveries")
+	if got := count(`SELECT count(*) FROM notification_deliveries WHERE status IN ('pending', 'in_progress')`); got != 4 {
+		t.Fatalf("unfinished rows = %d, want 4", got)
+	}
+	if got := count(`SELECT count(*) FROM notification_deliveries`); got != 4 {
+		t.Fatalf("rows after the 7 day purge = %d, want 4", got)
+	}
+
+	rollup := func(age string) {
+		pgtest.MustExec(t, e.admin, `INSERT INTO result_rollups_hourly (tenant_id, monitor_id, location_id, hour, total, ok_count, latency_sum_ms, latency_histogram)
+			VALUES ('`+tenantA+`', '`+mon.String()+`', gen_random_uuid(), date_trunc('hour', now() - interval '`+age+`', 'UTC'), 1, 1, 10, '{0,0,0,0,0,0,0,0,0,0,0}')`)
+	}
+	rollup("14 months")
+	rollup("12 months")
+	rollup("5 months")
+	run("purge_result_rollups")
+	if got := count(`SELECT count(*) FROM result_rollups_hourly`); got != 2 {
+		t.Fatalf("rollups after the default purge = %d, want 2 (13 months)", got)
+	}
+	pgtest.MustExec(t, e.admin, `UPDATE platform_settings SET rollup_retention_months = 4`)
+	run("purge_result_rollups")
+	if got := count(`SELECT count(*) FROM result_rollups_hourly`); got != 0 {
+		t.Fatalf("rollups after the 4 month purge = %d, want 0", got)
+	}
+}

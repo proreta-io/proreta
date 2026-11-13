@@ -143,3 +143,33 @@ func (s *server) AdminUpdateRegistration(ctx context.Context, req gen.AdminUpdat
 	}
 	return gen.AdminUpdateRegistration200JSONResponse(toAdminRegistration(r)), nil
 }
+
+func toAdminRetention(r admin.RetentionSettings) gen.AdminRetentionSettings {
+	return gen.AdminRetentionSettings{
+		DeliveryDays: r.DeliveryDays, RollupMonths: r.RollupMonths, DeliveryDefault: r.DeliveryDefault, RollupDefault: r.RollupDefault, UpdatedAt: r.UpdatedAt,
+	}
+}
+
+func (s *server) AdminGetRetentionSettings(ctx context.Context, _ gen.AdminGetRetentionSettingsRequestObject) (gen.AdminGetRetentionSettingsResponseObject, error) {
+	a, err := s.adminActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	r, err := s.admin.Retention(ctx, a)
+	if err != nil {
+		return nil, err
+	}
+	return gen.AdminGetRetentionSettings200JSONResponse(toAdminRetention(r)), nil
+}
+
+func (s *server) AdminUpdateRetentionSettings(ctx context.Context, req gen.AdminUpdateRetentionSettingsRequestObject) (gen.AdminUpdateRetentionSettingsResponseObject, error) {
+	a, err := s.adminActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	r, err := s.admin.SetRetention(ctx, a, req.Body.DeliveryDays, req.Body.RollupMonths)
+	if err != nil {
+		return nil, err
+	}
+	return gen.AdminUpdateRetentionSettings200JSONResponse(toAdminRetention(r)), nil
+}

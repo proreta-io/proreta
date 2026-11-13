@@ -41,6 +41,7 @@ export type AdminEmailConnectionUpdate = Schemas["AdminEmailConnectionUpdate"];
 export type AdminEmailFeaturesUpdate = Schemas["AdminEmailFeaturesUpdate"];
 export type AdminEmailTestResult = Schemas["AdminEmailTestResult"];
 export type AdminRegistrationSettings = Schemas["AdminRegistrationSettings"];
+export type AdminRetentionSettings = Schemas["AdminRetentionSettings"];
 export type AdminUser = Schemas["AdminUser"];
 export type AdminProject = Schemas["AdminProject"];
 export type AdminUserList = Schemas["AdminUserList"];
@@ -106,6 +107,7 @@ export const queryKeys = {
   adminStats: ["admin", "stats"] as const,
   adminEmail: ["admin", "email"] as const,
   adminRegistration: ["admin", "registration"] as const,
+  adminRetention: ["admin", "retention"] as const,
   adminOrganizations: (query: string, offset: number, includeDeleted: boolean) =>
     ["admin", "organizations", { query, offset, includeDeleted }] as const,
   adminOrganization: (id: string) => ["admin", "organization", id] as const,
@@ -451,6 +453,10 @@ export const getAdminRegistration = () => unwrap(client.GET("/api/v1/admin/regis
 /** `true` or `false` is the platform admin's choice; `null` follows the installation setting again. */
 export const updateAdminRegistration = (enabled: boolean | null) =>
   unwrap(client.PUT("/api/v1/admin/registration", { body: { enabled } }));
+export const getAdminRetention = () => unwrap(client.GET("/api/v1/admin/retention"));
+/** A null value returns that retention to its default. */
+export const updateAdminRetention = (deliveryDays: number | null, rollupMonths: number | null) =>
+  unwrap(client.PUT("/api/v1/admin/retention", { body: { deliveryDays, rollupMonths } }));
 
 /** Queues a real test message; poll getAdminEmailSettings for the result. */
 export const sendAdminTestEmail = (to: string) =>

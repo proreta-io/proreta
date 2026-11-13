@@ -32,6 +32,7 @@ describe("the Admin Area shell", () => {
       ["Users", "/admin/users"],
       ["Email", "/admin/email"],
       ["Registration", "/admin/registration"],
+      ["Retention", "/admin/retention"],
     ]);
 
     // Nothing of the application: no organization or project switcher, no main navigation.
