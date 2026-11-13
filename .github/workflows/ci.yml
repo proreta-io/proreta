@@ -209,6 +209,13 @@ jobs:
           cache-dependency-path: backend/go.sum
       - name: Generated code is up to date
         run: make check-generated
+      # Pinned by version (the Go checksum database verifies the module). The toolchain is the one
+      # in go.mod, the same as the release image; any reachable advisory fails the job.
+      - name: Known vulnerabilities (govulncheck)
+        working-directory: backend
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          "$(go env GOPATH)/bin/govulncheck" ./...
       - name: Test
         run: make test
       # TEST_DATABASE_ADMIN_URL comes from the job env above, like the normal tests.
