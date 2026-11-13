@@ -184,7 +184,7 @@ func TestIntegrationSpeculaQuotaAPI(t *testing.T) {
 		t.Fatalf("second: %d %s", over.code, over.raw)
 	}
 	if u := c.do(http.MethodGet, "/api/v1/usage", "", cookie); !strings.Contains(u.raw, `"usage":{"channels":0,"heartbeats":0,"members":1,"monitors":0,"projects":1,"specula":1,`) ||
-		!strings.Contains(u.raw, `"specula":1,"statusPages":1}`) {
+		!strings.Contains(u.raw, `"specula":1,"statusPageDomains":0,"statusPages":1}`) {
 		t.Fatalf("usage: %s", u.raw)
 	}
 	if d := c.do(http.MethodDelete, "/api/v1/specula/"+id, "", unsafe); d.code >= 300 {

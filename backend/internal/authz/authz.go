@@ -395,6 +395,12 @@ var operations = map[string]Permission{
 	"liststatuspagecomponents": "statuspage.manage",
 	"putstatuspagecomponents":  "statuspage.manage",
 	"previewstatuspage":        "statuspage.manage",
+	// Domains of a page follow the page's scope, as the page itself (the service decides per page).
+	"liststatuspagedomains":      "statuspage.read",
+	"addstatuspagedomain":        "statuspage.manage",
+	"setprimarystatuspagedomain": "statuspage.manage",
+	"removestatuspagedomain":     "statuspage.manage",
+	"verifystatuspagedomain":     "statuspage.manage",
 
 	// The organization itself.
 	"deleteorganization": "organization.delete",
@@ -452,6 +458,9 @@ var operations = map[string]Permission{
 	"admindeleteorganizationauthdomain":    PlatformAdmin,
 	"adminlistorganizationchannels":        PlatformAdmin,
 	"adminlistorganizationstatuspages":     PlatformAdmin,
+	"adminliststatuspagedomains":           PlatformAdmin,
+	"admindisablestatuspagedomain":         PlatformAdmin,
+	"adminenablestatuspagedomain":          PlatformAdmin,
 	"adminlistorganizationspecula":         PlatformAdmin,
 	"admincreateorganizationspecula":       PlatformAdmin,
 	"adminupdateorganizationspecula":       PlatformAdmin,

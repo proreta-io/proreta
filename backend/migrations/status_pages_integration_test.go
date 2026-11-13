@@ -3,6 +3,7 @@ package migrations_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/google/uuid"
@@ -99,8 +100,8 @@ func TestIntegrationStatusPages(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if fns, err = pgx.CollectRows(rows, pgx.RowTo[string]); err != nil || len(fns) != 1 || fns[0] != "status_page_snapshot" {
-			t.Fatalf("proreta_statuspage may execute %v (%v), want only status_page_snapshot", fns, err)
+		if fns, err = pgx.CollectRows(rows, pgx.RowTo[string]); err != nil || !slices.Equal(fns, []string{"status_page_domain_allowed", "status_page_domain_lookup", "status_page_snapshot"}) {
+			t.Fatalf("proreta_statuspage may execute %v (%v), want only the snapshot and the two host functions", fns, err)
 		}
 		for _, sql := range []string{
 			`SELECT count(*) FROM status_page_snapshots`,

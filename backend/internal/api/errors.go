@@ -28,6 +28,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/scheduler"
 	"github.com/proreta-io/proreta/backend/internal/specula"
 	"github.com/proreta-io/proreta/backend/internal/statuspages"
+	"github.com/proreta-io/proreta/backend/internal/statuspages/domains"
 )
 
 // Problem types (RFC 9457 "type" members).
@@ -71,6 +72,9 @@ const (
 	problemEmailConflict      = "urn:proreta:problem:email-settings-conflict"
 	problemSystemPlan         = "urn:proreta:problem:system-plan"
 	problemPlanInUse          = "urn:proreta:problem:plan-in-use"
+	problemDomainForbidden    = "urn:proreta:problem:domain-forbidden"
+	problemDomainUnavailable  = "urn:proreta:problem:domain-unavailable"
+	problemCustomDomainsOff   = "urn:proreta:problem:custom-domains-disabled"
 )
 
 // badRequestError is a request the handler itself rejected (the validator catches most).
@@ -104,6 +108,7 @@ func writeError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 	var sendErr *notify.SendError
 	var roleErr *roleError
 	var featureErr *featureError
+	var hostErr *domains.HostError
 	switch {
 	case errors.As(err, &badReq):
 		p.Type, p.Title, p.Status, p.Detail = problemBadRequest, "Bad request", http.StatusBadRequest, badReq.detail
@@ -144,6 +149,16 @@ func writeError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 		// recently), so it reveals nothing about other organizations' pages.
 		p.Type, p.Title, p.Status = problemSlugTaken, "This address is not available", http.StatusConflict
 		p.Detail = "Status page addresses are shared by every organization on this Proreta; choose another."
+	case errors.Is(err, errCustomDomainsDisabled):
+		p.Type, p.Title, p.Status = problemCustomDomainsOff, "Custom domains are not turned on", http.StatusNotFound
+		p.Detail = "This installation does not offer status pages on a customer's own domain."
+	case errors.As(err, &hostErr):
+		p.Type, p.Title, p.Status = problemDomainForbidden, "This host cannot be used", http.StatusUnprocessableEntity
+		p.Detail = hostErr.Message()
+		p.FieldErrors = []httpx.FieldError{{Field: "host", Message: hostErr.Message()}}
+	case errors.Is(err, domains.ErrUnavailable):
+		// One answer for every refusal, so it never says who holds a host.
+		p.Type, p.Title, p.Status = problemDomainUnavailable, "This host is not available", http.StatusConflict
 	case errors.Is(err, projects.ErrNotEmpty):
 		p.Type, p.Title, p.Status = problemProjectNotEmpty, "The project is not empty", http.StatusConflict
 		p.Detail = "Move or delete its monitors, channels and status pages first."

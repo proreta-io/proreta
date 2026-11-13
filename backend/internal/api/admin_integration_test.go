@@ -114,6 +114,8 @@ func adminCalls(t *testing.T, tenantID, userID string) []struct{ method, path, b
 				body = `{"enabled":false}`
 			case method == http.MethodPut && strings.HasSuffix(path, "/retention"):
 				body = `{"deliveryDays":10,"rollupMonths":6}`
+			case method == http.MethodPost && (strings.HasSuffix(path, "/disable") || strings.HasSuffix(path, "/enable")):
+				body = `{"reason":"abuse report"}`
 			case method == http.MethodPost && strings.HasSuffix(path, "/plans"):
 				body = `{"key":"gold","name":"Gold","limits":` + planLimitsJSON + `}`
 			case method == http.MethodPut && strings.Contains(path, "/plans/"):
@@ -131,8 +133,8 @@ func adminCalls(t *testing.T, tenantID, userID string) []struct{ method, path, b
 				strings.NewReplacer("{tenantId}", tenantID, "{organizationId}", tenantID, "{userId}", userID, "{invitationId}", userID, "{projectId}", userID, "{domainId}", userID, "{speculaId}", userID, "{key}", "free").Replace(path), body})
 		}
 	}
-	if len(out) != 51 {
-		t.Fatalf("%d admin operations in the spec, want 51", len(out))
+	if len(out) != 54 {
+		t.Fatalf("%d admin operations in the spec, want 54", len(out))
 	}
 	return out
 }
@@ -465,7 +467,7 @@ func TestIntegrationAdminPanel(t *testing.T) {
 			t.Fatalf("downgrade: %d %s", r.code, r.raw)
 		}
 		u := c.do(http.MethodGet, "/api/v1/usage", "", userCookie)
-		if fmt.Sprint(u.body["usage"]) != "map[channels:0 heartbeats:1 members:1 monitors:4 projects:1 specula:0 statusPages:0]" || fmt.Sprint(u.body["limits"]) != "map[channels:1 heartbeats:1 members:3 monitors:3 projects:50 specula:1 statusPages:1]" {
+		if fmt.Sprint(u.body["usage"]) != "map[channels:0 heartbeats:1 members:1 monitors:4 projects:1 specula:0 statusPageDomains:0 statusPages:0]" || fmt.Sprint(u.body["limits"]) != "map[channels:1 heartbeats:1 members:3 monitors:3 projects:50 specula:1 statusPageDomains:0 statusPages:1]" {
 			t.Fatalf("usage over the limit: %s", u.raw)
 		}
 		if r := c.do(http.MethodPost, "/api/v1/monitors", `{"type":"http","name":"one more","http":{"url":"https://example.com/x"}}`, uh); r.code != http.StatusConflict || r.body["type"] != "urn:proreta:problem:plan-limit-reached" {
@@ -628,7 +630,7 @@ func TestIntegrationPlatformAdminFirstSignIn(t *testing.T) {
 	}
 }
 
-const planLimitsJSON = `{"monitors":5,"heartbeats":2,"channels":2,"members":4,"projects":10,"statusPages":1,"specula":1}`
+const planLimitsJSON = `{"monitors":5,"heartbeats":2,"channels":2,"members":4,"projects":10,"statusPages":1,"specula":1,"statusPageDomains":2}`
 
 // The platform admin creates, edits and deletes plans through the API: validation answers 422
 // with the field, a duplicate key is 422 on key, a system plan or a plan in use cannot be
@@ -657,9 +659,9 @@ func TestIntegrationAdminPlans(t *testing.T) {
 		t.Fatalf("create: %d %s", r.code, r.raw)
 	}
 	for body, field := range map[string]string{
-		`{"key":"gold","name":"Again","limits":` + planLimitsJSON + `}`:                                                                                       "key",
-		`{"key":"silver","name":" ","limits":` + planLimitsJSON + `}`:                                                                                         "name",
-		`{"key":"silver","name":"Silver","limits":{"monitors":2147483648,"heartbeats":2,"channels":2,"members":4,"projects":10,"statusPages":1,"specula":1}}`: "limits.monitors",
+		`{"key":"gold","name":"Again","limits":` + planLimitsJSON + `}`: "key",
+		`{"key":"silver","name":" ","limits":` + planLimitsJSON + `}`:   "name",
+		`{"key":"silver","name":"Silver","limits":{"monitors":2147483648,"heartbeats":2,"channels":2,"members":4,"projects":10,"statusPages":1,"specula":1,"statusPageDomains":2}}`: "limits.monitors",
 	} {
 		r := c.do(http.MethodPost, path, body, ah)
 		fe, _ := r.body["fieldErrors"].([]any)
@@ -671,8 +673,8 @@ func TestIntegrationAdminPlans(t *testing.T) {
 	for _, body := range []string{
 		`{"key":"Bad Key","name":"X","limits":` + planLimitsJSON + `}`,
 		`{"key":"silver","name":"X","limits":{"monitors":1}}`,
-		`{"key":"silver","name":"X","limits":{"monitors":-1,"heartbeats":2,"channels":2,"members":4,"projects":10,"statusPages":1,"specula":1}}`,
-		`{"key":"silver","name":"X","limits":{"monitors":1.5,"heartbeats":2,"channels":2,"members":4,"projects":10,"statusPages":1,"specula":1}}`,
+		`{"key":"silver","name":"X","limits":{"monitors":-1,"heartbeats":2,"channels":2,"members":4,"projects":10,"statusPages":1,"specula":1,"statusPageDomains":2}}`,
+		`{"key":"silver","name":"X","limits":{"monitors":1.5,"heartbeats":2,"channels":2,"members":4,"projects":10,"statusPages":1,"specula":1,"statusPageDomains":2}}`,
 	} {
 		if r := c.do(http.MethodPost, path, body, ah); r.code != http.StatusBadRequest {
 			t.Errorf("%s: %d %s, want 400", body, r.code, r.raw)
@@ -688,7 +690,7 @@ func TestIntegrationAdminPlans(t *testing.T) {
 	if r.code != http.StatusOK || r.body["organizations"] != float64(1) || r.body["deletable"] != false || peak["members"] != float64(1) || peak["projects"] != float64(1) {
 		t.Fatalf("get: %d %s", r.code, r.raw)
 	}
-	r = c.do(http.MethodPut, path+"/gold", `{"name":"Gold plus","limits":{"monitors":7,"heartbeats":2,"channels":2,"members":4,"projects":10,"statusPages":1,"specula":2147483647}}`, ah)
+	r = c.do(http.MethodPut, path+"/gold", `{"name":"Gold plus","limits":{"monitors":7,"heartbeats":2,"channels":2,"members":4,"projects":10,"statusPages":1,"specula":2147483647,"statusPageDomains":2}}`, ah)
 	if r.code != http.StatusOK || r.body["name"] != "Gold plus" || r.body["limits"].(map[string]any)["monitors"] != float64(7) {
 		t.Fatalf("update: %d %s", r.code, r.raw)
 	}

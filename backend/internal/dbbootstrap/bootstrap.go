@@ -19,8 +19,8 @@ const (
 	OwnerRole  = "proreta_owner"
 	APIRole    = "proreta_api"
 	WorkerRole = "proreta_worker"
-	// StatuspageRole serves the public status page: it may only execute
-	// status_page_snapshot(slug).
+	// StatuspageRole serves the public status page: it may only execute status_page_snapshot(slug)
+	// and the host functions status_page_domain_lookup and status_page_domain_allowed.
 	StatuspageRole = "proreta_statuspage"
 )
 
@@ -482,6 +482,12 @@ const statuspageGrantSQL = `DO $do$
 BEGIN
   IF to_regprocedure('public.status_page_snapshot(text)') IS NOT NULL THEN
     GRANT EXECUTE ON FUNCTION public.status_page_snapshot(text) TO "proreta_statuspage";
+  END IF;
+  IF to_regprocedure('public.status_page_domain_lookup(text)') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION public.status_page_domain_lookup(text) TO "proreta_statuspage";
+  END IF;
+  IF to_regprocedure('public.status_page_domain_allowed(text)') IS NOT NULL THEN
+    GRANT EXECUTE ON FUNCTION public.status_page_domain_allowed(text) TO "proreta_statuspage";
   END IF;
 END
 $do$`

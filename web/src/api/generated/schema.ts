@@ -1620,6 +1620,184 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/status-pages/{statusPageId}/domains": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Status page id; a value that is not a UUID is answered with 400 */
+        statusPageId: components["parameters"]["StatusPageId"];
+      };
+      cookie?: never;
+    };
+    /**
+     * Domains of a status page
+     * @description The custom domains of the page (released ones are not listed), the primary one first, with the
+     *     DNS records each needs. Needs `statuspage.read` on the page's scope. 404
+     *     `urn:proreta:problem:custom-domains-disabled` when the installation has custom domains turned
+     *     off (`PRORETA_STATUS_PAGE_CUSTOM_DOMAINS`).
+     */
+    get: operations["listStatusPageDomains"];
+    put?: never;
+    /**
+     * Add a domain to a status page
+     * @description Needs `statuspage.manage` on the page's scope. The host is normalized (lowercase, one trailing
+     *     dot removed) and must be ASCII or `xn--`, below a registrable domain, and not an IP address,
+     *     wildcard, reserved name or a name of this installation; otherwise 422
+     *     `urn:proreta:problem:domain-forbidden` with a short reason in `fieldErrors`. The domain starts
+     *     `pending` with a new token; the response carries the DNS records to publish. A host that
+     *     another organization holds (`verified` or `active`) is not refused here; it is 409
+     *     `urn:proreta:problem:domain-unavailable` when verification cannot take it, the same answer
+     *     whoever holds it. At most 3 domains per page and the plan limit (`limit` is
+     *     `statusPageDomains`, 409 `urn:proreta:problem:plan-limit-reached`); at most 3 pending domains
+     *     per page and 10 added per organization per day (429). Audited as `status_page.domain_added`.
+     *     404 `urn:proreta:problem:custom-domains-disabled` when the installation has custom domains
+     *     turned off.
+     */
+    post: operations["addStatusPageDomain"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/status-pages/{statusPageId}/domains/{domainId}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Status page id; a value that is not a UUID is answered with 400 */
+        statusPageId: components["parameters"]["StatusPageId"];
+        /** @description Status page domain id; a value that is not a UUID is answered with 400 */
+        domainId: components["parameters"]["StatusPageDomainId"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Remove a domain from a status page
+     * @description Needs `statuspage.manage` on the page's scope. The domain stops being served and counted at
+     *     once (soft release, the row stays for audit). Audited as `status_page.domain_removed`.
+     */
+    delete: operations["removeStatusPageDomain"];
+    options?: never;
+    head?: never;
+    /**
+     * Make a domain the primary one of its page
+     * @description `primary` must be `true`: the domain becomes the primary one (used for canonical links, the
+     *     feed and badge URLs) and the previous primary is cleared in the same transaction. Needs
+     *     `statuspage.manage` on the page's scope. A domain that is not `verified` or `active` is 409
+     *     `urn:proreta:problem:domain-unavailable`. Audited as `status_page.domain_primary_changed`.
+     */
+    patch: operations["setPrimaryStatusPageDomain"];
+    trace?: never;
+  };
+  "/api/v1/status-pages/{statusPageId}/domains/{domainId}/verify": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Status page id; a value that is not a UUID is answered with 400 */
+        statusPageId: components["parameters"]["StatusPageId"];
+        /** @description Status page domain id; a value that is not a UUID is answered with 400 */
+        domainId: components["parameters"]["StatusPageDomainId"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Check the DNS records of a domain now
+     * @description Runs one DNS check synchronously and returns the domain in the state it ended in. Needs
+     *     `statuspage.manage` on the page's scope. Limited to 6 per minute and 30 per hour per
+     *     organization (429 with `Retry-After`). When the check proves a host another organization
+     *     holds and that organization's own token is no longer in DNS, the host moves here; when both
+     *     tokens are in DNS the holder keeps it and the answer is 409
+     *     `urn:proreta:problem:domain-unavailable`. Audited as `status_page.domain_verified`,
+     *     `status_page.domain_activated` or `status_page.domain_failed` when the state changes.
+     */
+    post: operations["verifyStatusPageDomain"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/status-page-domains": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the custom domains of every organization
+     * @description Custom domains of all organizations, newest first; released ones are not listed. `query`
+     *     matches the host (substring, case-insensitive); `state` keeps only the given states. Platform
+     *     admins only.
+     */
+    get: operations["adminListStatusPageDomains"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/status-page-domains/{domainId}/disable": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Status page domain id; a value that is not a UUID is answered with 400 */
+        domainId: components["parameters"]["StatusPageDomainId"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Stop serving a custom domain (abuse switch)
+     * @description Stops serving the host and issuing certificates for it at once, whatever the organization's
+     *     state; the organization sees the domain as disabled. `reason` is 1 to 500 characters. Audited
+     *     in the organization as `admin.status_page_domain.disabled` (reason in the metadata); nothing
+     *     is written when the domain is already disabled. Platform admins only.
+     */
+    post: operations["adminDisableStatusPageDomain"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/status-page-domains/{domainId}/enable": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Status page domain id; a value that is not a UUID is answered with 400 */
+        domainId: components["parameters"]["StatusPageDomainId"];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Serve a disabled custom domain again
+     * @description Undoes the abuse switch. `reason` is 1 to 500 characters. Audited in the organization as
+     *     `admin.status_page_domain.enabled`; nothing is written when the domain is not disabled.
+     *     Platform admins only.
+     */
+    post: operations["adminEnableStatusPageDomain"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/stats": {
     parameters: {
       query?: never;
@@ -3400,6 +3578,8 @@ export interface components {
       statusPages: number;
       /** @description Specula executors (revoked ones do not count) */
       specula: number;
+      /** @description Custom domains of status pages (released ones do not count); the limit is for the whole organization */
+      statusPageDomains: number;
     };
     /**
      * @description `suspended`: the organization's users cannot log in and nothing of it is checked. A deleted organization is also `suspended` and has `deletedAt`.
@@ -3965,6 +4145,105 @@ export interface components {
       /** Format: date-time */
       updatedAt: string;
     };
+    /**
+     * @description `pending`: the TXT record was not seen yet (expires after 7 days); `verified`: the TXT record
+     *     was seen, the host is served, waiting for the CNAME; `active`: verified and the CNAME points at
+     *     the target; `failed`: no proof for 7 days, not served.
+     * @enum {string}
+     */
+    StatusPageDomainState: "pending" | "verified" | "active" | "failed";
+    /**
+     * @description Why the last check did not find a record; `dns-error` means the lookup itself failed
+     * @enum {string}
+     */
+    StatusPageDomainError:
+      "txt-missing" | "txt-mismatch" | "cname-missing" | "cname-wrong" | "dns-error";
+    /** @description The DNS records the customer publishes at their DNS provider */
+    StatusPageDomainVerification: {
+      /** @example _proreta-status.status.example.com */
+      txtName: string;
+      /** @example proreta-verify=0123456789abcdef0123456789abcdef */
+      txtValue: string;
+      /**
+       * @description Where the host's CNAME must point; empty when the operator has not configured a target
+       * @example customers.proreta.example.net
+       */
+      cnameTarget: string;
+    };
+    StatusPageDomain: {
+      /** Format: uuid */
+      id: string;
+      /**
+       * @description Lowercase ASCII host name
+       * @example status.example.com
+       */
+      host: string;
+      /** @description The Unicode form of an `xn--` host, otherwise the same as `host` */
+      hostUnicode: string;
+      state: components["schemas"]["StatusPageDomainState"];
+      /** @description The domain used for canonical links, the feed and badge URLs; one per page */
+      primary: boolean;
+      /** @description The platform admin stopped serving this host */
+      disabled: boolean;
+      verification: components["schemas"]["StatusPageDomainVerification"];
+      /** Format: date-time */
+      verifiedAt: string | null;
+      /** Format: date-time */
+      lastCheckedAt: string | null;
+      lastError: components["schemas"]["StatusPageDomainError"] | null;
+      /**
+       * Format: date-time
+       * @description When a `pending` domain is deleted if its TXT record is still missing; null in other states
+       */
+      expiresAt: string | null;
+      /** Format: date-time */
+      createdAt: string;
+    };
+    StatusPageDomainList: {
+      items: components["schemas"]["StatusPageDomain"][];
+    };
+    StatusPageDomainCreate: {
+      /** @example status.example.com */
+      host: string;
+    };
+    StatusPageDomainUpdate: {
+      /** @enum {boolean} */
+      primary: true;
+    };
+    AdminStatusPageDomain: {
+      /** Format: uuid */
+      id: string;
+      host: string;
+      hostUnicode: string;
+      state: components["schemas"]["StatusPageDomainState"];
+      primary: boolean;
+      disabled: boolean;
+      /** Format: date-time */
+      disabledAt: string | null;
+      /** Format: uuid */
+      organizationId: string;
+      organizationSlug: string;
+      /** Format: uuid */
+      statusPageId: string;
+      statusPageSlug: string;
+      /** Format: date-time */
+      verifiedAt: string | null;
+      /** Format: date-time */
+      lastCheckedAt: string | null;
+      lastError: components["schemas"]["StatusPageDomainError"] | null;
+      /** Format: date-time */
+      createdAt: string;
+    };
+    AdminStatusPageDomainList: {
+      items: components["schemas"]["AdminStatusPageDomain"][];
+      /** @description Number of all matching domains */
+      total: number;
+      limit: number;
+      offset: number;
+    };
+    AdminStatusPageDomainSwitch: {
+      reason: string;
+    };
     StatusPageList: {
       items: components["schemas"]["StatusPage"][];
     };
@@ -4198,6 +4477,7 @@ export interface components {
      *     | `urn:proreta:problem:domain-not-allowed` | 403 | The operator does not allow claiming this sign-in domain |
      *     | `urn:proreta:problem:feature-unavailable` | 403 | The organization is not entitled to the feature the operation needs (see `features` of the session) |
      *     | `urn:proreta:problem:not-found` | 404 | The resource does not exist, was deleted, or the caller does not see it |
+     *     | `urn:proreta:problem:custom-domains-disabled` | 404 | The installation has custom domains for status pages turned off (`PRORETA_STATUS_PAGE_CUSTOM_DOMAINS`) |
      *     | `urn:proreta:problem:invitation-invalid` | 404 | The invitation token is unknown, expired, used or revoked |
      *     | `urn:proreta:problem:method-not-allowed` | 405 | The path exists, the method does not |
      *     | `urn:proreta:problem:not-a-heartbeat` | 409 | The operation exists only for heartbeat monitors |
@@ -4218,7 +4498,9 @@ export interface components {
      *     | `urn:proreta:problem:default-project` | 409 | The Default project cannot be deleted |
      *     | `urn:proreta:problem:no-password` | 409 | The user has no password to change (signed in only with a provider) |
      *     | `urn:proreta:problem:last-login-method` | 409 | Unlinking would leave the user without a way to sign in |
+     *     | `urn:proreta:problem:domain-unavailable` | 409 | The host cannot be taken for a status page now; the same answer whoever holds it |
      *     | `urn:proreta:problem:domain-taken` | 409 | Another organization claimed the sign-in domain |
+     *     | `urn:proreta:problem:domain-forbidden` | 422 | The host cannot be used for a status page domain (IP address, wildcard, reserved name, public suffix, a name of this installation, not ASCII); the reason is in `fieldErrors` |
      *     | `urn:proreta:problem:validation` | 422 | A well-formed request breaks a business rule; see `fieldErrors` |
      *     | `urn:proreta:problem:rate-limited` | 429 | Too many attempts; see `Retry-After` |
      *     | `urn:proreta:problem:internal` | 500 | Unexpected server error; quote `requestId` when reporting it |
@@ -4245,7 +4527,14 @@ export interface components {
        * @enum {string}
        */
       limit?:
-        "monitors" | "heartbeats" | "channels" | "members" | "projects" | "statusPages" | "specula";
+        | "monitors"
+        | "heartbeats"
+        | "channels"
+        | "members"
+        | "projects"
+        | "statusPages"
+        | "specula"
+        | "statusPageDomains";
       /** @description The value of that limit for the organization (only with `urn:proreta:problem:plan-limit-reached`) */
       max?: number;
     };
@@ -4386,6 +4675,8 @@ export interface components {
     Offset: number;
     /** @description Status page id; a value that is not a UUID is answered with 400 */
     StatusPageId: string;
+    /** @description Status page domain id; a value that is not a UUID is answered with 400 */
+    StatusPageDomainId: string;
     /** @description The OAuth provider */
     OAuthProviderId: components["schemas"]["OAuthProvider"];
     /** @description Sign-in domain id; a value that is not a UUID is answered with 400 */
@@ -6707,6 +6998,282 @@ export interface operations {
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
+      default: components["responses"]["Error"];
+    };
+  };
+  listStatusPageDomains: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Status page id; a value that is not a UUID is answered with 400 */
+        statusPageId: components["parameters"]["StatusPageId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The domains */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["StatusPageDomainList"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      404: components["responses"]["NotFound"];
+      default: components["responses"]["Error"];
+    };
+  };
+  addStatusPageDomain: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description Status page id; a value that is not a UUID is answered with 400 */
+        statusPageId: components["parameters"]["StatusPageId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["StatusPageDomainCreate"];
+      };
+    };
+    responses: {
+      /** @description The pending domain */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["StatusPageDomain"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      422: components["responses"]["UnprocessableEntity"];
+      429: components["responses"]["TooManyRequests"];
+      default: components["responses"]["Error"];
+    };
+  };
+  removeStatusPageDomain: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description Status page id; a value that is not a UUID is answered with 400 */
+        statusPageId: components["parameters"]["StatusPageId"];
+        /** @description Status page domain id; a value that is not a UUID is answered with 400 */
+        domainId: components["parameters"]["StatusPageDomainId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Removed */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      default: components["responses"]["Error"];
+    };
+  };
+  setPrimaryStatusPageDomain: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description Status page id; a value that is not a UUID is answered with 400 */
+        statusPageId: components["parameters"]["StatusPageId"];
+        /** @description Status page domain id; a value that is not a UUID is answered with 400 */
+        domainId: components["parameters"]["StatusPageDomainId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["StatusPageDomainUpdate"];
+      };
+    };
+    responses: {
+      /** @description The domain after the change */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["StatusPageDomain"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      422: components["responses"]["UnprocessableEntity"];
+      default: components["responses"]["Error"];
+    };
+  };
+  verifyStatusPageDomain: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description Status page id; a value that is not a UUID is answered with 400 */
+        statusPageId: components["parameters"]["StatusPageId"];
+        /** @description Status page domain id; a value that is not a UUID is answered with 400 */
+        domainId: components["parameters"]["StatusPageDomainId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The domain after the check */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["StatusPageDomain"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
+      429: components["responses"]["TooManyRequests"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminListStatusPageDomains: {
+    parameters: {
+      query?: {
+        /** @description Case-insensitive substring to search for; empty lists everything */
+        query?: components["parameters"]["AdminQuery"];
+        /** @description Page size */
+        limit?: components["parameters"]["Limit"];
+        /** @description Number of items to skip */
+        offset?: components["parameters"]["Offset"];
+        /** @description Only domains in these states (comma-separated) */
+        state?: components["schemas"]["StatusPageDomainState"][];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description One page of domains */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminStatusPageDomainList"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminDisableStatusPageDomain: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description Status page domain id; a value that is not a UUID is answered with 400 */
+        domainId: components["parameters"]["StatusPageDomainId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminStatusPageDomainSwitch"];
+      };
+    };
+    responses: {
+      /** @description The domain after the change */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminStatusPageDomain"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      422: components["responses"]["UnprocessableEntity"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminEnableStatusPageDomain: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description Status page domain id; a value that is not a UUID is answered with 400 */
+        domainId: components["parameters"]["StatusPageDomainId"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminStatusPageDomainSwitch"];
+      };
+    };
+    responses: {
+      /** @description The domain after the change */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminStatusPageDomain"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      422: components["responses"]["UnprocessableEntity"];
       default: components["responses"]["Error"];
     };
   };

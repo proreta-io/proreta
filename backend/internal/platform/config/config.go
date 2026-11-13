@@ -114,7 +114,10 @@ type API struct {
 	// PasswordLoginEnabled turns the password form off for everyone but the admin login when
 	// false (PRORETA_PASSWORD_LOGIN_ENABLED, default true).
 	PasswordLoginEnabled bool
-	OAuth                OAuth
+	// StatusPageCustomDomains turns on status pages on a customer's own domain
+	// (PRORETA_STATUS_PAGE_CUSTOM_DOMAINS, default false); off, the domain operations answer 404.
+	StatusPageCustomDomains bool
+	OAuth                   OAuth
 }
 
 // OAuth holds the OAuth client credentials. A provider without both values is off.
@@ -244,20 +247,21 @@ const (
 func LoadAPI(lookup LookupFunc) (API, error) {
 	l := &loader{lookup: lookup}
 	cfg := API{
-		Server:               l.server(10),
-		Encryption:           l.encryption(),
-		Request:              l.requestSeal(),
-		Guard:                l.guard(),
-		HTTPAddr:             l.addr("PRORETA_HTTP_ADDR", ":8080"),
-		AdminLogin:           l.login("PRORETA_ADMIN_LOGIN"),
-		AdminPasswordHash:    l.passwordHash("PRORETA_ADMIN_PASSWORD_HASH"),
-		SessionTTL:           l.duration("PRORETA_SESSION_TTL", 12*time.Hour, 5*time.Minute, 30*24*time.Hour),
-		CookieSecure:         l.boolean("PRORETA_COOKIE_SECURE", true),
-		TrustedProxyHops:     l.integer("PRORETA_TRUSTED_PROXY_HOPS", 0, 0, 10),
-		PublicURL:            l.publicURL("PRORETA_PUBLIC_URL"),
-		RegistrationEnabled:  l.boolean("PRORETA_REGISTRATION_ENABLED", true),
-		PasswordLoginEnabled: l.boolean("PRORETA_PASSWORD_LOGIN_ENABLED", true),
-		OAuth:                l.oauth(),
+		Server:                  l.server(10),
+		Encryption:              l.encryption(),
+		Request:                 l.requestSeal(),
+		Guard:                   l.guard(),
+		HTTPAddr:                l.addr("PRORETA_HTTP_ADDR", ":8080"),
+		AdminLogin:              l.login("PRORETA_ADMIN_LOGIN"),
+		AdminPasswordHash:       l.passwordHash("PRORETA_ADMIN_PASSWORD_HASH"),
+		SessionTTL:              l.duration("PRORETA_SESSION_TTL", 12*time.Hour, 5*time.Minute, 30*24*time.Hour),
+		CookieSecure:            l.boolean("PRORETA_COOKIE_SECURE", true),
+		TrustedProxyHops:        l.integer("PRORETA_TRUSTED_PROXY_HOPS", 0, 0, 10),
+		PublicURL:               l.publicURL("PRORETA_PUBLIC_URL"),
+		RegistrationEnabled:     l.boolean("PRORETA_REGISTRATION_ENABLED", true),
+		PasswordLoginEnabled:    l.boolean("PRORETA_PASSWORD_LOGIN_ENABLED", true),
+		StatusPageCustomDomains: l.boolean("PRORETA_STATUS_PAGE_CUSTOM_DOMAINS", false),
+		OAuth:                   l.oauth(),
 	}
 	if cfg.HTTPAddr != "" && cfg.HTTPAddr == cfg.AdminAddr {
 		l.fail("PRORETA_HTTP_ADDR", "must differ from PRORETA_ADMIN_ADDR")

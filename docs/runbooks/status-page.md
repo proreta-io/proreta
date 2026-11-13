@@ -9,7 +9,7 @@ On an empty or an existing database, set `database.bootstrap.enabled: true` and 
 The renderer logs in as `proreta_statuspage`, which only `proretactl db bootstrap` creates, and reads its URL from the key `statuspage_url` of the Secret `proreta-db`. An installation bootstrapped before the status page existed has neither, so keep `statuspage.enabled: false` until both exist. The admin API, the settings page and the snapshots work without it; only the public page is missing.
 
 1. Deploy the release as usual (the migrations create the status page tables and functions). Check: `kubectl --context <cluster-context> -n proreta logs job/proreta-migrate`.
-2. Set `database.bootstrap.enabled: true` and sync once. The Job creates `proreta_statuspage`, adds `statuspage_password` and `statuspage_url` to `proreta-db` (existing keys are never rewritten; only key names are logged) and grants `EXECUTE` on `status_page_snapshot(text)`. The admin Secret must exist for this run (the Job does not skip while the status page keys are missing).
+2. Set `database.bootstrap.enabled: true` and sync once. The Job creates `proreta_statuspage`, adds `statuspage_password` and `statuspage_url` to `proreta-db` (existing keys are never rewritten; only key names are logged) and grants `EXECUTE` on `status_page_snapshot(text)`, `status_page_domain_lookup(text)` and `status_page_domain_allowed(text)`. The admin Secret must exist for this run (the Job does not skip while the status page keys are missing).
 3. Set `statuspage.enabled: true` (and, if you like, `database.bootstrap.enabled: false`) in the same change; sync. With `secrets.statuspage.source: generate` (default) the secrets bootstrap Job creates the Secret `proreta-statuspage` (key `cookie_key`) first; with `externalSecret` create the key `secrets.statuspage.remoteKey` (property `cookie_key`, standard base64 of 32 random bytes) in your secret store before.
 4. Verify: `kubectl --context <cluster-context> -n proreta get pods -l app.kubernetes.io/component=statuspage` is Ready; `curl -sI https://proreta.example.com/status/does-not-exist` answers 404 with a `Content-Security-Policy` header; publish a page and open it.
 
@@ -17,6 +17,8 @@ The renderer logs in as `proreta_statuspage`, which only `proretactl db bootstra
 As a superuser on the database (read-only queries):
 ```sql
 SELECT has_function_privilege('proreta_statuspage', 'status_page_snapshot(text)', 'EXECUTE');      -- true
+SELECT has_function_privilege('proreta_statuspage', 'status_page_domain_lookup(text)', 'EXECUTE');  -- true
+SELECT has_function_privilege('proreta_statuspage', 'status_page_domain_allowed(text)', 'EXECUTE'); -- true
 SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
  WHERE has_table_privilege('proreta_statuspage', c.oid, 'SELECT');                                   -- 0
 ```

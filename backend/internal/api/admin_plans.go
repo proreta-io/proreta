@@ -11,17 +11,17 @@ import (
 func toAdminPlan(p admin.Plan) gen.AdminPlan {
 	out := gen.AdminPlan{Key: p.Key, Name: p.Name, System: p.System, Organizations: p.Organizations, Deletable: p.Deletable,
 		Limits: gen.ResourceCounts{Monitors: p.Limits.MaxMonitors, Heartbeats: p.Limits.MaxHeartbeats, Channels: p.Limits.MaxChannels,
-			Members: p.Limits.MaxMembers, Projects: p.Limits.MaxProjects, StatusPages: p.Limits.MaxStatusPages, Specula: p.Limits.MaxAgents}}
+			Members: p.Limits.MaxMembers, Projects: p.Limits.MaxProjects, StatusPages: p.Limits.MaxStatusPages, Specula: p.Limits.MaxAgents, StatusPageDomains: p.Limits.MaxStatusPageDomains}}
 	if u := p.PeakUsage; u != nil {
 		out.PeakUsage = &gen.ResourceCounts{Monitors: u.Monitors, Heartbeats: u.Heartbeats, Channels: u.Channels, Members: u.Members,
-			Projects: u.Projects, StatusPages: u.StatusPages, Specula: u.Agents}
+			Projects: u.Projects, StatusPages: u.StatusPages, Specula: u.Agents, StatusPageDomains: u.StatusPageDomains}
 	}
 	return out
 }
 
 func limitsFromAPI(c gen.ResourceCounts) plans.Limits {
 	return plans.Limits{MaxMonitors: c.Monitors, MaxHeartbeats: c.Heartbeats, MaxChannels: c.Channels, MaxMembers: c.Members,
-		MaxProjects: c.Projects, MaxStatusPages: c.StatusPages, MaxAgents: c.Specula}
+		MaxProjects: c.Projects, MaxStatusPages: c.StatusPages, MaxAgents: c.Specula, MaxStatusPageDomains: c.StatusPageDomains}
 }
 
 func (s *server) AdminListPlans(ctx context.Context, _ gen.AdminListPlansRequestObject) (gen.AdminListPlansResponseObject, error) {

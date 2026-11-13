@@ -8,7 +8,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/testsupport/pgtest"
 )
 
-const goodLimits = `{"max_monitors": 5, "max_heartbeats": 2, "max_channels": 2, "max_members": 4, "max_projects": 10, "max_status_pages": 1, "max_agents": 1}`
+const goodLimits = `{"max_monitors": 5, "max_heartbeats": 2, "max_channels": 2, "max_members": 4, "max_projects": 10, "max_status_pages": 1, "max_agents": 1, "max_status_page_domains": 3}`
 
 // Plan administration: only the platform admin writes, every plan always carries all limits,
 // system plans survive, a plan in use cannot be deleted, and every change leaves one audit row.
@@ -74,6 +74,8 @@ func TestIntegrationAdminPlans(t *testing.T) {
 			{"gold", "Gold", strings.Replace(goodLimits, `"max_agents": 1`, `"max_agents": 2147483648`, 1), "PRA32"},
 			{"gold", "Gold", strings.Replace(goodLimits, `"max_agents": 1`, `"max_agents": null`, 1), "PRA32"},
 			{"gold", "Gold", strings.Replace(goodLimits, `"max_agents": 1`, `"max_agents": 1, "max_extra": 1`, 1), "PRA32"},
+			{"gold", "Gold", strings.Replace(goodLimits, `, "max_status_page_domains": 3`, ``, 1), "PRA32"},
+			{"gold", "Gold", strings.Replace(goodLimits, `"max_status_page_domains": 3`, `"max_status_page_domains": -1`, 1), "PRA32"},
 			{"gold", "Gold", `[]`, "PRA32"},
 		} {
 			if got := create(c.key, c.name, c.limits); got != c.state {

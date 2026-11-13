@@ -35,6 +35,7 @@ sessions kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arwd/pro
 specula_agents kind=r owner=proreta_owner rls=true force=true acl=proreta_api=ar/proreta_owner,proreta_owner=arwdDxt/proreta_owner
 specula_projects kind=r owner=proreta_owner rls=true force=true acl=proreta_api=ard/proreta_owner,proreta_owner=arwdDxt/proreta_owner
 status_page_components kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arwd/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=rd/proreta_owner
+status_page_domains kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arw/proreta_owner,proreta_owner=arwdDxt/proreta_owner
 status_page_released_slugs kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arw/proreta_owner,proreta_owner=arwdDxt/proreta_owner
 status_page_snapshots kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arwd/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=arwd/proreta_owner
 status_pages kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arw/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=r/proreta_owner
@@ -316,6 +317,22 @@ status_page_components.6 group_name text
 status_page_components.7 position integer not null
 status_page_components.8 created_at timestamp with time zone not null default now()
 status_page_components.9 updated_at timestamp with time zone not null default now()
+status_page_domains.1 id uuid not null
+status_page_domains.2 tenant_id uuid not null
+status_page_domains.3 page_id uuid not null
+status_page_domains.4 host text not null
+status_page_domains.5 state text not null default 'pending'::text
+status_page_domains.6 is_primary boolean not null default false
+status_page_domains.7 token text not null
+status_page_domains.8 verified_at timestamp with time zone
+status_page_domains.9 last_checked_at timestamp with time zone
+status_page_domains.10 last_proof_at timestamp with time zone
+status_page_domains.11 check_failures integer not null default 0
+status_page_domains.12 last_error text
+status_page_domains.13 disabled_at timestamp with time zone
+status_page_domains.14 created_at timestamp with time zone not null default now()
+status_page_domains.15 updated_at timestamp with time zone not null default now()
+status_page_domains.16 released_at timestamp with time zone
 status_page_released_slugs.1 tenant_id uuid not null
 status_page_released_slugs.2 slug text not null
 status_page_released_slugs.3 released_at timestamp with time zone not null default now()
@@ -591,6 +608,16 @@ status_page_components status_page_components_public_name_check CHECK (((char_le
 status_page_components status_page_components_tenant_id_id_key UNIQUE (tenant_id, id)
 status_page_components status_page_components_tenant_id_monitor_id_fkey FOREIGN KEY (tenant_id, monitor_id) REFERENCES monitors(tenant_id, id)
 status_page_components status_page_components_tenant_id_page_id_fkey FOREIGN KEY (tenant_id, page_id) REFERENCES status_pages(tenant_id, id) ON DELETE CASCADE
+status_page_domains status_page_domains_check_failures_check CHECK ((check_failures >= 0))
+status_page_domains status_page_domains_host_check CHECK (((host = lower(host)) AND ((char_length(host) >= 4) AND (char_length(host) <= 253)) AND (host ~ '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'::text)))
+status_page_domains status_page_domains_last_error_check CHECK (((last_error IS NULL) OR (last_error = ANY (ARRAY['txt-missing'::text, 'txt-mismatch'::text, 'cname-missing'::text, 'cname-wrong'::text, 'dns-error'::text]))))
+status_page_domains status_page_domains_pkey PRIMARY KEY (id)
+status_page_domains status_page_domains_released_not_primary CHECK (((released_at IS NULL) OR (NOT is_primary)))
+status_page_domains status_page_domains_state_check CHECK ((state = ANY (ARRAY['pending'::text, 'verified'::text, 'active'::text, 'failed'::text])))
+status_page_domains status_page_domains_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+status_page_domains status_page_domains_tenant_id_id_key UNIQUE (tenant_id, id)
+status_page_domains status_page_domains_tenant_id_page_id_fkey FOREIGN KEY (tenant_id, page_id) REFERENCES status_pages(tenant_id, id) ON DELETE CASCADE
+status_page_domains status_page_domains_token_check CHECK ((token ~ '^[0-9a-f]{32}$'::text))
 status_page_released_slugs status_page_released_slugs_pkey PRIMARY KEY (tenant_id, slug)
 status_page_released_slugs status_page_released_slugs_slug_check CHECK ((slug ~ '^[a-z0-9][a-z0-9-]{2,62}$'::text))
 status_page_released_slugs status_page_released_slugs_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tenants(id)
@@ -717,6 +744,13 @@ CREATE UNIQUE INDEX status_page_components_page_id_monitor_id_key ON public.stat
 CREATE UNIQUE INDEX status_page_components_page_id_position_key ON public.status_page_components USING btree (page_id, "position")
 CREATE UNIQUE INDEX status_page_components_pkey ON public.status_page_components USING btree (id)
 CREATE UNIQUE INDEX status_page_components_tenant_id_id_key ON public.status_page_components USING btree (tenant_id, id)
+CREATE INDEX status_page_domains_due_idx ON public.status_page_domains USING btree (last_checked_at NULLS FIRST) WHERE (released_at IS NULL)
+CREATE UNIQUE INDEX status_page_domains_host_idx ON public.status_page_domains USING btree (host) WHERE ((state = ANY (ARRAY['verified'::text, 'active'::text])) AND (released_at IS NULL))
+CREATE UNIQUE INDEX status_page_domains_pkey ON public.status_page_domains USING btree (id)
+CREATE UNIQUE INDEX status_page_domains_primary_idx ON public.status_page_domains USING btree (page_id) WHERE (is_primary AND (released_at IS NULL))
+CREATE UNIQUE INDEX status_page_domains_tenant_host_idx ON public.status_page_domains USING btree (tenant_id, host) WHERE (released_at IS NULL)
+CREATE UNIQUE INDEX status_page_domains_tenant_id_id_key ON public.status_page_domains USING btree (tenant_id, id)
+CREATE INDEX status_page_domains_tenant_idx ON public.status_page_domains USING btree (tenant_id, page_id) WHERE (released_at IS NULL)
 CREATE UNIQUE INDEX status_page_released_slugs_pkey ON public.status_page_released_slugs USING btree (tenant_id, slug)
 CREATE INDEX status_page_released_slugs_slug_idx ON public.status_page_released_slugs USING btree (slug, released_at)
 CREATE UNIQUE INDEX status_page_snapshots_pkey ON public.status_page_snapshots USING btree (page_id)
@@ -781,6 +815,9 @@ specula_agents tenant_isolation cmd=* permissive=true to=public using (tenant_id
 specula_projects owner_specula_read cmd=r permissive=true to=proreta_owner using true
 specula_projects tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
 status_page_components tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
+status_page_domains owner_domain_read cmd=r permissive=true to=proreta_owner using true
+status_page_domains owner_domain_update cmd=w permissive=true to=proreta_owner using true check true
+status_page_domains tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
 status_page_released_slugs owner_slug_hold_read cmd=r permissive=true to=proreta_owner using true
 status_page_released_slugs tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
 status_page_snapshots owner_statuspage_read cmd=r permissive=true to=proreta_owner using true
@@ -790,6 +827,7 @@ status_pages tenant_isolation cmd=* permissive=true to=public using (tenant_id =
 
 -- triggers
 CREATE TRIGGER specula_agents_sync_location AFTER UPDATE OF name ON public.specula_agents FOR EACH ROW EXECUTE FUNCTION specula_agents_sync_location()
+CREATE TRIGGER status_pages_release_domains AFTER UPDATE OF deleted_at ON public.status_pages FOR EACH ROW WHEN (((old.deleted_at IS NULL) AND (new.deleted_at IS NOT NULL))) EXECUTE FUNCTION status_pages_release_domains()
 CREATE TRIGGER tenants_create_default_project AFTER INSERT ON public.tenants FOR EACH ROW EXECUTE FUNCTION tenants_create_default_project()
 
 -- function privileges
@@ -875,9 +913,17 @@ specula_mark_unreachable(interval) owner=proreta_owner definer=true acl=proreta_
 specula_revoke(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 specula_status_counts(interval) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_sync_offline(interval) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+status_page_domain_allowed(text) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_statuspage=X/proreta_owner
+status_page_domain_counts() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+status_page_domain_held_by_other(text) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+status_page_domain_lookup(text) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_statuspage=X/proreta_owner
+status_page_domain_record_check(uuid,uuid,text,text,text) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+status_page_domain_takeover(text,uuid,text[]) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+status_page_domains_due(integer) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 status_page_published_pages() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 status_page_slug_held(text) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 status_page_snapshot(text) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_statuspage=X/proreta_owner
+status_pages_release_domains() owner=proreta_owner definer=false acl=proreta_owner=X/proreta_owner
 tenants_create_default_project() owner=proreta_owner definer=false acl=proreta_owner=X/proreta_owner
 uuidv7_now() owner=proreta_owner definer=false acl=proreta_owner=X/proreta_owner
 webhook_delivery_context(uuid) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
@@ -1374,7 +1420,9 @@ BEGIN
         'statusPages', COALESCE((SELECT max(c) FROM (SELECT count(*) AS c FROM status_pages AS s
             WHERE s.tenant_id = ANY (v_ids) AND s.deleted_at IS NULL GROUP BY s.tenant_id) AS x), 0),
         'specula', COALESCE((SELECT max(c) FROM (SELECT count(*) AS c FROM specula_agents AS a
-            WHERE a.tenant_id = ANY (v_ids) AND a.revoked_at IS NULL GROUP BY a.tenant_id) AS x), 0)
+            WHERE a.tenant_id = ANY (v_ids) AND a.revoked_at IS NULL GROUP BY a.tenant_id) AS x), 0),
+        'statusPageDomains', COALESCE((SELECT max(c) FROM (SELECT count(*) AS c FROM status_page_domains AS d
+            WHERE d.tenant_id = ANY (v_ids) AND d.released_at IS NULL GROUP BY d.tenant_id) AS x), 0)
     );
 END
 $function$
@@ -2673,10 +2721,10 @@ CREATE OR REPLACE FUNCTION public.plan_limits_valid(l jsonb)
  SET search_path TO 'public', 'pg_temp'
 AS $function$
     SELECT jsonb_typeof(l) = 'object'
-        AND (SELECT count(*) FROM jsonb_object_keys(l)) = 7
+        AND (SELECT count(*) FROM jsonb_object_keys(l)) = 8
         AND NOT EXISTS (
             SELECT 1
-            FROM unnest(ARRAY['max_monitors', 'max_heartbeats', 'max_channels', 'max_members', 'max_projects', 'max_status_pages', 'max_agents']) AS k
+            FROM unnest(ARRAY['max_monitors', 'max_heartbeats', 'max_channels', 'max_members', 'max_projects', 'max_status_pages', 'max_agents', 'max_status_page_domains']) AS k
             WHERE jsonb_typeof(l -> k) IS DISTINCT FROM 'number'
                OR CASE WHEN (l ->> k) ~ '^(0|[1-9][0-9]{0,9})$' THEN (l ->> k)::bigint > 2147483647 ELSE true END
         )
@@ -3087,6 +3135,203 @@ BEGIN
     RETURN NEXT;
 END
 $function$
+CREATE OR REPLACE FUNCTION public.status_page_domain_allowed(p_host text)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    SELECT EXISTS (
+        SELECT 1
+        FROM status_page_domains AS d
+        JOIN status_pages AS p ON p.tenant_id = d.tenant_id AND p.id = d.page_id
+        JOIN tenants AS t ON t.id = d.tenant_id
+        WHERE d.host = p_host
+          AND d.state IN ('verified', 'active') AND d.disabled_at IS NULL AND d.released_at IS NULL
+          AND p.deleted_at IS NULL
+          AND t.status = 'active' AND t.deleted_at IS NULL)
+$function$
+CREATE OR REPLACE FUNCTION public.status_page_domain_counts()
+ RETURNS TABLE(state text, n bigint)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    SELECT s.state, count(d.id)
+    FROM unnest(ARRAY['pending', 'verified', 'active', 'failed']) AS s(state)
+    LEFT JOIN status_page_domains AS d ON d.state = s.state AND d.released_at IS NULL
+    GROUP BY s.state
+    ORDER BY s.state
+$function$
+CREATE OR REPLACE FUNCTION public.status_page_domain_held_by_other(p_host text)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    SELECT EXISTS (
+        SELECT 1 FROM status_page_domains AS d
+        WHERE d.host = p_host AND d.state IN ('verified', 'active') AND d.released_at IS NULL
+          AND d.tenant_id IS DISTINCT FROM NULLIF(current_setting('app.tenant_id', true), '')::uuid)
+$function$
+CREATE OR REPLACE FUNCTION public.status_page_domain_lookup(p_host text)
+ RETURNS TABLE(slug text)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    SELECT p.slug
+    FROM status_page_domains AS d
+    JOIN status_pages AS p ON p.tenant_id = d.tenant_id AND p.id = d.page_id
+    JOIN tenants AS t ON t.id = d.tenant_id
+    WHERE d.host = p_host
+      AND d.state IN ('verified', 'active') AND d.disabled_at IS NULL AND d.released_at IS NULL
+      AND p.published AND p.deleted_at IS NULL
+      AND t.status = 'active' AND t.deleted_at IS NULL
+$function$
+CREATE OR REPLACE FUNCTION public.status_page_domain_record_check(p_tenant uuid, p_id uuid, p_txt text, p_cname text, p_error text)
+ RETURNS TABLE(state text, events text[])
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+#variable_conflict use_column
+DECLARE
+    v_ctx      text := NULLIF(current_setting('app.tenant_id', true), '');
+    d          status_page_domains%ROWTYPE;
+    v_state    text;
+    v_proof    timestamptz;
+    v_failures integer;
+    v_verified timestamptz;
+    v_released timestamptz;
+    v_events   text[] := '{}';
+    v_any      boolean := p_txt = 'present' OR p_cname = 'present';
+BEGIN
+    IF p_txt IS NULL OR p_cname IS NULL OR p_txt NOT IN ('present', 'missing', 'unknown') OR p_cname NOT IN ('present', 'missing', 'unknown')
+       OR (p_error IS NOT NULL AND p_error NOT IN ('txt-missing', 'txt-mismatch', 'cname-missing', 'cname-wrong', 'dns-error')) THEN
+        RAISE EXCEPTION 'status page domain: invalid check result' USING ERRCODE = 'PRD01';
+    END IF;
+    IF v_ctx IS NOT NULL AND v_ctx <> p_tenant::text THEN
+        RAISE EXCEPTION 'status page domain: wrong tenant' USING ERRCODE = 'PRD02';
+    END IF;
+    SELECT * INTO d FROM status_page_domains AS x WHERE x.tenant_id = p_tenant AND x.id = p_id AND x.released_at IS NULL FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'status page domain: not found' USING ERRCODE = 'PRD03';
+    END IF;
+    v_state := d.state;
+    v_proof := d.last_proof_at;
+    v_failures := d.check_failures;
+    v_verified := d.verified_at;
+
+    IF d.state = 'pending' THEN
+        IF p_txt = 'present' THEN
+            v_state := 'verified';
+            v_proof := now();
+            v_failures := 0;
+            v_verified := coalesce(d.verified_at, now());
+            v_events := ARRAY['verified'];
+            IF p_cname = 'present' THEN
+                v_state := 'active';
+                v_events := array_append(v_events, 'activated');
+            END IF;
+        ELSIF p_txt = 'missing' AND now() - d.created_at >= interval '7 days' THEN
+            v_released := now();
+            v_events := ARRAY['expired'];
+        END IF;
+    ELSIF d.state IN ('verified', 'active') THEN
+        IF v_any THEN
+            v_proof := now();
+            v_failures := 0;
+            IF d.state = 'verified' AND p_cname = 'present' THEN
+                v_state := 'active';
+                v_events := ARRAY['activated'];
+            END IF;
+        ELSIF p_txt = 'missing' AND p_cname = 'missing' THEN
+            v_failures := d.check_failures + 1;
+            IF v_failures >= 3 AND now() - coalesce(d.last_proof_at, d.created_at) >= interval '7 days' THEN
+                v_state := 'failed';
+                v_events := ARRAY['failed'];
+            END IF;
+        END IF;
+    ELSIF d.state = 'failed' AND v_any THEN
+        v_state := 'verified';
+        v_proof := now();
+        v_failures := 0;
+        v_events := ARRAY['recovered'];
+    END IF;
+
+    UPDATE status_page_domains AS x
+    SET state = v_state, last_proof_at = v_proof, check_failures = v_failures, verified_at = v_verified,
+        last_checked_at = now(), last_error = p_error, updated_at = now(),
+        released_at = v_released, is_primary = x.is_primary AND v_released IS NULL
+    WHERE x.tenant_id = p_tenant AND x.id = p_id;
+    RETURN QUERY SELECT v_state, v_events;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.status_page_domain_takeover(p_host text, p_claimant uuid, p_dns_tokens text[])
+ RETURNS TABLE(granted boolean, previous_tenant_id uuid, previous_page_id uuid)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+#variable_conflict use_column
+DECLARE
+    v_ctx    uuid := NULLIF(current_setting('app.tenant_id', true), '')::uuid;
+    v_tokens text[] := coalesce(p_dns_tokens, '{}');
+    c        status_page_domains%ROWTYPE;
+    h        status_page_domains%ROWTYPE;
+BEGIN
+    IF v_ctx IS NULL THEN
+        RAISE EXCEPTION 'status page domain: no tenant' USING ERRCODE = 'PRD02';
+    END IF;
+    SELECT * INTO c FROM status_page_domains AS x
+    WHERE x.tenant_id = v_ctx AND x.id = p_claimant AND x.host = p_host AND x.released_at IS NULL AND x.state IN ('pending', 'failed');
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'status page domain: not found' USING ERRCODE = 'PRD03';
+    END IF;
+    IF NOT (c.token = ANY (v_tokens)) THEN
+        RETURN QUERY SELECT false, NULL::uuid, NULL::uuid;
+        RETURN;
+    END IF;
+    SELECT * INTO h FROM status_page_domains AS x
+    WHERE x.host = p_host AND x.state IN ('verified', 'active') AND x.released_at IS NULL AND x.tenant_id <> v_ctx
+    FOR UPDATE;
+    IF NOT FOUND THEN
+        RETURN QUERY SELECT true, NULL::uuid, NULL::uuid;
+        RETURN;
+    END IF;
+    IF h.token = ANY (v_tokens) THEN
+        RETURN QUERY SELECT false, NULL::uuid, NULL::uuid;
+        RETURN;
+    END IF;
+    UPDATE status_page_domains AS x SET released_at = now(), is_primary = false, updated_at = now()
+    WHERE x.tenant_id = h.tenant_id AND x.id = h.id;
+    RETURN QUERY SELECT true, h.tenant_id, h.page_id;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.status_page_domains_due(p_limit integer)
+ RETURNS TABLE(tenant_id uuid, id uuid, host text, token text, state text, created_at timestamp with time zone, last_proof_at timestamp with time zone, check_failures integer)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+#variable_conflict use_column
+BEGIN
+    RETURN QUERY
+    SELECT d.tenant_id, d.id, d.host, d.token, d.state, d.created_at, d.last_proof_at, d.check_failures
+    FROM status_page_domains AS d
+    JOIN tenants AS t ON t.id = d.tenant_id
+    WHERE d.released_at IS NULL
+      AND t.status = 'active' AND t.deleted_at IS NULL
+      AND (d.last_checked_at IS NULL OR d.last_checked_at <= now() - CASE
+              WHEN d.state = 'pending' AND d.created_at > now() - interval '24 hours' THEN interval '10 minutes'
+              WHEN d.state = 'pending' THEN interval '1 hour'
+              ELSE interval '6 hours' END)
+    ORDER BY d.last_checked_at NULLS FIRST, d.id
+    LIMIT greatest(1, least(coalesce(p_limit, 1), 1000))
+    FOR UPDATE OF d SKIP LOCKED;
+END
+$function$
 CREATE OR REPLACE FUNCTION public.status_page_published_pages()
  RETURNS TABLE(tenant_id uuid, page_id uuid)
  LANGUAGE sql
@@ -3125,6 +3370,18 @@ AS $function$
     WHERE p.slug = p_slug
       AND p.published AND p.deleted_at IS NULL
       AND t.status = 'active' AND t.deleted_at IS NULL
+$function$
+CREATE OR REPLACE FUNCTION public.status_pages_release_domains()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+    UPDATE status_page_domains
+    SET released_at = now(), is_primary = false, updated_at = now()
+    WHERE tenant_id = NEW.tenant_id AND page_id = NEW.id AND released_at IS NULL;
+    RETURN NULL;
+END
 $function$
 CREATE OR REPLACE FUNCTION public.tenants_create_default_project()
  RETURNS trigger

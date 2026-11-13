@@ -49,17 +49,21 @@ const (
 	ResourceStatusPage Resource = "statusPages"
 	// ResourceAgent counts Specula that are not revoked.
 	ResourceAgent Resource = "specula"
+	// ResourceStatusPageDomain counts custom domains of status pages that are not released; the
+	// limit is for the whole organization.
+	ResourceStatusPageDomain Resource = "statusPageDomains"
 )
 
 // JSON keys in plans.limits and tenants.limits.
 const (
-	keyMaxMonitors   = "max_monitors"
-	keyMaxHeartbeats = "max_heartbeats"
-	keyMaxChannels   = "max_channels"
-	keyMaxMembers    = "max_members"
-	keyMaxProjects   = "max_projects"
-	keyMaxStatusPage = "max_status_pages"
-	keyMaxAgents     = "max_agents"
+	keyMaxMonitors          = "max_monitors"
+	keyMaxHeartbeats        = "max_heartbeats"
+	keyMaxChannels          = "max_channels"
+	keyMaxMembers           = "max_members"
+	keyMaxProjects          = "max_projects"
+	keyMaxStatusPage        = "max_status_pages"
+	keyMaxAgents            = "max_agents"
+	keyMaxStatusPageDomains = "max_status_page_domains"
 )
 
 var (
@@ -79,6 +83,8 @@ type Limits struct {
 	MaxProjects    int
 	MaxStatusPages int
 	MaxAgents      int
+	// MaxStatusPageDomains is the limit of custom domains of status pages (0 on Free).
+	MaxStatusPageDomains int
 }
 
 // ParseLimits reads the limits of the plan planKey as stored; every key must be present.
@@ -92,7 +98,7 @@ func ParseLimits(planKey string, raw []byte) (Limits, error) {
 // JSON returns l as the plans.limits object, with every key the plan needs.
 func (l Limits) JSON() []byte {
 	b, err := json.Marshal(map[string]int{keyMaxMonitors: l.MaxMonitors, keyMaxHeartbeats: l.MaxHeartbeats, keyMaxChannels: l.MaxChannels,
-		keyMaxMembers: l.MaxMembers, keyMaxProjects: l.MaxProjects, keyMaxStatusPage: l.MaxStatusPages, keyMaxAgents: l.MaxAgents})
+		keyMaxMembers: l.MaxMembers, keyMaxProjects: l.MaxProjects, keyMaxStatusPage: l.MaxStatusPages, keyMaxAgents: l.MaxAgents, keyMaxStatusPageDomains: l.MaxStatusPageDomains})
 	if err != nil {
 		panic(err) // a map of ints always marshals
 	}
@@ -116,6 +122,8 @@ func (l Limits) Of(r Resource) int {
 		return l.MaxStatusPages
 	case ResourceAgent:
 		return l.MaxAgents
+	case ResourceStatusPageDomain:
+		return l.MaxStatusPageDomains
 	}
 	panic(fmt.Sprintf("plans: unknown resource %q", r))
 }
@@ -129,6 +137,8 @@ type Counts struct {
 	Projects    int
 	StatusPages int
 	Agents      int
+	// StatusPageDomains is the number of domains that are not released.
+	StatusPageDomains int
 }
 
 // Plan identifies a plan.
@@ -172,7 +182,7 @@ func Resolve(planKey string, planLimits, overrides []byte) (Limits, error) {
 		key string
 		dst *int
 	}{{keyMaxMonitors, &l.MaxMonitors}, {keyMaxHeartbeats, &l.MaxHeartbeats}, {keyMaxChannels, &l.MaxChannels}, {keyMaxMembers, &l.MaxMembers}, {keyMaxProjects, &l.MaxProjects},
-		{keyMaxStatusPage, &l.MaxStatusPages}, {keyMaxAgents, &l.MaxAgents}} {
+		{keyMaxStatusPage, &l.MaxStatusPages}, {keyMaxAgents, &l.MaxAgents}, {keyMaxStatusPageDomains, &l.MaxStatusPageDomains}} {
 		v, ok := over[f.key]
 		if !ok {
 			if v, ok = base[f.key]; !ok {
@@ -194,7 +204,7 @@ func parse(raw []byte) (map[string]int, error) {
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidLimits, err)
 	}
-	for _, key := range []string{keyMaxMonitors, keyMaxHeartbeats, keyMaxChannels, keyMaxMembers, keyMaxProjects, keyMaxStatusPage, keyMaxAgents} {
+	for _, key := range []string{keyMaxMonitors, keyMaxHeartbeats, keyMaxChannels, keyMaxMembers, keyMaxProjects, keyMaxStatusPage, keyMaxAgents, keyMaxStatusPageDomains} {
 		v, ok := obj[key]
 		if !ok {
 			continue
@@ -322,6 +332,8 @@ func count(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, r Resource) (int,
 		n, err = q.MaxStatusPagesInOneScope(ctx, tenantID)
 	case ResourceAgent:
 		n, err = q.CountSpecula(ctx, tenantID)
+	case ResourceStatusPageDomain:
+		n, err = q.CountStatusPageDomains(ctx, tenantID)
 	default:
 		return 0, fmt.Errorf("plans: unknown resource %q", r)
 	}
@@ -363,7 +375,7 @@ func (s *Service) Usage(ctx context.Context, tenantID uuid.UUID) (Usage, error) 
 			r   Resource
 			dst *int
 		}{{ResourceMonitor, &u.Counts.Monitors}, {ResourceHeartbeat, &u.Counts.Heartbeats}, {ResourceChannel, &u.Counts.Channels},
-			{ResourceMember, &u.Counts.Members}, {ResourceProject, &u.Counts.Projects}, {ResourceStatusPage, &u.Counts.StatusPages}, {ResourceAgent, &u.Counts.Agents}} {
+			{ResourceMember, &u.Counts.Members}, {ResourceProject, &u.Counts.Projects}, {ResourceStatusPage, &u.Counts.StatusPages}, {ResourceAgent, &u.Counts.Agents}, {ResourceStatusPageDomain, &u.Counts.StatusPageDomains}} {
 			if *c.dst, err = count(ctx, tx, tenantID, c.r); err != nil {
 				return err
 			}

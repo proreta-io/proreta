@@ -133,7 +133,9 @@ func TestRoleSpecs(t *testing.T) {
 	}
 	schema := strings.Join(schemaSQL(), ";")
 	if !strings.Contains(schema, `GRANT USAGE ON SCHEMA public TO "proreta_api", "proreta_worker", "proreta_statuspage"`) ||
-		!strings.Contains(schema, `GRANT EXECUTE ON FUNCTION public.status_page_snapshot(text) TO "proreta_statuspage"`) {
+		!strings.Contains(schema, `GRANT EXECUTE ON FUNCTION public.status_page_snapshot(text) TO "proreta_statuspage"`) ||
+		!strings.Contains(schema, `GRANT EXECUTE ON FUNCTION public.status_page_domain_lookup(text) TO "proreta_statuspage"`) ||
+		!strings.Contains(schema, `GRANT EXECUTE ON FUNCTION public.status_page_domain_allowed(text) TO "proreta_statuspage"`) {
 		t.Errorf("schemaSQL = %s", schema)
 	}
 }

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-const freeLimits = `{"max_monitors":3,"max_heartbeats":1,"max_channels":1,"max_members":3,"max_projects":50,"max_status_pages":1,"max_agents":1}`
+const freeLimits = `{"max_monitors":3,"max_heartbeats":1,"max_channels":1,"max_members":3,"max_projects":50,"max_status_pages":1,"max_agents":1,"max_status_page_domains":0}`
 
 func TestResolve(t *testing.T) {
 	cases := []struct {
@@ -59,7 +59,7 @@ func TestResolveRejectsInvalidValues(t *testing.T) {
 
 func TestResolvePlanMissingKey(t *testing.T) {
 	// A key missing from the plan is an error unless the tenant overrides it.
-	plan := []byte(`{"max_monitors":3,"max_channels":1,"max_members":2,"max_projects":5,"max_status_pages":1,"max_agents":1}`)
+	plan := []byte(`{"max_monitors":3,"max_channels":1,"max_members":2,"max_projects":5,"max_status_pages":1,"max_agents":1,"max_status_page_domains":0}`)
 	if _, err := Resolve("partial", plan, nil); !errors.Is(err, ErrInvalidLimits) {
 		t.Fatalf("err = %v, want ErrInvalidLimits", err)
 	}
@@ -69,9 +69,24 @@ func TestResolvePlanMissingKey(t *testing.T) {
 	}
 }
 
+func TestResolveMaxStatusPageDomains(t *testing.T) {
+	// A plan stored before the key existed is invalid until the migration adds it.
+	old := []byte(`{"max_monitors":3,"max_heartbeats":1,"max_channels":1,"max_members":3,"max_projects":50,"max_status_pages":1,"max_agents":1}`)
+	if _, err := Resolve("old", old, nil); !errors.Is(err, ErrInvalidLimits) {
+		t.Fatalf("err = %v, want ErrInvalidLimits", err)
+	}
+	got, err := Resolve("free", []byte(freeLimits), []byte(`{"max_status_page_domains":5}`))
+	if err != nil || got.MaxStatusPageDomains != 5 || got.Of(ResourceStatusPageDomain) != 5 {
+		t.Fatalf("override: %+v, %v", got, err)
+	}
+	if _, err := Resolve("free", []byte(freeLimits), []byte(`{"max_status_page_domains":-1}`)); !errors.Is(err, ErrInvalidLimits) {
+		t.Fatalf("negative: err = %v, want ErrInvalidLimits", err)
+	}
+}
+
 func TestResolveMaxAgents(t *testing.T) {
 	// A plan stored before max_agents existed is invalid until the migration adds the key.
-	old := []byte(`{"max_monitors":3,"max_heartbeats":1,"max_channels":1,"max_members":3,"max_projects":50,"max_status_pages":1}`)
+	old := []byte(`{"max_monitors":3,"max_heartbeats":1,"max_channels":1,"max_members":3,"max_projects":50,"max_status_pages":1,"max_status_page_domains":0}`)
 	if _, err := Resolve("old", old, nil); !errors.Is(err, ErrInvalidLimits) {
 		t.Fatalf("err = %v, want ErrInvalidLimits", err)
 	}
@@ -85,15 +100,15 @@ func TestResolveMaxAgents(t *testing.T) {
 }
 
 func TestLimitsOf(t *testing.T) {
-	l := Limits{MaxMonitors: 1, MaxHeartbeats: 2, MaxChannels: 3, MaxMembers: 4, MaxProjects: 5, MaxStatusPages: 6, MaxAgents: 7}
+	l := Limits{MaxMonitors: 1, MaxHeartbeats: 2, MaxChannels: 3, MaxMembers: 4, MaxProjects: 5, MaxStatusPages: 6, MaxAgents: 7, MaxStatusPageDomains: 8}
 	if l.Of(ResourceMonitor) != 1 || l.Of(ResourceHeartbeat) != 2 || l.Of(ResourceChannel) != 3 || l.Of(ResourceMember) != 4 || l.Of(ResourceProject) != 5 ||
-		l.Of(ResourceStatusPage) != 6 || l.Of(ResourceAgent) != 7 {
+		l.Of(ResourceStatusPage) != 6 || l.Of(ResourceAgent) != 7 || l.Of(ResourceStatusPageDomain) != 8 {
 		t.Fatalf("Of: %+v", l)
 	}
 }
 
 func TestLimitsJSONRoundTrip(t *testing.T) {
-	want := Limits{MaxMonitors: 1, MaxHeartbeats: 2, MaxChannels: 3, MaxMembers: 4, MaxProjects: 5, MaxStatusPages: 6, MaxAgents: Unlimited}
+	want := Limits{MaxMonitors: 1, MaxHeartbeats: 2, MaxChannels: 3, MaxMembers: 4, MaxProjects: 5, MaxStatusPages: 6, MaxAgents: Unlimited, MaxStatusPageDomains: 9}
 	got, err := ParseLimits("x", want.JSON())
 	if err != nil || got != want {
 		t.Fatalf("round trip: %+v, %v; want %+v", got, err, want)

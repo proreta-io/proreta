@@ -87,6 +87,9 @@ Operations marked `public` need no session. Operations marked `platform admin` a
 | `AdminGetRetentionSettings` | `GET /api/v1/admin/retention` | `platform admin` |
 | `AdminUpdateRetentionSettings` | `PUT /api/v1/admin/retention` | `platform admin` |
 | `AdminGetStats` | `GET /api/v1/admin/stats` | `platform admin` |
+| `AdminListStatusPageDomains` | `GET /api/v1/admin/status-page-domains` | `platform admin` |
+| `AdminDisableStatusPageDomain` | `POST /api/v1/admin/status-page-domains/{domainId}/disable` | `platform admin` |
+| `AdminEnableStatusPageDomain` | `POST /api/v1/admin/status-page-domains/{domainId}/enable` | `platform admin` |
 | `AdminListAllUsers` | `GET /api/v1/admin/users` | `platform admin` |
 | `AdminGetUser` | `GET /api/v1/admin/users/{userId}` | `platform admin` |
 | `AdminDisableUser` | `POST /api/v1/admin/users/{userId}/disable` | `platform admin` |
@@ -167,6 +170,11 @@ Operations marked `public` need no session. Operations marked `platform admin` a
 | `UpdateStatusPage` | `PATCH /api/v1/status-pages/{statusPageId}` | `statuspage.manage` |
 | `ListStatusPageComponents` | `GET /api/v1/status-pages/{statusPageId}/components` | `statuspage.manage` |
 | `PutStatusPageComponents` | `PUT /api/v1/status-pages/{statusPageId}/components` | `statuspage.manage` |
+| `ListStatusPageDomains` | `GET /api/v1/status-pages/{statusPageId}/domains` | `statuspage.read` |
+| `AddStatusPageDomain` | `POST /api/v1/status-pages/{statusPageId}/domains` | `statuspage.manage` |
+| `RemoveStatusPageDomain` | `DELETE /api/v1/status-pages/{statusPageId}/domains/{domainId}` | `statuspage.manage` |
+| `SetPrimaryStatusPageDomain` | `PATCH /api/v1/status-pages/{statusPageId}/domains/{domainId}` | `statuspage.manage` |
+| `VerifyStatusPageDomain` | `POST /api/v1/status-pages/{statusPageId}/domains/{domainId}/verify` | `statuspage.manage` |
 | `ClearStatusPagePassword` | `DELETE /api/v1/status-pages/{statusPageId}/password` | `statuspage.manage` |
 | `SetStatusPagePassword` | `PUT /api/v1/status-pages/{statusPageId}/password` | `statuspage.manage` |
 | `PreviewStatusPage` | `GET /api/v1/status-pages/{statusPageId}/preview` | `statuspage.manage` |

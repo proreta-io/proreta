@@ -351,6 +351,7 @@ describe("status page settings", () => {
           projects: 50,
           statusPages: limit,
           specula: 1,
+          statusPageDomains: 0,
         },
         usage: {
           monitors: 0,
@@ -360,6 +361,7 @@ describe("status page settings", () => {
           projects: 2,
           statusPages: 1,
           specula: 0,
+          statusPageDomains: 0,
         },
       });
     const twoProjects = {

@@ -137,13 +137,14 @@ func run() error {
 		return err
 	}
 	handler, err := api.NewHandler(api.Config{
-		Version:              version,
-		Commit:               commit,
-		CookieSecure:         cfg.CookieSecure,
-		TrustedProxyHops:     cfg.TrustedProxyHops,
-		RegistrationEnabled:  cfg.RegistrationEnabled,
-		PublicURL:            cfg.PublicURL,
-		PasswordLoginEnabled: cfg.PasswordLoginEnabled,
+		Version:                 version,
+		Commit:                  commit,
+		CookieSecure:            cfg.CookieSecure,
+		TrustedProxyHops:        cfg.TrustedProxyHops,
+		RegistrationEnabled:     cfg.RegistrationEnabled,
+		PublicURL:               cfg.PublicURL,
+		PasswordLoginEnabled:    cfg.PasswordLoginEnabled,
+		StatusPageCustomDomains: cfg.StatusPageCustomDomains,
 	}, api.Deps{
 		Auth:     authSvc,
 		Monitors: monitorSvc,

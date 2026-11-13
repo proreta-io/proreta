@@ -22,9 +22,9 @@ func TestIntegrationSeeds(t *testing.T) {
 	if err := admin.QueryRow(ctx, `SELECT string_agg(key || '=' || name || ' ' || limits::text || ' ' || features::text, '; ' ORDER BY key) FROM plans`).Scan(&seeded); err != nil {
 		t.Fatal(err)
 	}
-	want := `community=Community {"max_agents": 2147483647, "max_members": 2147483647, "max_channels": 2147483647, "max_monitors": 2147483647, "max_projects": 2147483647, "max_heartbeats": 2147483647, "max_status_pages": 2147483647} {}; ` +
-		`free=Free {"max_agents": 1, "max_members": 3, "max_channels": 1, "max_monitors": 3, "max_projects": 50, "max_heartbeats": 1, "max_status_pages": 1} {}; ` +
-		`internal=Internal {"max_agents": 20, "max_members": 50, "max_channels": 10, "max_monitors": 1000, "max_projects": 50, "max_heartbeats": 100, "max_status_pages": 1} {}`
+	want := `community=Community {"max_agents": 2147483647, "max_members": 2147483647, "max_channels": 2147483647, "max_monitors": 2147483647, "max_projects": 2147483647, "max_heartbeats": 2147483647, "max_status_pages": 2147483647, "max_status_page_domains": 2147483647} {}; ` +
+		`free=Free {"max_agents": 1, "max_members": 3, "max_channels": 1, "max_monitors": 3, "max_projects": 50, "max_heartbeats": 1, "max_status_pages": 1, "max_status_page_domains": 0} {}; ` +
+		`internal=Internal {"max_agents": 20, "max_members": 50, "max_channels": 10, "max_monitors": 1000, "max_projects": 50, "max_heartbeats": 100, "max_status_pages": 1, "max_status_page_domains": 0} {}`
 	if seeded != want {
 		t.Fatalf("plans = %s\nwant    %s", seeded, want)
 	}
@@ -38,7 +38,7 @@ func TestIntegrationSeeds(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, r := range []plans.Resource{plans.ResourceMonitor, plans.ResourceHeartbeat, plans.ResourceChannel,
-		plans.ResourceMember, plans.ResourceProject, plans.ResourceStatusPage} {
+		plans.ResourceMember, plans.ResourceProject, plans.ResourceStatusPage, plans.ResourceAgent, plans.ResourceStatusPageDomain} {
 		if l.Of(r) != plans.Unlimited {
 			t.Errorf("community %s limit = %d, want plans.Unlimited", r, l.Of(r))
 		}
