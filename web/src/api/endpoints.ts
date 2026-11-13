@@ -9,8 +9,6 @@ export type MonitorUpdate = Schemas["MonitorUpdate"];
 export type HttpMonitor = Schemas["HttpMonitor"];
 export type TcpMonitor = Schemas["TcpMonitor"];
 export type HeartbeatMonitor = Schemas["HeartbeatMonitor"];
-export type ErrorKind = Schemas["ErrorKind"];
-export type MonitorStats = Schemas["MonitorStats"];
 export type StatsRange = Schemas["StatsRange"];
 export type LatencyPoint = Schemas["LatencyPoint"];
 export type Check = Schemas["Check"];
@@ -20,7 +18,6 @@ export type SpeculaCreate = Schemas["SpeculaCreate"];
 export type SpeculaUpdate = Schemas["SpeculaUpdate"];
 export type SpeculaCreated = Schemas["SpeculaCreated"];
 export type SpeculaStatus = Schemas["SpeculaStatus"];
-export type MonitorLocation = Schemas["MonitorLocation"];
 export type MonitorLocationInput = Schemas["MonitorLocationInput"];
 export type Channel = Schemas["Channel"];
 export type ChannelCreate = Schemas["ChannelCreate"];
@@ -31,10 +28,8 @@ export type Usage = Schemas["Usage"];
 export type PermissionsInfo = Schemas["PermissionsInfo"];
 export type ProjectPermissions = Schemas["ProjectPermissions"];
 export type PermissionDefinition = Schemas["PermissionDefinition"];
-export type PublicConfig = Schemas["PublicConfig"];
 export type AdminStats = Schemas["AdminStats"];
 export type AdminOrganization = Schemas["AdminOrganization"];
-export type AdminOrganizationList = Schemas["AdminOrganizationList"];
 export type AdminOrganizationUpdate = Schemas["AdminOrganizationUpdate"];
 export type AdminEmailSettings = Schemas["AdminEmailSettings"];
 export type AdminEmailConnectionUpdate = Schemas["AdminEmailConnectionUpdate"];
@@ -45,20 +40,15 @@ export type AdminRetentionSettings = Schemas["AdminRetentionSettings"];
 export type AdminPlan = Schemas["AdminPlan"];
 /** One number per resource: a plan's limits, or the use of them. */
 export type ResourceCounts = Schemas["ResourceCounts"];
-export type AdminUser = Schemas["AdminUser"];
 export type AdminProject = Schemas["AdminProject"];
-export type AdminUserList = Schemas["AdminUserList"];
 export type AdminUserSummary = Schemas["AdminUserSummary"];
-export type AdminUserSummaryList = Schemas["AdminUserSummaryList"];
 export type AdminUserDetail = Schemas["AdminUserDetail"];
 export type AdminUserMembership = Schemas["AdminUserMembership"];
 export type AdminMember = Schemas["AdminMember"];
 export type MembershipRole = Schemas["MembershipRole"];
-export type Organization = Schemas["Organization"];
 export type Member = Schemas["Member"];
 export type Invitation = Schemas["Invitation"];
 export type InvitationRole = Schemas["InvitationRole"];
-export type InvitationCreated = Schemas["InvitationCreated"];
 export type InvitationPreview = Schemas["InvitationPreview"];
 export type Project = Schemas["Project"];
 export type ProjectMember = Schemas["ProjectMember"];
@@ -72,7 +62,6 @@ export type StatusPageSnapshot = Schemas["StatusPageSnapshot"];
 export type OAuthProvider = Schemas["OAuthProvider"];
 export type AuthProviders = Schemas["AuthProviders"];
 export type Identity = Schemas["Identity"];
-export type IdentityList = Schemas["IdentityList"];
 export type AuthDomain = Schemas["AuthDomain"];
 export type AuthDomainRole = Schemas["AuthDomainRole"];
 export type AuthDomainUpdate = Schemas["AuthDomainUpdate"];
@@ -119,7 +108,6 @@ export const queryKeys = {
   adminProjects: (id: string) => ["admin", "organization", id, "projects"] as const,
   adminProjectMembers: (id: string, projectId: string) =>
     ["admin", "organization", id, "projects", projectId, "members"] as const,
-  adminUsers: (id: string) => ["admin", "organization", id, "users"] as const,
   adminAllUsers: (query: string, status: string, offset: number) =>
     ["admin", "all-users", { query, status, offset }] as const,
   adminUser: (id: string) => ["admin", "user", id] as const,
@@ -329,14 +317,6 @@ export const updateAdminOrganization = (organizationId: string, body: AdminOrgan
 export const deleteAdminOrganization = (organizationId: string) =>
   unwrap(
     client.DELETE("/api/v1/admin/organizations/{organizationId}", organizationPath(organizationId)),
-  );
-
-/** The members of an organization (the first page is enough for the panel). */
-export const listAdminOrganizationUsers = (organizationId: string) =>
-  unwrap(
-    client.GET("/api/v1/admin/organizations/{organizationId}/users", {
-      params: { path: { organizationId }, query: { limit: 100 } },
-    }),
   );
 
 export const listAdminMembers = (organizationId: string) =>

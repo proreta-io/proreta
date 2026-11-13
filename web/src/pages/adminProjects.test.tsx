@@ -141,29 +141,13 @@ describe("admin organization projects", () => {
     let listed: ProjectMember[] = [pm({})];
     const fetchMock = mockApi({
       ...organizationRoutes(organization(), () => [def, web]),
-      [`GET ${base}/users`]: () =>
+      // The people the project picker offers are the organization's members.
+      [`GET ${base}/members`]: () =>
         json({
           items: [
-            {
-              id: "u-owner",
-              login: "alice@alpha.example",
-              status: "active",
-              role: "owner",
-              createdAt: "2026-10-01T00:00:00Z",
-              isPlatformAdmin: false,
-            },
-            {
-              id: "u-bob",
-              login: "bob@alpha.example",
-              status: "active",
-              role: "member",
-              createdAt: "2026-10-02T00:00:00Z",
-              isPlatformAdmin: false,
-            },
+            adminMember({ userId: "u-owner", login: "alice@alpha.example", role: "owner" }),
+            adminMember({ userId: "u-bob", login: "bob@alpha.example", role: "member" }),
           ],
-          total: 2,
-          limit: 100,
-          offset: 0,
         }),
       [`GET ${base}/projects/w/members`]: () => json({ items: listed }),
       [`PUT ${base}/projects/w/members/u-bob`]: async (r) => {
@@ -207,7 +191,7 @@ describe("admin organization projects", () => {
     await waitFor(() =>
       expect(requests(fetchMock, "DELETE", `${base}/projects/w/members/u-bob`)).toHaveLength(1),
     );
-    await waitFor(() => expect(screen.queryByLabelText(/Role of bob/)).toBeNull());
+    await waitFor(() => expect(screen.queryByLabelText(/Role of bob.* in Web/)).toBeNull());
   });
 
   it("shows a refused change as a message", async () => {
@@ -236,3 +220,14 @@ describe("admin organization projects", () => {
     expect(within(screen.getByRole("table")).getAllByText("Default").length).toBeGreaterThan(0);
   });
 });
+
+function adminMember(over: { userId: string; login: string; role: "owner" | "member" }) {
+  return {
+    displayName: "",
+    status: "active",
+    joinedAt: "2026-10-01T00:00:00Z",
+    isPlatformAdmin: false,
+    isSystemAdmin: false,
+    ...over,
+  };
+}

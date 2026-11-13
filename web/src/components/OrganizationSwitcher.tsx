@@ -42,7 +42,7 @@ export default function OrganizationSwitcher({ className }: { className?: string
     try {
       await auth.switchOrganization(id);
       const name = items.find((o) => o.id === id)?.name ?? "the organization";
-      navigate("/", { replace: true });
+      void navigate("/", { replace: true });
       toast(`Switched to ${name}`);
     } catch (err) {
       toast(errorMessage(err), "error");

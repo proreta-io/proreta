@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type SubmitEvent } from "react";
 import {
   ApiError,
   errorMessage,
@@ -81,7 +81,7 @@ export default function ChangePasswordForm({ forced = false }: { forced?: boolea
     if (first) form.querySelector<HTMLInputElement>(`input[name=${first}]`)?.focus();
   }
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function onSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
     const found = validatePasswordChange(values, auth.session?.user.login ?? "");
@@ -113,7 +113,7 @@ export default function ChangePasswordForm({ forced = false }: { forced?: boolea
   return (
     <form
       ref={formRef}
-      onSubmit={onSubmit}
+      onSubmit={(e) => void onSubmit(e)}
       noValidate
       className={forced ? "flex flex-col gap-[18px]" : "flex max-w-[420px] flex-col gap-[18px]"}
     >

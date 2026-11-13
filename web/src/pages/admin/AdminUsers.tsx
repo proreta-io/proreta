@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState, type SubmitEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { errorMessage, errorMeta } from "../../api/client";
 import {
@@ -56,7 +56,7 @@ export default function AdminUsers() {
     setParams(p);
   }
 
-  function onSearch(event: FormEvent<HTMLFormElement>) {
+  function onSearch(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     update({ query: draft.trim(), offset: 0 });
   }
@@ -136,7 +136,7 @@ export default function AdminUsers() {
                   key={u.id}
                   tone={u.status === "disabled" ? "warning" : "default"}
                   interactive
-                  onClick={() => navigate(`/admin/users/${u.id}`)}
+                  onClick={() => void navigate(`/admin/users/${u.id}`)}
                 >
                   <Td>
                     <span className="flex flex-wrap items-center gap-2">

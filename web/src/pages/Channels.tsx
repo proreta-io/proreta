@@ -3,7 +3,7 @@ import { NotificationChannels } from "./Settings";
 /** Notification channels of the projects the person sees and the channels shared by all projects. */
 export default function Channels() {
   return (
-    <section className="flex max-w-[960px] flex-col gap-4">
+    <section className="flex flex-col gap-4">
       <div className="flex flex-col gap-2 pt-6 sm:pt-10">
         <h1 className="text-headline leading-[1.1] font-semibold tracking-[-0.02em] sm:text-display">
           Notification channels
@@ -14,9 +14,7 @@ export default function Channels() {
           down alerts and an optional reminder while an incident stays open.
         </p>
       </div>
-      <div className="flex max-w-[560px] flex-col">
-        <NotificationChannels />
-      </div>
+      <NotificationChannels />
     </section>
   );
 }

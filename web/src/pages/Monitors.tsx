@@ -324,7 +324,7 @@ function MonitorTable({
                   key={m.id}
                   monitor={m}
                   now={now}
-                  onOpen={() => navigate(`/monitors/${m.id}`)}
+                  onOpen={() => void navigate(`/monitors/${m.id}`)}
                 />
               ))}
             </tbody>

@@ -289,6 +289,8 @@ jobs:
         run: npm run format:check
       - name: Lint
         run: npm run lint
+      - name: Unused files, exports and dependencies
+        run: npm run knip
       - name: Typecheck
         run: npm run typecheck
       - name: Test

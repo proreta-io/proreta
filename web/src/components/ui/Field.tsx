@@ -123,11 +123,28 @@ export function Textarea({ className, ...props }: ComponentProps<"textarea">) {
   return <textarea className={cx(CONTROL, "h-auto px-2.5 py-2 sm:h-auto", className)} {...props} />;
 }
 
-/** Native on purpose: the platform's list works on every phone and with every screen reader. */
-export function Select({ className, children, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
+/**
+ * A native select: the platform's list on phones and touch screens. With a mouse, where the
+ * browser supports it, theme.css draws the open list in the theme (`appearance: base-select`).
+ */
+export function Select({
+  className,
+  children,
+  onKeyDown,
+  ...props
+}: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <span className={cx("relative block", className)}>
-      <select className={cx(CONTROL, "cursor-pointer appearance-none pr-7 pl-2.5")} {...props}>
+      <select
+        className={cx(CONTROL, "cursor-pointer appearance-none pr-7 pl-2.5")}
+        onKeyDown={(e) => {
+          // The themed list's options are part of the page: the Escape that closes it must not
+          // also reach a dialog or a menu around the select.
+          if (e.key === "Escape" && e.target instanceof HTMLOptionElement) e.stopPropagation();
+          onKeyDown?.(e);
+        }}
+        {...props}
+      >
         {children}
       </select>
       <span

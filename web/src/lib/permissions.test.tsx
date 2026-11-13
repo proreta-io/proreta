@@ -152,6 +152,7 @@ describe("usePermissions", () => {
     renderApp("/");
     expect(await screen.findByRole("link", { name: "Add monitor" })).toBeInTheDocument();
     const banner = await screen.findByRole("banner");
+    await userEvent.click(within(banner).getByRole("button", { name: /, account$/ }));
     await userEvent.selectOptions(await within(banner).findByLabelText("Organization"), "t2");
     await waitFor(() => expect(screen.queryByRole("link", { name: "Add monitor" })).toBeNull());
     expect(

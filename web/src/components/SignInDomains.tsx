@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useState, type FormEvent } from "react";
+import { useCallback, useState, type SubmitEvent } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, errorMessage } from "../api/client";
 import {
@@ -112,7 +112,7 @@ export default function SignInDomains() {
     }
   }
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
+  function onSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(undefined);
     const value = domain.trim().toLowerCase();

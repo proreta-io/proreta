@@ -19,7 +19,7 @@ export default function VerifyEmail() {
   const location = useLocation();
   const [token] = useState(() => location.hash.replace(/^#/, ""));
   useEffect(() => {
-    if (globalThis.location?.hash) {
+    if (globalThis.location.hash) {
       globalThis.history.replaceState(globalThis.history.state, "", "/verify-email");
     }
   }, []);

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState, type SubmitEvent } from "react";
 import { errorMessage, errorMeta } from "../api/client";
 import {
   createSpecula,
@@ -345,7 +345,7 @@ export function SpeculaForm({
     },
   });
 
-  function onSubmit(e: FormEvent<HTMLFormElement>) {
+  function onSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     const found = validateSpeculaForm(values);
     setErrors(found);

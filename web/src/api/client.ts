@@ -222,6 +222,8 @@ export type ClientPaths = {
 };
 
 export const client = createClient<ClientPaths>({
+  // No location outside a browser (a node test, a worker): relative URLs then.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- the DOM types say it is always there
   baseUrl: globalThis.location?.origin ?? "",
   credentials: "same-origin",
   // Late-bound so tests can replace the global fetch.

@@ -43,7 +43,8 @@ make test test-e2e
 cd web
 npm ci
 npm run dev           # dev server on :5173, /api proxied to PRORETA_API_TARGET (default http://localhost:8080)
-npm run format:check && npm run lint && npm run typecheck && npm test && npm run build
+npm run dev:mock      # the same with a fake API in memory (web/mock/api.ts), no backend needed
+npm run format:check && npm run lint && npm run knip && npm run typecheck && npm test && npm run build
 npm run gen:api       # regenerate src/api/generated from ../api/openapi.yaml
 ```
 
@@ -104,7 +105,7 @@ Migrations are SQL files for goose in `backend/migrations`, embedded in the `mig
 
 ```sh
 make check-generated test lint     # backend: generated code, tests, golangci-lint (make test-e2e needs a database)
-cd web && npm ci && npm run gen:api && npm run format:check && npm run lint && npm run typecheck && npm test && npm run build
+cd web && npm ci && npm run gen:api && npm run format:check && npm run lint && npm run knip && npm run typecheck && npm test && npm run build
 bash scripts/validate-chart.sh     # chart, when deploy/helm/ changed
 bash scripts/check-todos.sh        # TODO format
 bash scripts/check-internal-refs.sh  # no internal record ids

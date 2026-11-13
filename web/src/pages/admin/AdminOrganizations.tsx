@@ -1,5 +1,5 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState, type SubmitEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { errorMessage, errorMeta } from "../../api/client";
 import { ADMIN_PAGE_SIZE, listAdminOrganizations, queryKeys } from "../../api/endpoints";
@@ -47,7 +47,7 @@ export default function AdminOrganizations() {
     setParams(p);
   }
 
-  function onSearch(event: FormEvent<HTMLFormElement>) {
+  function onSearch(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     update({ query: draft.trim(), offset: 0 });
   }
@@ -125,7 +125,7 @@ export default function AdminOrganizations() {
                   key={org.id}
                   tone={organizationTone(org)}
                   interactive
-                  onClick={() => navigate(`/admin/organizations/${org.id}`)}
+                  onClick={() => void navigate(`/admin/organizations/${org.id}`)}
                 >
                   <Td>
                     <Link

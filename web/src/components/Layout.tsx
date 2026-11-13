@@ -1,20 +1,19 @@
 import { useState, type ReactNode } from "react";
-import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { usePermissions } from "../lib/permissions";
 import ErrorBoundary from "./ErrorBoundary";
-import OrganizationSwitcher from "./OrganizationSwitcher";
 import ProjectSwitcher from "./ProjectSwitcher";
-import ThemeToggle from "./ThemeToggle";
+import UserMenu from "./UserMenu";
 import VerifyEmailBanner from "./VerifyEmailBanner";
-import { Button, cx } from "./ui";
+import { Button, buttonClass, cx } from "./ui";
 
 /** The page width shared by the top bar and the content, so their edges line up. */
 export const PAGE = "mx-auto w-full max-w-[1200px] px-4 sm:px-8";
 
 const navClass = ({ isActive }: { isActive: boolean }) =>
   cx(
-    "flex items-center",
+    "flex items-center whitespace-nowrap",
     isActive
       ? "font-medium shadow-[inset_0_-2px_0_var(--foreground)]"
       : "text-muted-foreground hover:text-foreground",
@@ -22,19 +21,12 @@ const navClass = ({ isActive }: { isActive: boolean }) =>
 
 export default function Layout({ children }: { children?: ReactNode }) {
   const auth = useAuth();
-  const navigate = useNavigate();
   const location = useLocation();
   // Keyed by path below, so the phone menu closes on every navigation.
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const menuOpen = menuFor === location.pathname;
-  const login = auth.session?.user.login;
   const isAdmin = auth.session?.user.isPlatformAdmin === true;
   const can = usePermissions();
-
-  async function onLogout() {
-    await auth.logout();
-    navigate("/login", { replace: true });
-  }
 
   const links = (
     <>
@@ -59,12 +51,13 @@ export default function Layout({ children }: { children?: ReactNode }) {
       <NavLink to="/settings" className={navClass}>
         Settings
       </NavLink>
-      {isAdmin && (
-        <NavLink to="/admin" className={navClass}>
-          Admin
-        </NavLink>
-      )}
     </>
+  );
+  // The Admin Area is another shell, so it is a button next to the account, like its "Back to app".
+  const adminLink = isAdmin && (
+    <Link to="/admin" className={buttonClass("secondary", "small")}>
+      Admin
+    </Link>
   );
 
   return (
@@ -82,29 +75,27 @@ export default function Layout({ children }: { children?: ReactNode }) {
               {links}
             </nav>
           </div>
-          <div className="flex items-center gap-3.5 max-sm:hidden">
-            <OrganizationSwitcher />
-            <ProjectSwitcher />
-            <span className="font-mono text-mono text-muted-foreground">{login}</span>
-            <ThemeToggle />
-            <Button variant="ghost" size="small" onClick={() => void onLogout()}>
-              Log out
-            </Button>
-          </div>
-          <Button
-            variant="ghost"
-            aria-expanded={menuOpen}
-            aria-controls="phone-menu"
-            className="-mr-2 self-center sm:hidden"
-            onClick={() => setMenuFor(menuOpen ? null : location.pathname)}
-          >
-            <span aria-hidden="true" className="flex w-3.5 flex-col gap-[3px]">
-              <span className="h-[1.5px] bg-current" />
-              <span className="h-[1.5px] bg-current" />
-              <span className="h-[1.5px] bg-current" />
+          <div className="flex items-center gap-3">
+            <span className="flex items-center gap-3 max-sm:hidden">
+              <ProjectSwitcher />
+              {adminLink}
             </span>
-            Menu
-          </Button>
+            <Button
+              variant="ghost"
+              aria-expanded={menuOpen}
+              aria-controls="phone-menu"
+              className="sm:hidden"
+              onClick={() => setMenuFor(menuOpen ? null : location.pathname)}
+            >
+              <span aria-hidden="true" className="flex w-3.5 flex-col gap-[3px]">
+                <span className="h-[1.5px] bg-current" />
+                <span className="h-[1.5px] bg-current" />
+                <span className="h-[1.5px] bg-current" />
+              </span>
+              Menu
+            </Button>
+            <UserMenu />
+          </div>
         </div>
         {menuOpen && (
           // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- Escape closes the menu from any of its links; it is not a control itself.
@@ -118,18 +109,9 @@ export default function Layout({ children }: { children?: ReactNode }) {
             <nav aria-label="Main" className="flex flex-col [&>a]:h-11 [&>a]:shadow-none">
               {links}
             </nav>
-            <div className="flex items-center justify-between gap-3 border-t border-border-faint py-3">
-              <OrganizationSwitcher className="max-w-none flex-1" />
+            <div className="flex items-center justify-between gap-3 border-t border-border-faint pt-3 empty:hidden">
               <ProjectSwitcher className="max-w-none flex-1" />
-            </div>
-            <div className="flex items-center justify-between gap-3 border-t border-border-faint pt-3">
-              <span className="font-mono text-mono text-muted-foreground">{login}</span>
-              <span className="flex items-center gap-2">
-                <ThemeToggle />
-                <Button variant="secondary" size="small" onClick={() => void onLogout()}>
-                  Log out
-                </Button>
-              </span>
+              {adminLink}
             </div>
           </div>
         )}

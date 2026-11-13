@@ -47,25 +47,6 @@ export function Alert({
   );
 }
 
-export function EmptyState({
-  title,
-  action,
-  children,
-}: {
-  title: ReactNode;
-  action?: ReactNode;
-  children?: ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-3.5 border border-border px-6 py-7">
-      <div aria-hidden="true" className="h-[18px] border-b border-dashed border-input" />
-      <h2 className="text-[20px] font-semibold tracking-[-0.01em]">{title}</h2>
-      {children && <p className="max-w-[340px] text-muted-foreground">{children}</p>}
-      {action && <div className="flex gap-2">{action}</div>}
-    </div>
-  );
-}
-
 /** `section` keeps the page's layout when only one part of it failed to load. */
 export function ErrorState({
   title,
@@ -83,12 +64,13 @@ export function ErrorState({
 }) {
   if (variant === "section") {
     return (
-      <div
-        role="alert"
-        className="flex items-center gap-2.5 border border-border-faint px-3 py-2.5"
-      >
-        <TriangleShape size="small" className="text-down" />
-        <span className="flex-1 text-muted-foreground">{title}</span>
+      <div role="alert" className="flex items-start gap-2.5 border border-border-faint px-3 py-2.5">
+        <TriangleShape size="small" className="mt-1.5 text-down" />
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="text-muted-foreground">{title}</span>
+          {detail && <span className="text-caption text-muted-foreground">{detail}</span>}
+          {meta && <span className="font-mono text-mono text-subtle-foreground">{meta}</span>}
+        </span>
         {onRetry && (
           <Button variant="link" onClick={onRetry}>
             Retry

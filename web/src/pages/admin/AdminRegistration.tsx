@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState, type SubmitEvent } from "react";
 import { errorMessage, errorMeta } from "../../api/client";
 import {
   getAdminRegistration,
@@ -60,7 +60,7 @@ function RegistrationForm({ settings }: { settings: AdminRegistrationSettings })
       toast("Registration setting saved.");
     },
   });
-  const submit = (e: FormEvent) => {
+  const submit = (e: SubmitEvent) => {
     e.preventDefault();
     save.mutate();
   };

@@ -152,7 +152,9 @@ describe("register page", () => {
       "href",
       "/monitors/new",
     );
-    expect(within(screen.getByRole("banner")).getByText("owner@example.com")).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("banner")).getByRole("button", { name: /, account$/ }),
+    ).toHaveAttribute("title", "owner@example.com");
     expect(getCsrfToken()).toBe("csrf-reg");
 
     const [call] = registerCalls(fetchMock);

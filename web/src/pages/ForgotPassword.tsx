@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState, type SubmitEvent } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, errorMessage } from "../api/client";
 import { getAuthProviders, queryKeys, requestPasswordReset } from "../api/endpoints";
@@ -67,7 +67,7 @@ export default function ForgotPassword() {
     );
   }
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
+  function onSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     send.mutate(normalizeEmail(email));
   }

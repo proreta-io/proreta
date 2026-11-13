@@ -20,7 +20,7 @@ Co-Authored-By trailers for human collaborators are fine. Remove this comment be
 - [ ] Breaking change: documented in the description, entry in `api/oasdiff-err-ignore.txt` with its reason
 
 ## Checklist
-- [ ] Lint and tests pass locally (`make lint test`; web: `npm run lint && npm test`)
+- [ ] Lint and tests pass locally (`make lint test`; web: `npm run lint && npm run knip && npm test`)
 - [ ] Generated code is up to date (`make generate`, `npm run gen:api`) after spec or query changes
 - [ ] Every new TODO references an issue: `TODO(#123)`
 - [ ] Operator docs under `docs/` updated if behaviour changed

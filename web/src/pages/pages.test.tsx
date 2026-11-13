@@ -212,7 +212,7 @@ describe("monitors list", () => {
     const button = screen.getByRole("button", { name: "Add monitor" });
     expect(button).toHaveAttribute("aria-disabled", "true");
     expect(button).not.toHaveAttribute("href");
-    expect(button).toHaveAccessibleDescription(note.textContent!);
+    expect(button).toHaveAccessibleDescription(note.textContent);
     expect(screen.queryByRole("link", { name: "Add monitor" })).not.toBeInTheDocument();
   });
 
@@ -1265,6 +1265,7 @@ describe("settings", () => {
     mockApi({ ...signedIn, "GET /api/v1/channels": () => json({ items: [] }) });
     renderApp("/settings");
     const bar = within(await screen.findByRole("banner"));
+    await userEvent.click(bar.getByRole("button", { name: /, account$/ }));
     await userEvent.click(bar.getByRole("button", { name: "Light theme" }));
     expect(document.documentElement).toHaveClass("theme-light");
     expect(bar.getByRole("button", { name: "Light theme" })).toHaveAttribute(

@@ -7,18 +7,15 @@ import {
   deleteOrganization,
   leaveOrganization,
   listInvitations,
-  listMembers,
   queryKeys,
-  removeMember,
   revokeInvitation,
-  updateMember,
   type Invitation,
   type InvitationRole,
-  type Member,
   type MembershipRole,
 } from "../api/endpoints";
 import { useAuth } from "../auth/AuthProvider";
 import { useEmailEnabled } from "../lib/oauth";
+import PeopleTable from "../components/PeopleTable";
 import { useToast } from "../components/Toasts";
 import {
   Alert,
@@ -38,20 +35,13 @@ import {
   Td,
   Th,
   Tr,
+  cx,
   type BadgeTone,
 } from "../components/ui";
 import { formatDate, formatDateTime } from "../lib/format";
-import {
-  assignableRoles,
-  canManageMember,
-  ROLE_DESCRIPTIONS,
-  ROLE_HINTS,
-  NO_ROLE_LABEL,
-  ROLE_LABELS,
-  roleLabel,
-} from "../lib/roles";
+import { assignableRoles, ROLE_DESCRIPTIONS, ROLE_HINTS, ROLE_LABELS } from "../lib/roles";
 import { absoluteLink } from "../lib/inviteLink";
-import { memberLabel } from "../lib/members";
+import { useOrganizationPeople } from "../lib/people";
 import { usePermissions } from "../lib/permissions";
 
 /** Members, roles and invitations of the organization. */
@@ -60,6 +50,7 @@ export default function Members() {
   const can = usePermissions();
   const role = can.organizationRole;
   const org = auth.session?.organization.name ?? "this organization";
+  const people = useOrganizationPeople();
   if (!can.ready) return null;
   if (!can.org("organization.members.read")) {
     return (
@@ -75,23 +66,26 @@ export default function Members() {
     );
   }
   return (
-    <section className="flex max-w-[960px] flex-col">
+    <section className="flex flex-col">
       <h1 className="pt-6 pb-2 text-headline leading-[1.1] font-semibold tracking-[-0.02em] sm:pt-10 sm:text-display">
         Members
       </h1>
-      <p className="pb-6 text-muted-foreground sm:pb-9">
+      <p className="max-w-[960px] pb-6 text-muted-foreground sm:pb-9">
         People in <strong className="font-medium text-foreground">{org}</strong>. You are{" "}
         {role ? `${article(role)} ${ROLE_LABELS[role].toLowerCase()}` : "a member"}:{" "}
-        {role ? ROLE_DESCRIPTIONS[role].toLowerCase() : ""} A role here applies to every project; a
-        role in a project can only raise it there.{" "}
+        {role
+          ? ROLE_DESCRIPTIONS[role].charAt(0).toLowerCase() + ROLE_DESCRIPTIONS[role].slice(1)
+          : ""}{" "}
+        A role here applies to every project; a role in a project can only raise it there.{" "}
         <Link to="/help/roles" className="underline underline-offset-3">
           What each role may do
         </Link>
       </p>
-      <Section id="members" title="People">
-        <MemberList />
+      <Section id="members" title="People" wide>
+        <PeopleTable api={people} organizationName={org} />
       </Section>
       <Section
+        wide
         id="invitations"
         title="Invitations"
         description="A link joins one person with the role you choose. It works once and for 7 days. No email is sent: hand it over yourself."
@@ -109,8 +103,6 @@ export default function Members() {
   );
 }
 
-const NONE = "none";
-
 function article(role: MembershipRole) {
   return role === "owner" ? "an" : "a";
 }
@@ -119,17 +111,23 @@ function Section({
   id,
   title,
   description,
+  wide = false,
   children,
 }: {
   id: string;
   title: string;
   description?: string;
+  /** The heading above the content, for a table that needs the full width. */
+  wide?: boolean;
   children: ReactNode;
 }) {
   return (
     <section
       aria-labelledby={`${id}-heading`}
-      className="grid gap-4 border-t border-border pt-6 pb-7 sm:grid-cols-[220px_minmax(0,1fr)] sm:gap-12 sm:pt-8 sm:pb-10"
+      className={cx(
+        "grid gap-4 border-t border-border pt-6 pb-7 sm:pt-8 sm:pb-10",
+        !wide && "sm:grid-cols-[220px_minmax(0,720px)] sm:gap-12",
+      )}
     >
       <div className="flex flex-col gap-1.5">
         <h2 id={`${id}-heading`} className="text-lead font-semibold">
@@ -139,158 +137,6 @@ function Section({
       </div>
       <div className="flex min-w-0 flex-col gap-4">{children}</div>
     </section>
-  );
-}
-
-function MemberList() {
-  const auth = useAuth();
-  const queryClient = useQueryClient();
-  const toast = useToast();
-  const me = auth.session?.user.id;
-  const actor = auth.session?.role;
-  const members = useQuery({ queryKey: queryKeys.members, queryFn: listMembers });
-  const [removing, setRemoving] = useState<Member | null>(null);
-
-  const change = useMutation({
-    mutationFn: ({ member, role }: { member: Member; role: MembershipRole | null }) =>
-      updateMember(member.userId, role),
-    onSuccess: (updated) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.members });
-      if (updated.userId === me) void queryClient.invalidateQueries({ queryKey: queryKeys.me });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.permissions });
-      toast(
-        updated.role
-          ? `${memberLabel(updated)} is now ${ROLE_LABELS[updated.role].toLowerCase()}`
-          : `${memberLabel(updated)} now belongs through projects only`,
-      );
-    },
-    onError: (err) => toast(errorMessage(err), "error"),
-  });
-
-  const remove = useMutation({
-    mutationFn: (member: Member) => removeMember(member.userId),
-    onSuccess: (_, member) => {
-      setRemoving(null);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.members });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
-      toast(`${memberLabel(member)} was removed`);
-    },
-    onError: (err) => {
-      setRemoving(null);
-      toast(errorMessage(err), "error");
-    },
-  });
-
-  if (members.isPending) {
-    return (
-      <Loading label="Loading members…">
-        <Skeleton className="w-full" />
-        <Skeleton className="w-2/3" />
-      </Loading>
-    );
-  }
-  if (members.isError) {
-    return (
-      <ErrorState
-        variant="section"
-        title="Cannot load the members"
-        onRetry={() => void members.refetch()}
-      />
-    );
-  }
-  const roles = assignableRoles(actor);
-  return (
-    <>
-      <Table>
-        <thead>
-          <tr>
-            <Th>Login</Th>
-            <Th>Role</Th>
-            <Th numeric>Joined</Th>
-            <Th numeric>
-              <span className="sr-only">Actions</span>
-            </Th>
-          </tr>
-        </thead>
-        <tbody>
-          {members.data.items.map((m) => {
-            const manageable = canManageMember(actor, m.role) && !m.isSystemAdmin;
-            const noteId = `member-note-${m.userId}`;
-            const note = m.isSystemAdmin
-              ? "The system administrator; set by the deployment."
-              : actor && canManageMember(actor, "viewer") && !canManageMember(actor, m.role)
-                ? "Only an owner can change an owner."
-                : undefined;
-            return (
-              <Tr key={m.userId}>
-                <Td>
-                  <span className="flex flex-wrap items-center gap-2">
-                    {m.login ? (
-                      <span className="font-mono text-[13px] break-all">{m.login}</span>
-                    ) : (
-                      <span className="break-all">{memberLabel(m)}</span>
-                    )}
-                    {m.userId === me && <Badge>You</Badge>}
-                  </span>
-                </Td>
-                <Td>
-                  {manageable ? (
-                    <Select
-                      aria-label={`Role of ${memberLabel(m)}`}
-                      className="w-[250px] max-w-full"
-                      value={m.role ?? NONE}
-                      disabled={change.isPending}
-                      onChange={(e) =>
-                        change.mutate({
-                          member: m,
-                          role: e.target.value === NONE ? null : (e.target.value as MembershipRole),
-                        })
-                      }
-                    >
-                      <option value={NONE}>{NO_ROLE_LABEL}</option>
-                      {roles.map((r) => (
-                        <option key={r} value={r}>
-                          {ROLE_LABELS[r]}
-                        </option>
-                      ))}
-                    </Select>
-                  ) : (
-                    <span aria-describedby={note ? noteId : undefined}>{roleLabel(m.role)}</span>
-                  )}
-                  {note && (
-                    <span id={noteId} className="mt-1 block text-caption text-muted-foreground">
-                      {note}
-                    </span>
-                  )}
-                </Td>
-                <Td numeric>{formatDate(m.joinedAt)}</Td>
-                <Td numeric>
-                  {manageable && m.userId !== me && (
-                    <Button variant="ghost-destructive" size="small" onClick={() => setRemoving(m)}>
-                      Remove
-                    </Button>
-                  )}
-                </Td>
-              </Tr>
-            );
-          })}
-        </tbody>
-      </Table>
-      {removing && (
-        <ConfirmDialog
-          title={`Remove ${memberLabel(removing)}?`}
-          confirmLabel="Remove member"
-          busy={remove.isPending}
-          onCancel={() => setRemoving(null)}
-          onConfirm={() => remove.mutate(removing)}
-        >
-          <p>
-            They lose access to this organization at once and are signed out of it. Their account
-            and other organizations stay. Invite them again to bring them back.
-          </p>
-        </ConfirmDialog>
-      )}
-    </>
   );
 }
 
@@ -591,7 +437,7 @@ function LeaveOrDelete() {
     mutationFn: leaveOrganization,
     onSuccess: () => {
       auth.endSession();
-      navigate("/login", { replace: true });
+      void navigate("/login", { replace: true });
     },
     onError: (err) => {
       setConfirm(null);
@@ -602,7 +448,7 @@ function LeaveOrDelete() {
     mutationFn: deleteOrganization,
     onSuccess: () => {
       auth.endSession();
-      navigate("/login", { replace: true });
+      void navigate("/login", { replace: true });
     },
     onError: (err) => {
       setConfirm(null);

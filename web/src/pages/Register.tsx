@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent } from "react";
+import { useId, useState, type SubmitEvent } from "react";
 import { Link, Navigate } from "react-router-dom";
 import {
   ApiError,
@@ -87,7 +87,7 @@ export default function Register() {
     setErrors((e) => (e[field] ? { ...e, [field]: undefined } : e));
   }
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function onSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
     const found = validateRegisterForm(values);
@@ -150,7 +150,7 @@ export default function Register() {
       }
     >
       <AuthHeading>Create account</AuthHeading>
-      <form onSubmit={onSubmit} noValidate className="flex flex-col gap-[18px]">
+      <form onSubmit={(e) => void onSubmit(e)} noValidate className="flex flex-col gap-[18px]">
         {(general || hasErrors) && <Alert>{general ?? "Check the highlighted fields."}</Alert>}
         <DisplayNameField
           value={values.displayName}
