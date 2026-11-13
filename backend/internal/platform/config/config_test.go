@@ -362,6 +362,28 @@ func TestRegistrationKillSwitch(t *testing.T) {
 	}
 }
 
+func TestStatusPageCustomDomainsSwitch(t *testing.T) {
+	cfg, err := LoadAPI(env(apiEnv(t)))
+	if err != nil || cfg.StatusPageCustomDomains {
+		t.Fatalf("default: %v, %v", cfg.StatusPageCustomDomains, err)
+	}
+	for in, want := range map[string]bool{"true": true, "1": true, "false": false, " TRUE ": true} {
+		e := apiEnv(t)
+		e["PRORETA_STATUS_PAGE_CUSTOM_DOMAINS"] = in
+		cfg, err := LoadAPI(env(e))
+		if err != nil || cfg.StatusPageCustomDomains != want {
+			t.Fatalf("%q: %v, %v", in, cfg.StatusPageCustomDomains, err)
+		}
+	}
+	for _, in := range []string{"yes", "on", "2"} {
+		e := apiEnv(t)
+		e["PRORETA_STATUS_PAGE_CUSTOM_DOMAINS"] = in
+		if _, err := LoadAPI(env(e)); err == nil || !strings.Contains(err.Error(), "PRORETA_STATUS_PAGE_CUSTOM_DOMAINS: must be true or false") {
+			t.Fatalf("%q accepted: %v", in, err)
+		}
+	}
+}
+
 func TestAdminLogin(t *testing.T) {
 	for in, want := range map[string]string{
 		"admin": "admin", "Admin": "admin", " ADMIN ": "admin", "owner@example.com": "owner@example.com",

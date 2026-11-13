@@ -107,8 +107,18 @@ const usageOf = (
     projects: 50,
     statusPages: 1,
     specula: 1,
+    statusPageDomains: 0,
   },
-  usage: { monitors, heartbeats, channels: 1, members: 1, projects: 1, statusPages: 0, specula: 0 },
+  usage: {
+    monitors,
+    heartbeats,
+    channels: 1,
+    members: 1,
+    projects: 1,
+    statusPages: 0,
+    specula: 0,
+    statusPageDomains: 0,
+  },
 });
 
 describe("monitors list", () => {

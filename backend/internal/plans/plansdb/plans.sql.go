@@ -100,6 +100,21 @@ func (q *Queries) CountSpecula(ctx context.Context, tenantID uuid.UUID) (int64, 
 	return count, err
 }
 
+const countStatusPageDomains = `-- name: CountStatusPageDomains :one
+SELECT count(*)
+FROM status_page_domains
+WHERE tenant_id = $1 AND released_at IS NULL
+`
+
+// Read-only count for the max_status_page_domains quota: domains of the organization that are not
+// released (status page domains are owned by internal/statuspages).
+func (q *Queries) CountStatusPageDomains(ctx context.Context, tenantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countStatusPageDomains, tenantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countStatusPagesInScope = `-- name: CountStatusPagesInScope :one
 SELECT count(*)
 FROM status_pages

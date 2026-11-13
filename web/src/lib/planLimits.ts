@@ -26,6 +26,11 @@ export const LIMITS: { field: keyof ResourceCounts; label: string; hint: string 
     label: "Specula",
     hint: "Executors in a customer network; revoked ones do not count.",
   },
+  {
+    field: "statusPageDomains",
+    label: "Status page domains",
+    hint: "Custom domains of status pages, for the whole organization; 0 turns the feature off.",
+  },
 ];
 
 /** "3", or "Unlimited" for the value that means no quota. */

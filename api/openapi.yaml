@@ -2814,6 +2814,328 @@ paths:
           $ref: "#/components/responses/NotFound"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/status-pages/{statusPageId}/domains:
+    parameters:
+      - $ref: "#/components/parameters/StatusPageId"
+    get:
+      operationId: listStatusPageDomains
+      x-experimental: true
+      summary: Domains of a status page
+      description: |
+        The custom domains of the page (released ones are not listed), the primary one first, with the
+        DNS records each needs. Needs `statuspage.read` on the page's scope. 404
+        `urn:proreta:problem:custom-domains-disabled` when the installation has custom domains turned
+        off (`PRORETA_STATUS_PAGE_CUSTOM_DOMAINS`).
+      tags: [status-page]
+      responses:
+        "200":
+          description: The domains
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusPageDomainList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: addStatusPageDomain
+      x-experimental: true
+      summary: Add a domain to a status page
+      description: |
+        Needs `statuspage.manage` on the page's scope. The host is normalized (lowercase, one trailing
+        dot removed) and must be ASCII or `xn--`, below a registrable domain, and not an IP address,
+        wildcard, reserved name or a name of this installation; otherwise 422
+        `urn:proreta:problem:domain-forbidden` with a short reason in `fieldErrors`. The domain starts
+        `pending` with a new token; the response carries the DNS records to publish. A host that
+        another organization holds (`verified` or `active`) is not refused here; it is 409
+        `urn:proreta:problem:domain-unavailable` when verification cannot take it, the same answer
+        whoever holds it. At most 3 domains per page and the plan limit (`limit` is
+        `statusPageDomains`, 409 `urn:proreta:problem:plan-limit-reached`); at most 3 pending domains
+        per page and 10 added per organization per day (429). Audited as `status_page.domain_added`.
+        404 `urn:proreta:problem:custom-domains-disabled` when the installation has custom domains
+        turned off.
+      tags: [status-page]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StatusPageDomainCreate"
+      responses:
+        "201":
+          description: The pending domain
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusPageDomain"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/status-pages/{statusPageId}/domains/{domainId}:
+    parameters:
+      - $ref: "#/components/parameters/StatusPageId"
+      - $ref: "#/components/parameters/StatusPageDomainId"
+    patch:
+      operationId: setPrimaryStatusPageDomain
+      x-experimental: true
+      summary: Make a domain the primary one of its page
+      description: |
+        `primary` must be `true`: the domain becomes the primary one (used for canonical links, the
+        feed and badge URLs) and the previous primary is cleared in the same transaction. Needs
+        `statuspage.manage` on the page's scope. A domain that is not `verified` or `active` is 409
+        `urn:proreta:problem:domain-unavailable`. Audited as `status_page.domain_primary_changed`.
+      tags: [status-page]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StatusPageDomainUpdate"
+      responses:
+        "200":
+          description: The domain after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusPageDomain"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: removeStatusPageDomain
+      x-experimental: true
+      summary: Remove a domain from a status page
+      description: |
+        Needs `statuspage.manage` on the page's scope. The domain stops being served and counted at
+        once (soft release, the row stays for audit). Audited as `status_page.domain_removed`.
+      tags: [status-page]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Removed
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/status-pages/{statusPageId}/domains/{domainId}/verify:
+    parameters:
+      - $ref: "#/components/parameters/StatusPageId"
+      - $ref: "#/components/parameters/StatusPageDomainId"
+    post:
+      operationId: verifyStatusPageDomain
+      x-experimental: true
+      summary: Check the DNS records of a domain now
+      description: |
+        Runs one DNS check synchronously and returns the domain in the state it ended in. Needs
+        `statuspage.manage` on the page's scope. Limited to 6 per minute and 30 per hour per
+        organization (429 with `Retry-After`). When the check proves a host another organization
+        holds and that organization's own token is no longer in DNS, the host moves here; when both
+        tokens are in DNS the holder keeps it and the answer is 409
+        `urn:proreta:problem:domain-unavailable`. Audited as `status_page.domain_verified`,
+        `status_page.domain_activated` or `status_page.domain_failed` when the state changes.
+      tags: [status-page]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "202":
+          description: The domain after the check
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusPageDomain"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/status-page-domains:
+    get:
+      operationId: adminListStatusPageDomains
+      x-experimental: true
+      summary: List the custom domains of every organization
+      description: |
+        Custom domains of all organizations, newest first; released ones are not listed. `query`
+        matches the host (substring, case-insensitive); `state` keeps only the given states. Platform
+        admins only.
+      tags: [admin]
+      parameters:
+        - $ref: "#/components/parameters/AdminQuery"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - name: state
+          in: query
+          required: false
+          description: Only domains in these states (comma-separated)
+          style: form
+          explode: false
+          schema:
+            type: array
+            maxItems: 4
+            items:
+              $ref: "#/components/schemas/StatusPageDomainState"
+      responses:
+        "200":
+          description: One page of domains
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStatusPageDomainList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/status-page-domains/{domainId}/disable:
+    parameters:
+      - $ref: "#/components/parameters/StatusPageDomainId"
+    post:
+      operationId: adminDisableStatusPageDomain
+      x-experimental: true
+      summary: Stop serving a custom domain (abuse switch)
+      description: |
+        Stops serving the host and issuing certificates for it at once, whatever the organization's
+        state; the organization sees the domain as disabled. `reason` is 1 to 500 characters. Audited
+        in the organization as `admin.status_page_domain.disabled` (reason in the metadata); nothing
+        is written when the domain is already disabled. Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminStatusPageDomainSwitch"
+      responses:
+        "200":
+          description: The domain after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStatusPageDomain"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/admin/status-page-domains/{domainId}/enable:
+    parameters:
+      - $ref: "#/components/parameters/StatusPageDomainId"
+    post:
+      operationId: adminEnableStatusPageDomain
+      x-experimental: true
+      summary: Serve a disabled custom domain again
+      description: |
+        Undoes the abuse switch. `reason` is 1 to 500 characters. Audited in the organization as
+        `admin.status_page_domain.enabled`; nothing is written when the domain is not disabled.
+        Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminStatusPageDomainSwitch"
+      responses:
+        "200":
+          description: The domain after the change
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminStatusPageDomain"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/admin/stats:
     get:
       operationId: adminGetStats
@@ -4703,6 +5025,14 @@ components:
       schema:
         type: string
         format: uuid
+    StatusPageDomainId:
+      name: domainId
+      in: path
+      required: true
+      description: Status page domain id; a value that is not a UUID is answered with 400
+      schema:
+        type: string
+        format: uuid
     OAuthProviderId:
       name: provider
       in: path
@@ -6031,7 +6361,7 @@ components:
     ResourceCounts:
       type: object
       additionalProperties: false
-      required: [monitors, heartbeats, channels, members, projects, statusPages, specula]
+      required: [monitors, heartbeats, channels, members, projects, statusPages, specula, statusPageDomains]
       properties:
         monitors:
           type: integer
@@ -6062,6 +6392,10 @@ components:
           type: integer
           minimum: 0
           description: Specula executors (revoked ones do not count)
+        statusPageDomains:
+          type: integer
+          minimum: 0
+          description: Custom domains of status pages (released ones do not count); the limit is for the whole organization
     OrganizationStatus:
       type: string
       description: "`suspended`: the organization's users cannot log in and nothing of it is checked. A deleted organization is also `suspended` and has `deletedAt`."
@@ -7097,6 +7431,178 @@ components:
         updatedAt:
           type: string
           format: date-time
+    StatusPageDomainState:
+      type: string
+      description: |
+        `pending`: the TXT record was not seen yet (expires after 7 days); `verified`: the TXT record
+        was seen, the host is served, waiting for the CNAME; `active`: verified and the CNAME points at
+        the target; `failed`: no proof for 7 days, not served.
+      enum: [pending, verified, active, failed]
+    StatusPageDomainError:
+      type: string
+      description: Why the last check did not find a record; `dns-error` means the lookup itself failed
+      enum: [txt-missing, txt-mismatch, cname-missing, cname-wrong, dns-error]
+    StatusPageDomainVerification:
+      type: object
+      additionalProperties: false
+      description: The DNS records the customer publishes at their DNS provider
+      required: [txtName, txtValue, cnameTarget]
+      properties:
+        txtName:
+          type: string
+          example: _proreta-status.status.example.com
+        txtValue:
+          type: string
+          example: proreta-verify=0123456789abcdef0123456789abcdef
+        cnameTarget:
+          type: string
+          description: Where the host's CNAME must point; empty when the operator has not configured a target
+          example: customers.proreta.example.net
+    StatusPageDomain:
+      type: object
+      additionalProperties: false
+      required: [id, host, hostUnicode, state, primary, disabled, verification, verifiedAt, lastCheckedAt, lastError, expiresAt, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        host:
+          type: string
+          description: Lowercase ASCII host name
+          example: status.example.com
+        hostUnicode:
+          type: string
+          description: The Unicode form of an `xn--` host, otherwise the same as `host`
+        state:
+          $ref: "#/components/schemas/StatusPageDomainState"
+        primary:
+          type: boolean
+          description: The domain used for canonical links, the feed and badge URLs; one per page
+        disabled:
+          type: boolean
+          description: The platform admin stopped serving this host
+        verification:
+          $ref: "#/components/schemas/StatusPageDomainVerification"
+        verifiedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastCheckedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastError:
+          allOf:
+            - $ref: "#/components/schemas/StatusPageDomainError"
+          nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When a `pending` domain is deleted if its TXT record is still missing; null in other states
+        createdAt:
+          type: string
+          format: date-time
+    StatusPageDomainList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/StatusPageDomain"
+    StatusPageDomainCreate:
+      type: object
+      additionalProperties: false
+      required: [host]
+      properties:
+        host:
+          type: string
+          minLength: 1
+          maxLength: 253
+          example: status.example.com
+    StatusPageDomainUpdate:
+      type: object
+      additionalProperties: false
+      required: [primary]
+      properties:
+        primary:
+          type: boolean
+          enum: [true]
+    AdminStatusPageDomain:
+      type: object
+      additionalProperties: false
+      required: [id, host, hostUnicode, state, primary, disabled, disabledAt, organizationId, organizationSlug, statusPageId, statusPageSlug, verifiedAt, lastCheckedAt, lastError, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        host:
+          type: string
+        hostUnicode:
+          type: string
+        state:
+          $ref: "#/components/schemas/StatusPageDomainState"
+        primary:
+          type: boolean
+        disabled:
+          type: boolean
+        disabledAt:
+          type: string
+          format: date-time
+          nullable: true
+        organizationId:
+          type: string
+          format: uuid
+        organizationSlug:
+          type: string
+        statusPageId:
+          type: string
+          format: uuid
+        statusPageSlug:
+          type: string
+        verifiedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastCheckedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastError:
+          allOf:
+            - $ref: "#/components/schemas/StatusPageDomainError"
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    AdminStatusPageDomainList:
+      type: object
+      additionalProperties: false
+      required: [items, total, limit, offset]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminStatusPageDomain"
+        total:
+          type: integer
+          minimum: 0
+          description: Number of all matching domains
+        limit:
+          type: integer
+        offset:
+          type: integer
+    AdminStatusPageDomainSwitch:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
     StatusPageList:
       type: object
       additionalProperties: false
@@ -7533,6 +8039,7 @@ components:
         | `urn:proreta:problem:domain-not-allowed` | 403 | The operator does not allow claiming this sign-in domain |
         | `urn:proreta:problem:feature-unavailable` | 403 | The organization is not entitled to the feature the operation needs (see `features` of the session) |
         | `urn:proreta:problem:not-found` | 404 | The resource does not exist, was deleted, or the caller does not see it |
+        | `urn:proreta:problem:custom-domains-disabled` | 404 | The installation has custom domains for status pages turned off (`PRORETA_STATUS_PAGE_CUSTOM_DOMAINS`) |
         | `urn:proreta:problem:invitation-invalid` | 404 | The invitation token is unknown, expired, used or revoked |
         | `urn:proreta:problem:method-not-allowed` | 405 | The path exists, the method does not |
         | `urn:proreta:problem:not-a-heartbeat` | 409 | The operation exists only for heartbeat monitors |
@@ -7553,7 +8060,9 @@ components:
         | `urn:proreta:problem:default-project` | 409 | The Default project cannot be deleted |
         | `urn:proreta:problem:no-password` | 409 | The user has no password to change (signed in only with a provider) |
         | `urn:proreta:problem:last-login-method` | 409 | Unlinking would leave the user without a way to sign in |
+        | `urn:proreta:problem:domain-unavailable` | 409 | The host cannot be taken for a status page now; the same answer whoever holds it |
         | `urn:proreta:problem:domain-taken` | 409 | Another organization claimed the sign-in domain |
+        | `urn:proreta:problem:domain-forbidden` | 422 | The host cannot be used for a status page domain (IP address, wildcard, reserved name, public suffix, a name of this installation, not ASCII); the reason is in `fieldErrors` |
         | `urn:proreta:problem:validation` | 422 | A well-formed request breaks a business rule; see `fieldErrors` |
         | `urn:proreta:problem:rate-limited` | 429 | Too many attempts; see `Retry-After` |
         | `urn:proreta:problem:internal` | 500 | Unexpected server error; quote `requestId` when reporting it |
@@ -7589,7 +8098,7 @@ components:
             $ref: "#/components/schemas/FieldError"
         limit:
           type: string
-          enum: [monitors, heartbeats, channels, members, projects, statusPages, specula]
+          enum: [monitors, heartbeats, channels, members, projects, statusPages, specula, statusPageDomains]
           description: Which plan limit was reached (only with `urn:proreta:problem:plan-limit-reached`)
         max:
           type: integer

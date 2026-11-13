@@ -114,6 +114,7 @@ const PLAN_RESOURCES = new Set<unknown>([
   "projects",
   "statusPages",
   "specula",
+  "statusPageDomains",
 ]);
 
 function isPlanResource(value: unknown): value is NonNullable<Problem["limit"]> {
@@ -128,6 +129,7 @@ const PLAN_RESOURCE_NAMES: Record<NonNullable<Problem["limit"]>, [string, string
   projects: ["project", "projects"],
   statusPages: ["status page", "status pages"],
   specula: ["Specula", "Specula"],
+  statusPageDomains: ["status page domain", "status page domains"],
 };
 
 /** A user-facing message for a plan-limit problem, or undefined for any other error. */

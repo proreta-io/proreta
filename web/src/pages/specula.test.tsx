@@ -211,6 +211,7 @@ describe("Specula page", () => {
         projects: 50,
         statusPages: 1,
         specula: 1,
+        statusPageDomains: 0,
       },
       usage: {
         monitors: 0,
@@ -220,6 +221,7 @@ describe("Specula page", () => {
         projects: 1,
         statusPages: 0,
         specula: used,
+        statusPageDomains: 0,
       },
     });
     mockApi({

@@ -33,6 +33,7 @@ const counts = (n: number) => ({
   projects: n,
   statusPages: n,
   specula: n,
+  statusPageDomains: 0,
 });
 const usage = { plan: { key: "free", name: "Free" }, limits: counts(10), usage: counts(1) };
 

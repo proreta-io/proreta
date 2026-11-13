@@ -88,7 +88,16 @@ var definerCalls = map[string]string{
 	"status_page_published_pages": `SELECT * FROM status_page_published_pages()`,
 	"status_page_snapshot":        `SELECT * FROM status_page_snapshot('acme')`,
 	"status_page_slug_held":       `SELECT status_page_slug_held('acme')`,
-	"auth_domain_lookup":          `SELECT * FROM auth_domain_lookup('example.com')`,
+	// The domain functions: lookups answer nothing for an unknown host; record_check and takeover
+	// refuse an unknown domain (PRD03) or a missing tenant (PRD02).
+	"status_page_domain_lookup":        `SELECT * FROM status_page_domain_lookup('status.acme.com')`,
+	"status_page_domain_allowed":       `SELECT status_page_domain_allowed('status.acme.com')`,
+	"status_page_domains_due":          `SELECT * FROM status_page_domains_due(1)`,
+	"status_page_domain_record_check":  `SELECT * FROM status_page_domain_record_check(gen_random_uuid(), gen_random_uuid(), 'missing', 'missing', NULL)`,
+	"status_page_domain_held_by_other": `SELECT status_page_domain_held_by_other('status.acme.com')`,
+	"status_page_domain_takeover":      `SELECT * FROM status_page_domain_takeover('status.acme.com', gen_random_uuid(), '{}')`,
+	"status_page_domain_counts":        `SELECT * FROM status_page_domain_counts()`,
+	"auth_domain_lookup":               `SELECT * FROM auth_domain_lookup('example.com')`,
 	// Specula: the in-function refusal without a tenant, an unknown token, a trigger function.
 	"specula_create":               `SELECT specula_create(gen_random_uuid(), 'x', '\x00', true, NULL, gen_random_uuid())`,
 	"specula_revoke":               `SELECT specula_revoke(gen_random_uuid())`,

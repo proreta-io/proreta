@@ -72,6 +72,9 @@ type Config struct {
 	// PasswordLoginEnabled is PRORETA_PASSWORD_LOGIN_ENABLED; auth enforces it, the api only
 	// reports it.
 	PasswordLoginEnabled bool
+	// StatusPageCustomDomains is PRORETA_STATUS_PAGE_CUSTOM_DOMAINS: with false every status page
+	// domain operation answers 404 custom-domains-disabled.
+	StatusPageCustomDomains bool
 }
 
 // Deps are the collaborators of the HTTP layer.

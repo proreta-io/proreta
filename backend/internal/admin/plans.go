@@ -57,7 +57,7 @@ func limitFields(l *plans.Limits) []struct {
 		field string
 		value *int
 	}{{"monitors", &l.MaxMonitors}, {"heartbeats", &l.MaxHeartbeats}, {"channels", &l.MaxChannels}, {"members", &l.MaxMembers},
-		{"projects", &l.MaxProjects}, {"statusPages", &l.MaxStatusPages}, {"specula", &l.MaxAgents}}
+		{"projects", &l.MaxProjects}, {"statusPages", &l.MaxStatusPages}, {"specula", &l.MaxAgents}, {"statusPageDomains", &l.MaxStatusPageDomains}}
 }
 
 // ValidatePlan checks a create (key != "") or an update (key == "") request; the definer
@@ -131,13 +131,13 @@ func (s *Service) GetPlan(ctx context.Context, actor Actor, key string) (Plan, e
 			return err
 		}
 		var u struct {
-			Monitors, Heartbeats, Channels, Members, Projects, StatusPages, Specula int
+			Monitors, Heartbeats, Channels, Members, Projects, StatusPages, Specula, StatusPageDomains int
 		}
 		if err := json.Unmarshal(raw, &u); err != nil {
 			return err
 		}
 		p.PeakUsage = &plans.Counts{Monitors: u.Monitors, Heartbeats: u.Heartbeats, Channels: u.Channels, Members: u.Members,
-			Projects: u.Projects, StatusPages: u.StatusPages, Agents: u.Specula}
+			Projects: u.Projects, StatusPages: u.StatusPages, Agents: u.Specula, StatusPageDomains: u.StatusPageDomains}
 		return nil
 	})
 	if err != nil {

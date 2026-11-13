@@ -62,6 +62,13 @@ SELECT count(*)
 FROM specula_agents
 WHERE tenant_id = @tenant_id AND revoked_at IS NULL;
 
+-- name: CountStatusPageDomains :one
+-- Read-only count for the max_status_page_domains quota: domains of the organization that are not
+-- released (status page domains are owned by internal/statuspages).
+SELECT count(*)
+FROM status_page_domains
+WHERE tenant_id = @tenant_id AND released_at IS NULL;
+
 -- name: GetPlanFeatures :one
 SELECT features
 FROM plans

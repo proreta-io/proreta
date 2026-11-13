@@ -16,6 +16,7 @@ const limits = {
   projects: 50,
   statusPages: 1,
   specula: 2147483647,
+  statusPageDomains: 0,
 };
 const plan = (over: Partial<AdminPlan> = {}): AdminPlan => ({
   key: "free",
@@ -81,6 +82,7 @@ describe("admin plans", () => {
       "Members",
       "Projects",
       "Status pages",
+      "Status page domains",
     ])
       await userEvent.type(screen.getByLabelText(label), "5");
     await userEvent.click(screen.getByRole("checkbox", { name: "Specula: unlimited" }));
@@ -98,6 +100,7 @@ describe("admin plans", () => {
         projects: 5,
         statusPages: 5,
         specula: 2147483647,
+        statusPageDomains: 5,
       },
     });
     taken = false;
@@ -111,7 +114,7 @@ describe("admin plans", () => {
     renderApp("/admin/plans/new");
     await userEvent.click(await screen.findByRole("button", { name: "Create plan" }));
     expect(await screen.findByText("Enter a name.")).toBeInTheDocument();
-    expect(screen.getAllByText(/Enter a whole number from 0 up/).length).toBe(7);
+    expect(screen.getAllByText(/Enter a whole number from 0 up/).length).toBe(8);
     expect(post).not.toHaveBeenCalled();
   });
 

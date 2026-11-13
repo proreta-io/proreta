@@ -31,7 +31,7 @@ func TestIntegrationMigrateFromScratchAndRerun(t *testing.T) {
 	}
 	want := "audit_log,auth_identities,check_results,email_settings,email_verifications,heartbeat_tokens,incident_monitors,incidents,invitations,mail_outbox,memberships,monitor_channels,monitor_location_state," +
 		"monitor_locations,monitor_state,monitors,notification_channels,notification_deliveries,org_auth_domains,password_resets,plans,platform_settings,probe_locations,project_members,projects,result_rollups_hourly,rollup_state,sessions," +
-		"specula_agents,specula_projects,status_page_components,status_page_released_slugs,status_page_snapshots,status_pages,tenants,users"
+		"specula_agents,specula_projects,status_page_components,status_page_domains,status_page_released_slugs,status_page_snapshots,status_pages,tenants,users"
 	if got := strings.Join(tables, ","); got != want {
 		t.Fatalf("tables = %s, want %s", got, want)
 	}
@@ -158,6 +158,17 @@ var definerAllowList = map[string][]string{
 	// A freed address stays reserved for its organization for 30 days; the api asks whether it is
 	// held for someone else before the tenant could see the row.
 	"status_page_slug_held": {"proreta_api"},
+	// Status page on a customer's own domain: the renderer maps a verified host to a slug and the
+	// certificate hook asks whether a host may get one, jobs list the checks that are due, apply
+	// the result of each and count the states, and the api applies a check of its own tenant and
+	// settles who holds a host.
+	"status_page_domain_lookup":        {"proreta_statuspage"},
+	"status_page_domain_allowed":       {"proreta_statuspage"},
+	"status_page_domains_due":          {"proreta_worker"},
+	"status_page_domain_record_check":  {"proreta_api", "proreta_worker"},
+	"status_page_domain_held_by_other": {"proreta_api"},
+	"status_page_domain_takeover":      {"proreta_api"},
+	"status_page_domain_counts":        {"proreta_worker"},
 	// OAuth login: a Google sign-in finds the organization that claimed its
 	// Workspace domain before the tenant is known.
 	"auth_domain_lookup": {"proreta_api"},
@@ -200,6 +211,10 @@ var extraPolicies = map[string]struct {
 	"status_page_snapshots.owner_statuspage_read": {cmd: "r", roles: []string{"proreta_owner"}},
 	// status_page_slug_held.
 	"status_page_released_slugs.owner_slug_hold_read": {cmd: "r", roles: []string{"proreta_owner"}},
+	// The status page domain functions read every tenant's domains and change a row to apply a
+	// check result or to release a holder.
+	"status_page_domains.owner_domain_read":   {cmd: "r", roles: []string{"proreta_owner"}},
+	"status_page_domains.owner_domain_update": {cmd: "w", roles: []string{"proreta_owner"}},
 	// auth_domain_lookup.
 	"org_auth_domains.owner_domain_lookup": {cmd: "r", roles: []string{"proreta_owner"}},
 	// specula_authenticate, specula_hello, specula_revoke and the claim's access check.
