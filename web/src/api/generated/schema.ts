@@ -1485,8 +1485,10 @@ export interface paths {
      *     project may show only monitors of that project; an organization-level page may show
      *     monitors of every project. A project the caller does not see is 422 on `projectId`. The page starts unpublished and without components. `slug` is global
      *     (shared by every organization) and public; a slug in use is 409
-     *     `urn:proreta:problem:slug-taken`, a reserved word is 422. The plan allows one page per
-     *     organization: 409 `urn:proreta:problem:plan-limit-reached` (`limit` is `statusPages`).
+     *     `urn:proreta:problem:slug-taken`, a reserved word is 422. The plan limit (1 on Free) counts
+     *     the pages of one project, and separately the organization-level pages (no `projectId`), so
+     *     every project can have its own page; a scope that is full answers 409
+     *     `urn:proreta:problem:plan-limit-reached` (`limit` is `statusPages`, `detail` names the scope).
      *     Audited as `status_page.created`.
      */
     post: operations["createStatusPage"];
@@ -3146,7 +3148,7 @@ export interface components {
       members: number;
       /** @description Projects (deleted projects do not count); the Default project counts */
       projects: number;
-      /** @description Status pages (deleted pages do not count) */
+      /** @description Status pages in the fullest scope: the most pages one project holds, or the organization-level pages when they are more (deleted pages do not count). The limit applies to each project and to the organization-level pages separately. */
       statusPages: number;
       /** @description Specula executors (revoked ones do not count) */
       specula: number;

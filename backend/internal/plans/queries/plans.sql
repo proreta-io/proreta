@@ -38,11 +38,23 @@ SELECT count(*)
 FROM projects
 WHERE tenant_id = @tenant_id AND deleted_at IS NULL;
 
--- name: CountStatusPages :one
--- Read-only count for the status page quota (status pages are owned by internal/statuspages).
+-- name: CountStatusPagesInScope :one
+-- Read-only count for the status page quota, which applies per project and, separately, to the
+-- organization-level pages (project_id IS NULL); status pages are owned by internal/statuspages.
 SELECT count(*)
 FROM status_pages
-WHERE tenant_id = @tenant_id AND deleted_at IS NULL;
+WHERE tenant_id = @tenant_id AND deleted_at IS NULL
+  AND project_id IS NOT DISTINCT FROM sqlc.narg('project_id')::uuid;
+
+-- name: MaxStatusPagesInOneScope :one
+-- The fullest scope: what the per-scope limit is compared with in /usage.
+SELECT COALESCE(max(n), 0)::bigint
+FROM (
+    SELECT count(*) AS n
+    FROM status_pages
+    WHERE tenant_id = @tenant_id AND deleted_at IS NULL
+    GROUP BY project_id
+) AS per_scope;
 
 -- name: CountSpecula :one
 -- Read-only count for the max_agents quota (Specula are owned by internal/specula).

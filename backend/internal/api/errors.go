@@ -230,6 +230,12 @@ func writeError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 	case errors.As(err, &limitErr):
 		p.Type, p.Title, p.Status = problemPlanLimitReached, "Plan limit reached", http.StatusConflict
 		p.Detail = fmt.Sprintf("The %s plan allows at most %d %s.", limitErr.PlanName, limitErr.Max, limitErr.Resource)
+		switch limitErr.Scope {
+		case "project":
+			p.Detail += " Each project has its own allowance."
+		case "organization":
+			p.Detail += " This is the allowance for pages that belong to no project."
+		}
 		p.Limit, p.Max = string(limitErr.Resource), &limitErr.Max
 	case errors.Is(err, monitors.ErrNotHeartbeat):
 		p.Type, p.Title, p.Status = problemNotHeartbeat, "Not a heartbeat monitor", http.StatusConflict

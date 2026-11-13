@@ -217,7 +217,7 @@ type CreateInput struct {
 	AccentColor string
 }
 
-// Create adds an unpublished page under the max_status_pages quota (a *plans.LimitError when used up).
+// Create adds an unpublished page under the max_status_pages quota of its project or, for an organization-level page, of the organization (a *plans.LimitError when used up).
 // A page in a project needs statuspage.manage there, an organization-level one the organization role.
 func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Page, error) {
 	if in.ProjectID == nil && !a.Access.Holds("organization.statuspages.manage") {
@@ -230,7 +230,7 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Page, er
 	id := uuidv7.New()
 	var out Page
 	err = db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
-		if err := plans.CheckCreate(ctx, tx, a.TenantID, plans.ResourceStatusPage); err != nil {
+		if err := plans.CheckCreateStatusPage(ctx, tx, a.TenantID, in.ProjectID); err != nil {
 			return err
 		}
 		if in.ProjectID != nil {

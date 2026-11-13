@@ -100,15 +100,22 @@ func (q *Queries) CountSpecula(ctx context.Context, tenantID uuid.UUID) (int64, 
 	return count, err
 }
 
-const countStatusPages = `-- name: CountStatusPages :one
+const countStatusPagesInScope = `-- name: CountStatusPagesInScope :one
 SELECT count(*)
 FROM status_pages
 WHERE tenant_id = $1 AND deleted_at IS NULL
+  AND project_id IS NOT DISTINCT FROM $2::uuid
 `
 
-// Read-only count for the status page quota (status pages are owned by internal/statuspages).
-func (q *Queries) CountStatusPages(ctx context.Context, tenantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countStatusPages, tenantID)
+type CountStatusPagesInScopeParams struct {
+	TenantID  uuid.UUID
+	ProjectID *uuid.UUID
+}
+
+// Read-only count for the status page quota, which applies per project and, separately, to the
+// organization-level pages (project_id IS NULL); status pages are owned by internal/statuspages.
+func (q *Queries) CountStatusPagesInScope(ctx context.Context, arg CountStatusPagesInScopeParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countStatusPagesInScope, arg.TenantID, arg.ProjectID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -144,4 +151,22 @@ func (q *Queries) GetPlanFeatures(ctx context.Context, key string) ([]string, er
 	var features []string
 	err := row.Scan(&features)
 	return features, err
+}
+
+const maxStatusPagesInOneScope = `-- name: MaxStatusPagesInOneScope :one
+SELECT COALESCE(max(n), 0)::bigint
+FROM (
+    SELECT count(*) AS n
+    FROM status_pages
+    WHERE tenant_id = $1 AND deleted_at IS NULL
+    GROUP BY project_id
+) AS per_scope
+`
+
+// The fullest scope: what the per-scope limit is compared with in /usage.
+func (q *Queries) MaxStatusPagesInOneScope(ctx context.Context, tenantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, maxStatusPagesInOneScope, tenantID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
 }

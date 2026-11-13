@@ -44,7 +44,8 @@ const (
 	ResourceMember Resource = "members"
 	// ResourceProject counts live projects, the Default project included.
 	ResourceProject Resource = "projects"
-	// ResourceStatusPage counts status pages that are not deleted.
+	// ResourceStatusPage counts status pages that are not deleted. The limit applies per project and
+	// to the organization-level pages separately; count (and so /usage) reports the fullest scope.
 	ResourceStatusPage Resource = "statusPages"
 	// ResourceAgent counts Specula that are not revoked.
 	ResourceAgent Resource = "specula"
@@ -124,6 +125,8 @@ type LimitError struct {
 	Max      int
 	// PlanName is the name of the tenant's plan.
 	PlanName string
+	// Scope is "project" or "organization" for a limit that applies per scope (status pages), else empty.
+	Scope string
 }
 
 func (e *LimitError) Error() string {
@@ -199,6 +202,24 @@ func parse(raw []byte) (map[string]int, error) {
 // row, before inserting: the lock serialises concurrent creates of one tenant, so the count
 // stays true until commit. tx must be a tenant transaction of tenantID.
 func CheckCreate(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, r Resource) error {
+	return checkCreate(ctx, tx, tenantID, r, "", func() (int, error) { return count(ctx, tx, tenantID, r) })
+}
+
+// CheckCreateStatusPage is CheckCreate for a status page: max_status_pages applies per project
+// and, separately, to the organization-level pages (project nil), so only the pages of that scope
+// are counted.
+func CheckCreateStatusPage(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, project *uuid.UUID) error {
+	scope := "organization"
+	if project != nil {
+		scope = "project"
+	}
+	return checkCreate(ctx, tx, tenantID, ResourceStatusPage, scope, func() (int, error) {
+		n, err := plansdb.New(tx).CountStatusPagesInScope(ctx, plansdb.CountStatusPagesInScopeParams{TenantID: tenantID, ProjectID: project})
+		return int(n), err
+	})
+}
+
+func checkCreate(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, r Resource, scope string, used func() (int, error)) error {
 	q, err := tenants.LockQuota(ctx, tx, tenantID)
 	if err != nil {
 		return err
@@ -207,12 +228,12 @@ func CheckCreate(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, r Resource)
 	if err != nil {
 		return err
 	}
-	n, err := count(ctx, tx, tenantID, r)
+	n, err := used()
 	if err != nil {
-		return err
+		return fmt.Errorf("plans: count %s: %w", r, err)
 	}
 	if limit := limits.Of(r); n >= limit {
-		return &LimitError{Resource: r, Max: limit, PlanName: plan.Name}
+		return &LimitError{Resource: r, Max: limit, PlanName: plan.Name, Scope: scope}
 	}
 	return nil
 }
@@ -280,7 +301,7 @@ func count(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, r Resource) (int,
 	case ResourceProject:
 		n, err = q.CountProjects(ctx, tenantID)
 	case ResourceStatusPage:
-		n, err = q.CountStatusPages(ctx, tenantID)
+		n, err = q.MaxStatusPagesInOneScope(ctx, tenantID)
 	case ResourceAgent:
 		n, err = q.CountSpecula(ctx, tenantID)
 	default:

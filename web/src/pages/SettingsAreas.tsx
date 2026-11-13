@@ -130,7 +130,7 @@ export default function SettingsAreas() {
                   )}
                   {p.permissions.includes("statuspage.manage") && (
                     <Link
-                      to="/status-page"
+                      to={`/status-page?project=${p.projectId}`}
                       aria-label={`Status pages of ${p.name}`}
                       className={link}
                     >
