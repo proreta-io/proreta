@@ -60,6 +60,9 @@ type Actor struct {
 	Role Role
 	// Projects are the direct roles in projects, not yet combined with Role.
 	Projects map[uuid.UUID]Role
+	// PlatformAdmin is the user's platform-admin flag (users.is_platform_admin). It is not a role:
+	// only Can looks at it, for the operations marked PlatformAdmin.
+	PlatformAdmin bool
 }
 
 // ErrProjectForbidden means the actor sees the project but its role there does not allow the
@@ -553,7 +556,7 @@ func Can(a Actor, operationID string) bool {
 	case NoSession:
 		return true
 	case PlatformAdmin:
-		return a.Belongs()
+		return a.PlatformAdmin && a.Belongs()
 	}
 	return a.HoldsAnywhere(p)
 }

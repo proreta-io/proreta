@@ -2,6 +2,9 @@ module github.com/proreta-io/proreta/backend
 
 go 1.26.0
 
+// The standard library of 1.26.0 carries known vulnerabilities (govulncheck in CI); keep this in step with GO_VERSION in the Dockerfile.
+toolchain go1.26.11
+
 require (
 	github.com/getkin/kin-openapi v0.153.0
 	github.com/go-chi/chi/v5 v5.5.0

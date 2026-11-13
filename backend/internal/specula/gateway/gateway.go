@@ -33,11 +33,12 @@ import (
 )
 
 const (
-	maxBody       = 1 << 20
-	writeTimeout  = 20 * time.Second
-	lockTimeout   = "3s"
-	maxClockSkew  = time.Minute
-	maxResultAge  = 10 * time.Minute
+	maxBody      = 1 << 20
+	writeTimeout = 20 * time.Second
+	lockTimeout  = "3s"
+	maxClockSkew = time.Minute
+	// A lease lasts 30 s, so an older result is stale; checkedAt also sets next_run_at, so it must stay close to now.
+	maxResultAge  = time.Minute
 	maxLatencyMs  = int(time.Hour / time.Millisecond)
 	retryAfterSec = "5"
 )

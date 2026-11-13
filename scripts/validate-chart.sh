@@ -276,10 +276,10 @@ python3 scripts/check-rendered-chart.py "${renders[@]}"
 
 echo "== Specula chart (deploy/helm/proreta-specula)"
 sp_chart=deploy/helm/proreta-specula
-sp_args="--set image.tag=sha-0000000 --set proreta.url=https://proreta.example.com --set token.existingSecret=specula-token"
-helm lint --strict "$sp_chart" $sp_args >"$out/specula.lint" 2>&1 || { cat "$out/specula.lint"; exit 1; }
-helm template specula "$sp_chart" -n specula $sp_args >"$out/specula.yaml"
-helm template specula "$sp_chart" -n specula $sp_args --set replicas=1 --set specula.concurrency=100 --set 'env[0].name=HTTPS_PROXY' --set 'env[0].value=http://proxy:3128' >"$out/specula-custom.yaml"
+sp_args=(--set image.tag=sha-0000000 --set proreta.url=https://proreta.example.com --set token.existingSecret=specula-token)
+helm lint --strict "$sp_chart" "${sp_args[@]}" >"$out/specula.lint" 2>&1 || { cat "$out/specula.lint"; exit 1; }
+helm template specula "$sp_chart" -n specula "${sp_args[@]}" >"$out/specula.yaml"
+helm template specula "$sp_chart" -n specula "${sp_args[@]}" --set replicas=1 --set specula.concurrency=100 --set 'env[0].name=HTTPS_PROXY' --set 'env[0].value=http://proxy:3128' >"$out/specula-custom.yaml"
 helm package "$sp_chart" --version 1.2.3 --app-version 1.2.3 -d "$out/specula-pkg" >/dev/null
 helm template specula "$out/specula-pkg/proreta-specula-1.2.3.tgz" -n specula --set proreta.url=https://proreta.example.com --set token.existingSecret=specula-token >"$out/specula-packaged.yaml"
 grep -q 'image: "ghcr.io/proreta-io/proreta-backend:1.2.3"' "$out/specula-packaged.yaml" || { echo "FAIL: packaged Specula chart does not use appVersion 1.2.3" >&2; exit 1; }
@@ -320,8 +320,8 @@ sp_fail "no token Secret" "token.existingSecret is required" --set image.tag=sha
 sp_fail "no image tag from a git checkout" "image.tag is required" --set proreta.url=https://p.example.com --set token.existingSecret=t
 sp_fail "http URL" "/proreta/url" --set image.tag=sha-0000000 --set proreta.url=http://p.example.com --set token.existingSecret=t
 sp_fail "trailing slash" "/proreta/url" --set image.tag=sha-0000000 --set proreta.url=https://p.example.com/ --set token.existingSecret=t
-sp_fail "unknown key" "additional properties 'replica' not allowed" $sp_args --set replica=2
-sp_fail "chart-owned variable" "/env/0/name" $sp_args --set 'env[0].name=PRORETA_SPECULA_TOKEN' --set 'env[0].value=x'
+sp_fail "unknown key" "additional properties 'replica' not allowed" "${sp_args[@]}" --set replica=2
+sp_fail "chart-owned variable" "/env/0/name" "${sp_args[@]}" --set 'env[0].name=PRORETA_SPECULA_TOKEN' --set 'env[0].value=x'
 renders+=("$out/specula.yaml" "$out/specula-custom.yaml")
 
 echo "== kubeconform"
