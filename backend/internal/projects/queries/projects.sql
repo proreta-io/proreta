@@ -10,6 +10,16 @@ FROM projects AS p
 WHERE p.tenant_id = @tenant_id AND p.deleted_at IS NULL
 ORDER BY p.is_default DESC, lower(p.name), p.id;
 
+-- name: GetProject :one
+-- One live project with the counts of ListProjects.
+SELECT p.id, p.name, p.slug, p.is_default, p.all_members, p.created_at, p.updated_at,
+       (SELECT count(*) FROM monitors AS m
+        WHERE m.tenant_id = p.tenant_id AND m.project_id = p.id AND m.deleted_at IS NULL)::bigint AS monitor_count,
+       (SELECT count(*) FROM notification_channels AS c
+        WHERE c.tenant_id = p.tenant_id AND c.project_id = p.id AND c.deleted_at IS NULL)::bigint AS channel_count
+FROM projects AS p
+WHERE p.tenant_id = @tenant_id AND p.id = @id AND p.deleted_at IS NULL;
+
 -- name: LockProject :one
 -- Serialises changes of one project (rename, delete, members) and deletes against new monitors
 -- and channels, which take FOR KEY SHARE (LockProjectForUse).

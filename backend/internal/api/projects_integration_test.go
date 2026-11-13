@@ -200,6 +200,15 @@ func TestIntegrationProjectsLifecycle(t *testing.T) {
 		t.Fatalf("blank name: %d %s", r.code, r.raw)
 	}
 
+	// Get returns the project with its own counts (a monitor and a heartbeat, one channel).
+	if r := c.do(http.MethodGet, "/api/v1/projects/"+w.alpha, "", owner); r.code != http.StatusOK || r.body["id"] != w.alpha ||
+		r.body["monitorCount"] != float64(2) || r.body["channelCount"] != float64(1) {
+		t.Fatalf("get alpha: %d %s", r.code, r.raw)
+	}
+	if r := c.do(http.MethodGet, "/api/v1/projects/"+second, "", admin); r.code != http.StatusOK || r.body["monitorCount"] != float64(0) || r.body["channelCount"] != float64(0) {
+		t.Fatalf("get empty project: %d %s", r.code, r.raw)
+	}
+
 	// Delete: the Default project never, a project with monitors or channels not, an empty one yes.
 	if r := c.do(http.MethodDelete, "/api/v1/projects/"+w.def, "", owner); r.code != http.StatusConflict || r.body["type"] != "urn:proreta:problem:default-project" {
 		t.Fatalf("delete Default: %d %s", r.code, r.raw)
