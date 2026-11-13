@@ -189,6 +189,8 @@ type Jobs struct {
 	Guard
 	// PublicURL is PRORETA_PUBLIC_URL, linked from Slack messages and emails.
 	PublicURL string
+	// DomainChecks configures the verification of status page domains.
+	DomainChecks DomainChecks
 }
 
 // Statuspage is the configuration of cmd/statuspage, the public status page renderer.
@@ -371,6 +373,7 @@ func LoadSpecula(lookup LookupFunc) (Specula, error) {
 func LoadJobs(lookup LookupFunc) (Jobs, error) {
 	l := &loader{lookup: lookup}
 	cfg := Jobs{Server: l.server(5), Encryption: l.encryption(), Guard: l.guard(), PublicURL: l.publicURL("PRORETA_PUBLIC_URL")}
+	cfg.DomainChecks = l.domainChecks()
 	return cfg, l.err()
 }
 
