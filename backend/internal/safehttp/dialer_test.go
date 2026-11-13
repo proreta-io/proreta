@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/netip"
 	"testing"
+	"time"
 )
 
 type fixedResolver map[string][]netip.Addr
@@ -70,4 +71,32 @@ func TestPrivateDialerReachesLoopback(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = c.Close()
+}
+
+// A first address that never answers (a blackholed AAAA) must not use up the budget of the second.
+func TestDialerTriesNextAddressWithinBudget(t *testing.T) {
+	var dialed []string
+	d := NewDialer(Options{
+		Resolver: fixedResolver{"dual.example.com": {netip.MustParseAddr("2606:4700:4700::1111"), netip.MustParseAddr("93.184.216.34")}},
+		dialOverride: func(ctx context.Context, _, addr string) (net.Conn, error) {
+			dialed = append(dialed, addr)
+			if addr[0] == '[' {
+				<-ctx.Done()
+				return nil, ctx.Err()
+			}
+			c, _ := net.Pipe()
+			return c, nil
+		},
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	start := time.Now()
+	c, err := d(ctx, "tcp", "dual.example.com:443")
+	if err != nil {
+		t.Fatalf("err = %v after %v, dialed %v", err, time.Since(start), dialed)
+	}
+	_ = c.Close()
+	if len(dialed) != 2 || time.Since(start) > 1500*time.Millisecond {
+		t.Fatalf("dialed %v in %v", dialed, time.Since(start))
+	}
 }
