@@ -35,8 +35,9 @@ var (
 	// ErrOAuthNotInvited means no user has the identity and nothing allows creating one (no
 	// invitation, no claimed domain, registration off).
 	ErrOAuthNotInvited = errors.New("auth: identity not linked and not invited")
-	// ErrOAuthAccountExists means an account already uses the provider's email. It is never linked
-	// automatically (pre-hijacking): sign in with the password, then link.
+	// ErrOAuthAccountExists means an account already uses the provider's email. It is not linked
+	// automatically (pre-hijacking): sign in with the password, then link. Only an unverified
+	// account without identity is taken over (claimAccount).
 	ErrOAuthAccountExists = errors.New("auth: an account with this email exists")
 	// ErrOAuthEmailUnusable means the provider's verified email is not a valid login.
 	ErrOAuthEmailUnusable = errors.New("auth: the provider's email cannot be used as a login")
@@ -122,7 +123,8 @@ func refuse(err error, reason string, tenant uuid.UUID, actor *uuid.UUID) error 
 // OAuthLogin signs a user in with a verified provider identity. The user is found by
 // (provider, subject), never by email. Without a linked user, one is created only with a valid
 // invitation, a Google Workspace domain claimed by an organization, or open registration (in this
-// order); an email that already has an account answers ErrOAuthAccountExists. Every outcome is
+// order). An email that already has an account answers ErrOAuthAccountExists, except an unverified
+// account without identity, which the verified sign-in takes over (claimAccount). Every outcome is
 // audited. Errors are domain errors (the caller maps them to a redirect code) or internal ones.
 func (s *Service) OAuthLogin(ctx context.Context, in OAuthLoginInput) (LoginResult, error) {
 	if s.defaultTenant == uuid.Nil {
@@ -180,7 +182,18 @@ func (s *Service) oauthLogin(ctx context.Context, in OAuthLoginInput) (LoginResu
 		return LoginResult{}, err
 	}
 	if existing != nil {
-		return LoginResult{}, refuse(ErrOAuthAccountExists, "account_exists", uuid.Nil, nil)
+		// The provider verified this address; an account nobody verified may be a squatter's.
+		claimed, err := s.claimAccount(ctx, in, existing.ID)
+		if err != nil {
+			return LoginResult{}, err
+		}
+		if !claimed {
+			return LoginResult{}, refuse(ErrOAuthAccountExists, "account_exists", uuid.Nil, nil)
+		}
+		if len(in.InviteHash) > 0 {
+			return s.oauthJoinInvitation(ctx, in, existing.ID)
+		}
+		return s.oauthSignIn(ctx, in, existing.ID)
 	}
 	if len(in.InviteHash) > 0 {
 		return s.oauthJoinInvitation(ctx, in, uuid.Nil)

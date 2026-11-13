@@ -3,6 +3,7 @@ package auth_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/netip"
 	"testing"
 	"time"
@@ -108,11 +109,12 @@ func TestIntegrationOAuthLoginRules(t *testing.T) {
 		t.Fatalf("not_invited audit rows = %d", n)
 	}
 
-	// A password account with the same email is never linked automatically (pre-hijacking).
+	// A verified password account with the same email is never linked automatically (pre-hijacking).
 	pw, err := e.svc.Register(e.ctx, auth.RegisterInput{Email: "victim@example.com", Password: "a long enough password", IP: oauthIP})
 	if err != nil {
 		t.Fatal(err)
 	}
+	pgtest.MustExec(t, e.admin, `UPDATE users SET email_verified_at = now() WHERE id = '`+pw.User.ID.String()+`'`)
 	for _, reg := range []bool{false, true} {
 		_, err := e.login(auth.OAuthLoginInput{Identity: google("g-victim", "Victim@Example.com", ""), RegistrationEnabled: reg})
 		if !errors.Is(err, auth.ErrOAuthAccountExists) {
@@ -200,6 +202,7 @@ func TestIntegrationOAuthInvitation(t *testing.T) {
 	if _, err := e.svc.Register(e.ctx, auth.RegisterInput{Email: "taken@example.com", Password: "a long enough password", IP: oauthIP}); err != nil {
 		t.Fatal(err)
 	}
+	pgtest.MustExec(t, e.admin, `UPDATE users SET email_verified_at = now() WHERE email = 'taken@example.com'`)
 	if _, err := e.login(auth.OAuthLoginInput{Identity: github("1", "taken@example.com"), InviteHash: h}); !errors.Is(err, auth.ErrOAuthAccountExists) {
 		t.Fatalf("invited sign-in with a taken email: %v", err)
 	}
@@ -532,5 +535,125 @@ func TestIntegrationOAuthRateLimit(t *testing.T) {
 	// The password login of the same address shares the bucket.
 	if _, err := e.svc.Login(e.ctx, auth.LoginInput{Login: "admin", Password: "admin password", IP: oauthIP}); !errors.Is(err, auth.ErrRateLimited) {
 		t.Fatalf("password login after oauth failures: %v", err)
+	}
+}
+
+// An unverified password account (a squatter's) is taken over by the provider-verified owner.
+func TestIntegrationOAuthClaimsUnverifiedAccount(t *testing.T) {
+	e := newOAuthEnv(t, "auth_oauth_claim", auth.Options{})
+	const pwd = "a long enough password"
+	squat, err := e.svc.Register(e.ctx, auth.RegisterInput{Email: "ceo@corp.example", Password: pwd, IP: oauthIP})
+	if err != nil {
+		t.Fatal(err)
+	}
+	uid := squat.User.ID.String()
+	pgtest.MustExec(t, e.admin, `UPDATE users SET password_must_change = true WHERE id = '`+uid+`'`)
+
+	res, err := e.login(auth.OAuthLoginInput{Identity: google("g-ceo", "CEO@corp.example", "")})
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if res.User.ID != squat.User.ID || res.Tenant.ID != squat.Tenant.ID || res.Role != auth.RoleOwner || !res.User.EmailVerified {
+		t.Fatalf("claimed session: %+v", res.SessionInfo)
+	}
+	// The squatter's session and password are gone.
+	if _, err := e.svc.Authenticate(e.ctx, squat.Token); !errors.Is(err, auth.ErrUnauthenticated) {
+		t.Fatalf("old session after takeover: %v", err)
+	}
+	if _, err := e.svc.Login(e.ctx, auth.LoginInput{Login: "ceo@corp.example", Password: pwd, IP: oauthIP}); !errors.Is(err, auth.ErrInvalidCredentials) {
+		t.Fatalf("old password after takeover: %v", err)
+	}
+	var hash *string
+	var must bool
+	var verified *time.Time
+	if err := e.admin.QueryRow(e.ctx, `SELECT password_hash, password_must_change, email_verified_at FROM users WHERE id = $1`, uid).Scan(&hash, &must, &verified); err != nil {
+		t.Fatal(err)
+	}
+	if hash != nil || must || verified == nil {
+		t.Fatalf("user row: hash=%v must_change=%v verified=%v", hash, must, verified)
+	}
+	if n := e.count(`SELECT count(*) FROM memberships WHERE user_id = $1 AND tenant_id = $2`, uid, squat.Tenant.ID); n != 1 {
+		t.Fatalf("memberships = %d, want the one kept", n)
+	}
+	if n := e.count(`SELECT count(*) FROM auth_identities WHERE user_id = $1 AND provider = 'google'`, uid); n != 1 {
+		t.Fatal("identity not linked")
+	}
+	if n := e.count(`SELECT count(*) FROM audit_log WHERE action = 'auth.account_claimed' AND entity_id = $1`, uid); n != 1 {
+		t.Fatalf("auth.account_claimed rows = %d", n)
+	}
+	// The next sign-in is an ordinary one.
+	if _, err := e.login(auth.OAuthLoginInput{Identity: google("g-ceo", "ceo@corp.example", "")}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestIntegrationOAuthClaimNever(t *testing.T) {
+	e := newOAuthEnv(t, "auth_oauth_claim_never", auth.Options{})
+	const pwd = "a long enough password"
+	register := func(email string) auth.LoginResult {
+		res, err := e.svc.Register(e.ctx, auth.RegisterInput{Email: email, Password: pwd, IP: oauthIP})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	untouched := func(name, email string, res auth.LoginResult) {
+		t.Helper()
+		_, err := e.login(auth.OAuthLoginInput{Identity: google("g-"+name, email, "")})
+		if !errors.Is(err, auth.ErrOAuthAccountExists) {
+			t.Fatalf("%s: %v, want account_exists", name, err)
+		}
+		if _, err := e.svc.Authenticate(e.ctx, res.Token); err != nil {
+			t.Fatalf("%s: session revoked: %v", name, err)
+		}
+		if n := e.count(`SELECT count(*) FROM users WHERE id = $1 AND password_hash IS NOT NULL`, res.User.ID); n != 1 {
+			t.Fatalf("%s: password cleared", name)
+		}
+		if n := e.count(`SELECT count(*) FROM auth_identities WHERE subject = $1`, "g-"+name); n != 0 {
+			t.Fatalf("%s: identity linked", name)
+		}
+	}
+
+	verified := register("verified@corp.example")
+	pgtest.MustExec(t, e.admin, `UPDATE users SET email_verified_at = now() WHERE id = '`+verified.User.ID.String()+`'`)
+	untouched("verified", "verified@corp.example", verified)
+
+	withID := register("withid@corp.example")
+	pgtest.MustExec(t, e.admin, `INSERT INTO auth_identities (user_id, provider, subject, email) VALUES ('`+withID.User.ID.String()+`', 'github', 'gh-1', 'withid@corp.example')`)
+	untouched("withid", "withid@corp.example", withID)
+
+	pa := register("pa@corp.example")
+	pgtest.MustExec(t, e.admin, `UPDATE users SET is_platform_admin = true WHERE id = '`+pa.User.ID.String()+`'`)
+	untouched("pa", "pa@corp.example", pa)
+}
+
+func TestIntegrationOAuthClaimConcurrent(t *testing.T) {
+	e := newOAuthEnv(t, "auth_oauth_claim_race", auth.Options{})
+	if _, err := e.svc.Register(e.ctx, auth.RegisterInput{Email: "race@corp.example", Password: "a long enough password", IP: oauthIP}); err != nil {
+		t.Fatal(err)
+	}
+	const n = 5
+	errs := make(chan error, n)
+	for i := range n {
+		go func() {
+			_, err := e.login(auth.OAuthLoginInput{Identity: google(fmt.Sprintf("g-race-%d", i), "race@corp.example", "")})
+			errs <- err
+		}()
+	}
+	wins := 0
+	for range n {
+		err := <-errs
+		switch {
+		case err == nil:
+			wins++
+		case !errors.Is(err, auth.ErrOAuthAccountExists):
+			t.Fatalf("loser: %v", err)
+		}
+	}
+	if wins != 1 {
+		t.Fatalf("winners = %d, want 1", wins)
+	}
+	if c := e.count(`SELECT count(*) FROM auth_identities WHERE email = 'race@corp.example'`); c != 1 {
+		t.Fatalf("identities = %d", c)
 	}
 }

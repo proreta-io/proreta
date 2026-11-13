@@ -692,9 +692,11 @@ paths:
         GitHub numeric id), never by email. Google needs `email_verified`; GitHub uses the primary
         verified address only. Without a linked user, an account is created only with a valid
         invitation, a Google Workspace domain (`hd`) claimed by an organization, or open
-        registration; an email that already belongs to an account is never linked automatically
-        (`account_exists`: sign in with the password, then link). Success sets the session cookie
-        like a password login and redirects to `/`.
+        registration; an email that already belongs to an account is not linked automatically
+        (`account_exists`: sign in with the password, then link), except an account whose email was
+        never verified and that has no linked identity: the provider-verified sign-in takes it over
+        (its password and sessions are removed, `auth.account_claimed`). Success sets the session
+        cookie like a password login and redirects to `/`.
 
         Link (`intent: link`): the identity is added to the signed-in user and the browser goes to
         `/profile?linked=<provider>`; errors go to `/profile?error=<code>`.
@@ -704,7 +706,7 @@ paths:
         `invitation_invalid`, `already_member`, `plan_limit`, `suspended`, `rate_limited`; link
         errors add `identity_in_use`, `already_linked` and `session_expired`. Provider error text
         is never reflected. Every outcome is audited (`auth.oauth_login_succeeded`, `auth.oauth_login_failed`,
-        `auth.identity_linked`). Failed callbacks count against the login's per-client-IP limit.
+        `auth.identity_linked`, `auth.account_claimed`). Failed callbacks count against the login's per-client-IP limit.
       tags: [auth]
       security: []
       parameters:
