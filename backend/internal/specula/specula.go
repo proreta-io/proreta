@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/proreta-io/proreta/backend/internal/audit"
+	"github.com/proreta-io/proreta/backend/internal/plans"
 	"github.com/proreta-io/proreta/backend/internal/platform/db"
 	"github.com/proreta-io/proreta/backend/internal/platform/uuidv7"
 	"github.com/proreta-io/proreta/backend/internal/platform/validation"
@@ -139,6 +140,9 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Specula,
 			if err := s.checkProjects(ctx, tx, a.TenantID, projects); err != nil {
 				return err
 			}
+		}
+		if err := plans.CheckCreate(ctx, tx, a.TenantID, plans.ResourceAgent); err != nil {
+			return err
 		}
 		if _, err := tx.Exec(ctx, `SELECT specula_create($1, $2, $3, $4, $5, $6)`, id, name, hash, in.AllProjects, projects, a.UserID); err != nil {
 			if db.IsUniqueViolation(err, nameIndex) {
@@ -392,7 +396,8 @@ func sameSet(a, b []uuid.UUID) bool {
 
 func wrap(err error) error {
 	var verr *validation.Error
-	if err == nil || errors.Is(err, ErrNotFound) || errors.As(err, &verr) {
+	var lerr *plans.LimitError
+	if err == nil || errors.Is(err, ErrNotFound) || errors.As(err, &verr) || errors.As(err, &lerr) {
 		return err
 	}
 	return fmt.Errorf("specula: %w", err)

@@ -34,6 +34,7 @@ import {
 } from "../components/ui";
 import { formatAgo } from "../lib/format";
 import { usePermissions } from "../lib/permissions";
+import { countOf, useUsage } from "../lib/usage";
 import {
   emptySpeculaForm,
   mapSpeculaErrors,
@@ -70,6 +71,9 @@ export default function SpeculaPage() {
     queryKey: [...queryKeys.specula, manage],
     queryFn: () => listSpecula(undefined, manage),
   });
+  const usage = useUsage().data;
+  const limit = usage?.limits.specula;
+  const full = limit !== undefined && usage!.usage.specula >= limit;
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Specula | null>(null);
   const [created, setCreated] = useState<SpeculaCreated | null>(null);
@@ -105,7 +109,18 @@ export default function SpeculaPage() {
               }}
             />
           ) : (
-            <Button onClick={() => setCreating(true)}>Register a Specula</Button>
+            <div className="flex flex-col items-start gap-2">
+              <Button disabled={full} onClick={() => setCreating(true)}>
+                Register a Specula
+              </Button>
+              {limit !== undefined && (
+                <span className="text-caption text-muted-foreground">
+                  {full
+                    ? `Your plan allows ${countOf(limit, "Specula", "Specula")}, and the limit is reached. Revoke one to register another.`
+                    : `${usage!.usage.specula} of ${limit} Specula on your plan.`}
+                </span>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -175,6 +190,7 @@ function SpeculaTable({
     onSuccess: (_, s) => {
       setRevoking(null);
       void queryClient.invalidateQueries({ queryKey: queryKeys.specula });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
       void queryClient.invalidateQueries({ queryKey: queryKeys.monitors });
       toast(`${s.name} revoked`);
     },
@@ -295,6 +311,7 @@ function SpeculaForm({
     onSuccess: (saved) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.specula });
       void queryClient.invalidateQueries({ queryKey: queryKeys.monitors });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
       if (mode === "create") onSaved(saved);
       else {
         toast("Changes saved");

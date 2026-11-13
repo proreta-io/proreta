@@ -1871,7 +1871,8 @@ paths:
         Registers an executor and returns its token once; it is stored only as a hash and cannot be
         read again. Run the executor with `PRORETA_SPECULA_TOKEN` set to it. `allProjects` defaults
         to true; with false, `projectIds` lists the projects that may use it (at least one).
-        Business-rule failures are 422 with `fieldErrors`.
+        Business-rule failures are 422 with `fieldErrors`; an organization at its plan's limit of
+        Specula gets 409 `urn:proreta:problem:plan-limit-reached` (`limit` is `specula`).
       tags: [specula]
       security:
         - cookieAuth: []
@@ -1897,6 +1898,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/UnprocessableEntity"
         default:
@@ -5477,7 +5480,7 @@ components:
     ResourceCounts:
       type: object
       additionalProperties: false
-      required: [monitors, heartbeats, channels, members, projects, statusPages]
+      required: [monitors, heartbeats, channels, members, projects, statusPages, specula]
       properties:
         monitors:
           type: integer
@@ -5503,6 +5506,10 @@ components:
           type: integer
           minimum: 0
           description: Status pages (deleted pages do not count)
+        specula:
+          type: integer
+          minimum: 0
+          description: Specula executors (revoked ones do not count)
     OrganizationStatus:
       type: string
       description: "`suspended`: the organization's users cannot log in and nothing of it is checked. A deleted organization is also `suspended` and has `deletedAt`."
@@ -6935,7 +6942,7 @@ components:
             $ref: "#/components/schemas/FieldError"
         limit:
           type: string
-          enum: [monitors, heartbeats, channels, members, projects, statusPages]
+          enum: [monitors, heartbeats, channels, members, projects, statusPages, specula]
           description: Which plan limit was reached (only with `urn:proreta:problem:plan-limit-reached`)
         max:
           type: integer
