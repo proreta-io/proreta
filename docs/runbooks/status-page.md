@@ -52,5 +52,29 @@ A deleted page's address, and the old address after a rename, stay reserved for 
 - A page shows only what its maintainers published: public names, groups, states, daily bars and generated incident titles. Ask a maintainer of the organization to rename or remove a component, or unpublish the page. As a last resort the platform admin suspends the organization (its page then answers 404).
 - Request floods are limited per client IP and per replica; more replicas multiply the effective limits.
 
+## Custom domains (behind a feature flag)
+The renderer can serve a page at the root of a customer's own domain, such as `https://status.example.com/`, once that host is verified. This is off by default and only the renderer side exists so far: adding and verifying domains, the TLS hook and the chart values come in later changes, so an installation cannot use it end to end yet.
+
+Settings of the `statuspage` process (environment variables):
+
+| Variable | Meaning |
+|---|---|
+| `PRORETA_STATUS_PAGE_CUSTOM_DOMAINS` | `true` turns host mode on (default `false`). Off, the `Host` header is ignored and everything behaves as described above. |
+| `PRORETA_STATUSPAGE_INSTALLATION_HOSTS` | Comma separated host names of the installation itself, in addition to the host of `PRORETA_PUBLIC_URL`. These keep the `/status/<slug>` routes. |
+| `PRORETA_ABUSE_URL` | An `https://` URL or `mailto:` address behind the "Report abuse" link in the footer of customer-domain pages. Empty means no link, and the renderer logs a warning at startup. |
+| `PRORETA_TRUSTED_PROXY_HOPS` | As before; also decides whether `X-Forwarded-Proto` is believed (for HSTS). |
+
+With host mode on:
+- A request is classified by its `Host` (lower case, port and one trailing dot removed). An installation host serves the `/status/<slug>` routes exactly as before. Any other host is looked up with `status_page_domain_lookup(host)`, which returns the slug of a verified or active domain of a published page of an active organization, and nothing else. `X-Forwarded-Host` is never read.
+- On a customer host the page is at `/`, with `/status.json`, `/feed.rss`, `/badge`, `/embed.js`, `/robots.txt` and the password form posting to `/unlock`. Every link in the page, the feed, the badge and the embed script uses the request host. `/status/<slug>` is not served there.
+- An unknown, unverified, failed, disabled, released or unpublished host, a suspended organization and a malformed `Host` all get the same 404.
+- The unlock cookie of a customer host is `__Host-proreta_status_unlock` (`Path=/`, `Secure`, no `Domain`) and is bound to that host: it does not unlock the page on another host.
+- The footer reads "Status page by Proreta" with the abuse link, and the password form carries a notice not to enter an account password. They cannot be changed from the page settings.
+- `Strict-Transport-Security: max-age=31536000` (no `includeSubDomains`, no `preload`) is sent on successful answers when the request arrived over TLS: the proxy in front must set `X-Forwarded-Proto` and `PRORETA_TRUSTED_PROXY_HOPS` must count it.
+- Limits, per replica: all visitors of one host share 20 requests per second (burst 200), and lookups of hosts not in the cache are limited to 50 per second in total (a refused one answers `429`). Answers are cached for 15 seconds per host, so a removed domain stops serving within about 15 seconds plus the 30 second browser cache.
+- Metrics: `proreta_statuspage_requests_total{mode="path|host"}` and `proreta_statuspage_host_lookups_total{result="hit|miss|unknown|limited"}`.
+
+Not done yet: `<link rel="canonical">` on `/status/<slug>` pointing at the page's own domain (the renderer role cannot read a page's domain; a customer-domain page already names itself as canonical).
+
 ## Not available yet
-Custom domains, manual incident updates and maintenance windows, subscriptions other than RSS, translations and custom styling.
+Manual incident updates and maintenance windows, subscriptions other than RSS, translations and custom styling.

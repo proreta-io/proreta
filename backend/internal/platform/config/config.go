@@ -204,6 +204,16 @@ type Statuspage struct {
 	// CookieKey signs the unlock cookies of password-protected pages
 	// (PRORETA_STATUSPAGE_COOKIE_KEY, standard base64 of at least 32 bytes).
 	CookieKey Secret
+	// CustomDomains turns on host mode (PRORETA_STATUS_PAGE_CUSTOM_DOMAINS, default false, the same
+	// variable as the api's): a request to a host that is not an installation host is looked up as a
+	// customer's domain. Off, the Host header is ignored.
+	CustomDomains bool
+	// InstallationHosts are the host names that keep the /status/<slug> routes: the host of
+	// PublicURL plus PRORETA_STATUSPAGE_INSTALLATION_HOSTS (comma separated).
+	InstallationHosts []string
+	// AbuseURL is PRORETA_ABUSE_URL, the "Report abuse" link on customer domains: an https URL or a
+	// mailto: address; empty means no link.
+	AbuseURL string
 }
 
 // Migrate is the configuration of cmd/migrate.
@@ -389,7 +399,50 @@ func LoadStatuspage(lookup LookupFunc) (Statuspage, error) {
 		l.fail("PRORETA_HTTP_ADDR", "must differ from PRORETA_ADMIN_ADDR")
 	}
 	l.cookieMatchesURL(cfg.CookieSecure, cfg.PublicURL)
+	cfg.CustomDomains = l.boolean("PRORETA_STATUS_PAGE_CUSTOM_DOMAINS", false)
+	cfg.InstallationHosts = l.installationHosts("PRORETA_STATUSPAGE_INSTALLATION_HOSTS", cfg.PublicURL)
+	cfg.AbuseURL = l.abuseURL("PRORETA_ABUSE_URL")
 	return cfg, l.err()
+}
+
+// installationHosts reads a comma separated list of plain host names (lowercase, no scheme, port
+// or path) and adds the host of publicURL.
+func (l *loader) installationHosts(name, publicURL string) []string {
+	var out []string
+	if u, err := url.Parse(publicURL); err == nil && u.Hostname() != "" {
+		out = append(out, strings.ToLower(u.Hostname()))
+	}
+	for _, h := range strings.Split(l.optional(name), ",") {
+		h = strings.ToLower(strings.TrimSpace(h))
+		if h == "" {
+			continue
+		}
+		if !installationHostRe.MatchString(h) {
+			l.fail(name, "must be a comma separated list of plain host names such as proreta.example.com")
+			return out
+		}
+		out = append(out, h)
+	}
+	return out
+}
+
+var installationHostRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$`)
+
+// abuseURL reads an optional https URL or mailto: address.
+func (l *loader) abuseURL(name string) string {
+	v := l.optional(name)
+	if v == "" {
+		return ""
+	}
+	u, err := url.Parse(v)
+	ok := err == nil && u.User == nil && !strings.ContainsAny(v, " \t\n\"'<>")
+	switch {
+	case ok && u.Scheme == "https" && u.Host != "":
+	case ok && u.Scheme == "mailto" && u.Opaque != "" && strings.Contains(u.Opaque, "@"):
+	default:
+		l.fail(name, "must be an https URL or a mailto: address")
+	}
+	return v
 }
 
 // base64Key reads a required standard-base64 key of at least minBytes bytes; the decoded bytes are

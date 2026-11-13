@@ -64,6 +64,12 @@ const (
 	unlockWindow      = 15 * time.Minute
 	maxLimiterKeys    = 50_000
 	maxPasswordForm   = 4 << 10
+
+	// Host mode: all visitors of one customer host together, and lookups of hosts not in the cache.
+	hostViewRate     = 20.0 // per second on average
+	hostViewBurst    = 200
+	unknownHostRate  = 50.0 // per second
+	unknownHostBurst = 100
 )
 
 // Config are the renderer's settings.
@@ -73,11 +79,21 @@ type Config struct {
 	// TrustedProxyHops is PRORETA_TRUSTED_PROXY_HOPS, for the client IP of the limits.
 	TrustedProxyHops int
 	CookieSecure     bool
+	// CustomDomains turns on host mode (PRORETA_STATUS_PAGE_CUSTOM_DOMAINS): a request to a host that
+	// is not an installation host is looked up as a customer's domain. Off, the Host is ignored.
+	CustomDomains bool
+	// InstallationHosts are the host names of the installation itself (the host of PublicURL and
+	// PRORETA_STATUSPAGE_INSTALLATION_HOSTS); they keep the path routes under /status/<slug>.
+	InstallationHosts []string
+	// AbuseURL is PRORETA_ABUSE_URL, the "Report abuse" link of the footer on customer domains.
+	AbuseURL string
 }
 
 // Deps are the collaborators of the handler.
 type Deps struct {
-	Source  Source
+	Source Source
+	// Hosts maps a customer's host to a slug (host mode); nil uses Source when it implements HostSource.
+	Hosts   HostSource
 	Cookies *CookieSigner
 	Clock   clock.Clock
 	Logger  *slog.Logger
@@ -101,6 +117,14 @@ type handler struct {
 	// argon is a semaphore: one password verification at a time per replica (64 MiB each).
 	argon chan struct{}
 	m     *rendererMetrics
+	// Host mode; all nil when it is off.
+	hostsOf HostClassifier
+	hosts   *HostCache
+	// hostViews limits all visitors of one customer host together; unknownHosts limits the
+	// lookups of hosts not in the cache, so random Host values cannot flood the database.
+	hostViews    *Limiter
+	unknownHosts *Limiter
+	path, custom http.Handler
 }
 
 type rendererMetrics struct {
@@ -108,6 +132,9 @@ type rendererMetrics struct {
 	limited *prometheus.CounterVec
 	unlocks *prometheus.CounterVec
 	errors  prometheus.Counter
+	// requests counts requests by mode (path, host); hostLookups the resolution of customer hosts.
+	requests    *prometheus.CounterVec
+	hostLookups *prometheus.CounterVec
 }
 
 func newMetrics(reg prometheus.Registerer) *rendererMetrics {
@@ -116,7 +143,7 @@ func newMetrics(reg prometheus.Registerer) *rendererMetrics {
 			Name: "proreta_statuspage_cache_lookups_total", Help: "Snapshot lookups by result (hit, miss).",
 		}, []string{"result"}),
 		limited: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "proreta_statuspage_rate_limited_total", Help: "Requests refused by a rate limit, by kind (view, unlock).",
+			Name: "proreta_statuspage_rate_limited_total", Help: "Requests refused by a rate limit, by kind (view, unlock, host).",
 		}, []string{"kind"}),
 		unlocks: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "proreta_statuspage_unlock_attempts_total", Help: "Password attempts on protected pages, by result (ok, wrong).",
@@ -124,18 +151,30 @@ func newMetrics(reg prometheus.Registerer) *rendererMetrics {
 		errors: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "proreta_statuspage_snapshot_errors_total", Help: "Snapshot lookups that failed (database or decoding).",
 		}),
+		requests: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "proreta_statuspage_requests_total", Help: "Requests by mode (path: installation host, host: customer domain).",
+		}, []string{"mode"}),
+		hostLookups: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "proreta_statuspage_host_lookups_total", Help: "Customer host resolutions by result (hit: answered from the cache, miss: asked the database, unknown: malformed host, limited: refused by the unknown-host limiter).",
+		}, []string{"result"}),
 	}
 	for _, r := range []string{"hit", "miss"} {
 		m.cache.WithLabelValues(r)
 	}
-	for _, k := range []string{"view", "unlock"} {
+	for _, r := range []string{"path", "host"} {
+		m.requests.WithLabelValues(r)
+	}
+	for _, r := range []string{"hit", "miss", "unknown", "limited"} {
+		m.hostLookups.WithLabelValues(r)
+	}
+	for _, k := range []string{"view", "unlock", "host"} {
 		m.limited.WithLabelValues(k)
 	}
 	for _, r := range []string{"ok", "wrong"} {
 		m.unlocks.WithLabelValues(r)
 	}
 	if reg != nil {
-		reg.MustRegister(m.cache, m.limited, m.unlocks, m.errors)
+		reg.MustRegister(m.cache, m.limited, m.unlocks, m.errors, m.requests, m.hostLookups)
 	}
 	return m
 }
@@ -165,22 +204,145 @@ func NewHandler(cfg Config, deps Deps) http.Handler {
 		}
 	}
 
+	h.path = h.router(deps, func(r chi.Router) {
+		r.Get("/status/_assets/status.css", h.serveCSS)
+		r.Get("/status/{slug:[a-z0-9-]+}.json", h.serveJSON)
+		r.Get("/status/{slug:[a-z0-9-]+}/feed.rss", h.serveRSS)
+		r.Get("/status/{slug:[a-z0-9-]+}/badge", h.serveBadge)
+		r.Get("/status/{slug:[a-z0-9-]+}/embed.js", h.serveEmbed)
+		r.Post("/status/{slug:[a-z0-9-]+}/unlock", h.unlock)
+		r.Get("/status/{slug:[a-z0-9-]+}", h.servePage)
+	})
+	if !cfg.CustomDomains {
+		return h.countedAs("path", h.path)
+	}
+
+	hosts := deps.Hosts
+	if hosts == nil {
+		hosts, _ = deps.Source.(HostSource)
+	}
+	if hosts == nil {
+		panic("public: custom domains need a HostSource")
+	}
+	h.hostsOf = NewHostClassifier(cfg.InstallationHosts)
+	h.hosts = NewHostCache(hosts, clk)
+	h.hostViews = NewLimiter(hostViewRate, hostViewBurst, maxLimiterKeys, clk)
+	h.unknownHosts = NewLimiter(unknownHostRate, unknownHostBurst, 1, clk)
+	// Customer hosts: the host is the page, so no slug in the path. The stylesheet is static and
+	// answers on every host without a lookup; every other route resolves the host first, and
+	// anything else, /status/<slug> included, is the one 404.
+	h.custom = h.router(deps, func(r chi.Router) {
+		r.Get("/_assets/status.css", h.serveCSS)
+		r.Group(func(r chi.Router) {
+			r.Use(h.resolveHost)
+			r.Get("/", h.servePage)
+			r.Get("/status.json", h.serveJSON)
+			r.Get("/feed.rss", h.serveRSS)
+			r.Get("/badge", h.serveBadge)
+			r.Get("/embed.js", h.serveEmbed)
+			r.Get("/robots.txt", h.serveRobots)
+			r.Post("/unlock", h.unlock)
+		})
+	})
+	return h.countedAs("", http.HandlerFunc(h.dispatch))
+}
+
+// router builds one router with the shared middleware; routes registers the routes of a mode.
+func (h *handler) router(deps Deps, routes func(chi.Router)) http.Handler {
 	r := chi.NewRouter()
-	r.Use(httpx.RequestID, httpx.AccessLog(log), httpx.Recover(log))
+	r.Use(httpx.RequestID, httpx.AccessLog(h.log), httpx.Recover(h.log))
 	if deps.HTTPMetrics != nil {
 		r.Use(deps.HTTPMetrics.Middleware)
 	}
 	r.Use(middleware.GetHead, baseHeaders, httpx.MaxBody(maxPasswordForm), h.limitViews)
-	r.Get("/status/_assets/status.css", h.serveCSS)
-	r.Get("/status/{slug:[a-z0-9-]+}.json", h.serveJSON)
-	r.Get("/status/{slug:[a-z0-9-]+}/feed.rss", h.serveRSS)
-	r.Get("/status/{slug:[a-z0-9-]+}/badge", h.serveBadge)
-	r.Get("/status/{slug:[a-z0-9-]+}/embed.js", h.serveEmbed)
-	r.Post("/status/{slug:[a-z0-9-]+}/unlock", h.unlock)
-	r.Get("/status/{slug:[a-z0-9-]+}", h.servePage)
+	routes(r)
 	r.NotFound(h.notFound)
 	r.MethodNotAllowed(h.notFound)
 	return r
+}
+
+// countedAs counts each request by mode; an empty mode leaves that to next (the dispatcher).
+func (h *handler) countedAs(mode string, next http.Handler) http.Handler {
+	if mode == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.m.requests.WithLabelValues(mode).Inc()
+		next.ServeHTTP(w, r)
+	})
+}
+
+// reqInfo says which host a request is for; it is set by dispatch for customer hosts only.
+type reqInfo struct {
+	custom bool
+	host   string // normalised; "" for a malformed one
+	slug   string // set by resolveHost
+	https  bool   // the request arrived over TLS (for HSTS)
+}
+
+type infoKey struct{}
+
+func infoOf(r *http.Request) reqInfo {
+	ri, _ := r.Context().Value(infoKey{}).(reqInfo)
+	return ri
+}
+
+// dispatch sends a request to the installation routes or the customer-host routes by its Host.
+func (h *handler) dispatch(w http.ResponseWriter, r *http.Request) {
+	kind, host := h.hostsOf.Classify(r.Host)
+	if kind == HostInstallation {
+		h.m.requests.WithLabelValues("path").Inc()
+		h.path.ServeHTTP(w, r)
+		return
+	}
+	h.m.requests.WithLabelValues("host").Inc()
+	ri := reqInfo{custom: true, host: host, https: forwardedHTTPS(r, h.cfg.TrustedProxyHops)}
+	h.custom.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), infoKey{}, ri)))
+}
+
+// resolveHost maps the host to a slug (cached, with a limiter in front of every database lookup)
+// and applies the per-host limit. A host that is not served gets the one 404.
+func (h *handler) resolveHost(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ri := infoOf(r)
+		if ri.host == "" {
+			h.m.hostLookups.WithLabelValues("unknown").Inc()
+			h.notFound(w, r)
+			return
+		}
+		slug, found, ok := h.hosts.Cached(ri.host)
+		if ok {
+			h.m.hostLookups.WithLabelValues("hit").Inc()
+		} else {
+			if allowed, wait := h.unknownHosts.Allow("lookup"); !allowed {
+				h.m.hostLookups.WithLabelValues("limited").Inc()
+				h.m.limited.WithLabelValues("host").Inc()
+				tooMany(w, wait)
+				return
+			}
+			var err error
+			if slug, found, err = h.hosts.Fetch(r.Context(), ri.host); err != nil {
+				h.log.ErrorContext(r.Context(), "status page host lookup failed", "error", err)
+				h.notFound(w, r)
+				return
+			}
+			h.m.hostLookups.WithLabelValues("miss").Inc()
+		}
+		if !found {
+			h.notFound(w, r)
+			return
+		}
+		if allowed, wait := h.hostViews.Allow(ri.host); !allowed {
+			h.m.limited.WithLabelValues("host").Inc()
+			tooMany(w, wait)
+			return
+		}
+		ri.slug = slug
+		if ri.https {
+			w = &hstsWriter{ResponseWriter: w}
+		}
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), infoKey{}, ri)))
+	})
 }
 
 // baseHeaders apply to every answer, the 404 included.
@@ -239,6 +401,9 @@ func tooMany(w http.ResponseWriter, wait time.Duration) {
 // lookup returns the entry of a well-formed slug; anything else is not found.
 func (h *handler) lookup(r *http.Request) (string, Entry, bool) {
 	slug := chi.URLParam(r, "slug")
+	if ri := infoOf(r); ri.custom {
+		slug = ri.slug
+	}
 	if !slugRe.MatchString(slug) {
 		return slug, Entry{}, false
 	}
@@ -254,9 +419,9 @@ func (h *handler) lookup(r *http.Request) (string, Entry, bool) {
 // notFound is the one answer for unknown, unpublished, deleted and suspended pages, protected
 // pages on their JSON, RSS, badge and embed routes, and every other path: same status, headers and
 // body, so none of these cases can be told apart.
-func (h *handler) notFound(w http.ResponseWriter, _ *http.Request) {
+func (h *handler) notFound(w http.ResponseWriter, r *http.Request) {
 	var buf bytes.Buffer
-	_ = templates.ExecuteTemplate(&buf, "notfound", map[string]any{"CSSURL": cssURL()})
+	_ = templates.ExecuteTemplate(&buf, "notfound", map[string]any{"CSSURL": cssURLFor(infoOf(r))})
 	hd := w.Header()
 	hd.Set("Content-Security-Policy", "default-src 'none'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
 	hd.Set("Content-Type", "text/html; charset=utf-8")
@@ -267,6 +432,48 @@ func (h *handler) notFound(w http.ResponseWriter, _ *http.Request) {
 }
 
 func cssURL() string { return "/status/_assets/status.css?v=" + cssVersion }
+
+// cssURLFor is the stylesheet's URL on the host a request came to.
+func cssURLFor(ri reqInfo) string {
+	if ri.custom {
+		return "/_assets/status.css?v=" + cssVersion
+	}
+	return cssURL()
+}
+
+// urls are the addresses of one page on the host a request came to. Paths are relative to the
+// host; Origin is what absolute links (RSS, badge, embed) start with, never a configured constant on
+// a customer host.
+type urls struct {
+	Origin                         string
+	Page, JSON, RSS, Badge, Unlock string
+}
+
+func (h *handler) urlsOf(r *http.Request, slug string) urls {
+	if ri := infoOf(r); ri.custom {
+		return urls{Origin: "https://" + ri.host, Page: "/", JSON: "/status.json", RSS: "/feed.rss", Badge: "/badge", Unlock: "/unlock"}
+	}
+	base := "/status/" + slug
+	return urls{Origin: h.cfg.PublicURL, Page: base, JSON: base + ".json", RSS: base + "/feed.rss", Badge: base + "/badge", Unlock: base + "/unlock"}
+}
+
+// PageURL is the absolute address of the page.
+func (u urls) PageURL() string { return u.Origin + u.Page }
+
+func (h *handler) serveRobots(w http.ResponseWriter, r *http.Request) {
+	_, e, ok := h.lookup(r)
+	if !ok {
+		h.notFound(w, r)
+		return
+	}
+	body := "User-agent: *\nAllow: /\n"
+	if e.PasswordHash != "" {
+		body = "User-agent: *\nDisallow: /\n"
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=30")
+	_, _ = w.Write([]byte(body))
+}
 
 func (h *handler) serveCSS(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/css; charset=utf-8")
@@ -288,7 +495,7 @@ func newNonce() string {
 
 // pageHeaders is the policy of the HTML page: styles from this origin plus one nonce'd element,
 // images only from the logo's origin, no scripts, no frames, forms only to this origin.
-func pageHeaders(w http.ResponseWriter, nonce, imgSrc string, protected bool) {
+func pageHeaders(w http.ResponseWriter, nonce, imgSrc string, protected, custom bool) {
 	hd := w.Header()
 	img := "'none'"
 	if imgSrc != "" {
@@ -297,6 +504,9 @@ func pageHeaders(w http.ResponseWriter, nonce, imgSrc string, protected bool) {
 	hd.Set("Content-Security-Policy", "default-src 'none'; style-src 'self' 'nonce-"+nonce+"'; img-src "+img+
 		"; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 	hd.Set("Content-Type", "text/html; charset=utf-8")
+	if custom {
+		hd.Set("Cross-Origin-Resource-Policy", "same-origin")
+	}
 	if protected {
 		hd.Set("Cache-Control", "private, no-store")
 		hd.Set("X-Robots-Tag", "noindex, nofollow")
@@ -317,7 +527,7 @@ func (h *handler) servePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nonce := newNonce()
-	v := h.pageView(slug, e.Snapshot, nonce)
+	v := h.pageView(r, slug, e.Snapshot, nonce)
 	v.NoIndex = protected
 	var buf bytes.Buffer
 	if err := templates.ExecuteTemplate(&buf, "page", v); err != nil {
@@ -325,7 +535,7 @@ func (h *handler) servePage(w http.ResponseWriter, r *http.Request) {
 		h.notFound(w, r)
 		return
 	}
-	pageHeaders(w, nonce, v.imgSrc, protected)
+	pageHeaders(w, nonce, v.imgSrc, protected, v.Custom)
 	if protected {
 		w.Header().Set("Vary", "Cookie")
 	}
@@ -333,21 +543,25 @@ func (h *handler) servePage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) unlocked(r *http.Request, slug string, e Entry) bool {
+	if ri := infoOf(r); ri.custom {
+		c, err := r.Cookie(HostCookieName)
+		return err == nil && h.cookies != nil && h.cookies.HostValid(c.Value, ri.host, slug, e.PasswordHash, h.clock.Now())
+	}
 	c, err := r.Cookie(CookieName)
 	return err == nil && h.cookies != nil && h.cookies.Valid(c.Value, slug, e.PasswordHash, h.clock.Now())
 }
 
 func (h *handler) renderLock(w http.ResponseWriter, r *http.Request, slug string, e Entry, msg string, status int) {
 	nonce := newNonce()
-	v := h.pageView(slug, e.Snapshot, nonce)
-	v.NoIndex, v.Error = true, msg
+	v := h.pageView(r, slug, e.Snapshot, nonce)
+	v.NoIndex, v.Error, v.Canonical = true, msg, ""
 	var buf bytes.Buffer
 	if err := templates.ExecuteTemplate(&buf, "lock", v); err != nil {
 		h.log.ErrorContext(r.Context(), "render lock page", "error", err)
 		h.notFound(w, r)
 		return
 	}
-	pageHeaders(w, nonce, "", true)
+	pageHeaders(w, nonce, "", true, v.Custom)
 	w.WriteHeader(status)
 	_, _ = w.Write(buf.Bytes())
 }
@@ -398,9 +612,17 @@ func (h *handler) unlock(w http.ResponseWriter, r *http.Request) {
 		Name: CookieName, Value: h.cookies.Value(slug, e.PasswordHash, h.clock.Now()), Path: "/status/" + slug,
 		MaxAge: int(CookieTTL.Seconds()), HttpOnly: true, Secure: h.cfg.CookieSecure, SameSite: http.SameSiteLaxMode,
 	}
+	if ri := infoOf(r); ri.custom {
+		// __Host-: Secure, Path=/ and no Domain, so the cookie belongs to this exact host; the host is
+		// also in the MAC. A customer host is always served over HTTPS.
+		c = &http.Cookie{ //nolint:gosec // G124: HttpOnly, Secure and SameSite=Lax are literal
+			Name: HostCookieName, Value: h.cookies.HostValue(ri.host, slug, e.PasswordHash, h.clock.Now()), Path: "/",
+			MaxAge: int(CookieTTL.Seconds()), HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode,
+		}
+	}
 	http.SetCookie(w, c)
 	w.Header().Set("Cache-Control", "no-store")
-	http.Redirect(w, r, "/status/"+slug, http.StatusSeeOther) //nolint:gosec // slug is matched against the slug pattern before this point
+	http.Redirect(w, r, h.urlsOf(r, slug).Page, http.StatusSeeOther) //nolint:gosec // a path built from the slug pattern or "/"
 }
 
 // sameOrigin refuses a cross-site form post (login CSRF) when the browser tells the origin.
@@ -414,6 +636,9 @@ func (h *handler) sameOrigin(r *http.Request) bool {
 	case "null":
 		return r.Header.Get("Sec-Fetch-Site") == "same-origin"
 	default:
+		if ri := infoOf(r); ri.custom {
+			return o == "https://"+ri.host
+		}
 		return h.cfg.PublicURL != "" && o == h.cfg.PublicURL
 	}
 }
@@ -471,7 +696,8 @@ func (h *handler) serveEmbed(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	src, _ := json.Marshal(h.cfg.PublicURL + "/status/" + slug + "/badge")
+	u := h.urlsOf(r, slug)
+	src, _ := json.Marshal(u.Origin + u.Badge)
 	title, _ := json.Marshal("Status of " + e.Snapshot.Page.Title)
 	js := "(function(){var s=document.currentScript;if(!s||!s.parentNode)return;" +
 		"var f=document.createElement(\"iframe\");f.src=" + string(src) + ";f.title=" + string(title) + ";" +
@@ -507,7 +733,7 @@ func (h *handler) serveBadge(w http.ResponseWriter, r *http.Request) {
 	var buf bytes.Buffer
 	if err := templates.ExecuteTemplate(&buf, "badge", map[string]any{
 		"Nonce": nonce, "BadgeCSS": badgeStyle, "Status": e.Snapshot.Status, "StatusText": overallText(e.Snapshot.Status),
-		"PageURL": h.cfg.PublicURL + "/status/" + slug,
+		"PageURL": h.urlsOf(r, slug).PageURL(),
 	}); err != nil {
 		h.notFound(w, r)
 		return
@@ -558,7 +784,7 @@ func (h *handler) serveRSS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s := e.Snapshot
-	link := h.cfg.PublicURL + "/status/" + slug
+	link := h.urlsOf(r, slug).PageURL()
 	feed := rss{Version: "2.0", Channel: rssChannel{Title: s.Page.Title + " incidents", Link: link,
 		Description: "Incidents of " + s.Page.Title + " (opened and resolved).", Language: "en",
 		LastBuild: s.GeneratedAt.UTC().Format(time.RFC1123Z), TTL: 1}}
@@ -595,6 +821,8 @@ type pageView struct {
 	Nonce, Title, Description, LogoURL  string
 	AccentCSS                           template.CSS
 	CSSURL, RSSURL, JSONURL, UnlockURL  string
+	Canonical, AbuseURL                 string
+	Custom                              bool
 	Status                              statuspages.Status
 	StatusText, Generated, GeneratedISO string
 	Groups                              []groupView
@@ -624,13 +852,17 @@ type incidentView struct {
 	Ref, Title, Start, StartISO, End, EndISO, Duration string
 }
 
-func (h *handler) pageView(slug string, s statuspages.Snapshot, nonce string) pageView {
-	base := "/status/" + slug
-	v := pageView{Nonce: nonce, Title: s.Page.Title, Description: s.Page.Description, CSSURL: cssURL(),
-		RSSURL: base + "/feed.rss", JSONURL: base + ".json", UnlockURL: base + "/unlock",
+func (h *handler) pageView(r *http.Request, slug string, s statuspages.Snapshot, nonce string) pageView {
+	u := h.urlsOf(r, slug)
+	ri := infoOf(r)
+	v := pageView{Nonce: nonce, Title: s.Page.Title, Description: s.Page.Description, CSSURL: cssURLFor(ri),
+		RSSURL: u.RSS, JSONURL: u.JSON, UnlockURL: u.Unlock,
 		Status: s.Status, StatusText: overallText(s.Status), Generated: formatTime(s.GeneratedAt), GeneratedISO: s.GeneratedAt.UTC().Format(time.RFC3339)}
 	if v.Title == "" {
 		v.Title = "Status"
+	}
+	if ri.custom {
+		v.Custom, v.AbuseURL, v.Canonical = true, h.cfg.AbuseURL, u.PageURL()
 	}
 	// The accent goes through a strict pattern again before it reaches the style element.
 	if s.Page.AccentColor != nil && statuspages.ValidAccent(*s.Page.AccentColor) {
