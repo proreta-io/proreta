@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 	"time"
 
 	"github.com/google/uuid"
@@ -261,7 +262,12 @@ func (g *Handler) results(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case err != nil:
 				_ = sp.Rollback(ctx)
-				return err
+				if !permanentItemError(err) {
+					return err
+				}
+				// A result the database will never take (bad data, a constraint) is rejected on
+				// its own, so it cannot block the rest of the batch; its lease stays open.
+				g.d.Log.ErrorContext(ctx, "specula result rejected: the database refused it", "monitor_id", x.MonitorID, "error", err)
 			case !ok:
 				outcomes[i].Outcome = wire.OutcomeStale
 				if err := sp.Rollback(ctx); err != nil {
@@ -290,6 +296,14 @@ func (g *Handler) results(w http.ResponseWriter, r *http.Request) {
 		g.metrics.results.WithLabelValues(o.Outcome).Inc()
 	}
 	write(w, http.StatusOK, wire.ResultsResponse{Outcomes: outcomes})
+}
+
+// permanentItemError reports a data exception (SQLSTATE class 22) or integrity violation (class
+// 23): retrying the same result fails the same way. Everything else (timeouts, serialization,
+// connection errors) is transient and fails the batch so it is retried.
+func permanentItemError(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && (strings.HasPrefix(pgErr.Code, "22") || strings.HasPrefix(pgErr.Code, "23"))
 }
 
 // record stores one result of the Specula's own location. The lease is looked up by monitor, tenant
@@ -355,9 +369,13 @@ func clean(s string, max int) string {
 			return -1
 		}
 		return r
-	}, s)
+	}, strings.ToValidUTF8(s, ""))
 	if len(s) > max {
+		// Cut on a rune boundary: a split rune is invalid UTF-8, which Postgres rejects.
 		s = s[:max]
+		for len(s) > 0 && !utf8.ValidString(s) {
+			s = s[:len(s)-1]
+		}
 	}
 	return s
 }
