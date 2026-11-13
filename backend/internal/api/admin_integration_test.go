@@ -114,6 +114,10 @@ func adminCalls(t *testing.T, tenantID, userID string) []struct{ method, path, b
 				body = `{"enabled":false}`
 			case method == http.MethodPut && strings.HasSuffix(path, "/retention"):
 				body = `{"deliveryDays":10,"rollupMonths":6}`
+			case method == http.MethodPost && strings.HasSuffix(path, "/plans"):
+				body = `{"key":"gold","name":"Gold","limits":` + planLimitsJSON + `}`
+			case method == http.MethodPut && strings.Contains(path, "/plans/"):
+				body = `{"name":"Gold","limits":` + planLimitsJSON + `}`
 			case method == http.MethodPut && strings.HasSuffix(path, "/platform-admin"):
 				body = `{"enabled":true}`
 			case method == http.MethodPut && strings.Contains(path, "/members/"):
@@ -124,11 +128,11 @@ func adminCalls(t *testing.T, tenantID, userID string) []struct{ method, path, b
 				body = `{"role":"member"}`
 			}
 			out = append(out, struct{ method, path, body string }{method,
-				strings.NewReplacer("{tenantId}", tenantID, "{organizationId}", tenantID, "{userId}", userID, "{invitationId}", userID, "{projectId}", userID, "{domainId}", userID, "{speculaId}", userID).Replace(path), body})
+				strings.NewReplacer("{tenantId}", tenantID, "{organizationId}", tenantID, "{userId}", userID, "{invitationId}", userID, "{projectId}", userID, "{domainId}", userID, "{speculaId}", userID, "{key}", "free").Replace(path), body})
 		}
 	}
-	if len(out) != 46 {
-		t.Fatalf("%d admin operations in the spec, want 46", len(out))
+	if len(out) != 51 {
+		t.Fatalf("%d admin operations in the spec, want 51", len(out))
 	}
 	return out
 }
@@ -617,5 +621,100 @@ func TestIntegrationPlatformAdminFirstSignIn(t *testing.T) {
 	cookie, csrf = session(t, r)
 	if r := c.do(http.MethodGet, "/api/v1/admin/stats", "", withCSRF(cookie, csrf)); r.code != http.StatusOK {
 		t.Fatalf("stats after the change: %d %s", r.code, r.raw)
+	}
+}
+
+const planLimitsJSON = `{"monitors":5,"heartbeats":2,"channels":2,"members":4,"projects":10,"statusPages":1,"specula":1}`
+
+// The platform admin creates, edits and deletes plans through the API: validation answers 422
+// with the field, a duplicate key is 422 on key, a system plan or a plan in use cannot be
+// deleted (409), an edit shows in the usage of the organizations on the plan at once, and the
+// peak usage of an organization is reported for the edit form.
+func TestIntegrationAdminPlans(t *testing.T) {
+	env := pgtest.New(t, pgtest.DBName("apiadminplans"))
+	c := newAdminServer(t, env, &lockedBuffer{})
+	userCookie, userCSRF, reg := c.register("owner@tenant.example")
+	tenant := reg.body["organization"].(map[string]any)["id"].(string)
+	adminCookie, adminCSRF := c.login()
+	ah := withCSRF(adminCookie, adminCSRF)
+	const path = "/api/v1/admin/plans"
+
+	r := c.do(http.MethodGet, path, "", ah)
+	items, _ := r.body["items"].([]any)
+	if r.code != http.StatusOK || len(items) != 3 {
+		t.Fatalf("list: %d %s", r.code, r.raw)
+	}
+	if first := items[0].(map[string]any); first["system"] != true || first["deletable"] != false || first["limits"].(map[string]any)["specula"] == nil {
+		t.Fatalf("first plan: %s", r.raw)
+	}
+
+	r = c.do(http.MethodPost, path, `{"key":"gold","name":"Gold","limits":`+planLimitsJSON+`}`, ah)
+	if r.code != http.StatusCreated || r.body["key"] != "gold" || r.body["system"] != false || r.body["deletable"] != true || r.body["organizations"] != float64(0) {
+		t.Fatalf("create: %d %s", r.code, r.raw)
+	}
+	for body, field := range map[string]string{
+		`{"key":"gold","name":"Again","limits":` + planLimitsJSON + `}`:                                                                                       "key",
+		`{"key":"silver","name":" ","limits":` + planLimitsJSON + `}`:                                                                                         "name",
+		`{"key":"silver","name":"Silver","limits":{"monitors":2147483648,"heartbeats":2,"channels":2,"members":4,"projects":10,"statusPages":1,"specula":1}}`: "limits.monitors",
+	} {
+		r := c.do(http.MethodPost, path, body, ah)
+		fe, _ := r.body["fieldErrors"].([]any)
+		if r.code != http.StatusUnprocessableEntity || len(fe) == 0 || fe[0].(map[string]any)["field"] != field {
+			t.Errorf("%s: %d %s, want 422 on %s", body, r.code, r.raw, field)
+		}
+	}
+	// A bad key shape and a missing limit never reach the service (spec validation, 400).
+	for _, body := range []string{
+		`{"key":"Bad Key","name":"X","limits":` + planLimitsJSON + `}`,
+		`{"key":"silver","name":"X","limits":{"monitors":1}}`,
+		`{"key":"silver","name":"X","limits":{"monitors":-1,"heartbeats":2,"channels":2,"members":4,"projects":10,"statusPages":1,"specula":1}}`,
+		`{"key":"silver","name":"X","limits":{"monitors":1.5,"heartbeats":2,"channels":2,"members":4,"projects":10,"statusPages":1,"specula":1}}`,
+	} {
+		if r := c.do(http.MethodPost, path, body, ah); r.code != http.StatusBadRequest {
+			t.Errorf("%s: %d %s, want 400", body, r.code, r.raw)
+		}
+	}
+
+	// Move the organization onto the plan, edit it, and see the usage change at once.
+	if r := c.do(http.MethodPatch, "/api/v1/admin/organizations/"+tenant, `{"planKey":"gold"}`, ah); r.code != http.StatusOK {
+		t.Fatalf("assign: %d %s", r.code, r.raw)
+	}
+	r = c.do(http.MethodGet, path+"/gold", "", ah)
+	peak, _ := r.body["peakUsage"].(map[string]any)
+	if r.code != http.StatusOK || r.body["organizations"] != float64(1) || r.body["deletable"] != false || peak["members"] != float64(1) || peak["projects"] != float64(1) {
+		t.Fatalf("get: %d %s", r.code, r.raw)
+	}
+	r = c.do(http.MethodPut, path+"/gold", `{"name":"Gold plus","limits":{"monitors":7,"heartbeats":2,"channels":2,"members":4,"projects":10,"statusPages":1,"specula":2147483647}}`, ah)
+	if r.code != http.StatusOK || r.body["name"] != "Gold plus" || r.body["limits"].(map[string]any)["monitors"] != float64(7) {
+		t.Fatalf("update: %d %s", r.code, r.raw)
+	}
+	u := c.do(http.MethodGet, "/api/v1/usage", "", withCSRF(userCookie, userCSRF))
+	if u.code != http.StatusOK || u.body["plan"].(map[string]any)["name"] != "Gold plus" || u.body["limits"].(map[string]any)["monitors"] != float64(7) ||
+		u.body["limits"].(map[string]any)["specula"] != float64(2147483647) {
+		t.Fatalf("usage after the edit: %d %s", u.code, u.raw)
+	}
+	if r := c.do(http.MethodPut, path+"/nope", `{"name":"N","limits":`+planLimitsJSON+`}`, ah); r.code != http.StatusNotFound {
+		t.Fatalf("update unknown: %d %s", r.code, r.raw)
+	}
+	if r := c.do(http.MethodGet, path+"/nope", "", ah); r.code != http.StatusNotFound {
+		t.Fatalf("get unknown: %d %s", r.code, r.raw)
+	}
+
+	for key, want := range map[string]string{"free": "urn:proreta:problem:system-plan", "gold": "urn:proreta:problem:plan-in-use"} {
+		if r := c.do(http.MethodDelete, path+"/"+key, "", ah); r.code != http.StatusConflict || r.body["type"] != want {
+			t.Errorf("delete %s: %d %s, want 409 %s", key, r.code, r.raw, want)
+		}
+	}
+	c.do(http.MethodPatch, "/api/v1/admin/organizations/"+tenant, `{"planKey":"free"}`, ah)
+	if r := c.do(http.MethodDelete, path+"/gold", "", ah); r.code != http.StatusNoContent {
+		t.Fatalf("delete: %d %s", r.code, r.raw)
+	}
+	if r := c.do(http.MethodDelete, path+"/gold", "", ah); r.code != http.StatusNotFound {
+		t.Fatalf("delete again: %d %s", r.code, r.raw)
+	}
+	for action, want := range map[string]int{"admin.plan.created": 1, "admin.plan.updated": 1, "admin.plan.deleted": 1} {
+		if n := countRows(t, env, `SELECT count(*) FROM audit_log WHERE action = '`+action+`'`); n != want {
+			t.Errorf("%s audit rows = %d, want %d", action, n, want)
+		}
 	}
 }

@@ -77,6 +77,11 @@ Operations marked `public` need no session. Operations marked `platform admin` a
 | `AdminListOrganizationStatusPages` | `GET /api/v1/admin/organizations/{organizationId}/status-pages` | `platform admin` |
 | `AdminGetOrganizationUsage` | `GET /api/v1/admin/organizations/{organizationId}/usage` | `platform admin` |
 | `AdminListOrganizationUsers` | `GET /api/v1/admin/organizations/{organizationId}/users` | `platform admin` |
+| `AdminListPlans` | `GET /api/v1/admin/plans` | `platform admin` |
+| `AdminCreatePlan` | `POST /api/v1/admin/plans` | `platform admin` |
+| `AdminDeletePlan` | `DELETE /api/v1/admin/plans/{key}` | `platform admin` |
+| `AdminGetPlan` | `GET /api/v1/admin/plans/{key}` | `platform admin` |
+| `AdminUpdatePlan` | `PUT /api/v1/admin/plans/{key}` | `platform admin` |
 | `AdminGetRegistration` | `GET /api/v1/admin/registration` | `platform admin` |
 | `AdminUpdateRegistration` | `PUT /api/v1/admin/registration` | `platform admin` |
 | `AdminGetRetentionSettings` | `GET /api/v1/admin/retention` | `platform admin` |

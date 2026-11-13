@@ -130,7 +130,7 @@ func NewService(pool *db.Pool, authSvc *auth.Service, opts Options) (*Service, e
 		plans: opts.Plans, channels: opts.Channels, specula: opts.Specula, statusPages: opts.StatusPages,
 		actions: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "proreta_admin_actions_total",
-			Help: "Platform admin changes by audit action (admin.organization.plan_changed, admin.organization.suspended, admin.organization.unsuspended, admin.organization.deleted, admin.user.password_reset, admin.user.disabled, admin.user.enabled, admin.user.sessions_revoked, admin.user.platform_admin_granted, admin.user.platform_admin_revoked, admin.email_settings.updated, admin.email_test.sent, admin.registration_settings.updated, admin.retention_settings.updated, admin.member.added, admin.member.role_changed, admin.member.removed, admin.invitation.created, admin.invitation.revoked, admin.project.created, admin.project.updated, admin.project.deleted, admin.project_member.added, admin.project_member.updated, admin.project_member.removed, admin.auth_domain.updated, admin.auth_domain.deleted, admin.specula.created, admin.specula.updated, admin.specula.revoked).",
+			Help: "Platform admin changes by audit action (admin.organization.plan_changed, admin.organization.suspended, admin.organization.unsuspended, admin.organization.deleted, admin.user.password_reset, admin.user.disabled, admin.user.enabled, admin.user.sessions_revoked, admin.user.platform_admin_granted, admin.user.platform_admin_revoked, admin.email_settings.updated, admin.email_test.sent, admin.registration_settings.updated, admin.retention_settings.updated, admin.plan.created, admin.plan.updated, admin.plan.deleted, admin.member.added, admin.member.role_changed, admin.member.removed, admin.invitation.created, admin.invitation.revoked, admin.project.created, admin.project.updated, admin.project.deleted, admin.project_member.added, admin.project_member.updated, admin.project_member.removed, admin.auth_domain.updated, admin.auth_domain.deleted, admin.specula.created, admin.specula.updated, admin.specula.revoked).",
 		}, []string{"action"}),
 	}
 	if opts.Registerer != nil {
@@ -521,6 +521,16 @@ func mapError(op string, err error) error {
 			return &validation.Error{Fields: []validation.FieldError{{Field: "deliveryDays", Message: "must be between 7 and 365 days"}}}
 		case "PRA17":
 			return &validation.Error{Fields: []validation.FieldError{{Field: "rollupMonths", Message: "must be between 4 and 60 months"}}}
+		case "PRA30":
+			return &validation.Error{Fields: []validation.FieldError{{Field: "key", Message: "a plan with this key already exists"}}}
+		case "PRA31":
+			return &validation.Error{Fields: []validation.FieldError{{Field: "name", Message: "invalid key or name"}}}
+		case "PRA32":
+			return &validation.Error{Fields: []validation.FieldError{{Field: "limits", Message: "every limit must be a whole number from 0 to 2147483647"}}}
+		case "PRA33":
+			return ErrSystemPlan
+		case "PRA34":
+			return ErrPlanInUse
 		case "PRA13":
 			return &validation.Error{Fields: []validation.FieldError{{Field: "password", Message: "is required with a username"}}}
 		}

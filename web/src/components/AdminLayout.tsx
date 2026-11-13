@@ -67,6 +67,9 @@ export default function AdminLayout() {
             <NavLink to="/admin/users" className={navClass}>
               Users
             </NavLink>
+            <NavLink to="/admin/plans" className={navClass}>
+              Plans
+            </NavLink>
             <NavLink to="/admin/email" className={navClass}>
               Email
             </NavLink>

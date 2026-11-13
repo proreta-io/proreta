@@ -121,9 +121,15 @@ var definerAllowList = map[string][]string{
 	"admin_registration_set":         {"proreta_api"},
 	// Retention of finished deliveries and hourly rollups: jobs reads the choices and purges, the
 	// platform admin changes them.
-	"platform_retention_overrides":  {"proreta_worker"},
-	"admin_retention_get":           {"proreta_api"},
-	"admin_retention_set":           {"proreta_api"},
+	"platform_retention_overrides": {"proreta_worker"},
+	"admin_retention_get":          {"proreta_api"},
+	"admin_retention_set":          {"proreta_api"},
+	// Plans: the platform admin lists, creates, edits and deletes them.
+	"admin_plans_list":              {"proreta_api"},
+	"admin_plan_peak_usage":         {"proreta_api"},
+	"admin_plan_create":             {"proreta_api"},
+	"admin_plan_update":             {"proreta_api"},
+	"admin_plan_delete":             {"proreta_api"},
 	"purge_notification_deliveries": {"proreta_worker"},
 	"purge_result_rollups":          {"proreta_worker"},
 	// Pause, resume and URL change reset the schedule within the caller's tenant.

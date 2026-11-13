@@ -91,3 +91,17 @@ func TestLimitsOf(t *testing.T) {
 		t.Fatalf("Of: %+v", l)
 	}
 }
+
+func TestLimitsJSONRoundTrip(t *testing.T) {
+	want := Limits{MaxMonitors: 1, MaxHeartbeats: 2, MaxChannels: 3, MaxMembers: 4, MaxProjects: 5, MaxStatusPages: 6, MaxAgents: Unlimited}
+	got, err := ParseLimits("x", want.JSON())
+	if err != nil || got != want {
+		t.Fatalf("round trip: %+v, %v; want %+v", got, err, want)
+	}
+	if _, err := ParseLimits("x", []byte(`{"max_monitors": 1}`)); !errors.Is(err, ErrInvalidLimits) {
+		t.Fatalf("missing keys: %v, want ErrInvalidLimits", err)
+	}
+	if _, err := ParseLimits("x", nil); !errors.Is(err, ErrUnknownPlan) {
+		t.Fatalf("nil: %v, want ErrUnknownPlan", err)
+	}
+}

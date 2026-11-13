@@ -81,6 +81,24 @@ type Limits struct {
 	MaxAgents      int
 }
 
+// ParseLimits reads the limits of the plan planKey as stored; every key must be present.
+func ParseLimits(planKey string, raw []byte) (Limits, error) {
+	if raw == nil {
+		return Limits{}, fmt.Errorf("%w %q", ErrUnknownPlan, planKey)
+	}
+	return Resolve(planKey, raw, nil)
+}
+
+// JSON returns l as the plans.limits object, with every key the plan needs.
+func (l Limits) JSON() []byte {
+	b, err := json.Marshal(map[string]int{keyMaxMonitors: l.MaxMonitors, keyMaxHeartbeats: l.MaxHeartbeats, keyMaxChannels: l.MaxChannels,
+		keyMaxMembers: l.MaxMembers, keyMaxProjects: l.MaxProjects, keyMaxStatusPage: l.MaxStatusPages, keyMaxAgents: l.MaxAgents})
+	if err != nil {
+		panic(err) // a map of ints always marshals
+	}
+	return b
+}
+
 // Of returns the limit for r.
 func (l Limits) Of(r Resource) int {
 	switch r {

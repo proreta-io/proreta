@@ -237,6 +237,7 @@ plans.2 name text not null
 plans.3 limits jsonb not null
 plans.4 created_at timestamp with time zone not null default now()
 plans.5 features text[] not null default '{}'::text[]
+plans.6 is_system boolean not null default false
 platform_settings.1 id boolean not null default true
 platform_settings.2 registration_enabled boolean
 platform_settings.3 updated_at timestamp with time zone
@@ -805,6 +806,11 @@ admin_list_all_users(uuid,text,text,integer,integer) owner=proreta_owner definer
 admin_list_tenants(uuid,text,boolean,integer,integer) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_list_user_memberships(uuid,uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_list_users(uuid,uuid,text,integer,integer) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+admin_plan_create(uuid,text,text,jsonb,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+admin_plan_delete(uuid,text,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+admin_plan_peak_usage(uuid,text) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+admin_plan_update(uuid,text,text,jsonb,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+admin_plans_list(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_registration_get(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_registration_set(uuid,boolean,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_require_platform_admin(uuid) owner=proreta_owner definer=false acl=proreta_owner=X/proreta_owner
@@ -850,6 +856,7 @@ mail_pending() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owne
 monitor_set_location(uuid,uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 org_delete_tenant(uuid,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 outbox_pending() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+plan_limits_valid(jsonb) owner=proreta_owner definer=false acl=proreta_owner=X/proreta_owner
 platform_registration_override() owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 platform_retention_overrides() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 purge_email_verifications() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
@@ -1268,6 +1275,160 @@ BEGIN
     ORDER BY m.created_at, u.id
     LIMIT least(greatest(COALESCE(p_limit, 25), 1), 100)
     OFFSET greatest(COALESCE(p_offset, 0), 0);
+END
+$function$
+CREATE OR REPLACE FUNCTION public.admin_plan_create(p_actor uuid, p_key text, p_name text, p_limits jsonb, p_audit_id uuid, p_ip inet)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_tenant uuid;
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    IF p_key IS NULL OR p_key !~ '^[a-z0-9][a-z0-9-]{0,62}$' OR p_name IS NULL OR length(p_name) NOT BETWEEN 1 AND 200 OR btrim(p_name) = '' THEN
+        RAISE EXCEPTION 'admin: invalid plan key or name' USING ERRCODE = 'PRA31';
+    END IF;
+    IF NOT COALESCE(plan_limits_valid(p_limits), false) THEN
+        RAISE EXCEPTION 'admin: invalid plan limits' USING ERRCODE = 'PRA32';
+    END IF;
+    -- Serialises two creates of one key, so the loser gets PRA30 and not a unique violation.
+    PERFORM pg_advisory_xact_lock(hashtext('plan:' || p_key));
+    IF EXISTS (SELECT 1 FROM plans AS p WHERE p.key = p_key) THEN
+        RAISE EXCEPTION 'admin: plan key exists' USING ERRCODE = 'PRA30';
+    END IF;
+    INSERT INTO plans (key, name, limits) VALUES (p_key, p_name, p_limits);
+    v_tenant := auth_login_tenant(p_actor);
+    IF v_tenant IS NOT NULL THEN
+        PERFORM admin_audit(v_tenant, p_actor, p_audit_id, 'admin.plan.created', 'plan', p_key,
+                            jsonb_build_object('key', p_key, 'name', p_name, 'limits', p_limits), p_ip);
+    END IF;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.admin_plan_delete(p_actor uuid, p_key text, p_audit_id uuid, p_ip inet)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_name   text;
+    v_limits jsonb;
+    v_system boolean;
+    v_tenant uuid;
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    SELECT p.name, p.limits, p.is_system INTO v_name, v_limits, v_system FROM plans AS p WHERE p.key = p_key FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'admin: plan not found' USING ERRCODE = 'PRA02';
+    END IF;
+    IF v_system THEN
+        RAISE EXCEPTION 'admin: system plan' USING ERRCODE = 'PRA33';
+    END IF;
+    -- A tenant changing to this plan needs the plan row lock (the foreign key takes a share lock
+    -- on it), which this transaction holds, so the check below cannot race with an assignment.
+    IF EXISTS (SELECT 1 FROM tenants AS t WHERE t.plan_key = p_key) THEN
+        RAISE EXCEPTION 'admin: plan in use' USING ERRCODE = 'PRA34';
+    END IF;
+    DELETE FROM plans WHERE key = p_key;
+    v_tenant := auth_login_tenant(p_actor);
+    IF v_tenant IS NOT NULL THEN
+        PERFORM admin_audit(v_tenant, p_actor, p_audit_id, 'admin.plan.deleted', 'plan', p_key,
+                            jsonb_build_object('key', p_key, 'name', v_name, 'limits', v_limits), p_ip);
+    END IF;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.admin_plan_peak_usage(p_actor uuid, p_key text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_ids uuid[];
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    IF NOT EXISTS (SELECT 1 FROM plans AS p WHERE p.key = p_key) THEN
+        RAISE EXCEPTION 'admin: plan not found' USING ERRCODE = 'PRA02';
+    END IF;
+    SELECT COALESCE(array_agg(t.id), '{}') INTO v_ids FROM tenants AS t WHERE t.plan_key = p_key AND t.deleted_at IS NULL;
+    RETURN jsonb_build_object(
+        'monitors', COALESCE((SELECT max(c) FROM (SELECT count(*) AS c FROM monitors AS m
+            WHERE m.tenant_id = ANY (v_ids) AND m.deleted_at IS NULL AND m.type <> 'heartbeat' GROUP BY m.tenant_id) AS x), 0),
+        'heartbeats', COALESCE((SELECT max(c) FROM (SELECT count(*) AS c FROM monitors AS m
+            WHERE m.tenant_id = ANY (v_ids) AND m.deleted_at IS NULL AND m.type = 'heartbeat' GROUP BY m.tenant_id) AS x), 0),
+        'channels', COALESCE((SELECT max(c) FROM (SELECT count(*) AS c FROM notification_channels AS n
+            WHERE n.tenant_id = ANY (v_ids) AND n.deleted_at IS NULL GROUP BY n.tenant_id) AS x), 0),
+        'members', COALESCE((SELECT max(c) FROM (
+            SELECT tid, sum(c) AS c FROM (
+                SELECT m.tenant_id AS tid, count(*) AS c FROM memberships AS m WHERE m.tenant_id = ANY (v_ids) GROUP BY m.tenant_id
+                UNION ALL
+                SELECT i.tenant_id, count(*) FROM invitations AS i
+                WHERE i.tenant_id = ANY (v_ids) AND i.accepted_at IS NULL AND i.revoked_at IS NULL AND i.expires_at > now()
+                  AND (i.project_id IS NULL OR EXISTS (SELECT 1 FROM projects AS p
+                       WHERE p.tenant_id = i.tenant_id AND p.id = i.project_id AND p.deleted_at IS NULL))
+                GROUP BY i.tenant_id) AS u GROUP BY tid) AS x), 0),
+        'projects', COALESCE((SELECT max(c) FROM (SELECT count(*) AS c FROM projects AS p
+            WHERE p.tenant_id = ANY (v_ids) AND p.deleted_at IS NULL GROUP BY p.tenant_id) AS x), 0),
+        'statusPages', COALESCE((SELECT max(c) FROM (SELECT count(*) AS c FROM status_pages AS s
+            WHERE s.tenant_id = ANY (v_ids) AND s.deleted_at IS NULL GROUP BY s.tenant_id) AS x), 0),
+        'specula', COALESCE((SELECT max(c) FROM (SELECT count(*) AS c FROM specula_agents AS a
+            WHERE a.tenant_id = ANY (v_ids) AND a.revoked_at IS NULL GROUP BY a.tenant_id) AS x), 0)
+    );
+END
+$function$
+CREATE OR REPLACE FUNCTION public.admin_plan_update(p_actor uuid, p_key text, p_name text, p_limits jsonb, p_audit_id uuid, p_ip inet)
+ RETURNS boolean
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_old_name   text;
+    v_old_limits jsonb;
+    v_tenant     uuid;
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    IF p_name IS NULL OR length(p_name) NOT BETWEEN 1 AND 200 OR btrim(p_name) = '' THEN
+        RAISE EXCEPTION 'admin: invalid plan key or name' USING ERRCODE = 'PRA31';
+    END IF;
+    IF NOT COALESCE(plan_limits_valid(p_limits), false) THEN
+        RAISE EXCEPTION 'admin: invalid plan limits' USING ERRCODE = 'PRA32';
+    END IF;
+    SELECT p.name, p.limits INTO v_old_name, v_old_limits FROM plans AS p WHERE p.key = p_key FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'admin: plan not found' USING ERRCODE = 'PRA02';
+    END IF;
+    IF v_old_name = p_name AND v_old_limits = p_limits THEN
+        RETURN false;
+    END IF;
+    UPDATE plans SET name = p_name, limits = p_limits WHERE key = p_key;
+    v_tenant := auth_login_tenant(p_actor);
+    IF v_tenant IS NOT NULL THEN
+        PERFORM admin_audit(v_tenant, p_actor, p_audit_id, 'admin.plan.updated', 'plan', p_key,
+                            jsonb_build_object('key', p_key, 'name', p_name, 'previousName', v_old_name,
+                                               'limits', p_limits, 'previousLimits', v_old_limits,
+                                               'organizations', (SELECT count(*) FROM tenants AS t WHERE t.plan_key = p_key AND t.deleted_at IS NULL)), p_ip);
+    END IF;
+    RETURN true;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.admin_plans_list(p_actor uuid)
+ RETURNS TABLE(key text, name text, limits jsonb, is_system boolean, organizations integer, deletable boolean)
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+#variable_conflict use_column
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    RETURN QUERY
+    SELECT p.key, p.name, p.limits, p.is_system,
+           (SELECT count(*) FROM tenants AS t WHERE t.plan_key = p.key AND t.deleted_at IS NULL)::integer,
+           NOT p.is_system AND NOT EXISTS (SELECT 1 FROM tenants AS t WHERE t.plan_key = p.key)
+    FROM plans AS p
+    ORDER BY p.is_system DESC, p.created_at, p.key;
 END
 $function$
 CREATE OR REPLACE FUNCTION public.admin_registration_get(p_actor uuid)
@@ -2504,6 +2665,21 @@ CREATE OR REPLACE FUNCTION public.outbox_pending()
  SET search_path TO 'public', 'pg_temp'
 AS $function$
     SELECT count(*) FROM notification_deliveries WHERE status = 'pending'
+$function$
+CREATE OR REPLACE FUNCTION public.plan_limits_valid(l jsonb)
+ RETURNS boolean
+ LANGUAGE sql
+ IMMUTABLE
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    SELECT jsonb_typeof(l) = 'object'
+        AND (SELECT count(*) FROM jsonb_object_keys(l)) = 7
+        AND NOT EXISTS (
+            SELECT 1
+            FROM unnest(ARRAY['max_monitors', 'max_heartbeats', 'max_channels', 'max_members', 'max_projects', 'max_status_pages', 'max_agents']) AS k
+            WHERE jsonb_typeof(l -> k) IS DISTINCT FROM 'number'
+               OR CASE WHEN (l ->> k) ~ '^(0|[1-9][0-9]{0,9})$' THEN (l ->> k)::bigint > 2147483647 ELSE true END
+        )
 $function$
 CREATE OR REPLACE FUNCTION public.platform_registration_override()
  RETURNS boolean
