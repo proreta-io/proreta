@@ -3,7 +3,6 @@
    scheme. The status colours are fixed here and never use the page's accent colour. */
 :root {
   color-scheme: light dark;
-  --accent: light-dark(oklch(0.21 0.008 250), oklch(0.93 0.004 250));
   --background: light-dark(oklch(0.985 0.002 250), oklch(0.165 0.005 250));
   --foreground: light-dark(oklch(0.21 0.008 250), oklch(0.93 0.004 250));
   --muted: light-dark(oklch(0.962 0.003 250), oklch(0.195 0.005 250));
@@ -37,12 +36,14 @@
 html { background: var(--background); color: var(--foreground); font-family: var(--font-sans); font-variant-numeric: tabular-nums; -webkit-text-size-adjust: 100%; }
 body { margin: 0; font-size: 14px; line-height: 1.5; }
 a { color: inherit; text-underline-offset: 3px; }
-a:hover { color: var(--accent); }
+/* --accent is set only by a page with an accent colour (a style element from the handler). */
+a:hover { color: var(--accent, var(--foreground)); }
 :focus-visible { outline: 2px solid var(--foreground); outline-offset: 2px; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 .wrap { max-width: 860px; margin: 0 auto; padding: 0 16px; }
-header.page { border-top: 3px solid var(--accent); padding: 32px 0 20px; }
+/* The bar shows only with a page accent: a default one is a white stripe in dark mode. */
+header.page { border-top: 3px solid var(--accent, transparent); padding: 32px 0 20px; }
 .brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .brand img { display: block; max-height: 40px; max-width: 160px; width: auto; height: auto; object-fit: contain; }
 .brand h1 { margin: 0; font-size: 24px; line-height: 1.15; font-weight: 600; letter-spacing: -0.01em; overflow-wrap: anywhere; }

@@ -1064,8 +1064,9 @@ function Preview({
   const overall = snapshot.status;
   return (
     <div
-      className="flex flex-col gap-4 border border-border border-t-[3px] bg-background p-4"
-      style={accent ? { borderTopColor: accent } : undefined}
+      className="flex flex-col gap-4 border border-border bg-background p-4"
+      // Like the public page: the top bar only with an accent colour.
+      style={accent ? { borderTop: `3px solid ${accent}` } : undefined}
     >
       <div className="flex min-w-0 items-center gap-3">
         {logoHost && (
