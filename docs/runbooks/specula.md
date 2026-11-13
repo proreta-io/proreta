@@ -69,6 +69,6 @@ Owners and maintainers register, edit and revoke Specula and see all of them. Me
 
 ## Limits
 - Going offline or being revoked does not open an incident or send a notification yet; the monitors show *unknown*. Watch the Specula page, or alert on the executor's own metrics.
+- The plan limits how many Specula an organization may have (`max_agents`: `free` 1, `internal` 20, `community` unlimited). Revoked ones do not count; at the limit, registering another fails with "plan limit reached" until you revoke one. The operator can override it per organization in `tenants.limits`.
 - HTTP, HTTPS and TCP checks only.
-- No limit on the number of Specula per plan yet.
 - A token has no expiry; rotate by registering a new Specula and revoking the old one.

@@ -163,3 +163,34 @@ func TestIntegrationSpeculaAPI(t *testing.T) {
 		}
 	})
 }
+
+// The plan limit is a 409 plan-limit-reached problem naming `specula`, and revoking frees a slot.
+func TestIntegrationSpeculaQuotaAPI(t *testing.T) {
+	env := pgtest.New(t, pgtest.DBName("apispeculaquota"))
+	c := newServer(t, env, auth.Options{})
+	cookie, csrf := c.login()
+	unsafe := withCSRF(cookie, csrf)
+	pgtest.MustExec(t, env.AdminConn(t), `UPDATE tenants SET plan_key = 'free' WHERE slug = 'default'`)
+
+	r := c.do(http.MethodPost, "/api/v1/specula", `{"name":"one"}`, unsafe)
+	if r.code != http.StatusCreated {
+		t.Fatalf("first: %d %s", r.code, r.raw)
+	}
+	sp, _ := r.body["specula"].(map[string]any)
+	id, _ := sp["id"].(string)
+	over := c.do(http.MethodPost, "/api/v1/specula", `{"name":"two"}`, unsafe)
+	if over.code != http.StatusConflict || over.body["type"] != "urn:proreta:problem:plan-limit-reached" ||
+		over.body["limit"] != "specula" || over.body["max"] != float64(1) {
+		t.Fatalf("second: %d %s", over.code, over.raw)
+	}
+	if u := c.do(http.MethodGet, "/api/v1/usage", "", cookie); !strings.Contains(u.raw, `"usage":{"channels":0,"heartbeats":0,"members":1,"monitors":0,"projects":1,"specula":1,`) ||
+		!strings.Contains(u.raw, `"specula":1,"statusPages":1}`) {
+		t.Fatalf("usage: %s", u.raw)
+	}
+	if d := c.do(http.MethodDelete, "/api/v1/specula/"+id, "", unsafe); d.code >= 300 {
+		t.Fatalf("revoke: %d %s", d.code, d.raw)
+	}
+	if r := c.do(http.MethodPost, "/api/v1/specula", `{"name":"two"}`, unsafe); r.code != http.StatusCreated {
+		t.Fatalf("after revoke: %d %s", r.code, r.raw)
+	}
+}

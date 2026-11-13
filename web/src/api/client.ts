@@ -113,6 +113,7 @@ const PLAN_RESOURCES = new Set<unknown>([
   "members",
   "projects",
   "statusPages",
+  "specula",
 ]);
 
 function isPlanResource(value: unknown): value is NonNullable<Problem["limit"]> {
@@ -126,6 +127,7 @@ const PLAN_RESOURCE_NAMES: Record<NonNullable<Problem["limit"]>, [string, string
   members: ["member", "members"],
   projects: ["project", "projects"],
   statusPages: ["status page", "status pages"],
+  specula: ["Specula", "Specula"],
 };
 
 /** A user-facing message for a plan-limit problem, or undefined for any other error. */
@@ -135,7 +137,7 @@ export function planLimitMessage(err: unknown): string | undefined {
   const [one, many] = PLAN_RESOURCE_NAMES[err.limit];
   const what = `${err.max} ${err.max === 1 ? one : many}`;
   const hint =
-    err.limit === "channels" || err.limit === "statusPages"
+    err.limit === "channels" || err.limit === "statusPages" || err.limit === "specula"
       ? ""
       : err.limit === "members"
         ? " Open invitations count too: revoke one or remove a member to invite someone new."

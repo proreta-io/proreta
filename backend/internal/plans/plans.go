@@ -46,6 +46,8 @@ const (
 	ResourceProject Resource = "projects"
 	// ResourceStatusPage counts status pages that are not deleted.
 	ResourceStatusPage Resource = "statusPages"
+	// ResourceAgent counts Specula that are not revoked.
+	ResourceAgent Resource = "specula"
 )
 
 // JSON keys in plans.limits and tenants.limits.
@@ -56,6 +58,7 @@ const (
 	keyMaxMembers    = "max_members"
 	keyMaxProjects   = "max_projects"
 	keyMaxStatusPage = "max_status_pages"
+	keyMaxAgents     = "max_agents"
 )
 
 var (
@@ -74,6 +77,7 @@ type Limits struct {
 	MaxMembers     int
 	MaxProjects    int
 	MaxStatusPages int
+	MaxAgents      int
 }
 
 // Of returns the limit for r.
@@ -91,6 +95,8 @@ func (l Limits) Of(r Resource) int {
 		return l.MaxProjects
 	case ResourceStatusPage:
 		return l.MaxStatusPages
+	case ResourceAgent:
+		return l.MaxAgents
 	}
 	panic(fmt.Sprintf("plans: unknown resource %q", r))
 }
@@ -103,6 +109,7 @@ type Counts struct {
 	Members     int
 	Projects    int
 	StatusPages int
+	Agents      int
 }
 
 // Plan identifies a plan.
@@ -144,7 +151,7 @@ func Resolve(planKey string, planLimits, overrides []byte) (Limits, error) {
 		key string
 		dst *int
 	}{{keyMaxMonitors, &l.MaxMonitors}, {keyMaxHeartbeats, &l.MaxHeartbeats}, {keyMaxChannels, &l.MaxChannels}, {keyMaxMembers, &l.MaxMembers}, {keyMaxProjects, &l.MaxProjects},
-		{keyMaxStatusPage, &l.MaxStatusPages}} {
+		{keyMaxStatusPage, &l.MaxStatusPages}, {keyMaxAgents, &l.MaxAgents}} {
 		v, ok := over[f.key]
 		if !ok {
 			if v, ok = base[f.key]; !ok {
@@ -166,7 +173,7 @@ func parse(raw []byte) (map[string]int, error) {
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidLimits, err)
 	}
-	for _, key := range []string{keyMaxMonitors, keyMaxHeartbeats, keyMaxChannels, keyMaxMembers, keyMaxProjects, keyMaxStatusPage} {
+	for _, key := range []string{keyMaxMonitors, keyMaxHeartbeats, keyMaxChannels, keyMaxMembers, keyMaxProjects, keyMaxStatusPage, keyMaxAgents} {
 		v, ok := obj[key]
 		if !ok {
 			continue
@@ -274,6 +281,8 @@ func count(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, r Resource) (int,
 		n, err = q.CountProjects(ctx, tenantID)
 	case ResourceStatusPage:
 		n, err = q.CountStatusPages(ctx, tenantID)
+	case ResourceAgent:
+		n, err = q.CountSpecula(ctx, tenantID)
 	default:
 		return 0, fmt.Errorf("plans: unknown resource %q", r)
 	}
@@ -315,7 +324,7 @@ func (s *Service) Usage(ctx context.Context, tenantID uuid.UUID) (Usage, error) 
 			r   Resource
 			dst *int
 		}{{ResourceMonitor, &u.Counts.Monitors}, {ResourceHeartbeat, &u.Counts.Heartbeats}, {ResourceChannel, &u.Counts.Channels},
-			{ResourceMember, &u.Counts.Members}, {ResourceProject, &u.Counts.Projects}, {ResourceStatusPage, &u.Counts.StatusPages}} {
+			{ResourceMember, &u.Counts.Members}, {ResourceProject, &u.Counts.Projects}, {ResourceStatusPage, &u.Counts.StatusPages}, {ResourceAgent, &u.Counts.Agents}} {
 			if *c.dst, err = count(ctx, tx, tenantID, c.r); err != nil {
 				return err
 			}
