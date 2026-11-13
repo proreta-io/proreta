@@ -366,8 +366,12 @@ func TestIntegrationDelivery(t *testing.T) {
 		for i := range 3 {
 			e.deliver(tenantA, e.monitor(tenantA, fmt.Sprintf("r%d", i)), notify.DeliveryResolved, map[string]any{"monitorName": "r", "durationSeconds": 1})
 		}
-		if n := d.RunOnce(e.ctx); n != 3 {
-			t.Fatalf("claimed %d", n)
+		// A channel gives out two rows per claim; the limiter spaces the sends across claims.
+		if n := d.RunOnce(e.ctx); n != 2 {
+			t.Fatalf("claimed %d, want 2", n)
+		}
+		if n := d.RunOnce(e.ctx); n != 1 {
+			t.Fatalf("second claim: %d, want 1", n)
 		}
 		slices.Sort(sleeps)
 		if len(sleeps) < 2 || sleeps[len(sleeps)-1] < 1500*time.Millisecond {
@@ -523,8 +527,14 @@ func TestIntegrationConcurrentDeliverersClaimOnce(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for range 5 {
+			// A channel is claimed two rows at a time and not while it has one in progress, so
+			// a claimer that meets the other's channel gets nothing and asks again.
+			for range 100 {
 				claimed.Add(int64(d.RunOnce(e.ctx)))
+				if claimed.Load() >= 30 {
+					return
+				}
+				time.Sleep(5 * time.Millisecond)
 			}
 		}()
 	}
@@ -536,6 +546,40 @@ func TestIntegrationConcurrentDeliverersClaimOnce(t *testing.T) {
 		if r := e.row(id); r.status != "sent" || r.attempts != 1 {
 			t.Fatalf("%s: %+v", id, r)
 		}
+	}
+}
+
+// One busy channel does not crowd out the others: its rows are handed out two at a time, the
+// row of another tenant behind them is in the first claim, and the channel is skipped while one
+// of its rows is in progress.
+func TestIntegrationClaimDeliveriesFairAcrossChannels(t *testing.T) {
+	e := newEnv(t, "jobsfair")
+	for i := range 20 {
+		e.deliver(tenantA, e.monitor(tenantA, fmt.Sprintf("hot%d", i)), notify.DeliveryResolved, map[string]any{"monitorName": "h", "durationSeconds": 1})
+	}
+	other := e.deliver(tenantB, e.monitor(tenantB, "other"), notify.DeliveryResolved, map[string]any{"monitorName": "o", "durationSeconds": 1})
+	claim := func() map[uuid.UUID]bool {
+		t.Helper()
+		rows, err := e.admin.Query(e.ctx, `SELECT id FROM claim_deliveries(100)`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids, err := pgx.CollectRows(rows, pgx.RowTo[uuid.UUID])
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[uuid.UUID]bool{}
+		for _, id := range ids {
+			got[id] = true
+		}
+		return got
+	}
+	got := claim()
+	if len(got) != 3 || !got[other] {
+		t.Fatalf("first claim = %d rows, other tenant's claimed = %v; want 2 of the hot channel plus the other row", len(got), got[other])
+	}
+	if again := claim(); len(again) != 0 {
+		t.Fatalf("second claim = %d rows while both channels have rows in progress, want 0", len(again))
 	}
 }
 

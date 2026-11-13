@@ -655,7 +655,7 @@ CREATE UNIQUE INDEX memberships_pkey ON public.memberships USING btree (tenant_i
 CREATE INDEX memberships_user_id_idx ON public.memberships USING btree (user_id)
 CREATE INDEX monitor_channels_channel_idx ON public.monitor_channels USING btree (tenant_id, channel_id)
 CREATE UNIQUE INDEX monitor_channels_pkey ON public.monitor_channels USING btree (monitor_id, channel_id)
-CREATE INDEX monitor_location_state_due_idx ON public.monitor_location_state USING btree (next_run_at) WHERE (lease_token IS NULL)
+CREATE INDEX monitor_location_state_due_idx ON public.monitor_location_state USING btree (next_run_at)
 CREATE INDEX monitor_location_state_lease_idx ON public.monitor_location_state USING btree (lease_until) WHERE (lease_token IS NOT NULL)
 CREATE UNIQUE INDEX monitor_location_state_pkey ON public.monitor_location_state USING btree (monitor_id, location_id)
 CREATE INDEX monitor_locations_location_idx ON public.monitor_locations USING btree (location_id)
@@ -669,6 +669,7 @@ CREATE INDEX monitors_tenant_live_idx ON public.monitors USING btree (tenant_id,
 CREATE UNIQUE INDEX notification_channels_pkey ON public.notification_channels USING btree (id)
 CREATE INDEX notification_channels_project_idx ON public.notification_channels USING btree (tenant_id, project_id) WHERE (deleted_at IS NULL)
 CREATE UNIQUE INDEX notification_channels_tenant_id_id_key ON public.notification_channels USING btree (tenant_id, id)
+CREATE INDEX notification_deliveries_channel_open_idx ON public.notification_deliveries USING btree (channel_id) WHERE (status = 'in_progress'::text)
 CREATE INDEX notification_deliveries_incident_channel_idx ON public.notification_deliveries USING btree (incident_id, channel_id, created_at) WHERE (incident_id IS NOT NULL)
 CREATE INDEX notification_deliveries_lease_idx ON public.notification_deliveries USING btree (lease_until) WHERE (status = 'in_progress'::text)
 CREATE INDEX notification_deliveries_monitor_open_idx ON public.notification_deliveries USING btree (monitor_id, created_at, id) WHERE (status = ANY (ARRAY['pending'::text, 'in_progress'::text]))
@@ -1768,8 +1769,9 @@ AS $function$
         FOR UPDATE OF e SKIP LOCKED
     );
 
-    WITH ready AS (
-        SELECT d.id
+    WITH eligible AS (
+        SELECT d.id, d.created_at,
+               row_number() OVER (PARTITION BY d.channel_id ORDER BY d.created_at, d.id) AS rn
         FROM notification_deliveries AS d
         WHERE d.status = 'pending'
           AND d.next_attempt_at <= now()
@@ -1786,8 +1788,21 @@ AS $function$
                 AND o.status IN ('pending', 'in_progress')
                 AND (o.created_at, o.id) < (d.created_at, d.id)
           )
-        ORDER BY d.created_at, d.id
+          AND NOT EXISTS (
+              SELECT 1 FROM notification_deliveries AS p
+              WHERE p.channel_id = d.channel_id AND p.status = 'in_progress'
+          )
+    ), picked AS (
+        SELECT e.id FROM eligible AS e
+        WHERE e.rn <= 2
+        ORDER BY e.created_at, e.id
         LIMIT least(greatest(n, 0), 100)
+    ), ready AS (
+        -- Locked after picking; a row another claimer took meanwhile is skipped or no longer pending.
+        SELECT d.id
+        FROM notification_deliveries AS d
+        JOIN picked ON picked.id = d.id
+        WHERE d.status = 'pending'
         FOR UPDATE OF d SKIP LOCKED
     )
     UPDATE notification_deliveries AS d
@@ -2001,18 +2016,14 @@ BEGIN
     IF hi >= now() - interval '30 days' OR lo = date_trunc('month', now()) THEN
         RETURN false;
     END IF;
-    SELECT EXISTS (
-        SELECT 1
-        FROM (
-            SELECT c.monitor_id, c.location_id, date_trunc('hour', c.checked_at) AS hour, count(*) AS n
-            FROM check_results AS c
-            WHERE c.checked_at >= lo AND c.checked_at < hi
-            GROUP BY 1, 2, 3
-        ) AS raw
-        LEFT JOIN result_rollups_hourly AS r
-          ON r.monitor_id = raw.monitor_id AND r.location_id = raw.location_id AND r.hour = raw.hour
-        WHERE r.total IS DISTINCT FROM raw.n
-    ) INTO incomplete;
+    -- Every raw row of the partition must be in a rollup. A rollup hour counts the raw rows it
+    -- saw and never more than exist (raw rows are not deleted before the partition), so equal
+    -- totals mean every hour matches. Two scalar aggregates instead of a group by over the whole
+    -- partition (one row per monitor, location and hour).
+    SELECT (SELECT count(*) FROM check_results WHERE checked_at >= lo AND checked_at < hi)
+        IS DISTINCT FROM
+           (SELECT COALESCE(sum(total), 0) FROM result_rollups_hourly WHERE hour >= lo AND hour < hi)
+    INTO incomplete;
     IF incomplete THEN
         RETURN false;
     END IF;
@@ -2361,12 +2372,13 @@ AS $function$
 DECLARE
     caller_tenant uuid := NULLIF(current_setting('app.tenant_id', true), '')::uuid;
     mon_project   uuid;
+    mon_paused    boolean;
     loc_kind      text;
 BEGIN
     IF caller_tenant IS NULL THEN
         RAISE EXCEPTION 'monitor_set_location: app.tenant_id is not set' USING ERRCODE = 'insufficient_privilege';
     END IF;
-    SELECT project_id INTO mon_project FROM monitors
+    SELECT project_id, paused INTO mon_project, mon_paused FROM monitors
     WHERE tenant_id = caller_tenant AND id = p_monitor_id AND deleted_at IS NULL AND type IN ('http', 'tcp');
     IF mon_project IS NULL THEN
         RETURN 'no_monitor';
@@ -2388,7 +2400,8 @@ BEGIN
     INSERT INTO monitor_locations (tenant_id, monitor_id, location_id)
     VALUES (caller_tenant, p_monitor_id, p_location_id) ON CONFLICT DO NOTHING;
     INSERT INTO monitor_location_state (tenant_id, monitor_id, location_id, next_run_at)
-    VALUES (caller_tenant, p_monitor_id, p_location_id, now() + random() * interval '30 seconds')
+    VALUES (caller_tenant, p_monitor_id, p_location_id,
+            CASE WHEN mon_paused THEN 'infinity'::timestamptz ELSE now() + random() * interval '30 seconds' END)
     ON CONFLICT DO NOTHING;
     RETURN 'ok';
 END
@@ -2526,10 +2539,11 @@ BEGIN
         consecutive_failures = 0,
         lease_token = NULL,
         lease_until = NULL,
-        next_run_at = CASE WHEN m.type IN ('http', 'tcp') THEN now() + random() * interval '30 seconds'
+        next_run_at = CASE WHEN m.type IN ('http', 'tcp') AND NOT m.paused AND m.deleted_at IS NULL
+                           THEN now() + random() * interval '30 seconds'
                            ELSE 'infinity'::timestamptz END
     FROM monitors AS m
-    WHERE m.tenant_id = caller_tenant AND m.id = p_monitor_id AND m.deleted_at IS NULL
+    WHERE m.tenant_id = caller_tenant AND m.id = p_monitor_id
       AND s.tenant_id = m.tenant_id AND s.monitor_id = m.id;
     GET DIAGNOSTICS n = ROW_COUNT;
     RETURN n;

@@ -152,12 +152,16 @@ func TestIntegrationOutbox(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer func() { _ = tx2.Rollback(ctx) }()
-		a, b := ids(claimOn(tx1, 2)), ids(claimOn(tx2, 10))
-		got := append(a, b...)
-		slices.Sort(got)
-		slices.Sort(want)
-		if len(a) != 2 || !slices.Equal(got, want) {
-			t.Fatalf("claimed %v and %v, want disjoint sets covering %v", a, b, want)
+		// A channel gives out two rows per claim: the second claimer, concurrent and unable to see
+		// the first's uncommitted rows, finds them locked and takes none of them.
+		a, b := ids(claimOn(tx1, 5)), ids(claimOn(tx2, 10))
+		if len(a) != 2 || len(b) != 0 {
+			t.Fatalf("claimed %v and %v, want two rows and none", a, b)
+		}
+		for _, id := range a {
+			if !slices.Contains(want, id) {
+				t.Fatalf("claimed unknown row %s", id)
+			}
 		}
 	})
 
