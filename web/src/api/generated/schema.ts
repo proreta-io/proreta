@@ -1735,8 +1735,8 @@ export interface paths {
     /**
      * List the custom domains of every organization
      * @description Custom domains of all organizations, newest first; released ones are not listed. `query`
-     *     matches the host (substring, case-insensitive); `state` keeps only the given states. Platform
-     *     admins only.
+     *     matches the host, the organization's slug or its name (substring, case-insensitive); `state`
+     *     keeps only the given states. Platform admins only.
      */
     get: operations["adminListStatusPageDomains"];
     put?: never;

@@ -204,6 +204,20 @@ type Statuspage struct {
 	// CookieKey signs the unlock cookies of password-protected pages
 	// (PRORETA_STATUSPAGE_COOKIE_KEY, standard base64 of at least 32 bytes).
 	CookieKey Secret
+	// TLSAskAddr is PRORETA_STATUSPAGE_TLS_ASK_ADDR: the internal listener of the TLS permission
+	// endpoint a front proxy asks before it requests a certificate. Empty (the default) means the
+	// endpoint is off. It is never routed through the public Gateway.
+	TLSAskAddr string
+	// TLSAskToken is PRORETA_STATUSPAGE_TLS_ASK_TOKEN: the shared token the proxy presents; required
+	// when TLSAskAddr is set.
+	TLSAskToken Secret
+}
+
+// CtlDatabase is the configuration of the proretactl commands that read the database with the
+// api's role (status-domains).
+type CtlDatabase struct {
+	Base
+	DatabaseURL Secret
 }
 
 // Migrate is the configuration of cmd/migrate.
@@ -384,11 +398,50 @@ func LoadStatuspage(lookup LookupFunc) (Statuspage, error) {
 		TrustedProxyHops: l.integer("PRORETA_TRUSTED_PROXY_HOPS", 0, 0, 10),
 		CookieSecure:     l.boolean("PRORETA_COOKIE_SECURE", true),
 		CookieKey:        l.base64Key("PRORETA_STATUSPAGE_COOKIE_KEY", 32),
+		TLSAskAddr:       l.optionalAddr("PRORETA_STATUSPAGE_TLS_ASK_ADDR"),
+	}
+	cfg.TLSAskToken = l.tlsAskToken("PRORETA_STATUSPAGE_TLS_ASK_TOKEN", cfg.TLSAskAddr != "")
+	if cfg.TLSAskAddr != "" && (cfg.TLSAskAddr == cfg.AdminAddr || cfg.TLSAskAddr == cfg.HTTPAddr) {
+		l.fail("PRORETA_STATUSPAGE_TLS_ASK_ADDR", "must differ from PRORETA_HTTP_ADDR and PRORETA_ADMIN_ADDR")
 	}
 	if cfg.HTTPAddr != "" && cfg.HTTPAddr == cfg.AdminAddr {
 		l.fail("PRORETA_HTTP_ADDR", "must differ from PRORETA_ADMIN_ADDR")
 	}
 	l.cookieMatchesURL(cfg.CookieSecure, cfg.PublicURL)
+	return cfg, l.err()
+}
+
+// optionalAddr is addr with an empty default that stays empty.
+func (l *loader) optionalAddr(name string) string {
+	if l.optional(name) == "" {
+		return ""
+	}
+	return l.addr(name, "")
+}
+
+// tlsAskToken reads the shared token of the TLS permission endpoint. It is required when the
+// endpoint is on (and ignored otherwise); at least 32 characters of [A-Za-z0-9._~-] so it can sit
+// in a URL query without escaping, for proxies that cannot send a header.
+func (l *loader) tlsAskToken(name string, required bool) Secret {
+	if !required {
+		return ""
+	}
+	v := l.required(name)
+	if v == "" {
+		return ""
+	}
+	if len(v) < 32 || strings.Trim(v, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._~-") != "" {
+		l.fail(name, "must be at least 32 characters of letters, digits and . _ ~ -")
+		return ""
+	}
+	return Secret(v)
+}
+
+// LoadCtlDatabase loads the settings of proretactl commands that read the database through the
+// api's role.
+func LoadCtlDatabase(lookup LookupFunc) (CtlDatabase, error) {
+	l := &loader{lookup: lookup}
+	cfg := CtlDatabase{Base: l.base(), DatabaseURL: l.databaseURL("PRORETA_DATABASE_URL")}
 	return cfg, l.err()
 }
 

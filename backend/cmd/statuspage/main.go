@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -18,6 +19,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/platform/logging"
 	"github.com/proreta-io/proreta/backend/internal/platform/metrics"
 	"github.com/proreta-io/proreta/backend/internal/statuspages/public"
+	"github.com/proreta-io/proreta/backend/internal/statuspages/tlsask"
 )
 
 // Set at build time with -ldflags "-X main.version=... -X main.commit=...".
@@ -64,8 +66,18 @@ func run() error {
 		Registerer:  reg,
 		HTTPMetrics: metrics.NewHTTP(reg),
 	})
-	return httpx.Serve(ctx, log, cfg.ShutdownTimeout,
+	servers := []*http.Server{
 		httpx.NewServer(cfg.HTTPAddr, handler, log),
 		httpx.NewServer(cfg.AdminAddr, httpx.AdminHandler(log, pool.Ping, reg), log),
-	)
+	}
+	if cfg.TLSAskAddr != "" {
+		// Its own listener, so a NetworkPolicy can let only the front proxy reach it while
+		// Prometheus and the probes keep the admin port.
+		ask, err := tlsask.New(tlsask.DBAllower{Pool: pool}, tlsask.Options{Token: cfg.TLSAskToken.Value(), Logger: log, Registerer: reg})
+		if err != nil {
+			return err
+		}
+		servers = append(servers, httpx.NewServer(cfg.TLSAskAddr, httpx.Recover(log)(ask), log))
+	}
+	return httpx.Serve(ctx, log, cfg.ShutdownTimeout, servers...)
 }

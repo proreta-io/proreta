@@ -97,7 +97,11 @@ var definerCalls = map[string]string{
 	"status_page_domain_held_by_other": `SELECT status_page_domain_held_by_other('status.acme.com')`,
 	"status_page_domain_takeover":      `SELECT * FROM status_page_domain_takeover('status.acme.com', gen_random_uuid(), '{}')`,
 	"status_page_domain_counts":        `SELECT * FROM status_page_domain_counts()`,
-	"auth_domain_lookup":               `SELECT * FROM auth_domain_lookup('example.com')`,
+	// Operator interface: the admin ones refuse an unknown actor (PRA01); the export answers rows.
+	"admin_status_page_domains_list":        `SELECT * FROM admin_status_page_domains_list(gen_random_uuid(), NULL, '', NULL, 1, 0)`,
+	"admin_status_page_domain_set_disabled": `SELECT admin_status_page_domain_set_disabled(gen_random_uuid(), gen_random_uuid(), true, 'x', gen_random_uuid(), NULL)`,
+	"status_page_domains_export":            `SELECT * FROM status_page_domains_export(false)`,
+	"auth_domain_lookup":                    `SELECT * FROM auth_domain_lookup('example.com')`,
 	// Specula: the in-function refusal without a tenant, an unknown token, a trigger function.
 	"specula_create":               `SELECT specula_create(gen_random_uuid(), 'x', '\x00', true, NULL, gen_random_uuid())`,
 	"specula_revoke":               `SELECT specula_revoke(gen_random_uuid())`,

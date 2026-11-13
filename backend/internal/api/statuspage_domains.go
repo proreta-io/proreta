@@ -43,15 +43,3 @@ func (s *server) SetPrimaryStatusPageDomain(_ context.Context, _ gen.SetPrimaryS
 func (s *server) RemoveStatusPageDomain(_ context.Context, _ gen.RemoveStatusPageDomainRequestObject) (gen.RemoveStatusPageDomainResponseObject, error) {
 	return nil, s.domainsGate()
 }
-
-func (s *server) AdminListStatusPageDomains(_ context.Context, _ gen.AdminListStatusPageDomainsRequestObject) (gen.AdminListStatusPageDomainsResponseObject, error) {
-	return nil, s.domainsGate()
-}
-
-func (s *server) AdminDisableStatusPageDomain(_ context.Context, _ gen.AdminDisableStatusPageDomainRequestObject) (gen.AdminDisableStatusPageDomainResponseObject, error) {
-	return nil, s.domainsGate()
-}
-
-func (s *server) AdminEnableStatusPageDomain(_ context.Context, _ gen.AdminEnableStatusPageDomainRequestObject) (gen.AdminEnableStatusPageDomainResponseObject, error) {
-	return nil, s.domainsGate()
-}
