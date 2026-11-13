@@ -114,7 +114,7 @@ describe("admin organization members", () => {
       within(select)
         .getAllByRole("option")
         .map((o) => o.textContent),
-    ).toEqual(["No organization role (projects only)", "Owner", "Maintainer", "Member", "Viewer"]);
+    ).toEqual(["Projects only", "Owner", "Maintainer", "Member", "Viewer"]);
     await userEvent.selectOptions(select, "viewer");
     await waitFor(() => expect(requests(fetchMock, "PUT", `${base}/members/u-2`)).toHaveLength(1));
     expect(await requests(fetchMock, "PUT", `${base}/members/u-2`)[0]!.json()).toEqual({

@@ -5,9 +5,34 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", "node_modules"] },
+  { ignores: ["dist", "node_modules", "src/api/generated"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
+  // Type-aware rules: they catch dropped promises, `any` leaking out of JSON and conditions that
+  // can never change, which the plain rules cannot see.
+  ...tseslint.configs.recommendedTypeChecked.map((c) => ({ ...c, files: ["src/**/*.{ts,tsx}"] })),
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    languageOptions: {
+      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
+    },
+    rules: {
+      "@typescript-eslint/no-deprecated": "error",
+      "@typescript-eslint/no-unnecessary-condition": "error",
+      "@typescript-eslint/no-unnecessary-type-assertion": "error",
+      "@typescript-eslint/switch-exhaustiveness-check": "error",
+    },
+  },
+  {
+    // Mock handlers are async without awaiting, and JSON read back from a request is `any`.
+    files: ["**/*.test.{ts,tsx}"],
+    rules: {
+      "@typescript-eslint/require-await": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-call": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+    },
+  },
   reactHooks.configs.flat.recommended,
   jsxA11y.flatConfigs.recommended,
   {
@@ -43,6 +68,12 @@ export default tseslint.config(
         },
       ],
     },
+  },
+  {
+    // The mock drops fields from its records with rest destructuring.
+    files: ["mock/**/*.ts"],
+    languageOptions: { globals: globals.node },
+    rules: { "@typescript-eslint/no-unused-vars": ["error", { ignoreRestSiblings: true }] },
   },
   {
     files: ["vite.config.ts", "eslint.config.js"],

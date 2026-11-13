@@ -42,6 +42,112 @@ const requests = (mock: ReturnType<typeof mockApi>, method: string, path: string
     .filter((r) => r.method === method && new URL(r.url).pathname === path);
 
 describe("members page", () => {
+  it("shows and changes the role of one person in every project, under the person", async () => {
+    const project = (id: string, name: string) => ({
+      id,
+      name,
+      slug: id,
+      isDefault: id === "d",
+      allMembers: id === "d",
+      role: "owner",
+      monitorCount: 0,
+      channelCount: 0,
+      createdAt: "2026-10-01T00:00:00Z",
+      updatedAt: "2026-10-01T00:00:00Z",
+    });
+    const bobIn = (projectRole: "member" | "maintainer") => ({
+      userId: "u2",
+      login: "bob@example.com",
+      displayName: "",
+      organizationRole: null,
+      projectRole,
+      effectiveRole: projectRole,
+      explicit: true,
+      allProjects: false,
+    });
+    const fetchMock = mockApi({
+      ...as("owner"),
+      "GET /api/v1/members": () => json({ items: [me, member({ role: null })] }),
+      "GET /api/v1/invitations": () => json({ items: [] }),
+      "GET /api/v1/projects": () => json({ items: [project("d", "Default"), project("w", "Web")] }),
+      "GET /api/v1/projects/d/members": () => json({ items: [] }),
+      "GET /api/v1/projects/w/members": () => json({ items: [bobIn("member")] }),
+      "PUT /api/v1/projects/d/members/u2": () => json(bobIn("maintainer")),
+      "DELETE /api/v1/projects/w/members/u2": () => new Response(null, { status: 204 }),
+    });
+    renderApp("/members");
+    // The project roles show under the login without opening anything.
+    const row = await screen.findByRole("row", { name: /bob@example.com/ });
+    expect(await within(row).findByText("Web: Member")).toBeInTheDocument();
+
+    await userEvent.click(within(row).getByRole("button", { name: "Projects of bob@example.com" }));
+    const inDefault = await screen.findByLabelText("bob@example.com: role in Default");
+    const inWeb = screen.getByLabelText("bob@example.com: role in Web");
+    expect(inDefault).toHaveValue("");
+    expect(within(inDefault).getByRole("option", { name: "No access" })).toBeInTheDocument();
+    expect(inWeb).toHaveValue("member");
+
+    await userEvent.selectOptions(inDefault, "maintainer");
+    await waitFor(() =>
+      expect(requests(fetchMock, "PUT", "/api/v1/projects/d/members/u2")).toHaveLength(1),
+    );
+    expect(await requests(fetchMock, "PUT", "/api/v1/projects/d/members/u2")[0]!.json()).toEqual({
+      role: "maintainer",
+    });
+    // Back to the baseline removes the direct role.
+    await userEvent.selectOptions(inWeb, "");
+    await waitFor(() =>
+      expect(requests(fetchMock, "DELETE", "/api/v1/projects/w/members/u2")).toHaveLength(1),
+    );
+  });
+
+  it("shows the inherited role, not a lower direct one, in the project rows", async () => {
+    const web = {
+      id: "w",
+      name: "Web",
+      slug: "w",
+      isDefault: false,
+      allMembers: false,
+      role: "owner",
+      monitorCount: 0,
+      channelCount: 0,
+      createdAt: "2026-10-01T00:00:00Z",
+      updatedAt: "2026-10-01T00:00:00Z",
+    };
+    mockApi({
+      ...as("owner"),
+      "GET /api/v1/members": () => json({ items: [me, member({ role: "maintainer" })] }),
+      "GET /api/v1/invitations": () => json({ items: [] }),
+      "GET /api/v1/projects": () => json({ items: [web] }),
+      // A lowered override kept by the migration: the organization role still wins.
+      "GET /api/v1/projects/w/members": () =>
+        json({
+          items: [
+            {
+              userId: "u2",
+              login: "bob@example.com",
+              displayName: "",
+              organizationRole: "maintainer",
+              projectRole: "viewer",
+              effectiveRole: "maintainer",
+              explicit: true,
+              allProjects: false,
+            },
+          ],
+        }),
+    });
+    renderApp("/members");
+    const row = await screen.findByRole("row", { name: /bob@example.com/ });
+    await userEvent.click(within(row).getByRole("button", { name: "Projects of bob@example.com" }));
+    const inWeb = await screen.findByLabelText("bob@example.com: role in Web");
+    expect(inWeb).toHaveValue("");
+    expect(
+      within(inWeb).getByRole("option", { name: "Inherited: Maintainer" }),
+    ).toBeInTheDocument();
+    expect(within(inWeb).queryByRole("option", { name: "Viewer" })).not.toBeInTheDocument();
+    expect(within(row).queryByText(/Web:/)).not.toBeInTheDocument();
+  });
+
   it("shows a person without an organization role only the leave section", async () => {
     const fetchMock = mockApi({ ...as(null) });
     renderApp("/members");
@@ -95,7 +201,7 @@ describe("members page", () => {
     });
     renderApp("/members");
     const select = await screen.findByLabelText("Role of bob@example.com");
-    await userEvent.selectOptions(select, "No organization role (projects only)");
+    await userEvent.selectOptions(select, "Projects only");
     await waitFor(() => expect(requests(fetchMock, "PATCH", "/api/v1/members/u2")).toHaveLength(1));
     expect(sent).toEqual([{ role: null }]);
     expect(
@@ -175,7 +281,7 @@ describe("members page", () => {
       within(role)
         .getAllByRole("option")
         .map((o) => o.textContent),
-    ).toEqual(["No organization role (projects only)", "Owner", "Maintainer", "Member", "Viewer"]);
+    ).toEqual(["Projects only", "Owner", "Maintainer", "Member", "Viewer"]);
     // The owner's own row: a select (owners manage owners) but no Remove for oneself.
     expect(screen.getByText("You")).toBeInTheDocument();
 
@@ -183,7 +289,7 @@ describe("members page", () => {
     await waitFor(() => expect(requests(fetchMock, "PATCH", "/api/v1/members/u2")).toHaveLength(1));
     expect(await screen.findByText("bob@example.com is now viewer")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "Remove" }));
+    await userEvent.click(screen.getByRole("button", { name: "Remove bob@example.com" }));
     const dialog = await screen.findByRole("dialog", { name: "Remove bob@example.com?" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Remove member" }));
     await waitFor(() => expect(screen.queryByText("bob@example.com")).toBeNull());
@@ -394,7 +500,7 @@ describe("members page", () => {
     expect(await screen.findByLabelText("Role of bob@example.com")).toBeInTheDocument();
     expect(screen.queryByLabelText("Role of admin")).toBeNull();
     expect(screen.getByText("Only an owner can change an owner.")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Remove" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /^Remove / })).toHaveLength(1);
     expect(screen.queryByRole("button", { name: "Delete organization" })).toBeNull();
   });
 
@@ -406,7 +512,7 @@ describe("members page", () => {
     renderApp("/members");
     expect(await screen.findByText("bob@example.com")).toBeInTheDocument();
     expect(screen.queryByRole("combobox")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Remove" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Remove / })).toBeNull();
     expect(screen.queryByRole("button", { name: "Invite someone" })).toBeNull();
     expect(
       screen.getAllByText("Only maintainers and owners can invite people or change roles.").length,
@@ -580,6 +686,7 @@ describe("organization switcher", () => {
     renderApp("/");
     await waitFor(() => expect(requests(fetchMock, "GET", "/api/v1/monitors")).toHaveLength(1));
     const banner = await screen.findByRole("banner");
+    await userEvent.click(within(banner).getByRole("button", { name: /, account$/ }));
     const select = await within(banner).findByLabelText("Organization");
     expect(
       within(select).getByRole("option", { name: "Gone · Maintainer (suspended)" }),
@@ -617,7 +724,9 @@ describe("organization switcher", () => {
         json({ summary: { up: 0, down: 0, paused: 0, unknown: 0 }, items: [] }),
     });
     renderApp("/");
-    expect(await within(await screen.findByRole("banner")).findByText("Acme")).toBeInTheDocument();
+    const banner = await screen.findByRole("banner");
+    await userEvent.click(await within(banner).findByRole("button", { name: /, account$/ }));
+    expect(within(banner).getByText("Acme")).toBeInTheDocument();
     expect(screen.queryByLabelText("Organization")).toBeNull();
   });
 });

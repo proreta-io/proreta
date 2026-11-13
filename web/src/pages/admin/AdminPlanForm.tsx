@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState, type SubmitEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError, errorMessage, errorMeta } from "../../api/client";
 import {
@@ -120,7 +120,7 @@ function PlanForm({ plan }: { plan?: AdminPlan }) {
       setConfirm(null);
       done();
       toast(plan ? `Plan ${saved.name} saved.` : `Plan ${saved.name} created.`);
-      navigate("/admin/plans");
+      void navigate("/admin/plans");
     },
     onError: () => setConfirm(null),
   });
@@ -130,7 +130,7 @@ function PlanForm({ plan }: { plan?: AdminPlan }) {
       setConfirm(null);
       done();
       toast(`Plan ${plan?.name} deleted.`);
-      navigate("/admin/plans");
+      void navigate("/admin/plans");
     },
     onError: () => setConfirm(null),
   });
@@ -143,7 +143,7 @@ function PlanForm({ plan }: { plan?: AdminPlan }) {
       })
     : [];
 
-  const submit = (e: FormEvent) => {
+  const submit = (e: SubmitEvent<HTMLFormElement>) => {
     e.preventDefault();
     const errors: Record<string, string> = {};
     if (!draft.name.trim()) errors.name = "Enter a name.";

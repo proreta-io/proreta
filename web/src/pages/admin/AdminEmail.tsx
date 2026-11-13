@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState, type SubmitEvent } from "react";
 import { ApiError, errorMessage, errorMeta } from "../../api/client";
 import {
   deleteAdminEmailSettings,
@@ -154,7 +154,7 @@ function ConnectionForm({ settings }: { settings: AdminEmailSettings }) {
   const general =
     save.error && Object.keys(fields).length === 0 ? errorMessage(save.error) : undefined;
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
+  function onSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     save.mutate();
   }

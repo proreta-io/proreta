@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type SubmitEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { ApiError, errorMessage } from "../api/client";
 import {
@@ -75,6 +75,7 @@ export default function Settings() {
     if (!hash) return;
     const target = document.getElementById(decodeURIComponent(hash.slice(1)));
     if (!target) return;
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- jsdom has no scrollIntoView
     target.scrollIntoView?.({ block: "start" });
     target.focus({ preventScroll: true });
   }, [hash, can.ready]);
@@ -279,7 +280,7 @@ export function NotificationChannels() {
             {items.map((c) => (
               <Tr key={c.id} tone={c.status === "failed" ? "down" : "default"}>
                 <Td>
-                  <span className="font-medium break-words">{c.name}</span>
+                  <span className="block min-w-[160px] font-medium break-words">{c.name}</span>
                 </Td>
                 <Td className="text-caption">{channelTypeLabel[c.type]}</Td>
                 {multiProject && (
@@ -291,7 +292,7 @@ export function NotificationChannels() {
                   </Td>
                 ) : (
                   <>
-                    <Td className="text-caption">{eventsLabel(c.events)}</Td>
+                    <Td className="min-w-[160px] text-caption">{eventsLabel(c.events)}</Td>
                     <Td className="font-mono text-caption">
                       {c.mention.length > 0
                         ? c.mention.join(" ")
@@ -330,7 +331,7 @@ export function NotificationChannels() {
                             variant="ghost"
                             size="small"
                             aria-label={`Send a test message to ${c.name}`}
-                            busy={test.isPending && test.variables?.id === c.id}
+                            busy={test.isPending && test.variables.id === c.id}
                             disabled={test.isPending}
                             onClick={() => test.mutate(c)}
                           >
@@ -395,15 +396,17 @@ export function NotificationChannels() {
           )}
         </div>
       ) : (
-        <ChannelForm
-          key={editing.mode === "edit" ? editing.channel.id : "new"}
-          channel={editing.mode === "edit" ? editing.channel : undefined}
-          onDone={() => {
-            setEditing({ mode: "none" });
-            refresh();
-          }}
-          onCancel={() => setEditing({ mode: "none" })}
-        />
+        <div className="max-w-[560px]">
+          <ChannelForm
+            key={editing.mode === "edit" ? editing.channel.id : "new"}
+            channel={editing.mode === "edit" ? editing.channel : undefined}
+            onDone={() => {
+              setEditing({ mode: "none" });
+              refresh();
+            }}
+            onCancel={() => setEditing({ mode: "none" })}
+          />
+        </div>
       )}
 
       {deleting && (
@@ -490,7 +493,7 @@ function ChannelForm({
   });
 
   function update<K extends keyof ChannelFormValues>(key: K, value: ChannelFormValues[K]) {
-    patch({ [key]: value } as Partial<ChannelFormValues>);
+    patch({ [key]: value });
   }
 
   function patch(changes: Partial<ChannelFormValues>) {
@@ -504,7 +507,7 @@ function ChannelForm({
 
   const webhook = values.type === "webhook";
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
+  function onSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const found = validateChannelForm(values, creating);
     setErrors(found);
@@ -650,7 +653,7 @@ function ChannelForm({
                 value={values.project || defaultProject}
                 onChange={(e) => update("project", e.target.value)}
               >
-                {(projects ?? [])
+                {projects
                   .filter((p) => canManageChannelOf(can, p.id))
                   .map((p) => (
                     <option key={p.id} value={p.id}>

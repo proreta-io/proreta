@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { AdminMember, AdminOrganization, AdminUser } from "../api/endpoints";
+import type { AdminMember, AdminOrganization } from "../api/endpoints";
 import { json, mockApi, problem, renderApp, session, signedIn } from "../test/utils";
 
 const adminSession = { ...session, user: { ...session.user, isPlatformAdmin: true } };
@@ -30,16 +30,6 @@ const member = (over: Partial<AdminMember> = {}): AdminMember => ({
   joinedAt: "2026-10-01T00:00:00Z",
   isPlatformAdmin: false,
   isSystemAdmin: false,
-  ...over,
-});
-
-const user = (over: Partial<AdminUser> = {}): AdminUser => ({
-  id: "u-1",
-  login: "alice@alpha.example",
-  status: "active",
-  role: "owner",
-  createdAt: "2026-10-01T00:00:00Z",
-  isPlatformAdmin: false,
   ...over,
 });
 
@@ -156,8 +146,6 @@ describe("admin organizations list", () => {
       "GET /api/v1/admin/organizations": () =>
         json({ items: [organization()], total: 1, limit: 25, offset: 0 }),
       "GET /api/v1/admin/organizations/t-1": () => json(organization()),
-      "GET /api/v1/admin/organizations/t-1/users": () =>
-        json({ items: [user()], total: 1, limit: 100, offset: 0 }),
       "GET /api/v1/admin/stats": () => json(stats),
     });
     renderApp("/admin/organizations");
@@ -186,13 +174,6 @@ describe("admin organization details", () => {
       ...asAdmin,
       "GET /api/v1/admin/stats": () => json(stats),
       "GET /api/v1/admin/organizations/t-1": () => json(current),
-      "GET /api/v1/admin/organizations/t-1/users": () =>
-        json({
-          items: [user(), user({ id: "u-admin", login: "admin", isPlatformAdmin: true })],
-          total: 2,
-          limit: 100,
-          offset: 0,
-        }),
       "GET /api/v1/admin/organizations/t-1/members": () =>
         json({
           items: [

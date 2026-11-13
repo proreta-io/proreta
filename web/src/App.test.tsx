@@ -70,7 +70,9 @@ describe("auth guard", () => {
     expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
     expect(getCsrfToken()).toBe("csrf-1");
     // The top bar shows the login.
-    expect(within(screen.getByRole("banner")).getByText("admin")).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("banner")).getByRole("button", { name: /, account$/ }),
+    ).toHaveAttribute("title", "admin");
   });
 
   it("goes back to login when any request answers 401", async () => {
@@ -117,7 +119,8 @@ describe("auth guard", () => {
       "GET /api/v1/channels": () => json({ items: [] }),
     });
     renderApp("/settings");
-    await userEvent.click(await screen.findByRole("button", { name: "Log out" }));
+    await userEvent.click(await screen.findByRole("button", { name: /, account$/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Log out" }));
     expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
     const logoutCall = fetchMock.mock.calls
       .map(([r]) => r as Request)

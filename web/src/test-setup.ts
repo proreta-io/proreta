@@ -6,9 +6,11 @@ import "@testing-library/jest-dom/vitest";
 configure({ asyncUtilTimeout: 3000 });
 
 // jsdom has no modal dialogs: enough of the native API for a dialog to open, close and be found.
+/* eslint-disable @typescript-eslint/no-unnecessary-condition, @typescript-eslint/unbound-method -- the types claim jsdom has these */
 HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) {
   this.setAttribute("open", "");
 };
 HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) {
   this.removeAttribute("open");
 };
+/* eslint-enable @typescript-eslint/no-unnecessary-condition, @typescript-eslint/unbound-method */

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState, type SubmitEvent } from "react";
 import { ApiError, errorMessage, errorMeta } from "../../api/client";
 import {
   getAdminRetention,
@@ -55,7 +55,7 @@ function RetentionForm({ settings }: { settings: AdminRetentionSettings }) {
       toast("Retention settings saved.");
     },
   });
-  const submit = (e: FormEvent) => {
+  const submit = (e: SubmitEvent) => {
     e.preventDefault();
     save.mutate();
   };

@@ -1,0 +1,6 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": ["public/theme.js"],
+  "ignore": ["src/api/generated/**"],
+  "ignoreExportsUsedInFile": true
+}

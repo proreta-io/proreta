@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type SubmitEvent } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import {
   ALREADY_MEMBER_PROBLEM_TYPE,
@@ -36,7 +36,7 @@ export default function Invite() {
   const location = useLocation();
   const [token] = useState(() => location.hash.replace(/^#/, ""));
   useEffect(() => {
-    if (globalThis.location?.hash) {
+    if (globalThis.location.hash) {
       globalThis.history.replaceState(globalThis.history.state, "", "/invite");
     }
   }, []);
@@ -158,7 +158,7 @@ function AcceptAsUser({
     onJoining(true);
     try {
       await auth.acceptInvitation(token);
-      navigate("/", { replace: true });
+      void navigate("/", { replace: true });
       toast(`You joined ${preview.organizationName}`);
     } catch (err) {
       setBusy(false);
@@ -274,7 +274,7 @@ function NewAccount({
     setErrors((e) => (e[field] ? { ...e, [field]: undefined } : e));
   }
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function onSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
     const found = validateRegisterForm(values);
@@ -288,7 +288,7 @@ function NewAccount({
     setSubmitting(true);
     try {
       await auth.register(normalizeEmail(values.email), values.password, token, values.displayName);
-      navigate("/", { replace: true });
+      void navigate("/", { replace: true });
     } catch (err) {
       if (err instanceof ApiError && err.type === INVITATION_INVALID_PROBLEM_TYPE) {
         setGeneral("The invitation was used, revoked or expired meanwhile. Ask for a new link.");
@@ -318,7 +318,7 @@ function NewAccount({
       <AuthHeading>Join {preview.organizationName}</AuthHeading>
       <Offer preview={preview} />
       <InviteProviders token={token} />
-      <form onSubmit={onSubmit} noValidate className="flex flex-col gap-[18px]">
+      <form onSubmit={(e) => void onSubmit(e)} noValidate className="flex flex-col gap-[18px]">
         {(general || hasErrors) && <Alert>{general ?? "Check the highlighted fields."}</Alert>}
         <DisplayNameField
           value={values.displayName}
@@ -392,14 +392,14 @@ function ExistingAccount({
   const [error, setError] = useState<string | undefined>();
   const [submitting, setSubmitting] = useState(false);
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function onSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(undefined);
     setSubmitting(true);
     try {
       // The registration call with the token checks an existing account's password like a login.
       await auth.register(normalizeEmail(email), password, token);
-      navigate("/", { replace: true });
+      void navigate("/", { replace: true });
     } catch (err) {
       setSubmitting(false);
       setPassword("");
@@ -440,7 +440,7 @@ function ExistingAccount({
         Sign in with your account to join; your other organizations stay.
       </p>
       <InviteProviders token={token} />
-      <form onSubmit={onSubmit} className="flex flex-col gap-[18px]">
+      <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-[18px]">
         {error && <Alert>{error}</Alert>}
         <Field label="Email">
           {(c) => (

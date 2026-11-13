@@ -1,4 +1,4 @@
-/* Proreta design system, direction "Instrument". Components and gallery: src/components/ui (ui-kit.html in dev). */
+/* Proreta design system, direction "Instrument". Components: src/components/ui. */
 @import "tailwindcss";
 @import "@fontsource-variable/instrument-sans";
 @import "@fontsource-variable/azeret-mono";
@@ -295,5 +295,69 @@
   .proreta-beam {
     animation: none;
     transform: rotate(-5deg);
+  }
+}
+
+/*
+ * The open list of a Select in the theme as well (customizable select), with a mouse only: phones
+ * and touch screens keep the platform's picker. Unlayered, so it wins over the `appearance-none`
+ * utility; a browser without it keeps the native list.
+ */
+@media (pointer: fine) {
+  @supports (appearance: base-select) {
+    select,
+    ::picker(select) {
+      appearance: base-select;
+    }
+
+    /* The text sits in the middle of the box as in the native control. */
+    select {
+      display: flex;
+      align-items: center;
+    }
+
+    /* The kit draws its own chevron. */
+    select::picker-icon {
+      display: none;
+    }
+
+    ::picker(select) {
+      margin-block: 4px;
+      padding-block: 4px;
+      border: 1px solid var(--border);
+      background: var(--popover);
+      color: var(--foreground);
+      box-shadow:
+        0 1px 2px var(--shadow-near),
+        0 12px 24px -16px var(--shadow-far);
+    }
+
+    option {
+      padding: 8px 12px;
+      font-size: var(--text-body);
+    }
+
+    option:hover,
+    option:focus-visible {
+      background: var(--border-faint);
+    }
+
+    /* The keyboard position must be visible: --border-faint alone is too close to --popover. */
+    option:focus-visible {
+      outline: 2px solid var(--ring);
+      outline-offset: -2px;
+    }
+
+    option:checked {
+      font-weight: 600;
+    }
+
+    option:disabled {
+      color: var(--subtle-foreground);
+    }
+
+    option::checkmark {
+      color: var(--muted-foreground);
+    }
   }
 }

@@ -59,7 +59,7 @@ export function usePermissions(): Permissions {
   const query = useQuery({
     queryKey: queryKeys.permissions,
     queryFn: getPermissions,
-    enabled: session !== null && session !== undefined,
+    enabled: !!session,
     staleTime: 30_000,
   });
   return useMemo(() => permissionsFrom(query.data), [query.data]);

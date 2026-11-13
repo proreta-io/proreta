@@ -15,6 +15,7 @@ coverage.*
 node_modules/
 web/dist/
 web/.vite/
+*.tsbuildinfo
 
 # Secrets and local env
 /.dev/

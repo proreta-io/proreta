@@ -9,7 +9,18 @@ import type { MembershipRole } from "../api/endpoints";
  */
 export type OptionalRole = MembershipRole | null | undefined;
 
-const RANK: Record<MembershipRole, number> = { owner: 4, maintainer: 3, member: 2, viewer: 1 };
+export const RANK: Record<MembershipRole, number> = {
+  owner: 4,
+  maintainer: 3,
+  member: 2,
+  viewer: 1,
+};
+
+/** Every role, highest first. */
+export const ROLES: MembershipRole[] = ["owner", "maintainer", "member", "viewer"];
+
+/** The select value of "no organization role" (PROJECTS_ONLY_LABEL). */
+export const NO_ROLE = "none";
 
 export const ROLE_LABELS: Record<MembershipRole, string> = {
   owner: "Owner",
@@ -18,10 +29,7 @@ export const ROLE_LABELS: Record<MembershipRole, string> = {
   viewer: "Viewer",
 };
 
-/** The option that takes the organization role away. */
-export const NO_ROLE_LABEL = "No organization role (projects only)";
-
-/** What a list shows for a person without an organization role. */
+/** A person without an organization role, in lists and as the option that takes the role away. */
 export const PROJECTS_ONLY_LABEL = "Projects only";
 
 /** The label of a role that may be missing. */
@@ -46,9 +54,7 @@ export function roleAtLeast(role: OptionalRole, min: MembershipRole): boolean {
 /** The roles an actor may give someone (nobody grants above their own; owner only by an owner). */
 export function assignableRoles(actor: OptionalRole): MembershipRole[] {
   if (!roleAtLeast(actor, "maintainer")) return [];
-  return (["owner", "maintainer", "member", "viewer"] as const).filter(
-    (r) => RANK[r] <= RANK[actor as MembershipRole],
-  );
+  return ROLES.filter((r) => RANK[r] <= RANK[actor as MembershipRole]);
 }
 
 /**

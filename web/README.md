@@ -8,10 +8,12 @@ Requires Node 22 (`.nvmrc`).
 
 ```bash
 npm ci               # install from the lockfile
-npm run dev          # dev server on :5173, /api proxied to PRORETA_API_TARGET (default http://localhost:8080), /status to PRORETA_STATUSPAGE_TARGET (default http://localhost:8081), port from PRORETA_WEB_PORT; the component gallery is at /ui-kit.html
+npm run dev          # dev server on :5173, /api proxied to PRORETA_API_TARGET (default http://localhost:8080), /status to PRORETA_STATUSPAGE_TARGET (default http://localhost:8081), port from PRORETA_WEB_PORT
+npm run dev:mock     # dev server with a fake API in memory (mock/api.ts): no backend, awkward test data
 npm run build        # typecheck + production build into dist/
 npm run preview      # serve dist/ locally
-npm run lint         # eslint (flat config)
+npm run lint         # eslint (flat config, type-aware rules on src/)
+npm run knip         # unused files, exports and dependencies
 npm run typecheck    # tsc --noEmit
 npm test             # vitest (jsdom + Testing Library), fetch is mocked, no network
 npm run format       # prettier --write
@@ -48,7 +50,7 @@ The session cookie is `Secure`. Against a remote HTTPS target the proxy rewrites
 
 - `src/main.tsx` providers (error boundary, Query, Router, auth, toasts); `src/App.tsx` routes
 - `src/auth/` session context (`GET /auth/me`), login, registration and logout, `RequireAuth` route guard
-- `src/components/ui/` the design system: tokens (`theme.css`), components, gallery (`Gallery.tsx`, entry `src/ui-kit.tsx`, not in the production build)
+- `src/components/ui/` the design system: tokens (`theme.css`), components
 - `src/components/` app shell with the top bar, toasts (polite live region), error boundary, loading and error states, the one-time heartbeat URL panel
 - `src/pages/` one file per page: login, registration (`/register`, linked only when `GET /api/v1/public/config` says `registrationEnabled`), monitors list, add/edit monitor, monitor details, settings
 - `src/lib/` pure helpers with unit tests: `format.ts` (all durations, times and numbers; local time zone), `monitors.ts` (status text, summary, filter), `monitorForm.ts` (validation mirroring the server, server field-error mapping), `registerForm.ts` (the registration policy mirroring the server), `publicConfig.ts`, `ribbon.ts` (Signal Ribbon height, tone, time span and incident lane), `slack.ts`

@@ -103,12 +103,30 @@ export function Meter({ label, used, limit }: { label: string; used: number; lim
   );
 }
 
-export function Table({ children, className }: { children: ReactNode; className?: string }) {
+export function Table({
+  children,
+  className,
+  cards = false,
+}: {
+  children: ReactNode;
+  className?: string;
+  /** On a phone each row is a card (rows and cells styled by the caller); the header is hidden. */
+  cards?: boolean;
+}) {
   return (
     // relative: absolutely positioned content (an sr-only header) must scroll with the table,
     // not widen the page.
-    <div className={cx("relative overflow-x-auto border border-border", className)}>
-      <table className="w-full border-collapse">{children}</table>
+    <div
+      className={cx(
+        "relative overflow-x-auto border border-border",
+        cards && "max-sm:[&_table]:block max-sm:[&_tbody]:block max-sm:[&_thead]:hidden",
+        className,
+      )}
+    >
+      {/* A display other than table drops the implied table roles; explicit ones keep them. */}
+      <table role={cards ? "table" : undefined} className="w-full border-collapse">
+        {children}
+      </table>
     </div>
   );
 }
@@ -234,29 +252,6 @@ export function Pagination({
         </Button>
       </div>
     </nav>
-  );
-}
-
-/** Elevation 1 is a hairline: no shadow at rest. */
-export function Card({
-  title,
-  aside,
-  children,
-}: {
-  title?: ReactNode;
-  aside?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section className="flex flex-col border border-border bg-card">
-      {title && (
-        <header className="flex items-center gap-2.5 border-b border-border-faint px-4 py-3">
-          <h2 className="text-lead font-semibold">{title}</h2>
-          {aside}
-        </header>
-      )}
-      <div className="flex flex-col gap-3 p-4">{children}</div>
-    </section>
   );
 }
 

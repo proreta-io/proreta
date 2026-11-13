@@ -1,48 +1,22 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useEffect, useState, type SubmitEvent } from "react";
 import { errorMessage } from "../../api/client";
 import {
   listAdminAllUsers,
-  listAdminMembers,
   queryKeys,
-  removeAdminMember,
   resetAdminUserPassword,
   setAdminMember,
-  type AdminMember,
   type AdminOrganization,
   type AdminUserSummary,
   type MembershipRole,
 } from "../../api/endpoints";
+import PeopleTable from "../../components/PeopleTable";
 import TemporaryPasswordPanel from "../../components/TemporaryPasswordPanel";
 import { useToast } from "../../components/Toasts";
-import {
-  Alert,
-  Badge,
-  Button,
-  ConfirmDialog,
-  EmptyNote,
-  ErrorState,
-  Field,
-  Input,
-  Loading,
-  Select,
-  Skeleton,
-  Table,
-  Td,
-  Th,
-  Tr,
-} from "../../components/ui";
-import { formatDate } from "../../lib/format";
-import { NO_ROLE_LABEL, ROLE_LABELS, roleLabel } from "../../lib/roles";
-
-const ROLES: MembershipRole[] = ["owner", "maintainer", "member", "viewer"];
-const NONE = "none";
-
-type Pending =
-  | { kind: "role"; member: AdminMember; role: MembershipRole | null }
-  | { kind: "remove"; member: AdminMember }
-  | { kind: "reset"; member: AdminMember };
+import { Alert, Button, ConfirmDialog, Field, Input, Select } from "../../components/ui";
+import { memberLabel } from "../../lib/members";
+import { adminPeople, useRefreshPeople, type Person } from "../../lib/people";
+import { NO_ROLE, PROJECTS_ONLY_LABEL, ROLE_LABELS, ROLES, roleLabel } from "../../lib/roles";
 
 /** How many matches the picker shows; the search narrows the rest. */
 const MATCHES_SHOWN = 8;
@@ -53,18 +27,16 @@ export default function AdminOrganizationMembers({
 }: {
   organization: AdminOrganization;
 }) {
-  const queryClient = useQueryClient();
   const toast = useToast();
   const deleted = organization.deletedAt !== null;
-  const members = useQuery({
-    queryKey: queryKeys.adminMembers(organization.id),
-    queryFn: () => listAdminMembers(organization.id),
-  });
-  const [pending, setPending] = useState<Pending | null>(null);
+  const api = adminPeople(organization);
+  const refresh = useRefreshPeople(api);
+  const members = useQuery({ queryKey: api.keys.members, queryFn: api.listMembers });
+  const [resetting, setResetting] = useState<Person | null>(null);
   const [search, setSearch] = useState("");
   const [term, setTerm] = useState("");
   const [picked, setPicked] = useState<AdminUserSummary | null>(null);
-  const [role, setRole] = useState<MembershipRole | typeof NONE>("member");
+  const [role, setRole] = useState<MembershipRole | typeof NO_ROLE>("member");
   const [addError, setAddError] = useState<string | undefined>();
   // The temporary password lives only here: never in storage, gone when hidden or the page is
   // left. The mutation keeps no copy: gcTime 0 and reset() right after copying it.
@@ -80,83 +52,39 @@ export default function AdminOrganizationMembers({
     enabled: term.length >= 2 && picked === null,
   });
 
-  function refresh() {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.adminMembers(organization.id) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.adminUsers(organization.id) });
-    void queryClient.invalidateQueries({ queryKey: queryKeys.adminOrganization(organization.id) });
-  }
-
-  const change = useMutation({
-    mutationFn: ({ member, role }: { member: AdminMember; role: MembershipRole | null }) =>
-      setAdminMember(organization.id, member.userId, role),
-    onSuccess: (updated) => {
-      setPending(null);
-      refresh();
-      toast(
-        updated.role
-          ? `${updated.login} is now ${ROLE_LABELS[updated.role].toLowerCase()}`
-          : `${updated.login} now belongs through projects only`,
-      );
-    },
-    onError: (err) => {
-      setPending(null);
-      toast(errorMessage(err), "error");
-    },
-  });
-
-  const remove = useMutation({
-    mutationFn: (member: AdminMember) => removeAdminMember(organization.id, member.userId),
-    onSuccess: (_, member) => {
-      setPending(null);
-      refresh();
-      toast(`${member.login} was removed`);
-    },
-    onError: (err) => {
-      setPending(null);
-      toast(errorMessage(err), "error");
-    },
-  });
-
   const add = useMutation({
     mutationFn: (user: AdminUserSummary) =>
-      setAdminMember(organization.id, user.id, role === NONE ? null : role),
+      setAdminMember(organization.id, user.id, role === NO_ROLE ? null : role),
     onSuccess: (added) => {
       setPicked(null);
       setSearch("");
       setTerm("");
       setAddError(undefined);
-      refresh();
+      void refresh();
       toast(`${added.login} is ${roleLabel(added.role).toLowerCase()} now`);
     },
     onError: (err) => setAddError(errorMessage(err)),
   });
 
   const reset = useMutation({
-    mutationFn: (member: AdminMember) => resetAdminUserPassword(member.userId),
+    mutationFn: (member: Person) => resetAdminUserPassword(member.userId),
     gcTime: 0,
     onSuccess: (res, member) => {
-      setPending(null);
-      setTemporary({ login: member.login, password: res.temporaryPassword });
+      setResetting(null);
+      setTemporary({ login: memberLabel(member), password: res.temporaryPassword });
       reset.reset();
     },
     onError: (err) => {
-      setPending(null);
+      setResetting(null);
       toast(errorMessage(err), "error");
     },
   });
 
-  function onAdd(event: FormEvent<HTMLFormElement>) {
+  function onAdd(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!picked) return;
     setAddError(undefined);
     add.mutate(picked);
-  }
-
-  function onRoleChange(member: AdminMember, next: MembershipRole | null) {
-    // Owner changes are confirmed; the others apply at once.
-    if (next === "owner" || member.role === "owner")
-      setPending({ kind: "role", member, role: next });
-    else change.mutate({ member, role: next });
   }
 
   return (
@@ -177,119 +105,24 @@ export default function AdminOrganizationMembers({
           </Button>
         </TemporaryPasswordPanel>
       )}
-      {members.isPending && (
-        <Loading label="Loading members…">
-          <Skeleton className="w-1/2" />
-        </Loading>
-      )}
-      {members.isError && (
-        <ErrorState
-          variant="section"
-          title="Cannot load the members"
-          onRetry={() => void members.refetch()}
-        />
-      )}
-      {members.data && members.data.items.length === 0 && (
-        <EmptyNote>This organization has no members.</EmptyNote>
-      )}
-      {members.data && members.data.items.length > 0 && (
-        <Table>
-          <thead>
-            <tr>
-              <Th>Login</Th>
-              <Th>Role</Th>
-              <Th>Status</Th>
-              <Th numeric>Joined</Th>
-              <Th numeric>
-                <span className="sr-only">Actions</span>
-              </Th>
-            </tr>
-          </thead>
-          <tbody>
-            {members.data.items.map((m) => (
-              <Tr key={m.userId}>
-                <Td>
-                  <span className="flex flex-wrap items-center gap-2">
-                    <Link
-                      to={`/admin/users/${m.userId}`}
-                      className="font-mono text-[13px] break-all hover:underline"
-                    >
-                      {m.login}
-                    </Link>
-                    {m.isSystemAdmin && <Badge tone="inverse">System admin</Badge>}
-                    {m.isPlatformAdmin && !m.isSystemAdmin && (
-                      <Badge tone="inverse">Platform admin</Badge>
-                    )}
-                  </span>
-                </Td>
-                <Td>
-                  {deleted || m.isSystemAdmin ? (
-                    roleLabel(m.role)
-                  ) : (
-                    <Select
-                      aria-label={`Role of ${m.login}`}
-                      className="w-[250px] max-w-full"
-                      value={m.role ?? NONE}
-                      disabled={change.isPending}
-                      onChange={(e) =>
-                        onRoleChange(
-                          m,
-                          e.target.value === NONE ? null : (e.target.value as MembershipRole),
-                        )
-                      }
-                    >
-                      <option value={NONE}>{NO_ROLE_LABEL}</option>
-                      {ROLES.map((r) => (
-                        <option key={r} value={r}>
-                          {ROLE_LABELS[r]}
-                        </option>
-                      ))}
-                    </Select>
-                  )}
-                </Td>
-                <Td className={m.status === "disabled" ? "text-subtle-foreground" : undefined}>
-                  {m.status}
-                </Td>
-                <Td numeric>{formatDate(m.joinedAt)}</Td>
-                <Td numeric>
-                  <span className="inline-flex flex-wrap items-center justify-end gap-2">
-                    <Button
-                      variant="secondary"
-                      size="small"
-                      disabled={m.isSystemAdmin}
-                      aria-label={`Reset password of ${m.login}`}
-                      aria-describedby={
-                        m.isSystemAdmin ? `system-admin-note-${m.userId}` : undefined
-                      }
-                      onClick={() => setPending({ kind: "reset", member: m })}
-                    >
-                      Reset password
-                    </Button>
-                    {!deleted && !m.isSystemAdmin && (
-                      <Button
-                        variant="ghost-destructive"
-                        size="small"
-                        aria-label={`Remove ${m.login}`}
-                        onClick={() => setPending({ kind: "remove", member: m })}
-                      >
-                        Remove
-                      </Button>
-                    )}
-                  </span>
-                  {m.isSystemAdmin && (
-                    <span
-                      id={`system-admin-note-${m.userId}`}
-                      className="mt-1 block font-sans text-caption text-muted-foreground"
-                    >
-                      Managed by the proreta-admin Secret, not here.
-                    </span>
-                  )}
-                </Td>
-              </Tr>
-            ))}
-          </tbody>
-        </Table>
-      )}
+      <PeopleTable
+        api={api}
+        organizationName={organization.name}
+        userLink={(m) => `/admin/users/${m.userId}`}
+        actions={(m, describedBy) => (
+          <Button
+            variant="secondary"
+            size="small"
+            disabled={m.isSystemAdmin}
+            aria-label={`Reset password of ${memberLabel(m)}`}
+            // The note under the role says why.
+            aria-describedby={describedBy}
+            onClick={() => setResetting(m)}
+          >
+            Reset password
+          </Button>
+        )}
+      />
 
       {!deleted && (
         <form onSubmit={onAdd} className="flex max-w-[640px] flex-col gap-3 pt-2">
@@ -297,7 +130,7 @@ export default function AdminOrganizationMembers({
           {addError && <Alert>{addError}</Alert>}
           {picked ? (
             <p className="flex flex-wrap items-center gap-2">
-              <span className="font-mono text-[13px] break-all">{picked.login}</span>
+              <span className="font-mono text-[13px] break-words">{picked.login}</span>
               <Button
                 type="button"
                 variant="ghost"
@@ -344,9 +177,9 @@ export default function AdminOrganizationMembers({
                   {...c}
                   className="w-[250px] max-w-full"
                   value={role}
-                  onChange={(e) => setRole(e.target.value as MembershipRole | typeof NONE)}
+                  onChange={(e) => setRole(e.target.value as MembershipRole | typeof NO_ROLE)}
                 >
-                  <option value={NONE}>{NO_ROLE_LABEL}</option>
+                  <option value={NO_ROLE}>{PROJECTS_ONLY_LABEL}</option>
                   {ROLES.map((r) => (
                     <option key={r} value={r}>
                       {ROLE_LABELS[r]}
@@ -371,50 +204,19 @@ export default function AdminOrganizationMembers({
         </form>
       )}
 
-      {pending?.kind === "role" && (
+      {resetting && (
         <ConfirmDialog
-          title={`Make ${pending.member.login} ${pending.role ? ROLE_LABELS[pending.role].toLowerCase() : "project-only"}?`}
-          confirmLabel="Change role"
-          confirmVariant="primary"
-          busy={change.isPending}
-          onCancel={() => setPending(null)}
-          onConfirm={() => change.mutate({ member: pending.member, role: pending.role })}
-        >
-          <p>
-            {pending.role === "owner"
-              ? "An owner can do everything in this organization, including deleting it and managing other owners."
-              : "They lose the owner rights in this organization on their next request."}{" "}
-            The change is recorded in the organization&apos;s audit log.
-          </p>
-        </ConfirmDialog>
-      )}
-      {pending?.kind === "reset" && (
-        <ConfirmDialog
-          title={`Reset the password of ${pending.member.login}?`}
+          title={`Reset the password of ${memberLabel(resetting)}?`}
           confirmLabel="Reset password"
           confirmVariant="primary"
           busy={reset.isPending}
-          onCancel={() => setPending(null)}
-          onConfirm={() => reset.mutate(pending.member)}
+          onCancel={() => setResetting(null)}
+          onConfirm={() => reset.mutate(resetting)}
         >
           <p>
             The current password stops working and all of the user&apos;s sessions end. You get a
             temporary password once, to hand over yourself; the user must choose a new password at
             the next sign-in. Verify who asked for it first.
-          </p>
-        </ConfirmDialog>
-      )}
-      {pending?.kind === "remove" && (
-        <ConfirmDialog
-          title={`Remove ${pending.member.login}?`}
-          confirmLabel="Remove member"
-          busy={remove.isPending}
-          onCancel={() => setPending(null)}
-          onConfirm={() => remove.mutate(pending.member)}
-        >
-          <p>
-            They lose access to {organization.name} at once and are signed out of it. Their account
-            and other organizations stay. The last owner cannot be removed.
           </p>
         </ConfirmDialog>
       )}

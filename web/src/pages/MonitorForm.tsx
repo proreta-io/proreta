@@ -1,6 +1,6 @@
 import { usePermissions } from "../lib/permissions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useId, useState, type FormEvent, type ReactNode } from "react";
+import { useId, useState, type SubmitEvent, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError, errorMessage, errorMeta, planLimitMessage } from "../api/client";
 import {
@@ -273,7 +273,7 @@ function MonitorFormBody({
         setCreated(saved);
         return;
       }
-      navigate(`/monitors/${saved.id}`);
+      void navigate(`/monitors/${saved.id}`);
     },
     onError: (err) => {
       // A plan-limit refusal means the cached usage is stale.
@@ -297,7 +297,7 @@ function MonitorFormBody({
     );
   }
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
+  function onSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const current = { ...values, speculaId };
     const found = validateMonitorForm(current);

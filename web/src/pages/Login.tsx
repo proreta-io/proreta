@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState, type SubmitEvent } from "react";
 import { Link, Navigate, useLocation, useSearchParams } from "react-router-dom";
 import { ACCOUNT_SUSPENDED_PROBLEM_TYPE, ApiError, errorMessage } from "../api/client";
 import { useAuth } from "../auth/AuthProvider";
@@ -57,7 +57,7 @@ export default function Login() {
 
   if (auth.session) return <Navigate to={redirectTarget(location.state)} replace />;
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function onSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
     setSubmitting(true);
@@ -104,7 +104,7 @@ export default function Login() {
           <ProviderButtons providers={buttons} verb="Sign in with" />
           {buttons.length > 0 && showPassword && <OrDivider />}
           {showPassword && (
-            <form onSubmit={onSubmit} className="flex flex-col gap-[18px]">
+            <form onSubmit={(e) => void onSubmit(e)} className="flex flex-col gap-[18px]">
               {error && <Alert title={error.title}>{error.text}</Alert>}
               <Field label="Email or login">
                 {(c) => (

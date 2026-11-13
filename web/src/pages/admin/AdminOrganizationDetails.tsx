@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState, type SubmitEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { ApiError, errorMessage, errorMeta } from "../../api/client";
 import {
@@ -73,19 +73,22 @@ function OrganizationDetails({ id }: { id: string }) {
       </Loading>
     );
   }
-  if (organization.isError) {
-    if (organization.error instanceof ApiError && organization.error.status === 404) {
-      return (
-        <section className="flex flex-col items-start gap-4 py-10">
-          <h1 className="text-headline font-semibold tracking-[-0.02em] sm:text-display">
-            Organization not found
-          </h1>
-          <Link to="/admin/organizations" className={buttonClass("secondary")}>
-            Back to organizations
-          </Link>
-        </section>
-      );
-    }
+  // A failed refetch, even a 404, keeps the page: unmounting it would lose a temporary password
+  // on screen.
+  const data = organization.data;
+  if (!data && organization.error instanceof ApiError && organization.error.status === 404) {
+    return (
+      <section className="flex flex-col items-start gap-4 py-10">
+        <h1 className="text-headline font-semibold tracking-[-0.02em] sm:text-display">
+          Organization not found
+        </h1>
+        <Link to="/admin/organizations" className={buttonClass("secondary")}>
+          Back to organizations
+        </Link>
+      </section>
+    );
+  }
+  if (!data) {
     return (
       <div className="pt-9">
         <ErrorState
@@ -99,11 +102,11 @@ function OrganizationDetails({ id }: { id: string }) {
   }
   return (
     <section className="flex flex-col gap-8 pt-4">
-      <OrganizationInfo organization={organization.data} />
-      <AdminOrganizationMembers organization={organization.data} />
-      <AdminOrganizationInvitations organization={organization.data} />
-      <AdminOrganizationProjects organization={organization.data} />
-      <AdminOrganizationSettings organization={organization.data} />
+      <OrganizationInfo organization={data} />
+      <AdminOrganizationMembers organization={data} />
+      <AdminOrganizationInvitations organization={data} />
+      <AdminOrganizationProjects organization={data} />
+      <AdminOrganizationSettings organization={data} />
     </section>
   );
 }
@@ -167,7 +170,7 @@ function OrganizationInfo({ organization }: { organization: AdminOrganization })
     },
   });
 
-  function onSavePlan(event: FormEvent<HTMLFormElement>) {
+  function onSavePlan(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setPlanError(undefined);
     update.mutate({ planKey: plan });

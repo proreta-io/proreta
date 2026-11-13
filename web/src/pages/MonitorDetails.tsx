@@ -264,7 +264,7 @@ function Header({
       void queryClient.invalidateQueries({ queryKey: queryKeys.monitors, exact: true });
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
       toast("Monitor deleted");
-      navigate("/");
+      void navigate("/");
     },
     onError: (err) => {
       setConfirming(false);

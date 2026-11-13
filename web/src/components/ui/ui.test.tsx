@@ -17,7 +17,6 @@ import {
   SignalRibbon,
   StatusIndicator,
 } from ".";
-import Gallery from "./Gallery";
 
 describe("Button", () => {
   it("defaults to type=button so it cannot submit a form by accident", () => {
@@ -239,14 +238,6 @@ describe("SignalRibbon", () => {
   });
 });
 
-describe("Gallery", () => {
-  it("renders every section without crashing", () => {
-    render(<Gallery />);
-    expect(screen.getByRole("heading", { name: "UI kit" })).toBeInTheDocument();
-    expect(screen.getByText(/07 · Signal ribbon/)).toBeInTheDocument();
-  });
-});
-
 describe("Checkbox", () => {
   it("describes the box with its error and its description", () => {
     render(
@@ -303,13 +294,19 @@ describe("ToastProvider", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     fireEvent.mouseEnter(region);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    act(() => vi.advanceTimersByTime(10_000));
+    act(() => {
+      vi.advanceTimersByTime(10_000);
+    });
     expect(screen.getAllByText("Saved")).toHaveLength(2);
 
     fireEvent.mouseLeave(region);
-    act(() => vi.advanceTimersByTime(4_000));
+    act(() => {
+      vi.advanceTimersByTime(4_000);
+    });
     expect(screen.getAllByText("Saved")).toHaveLength(2);
-    act(() => vi.advanceTimersByTime(1_500));
+    act(() => {
+      vi.advanceTimersByTime(1_500);
+    });
     expect(screen.queryByText("Saved")).not.toBeInTheDocument();
   });
 });

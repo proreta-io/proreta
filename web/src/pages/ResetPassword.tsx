@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type SubmitEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { ApiError, errorMessage } from "../api/client";
 import { getAuthProviders, queryKeys, resetPassword } from "../api/endpoints";
@@ -30,7 +30,7 @@ export default function ResetPassword() {
   });
   const [token] = useState(() => location.hash.replace(/^#/, ""));
   useEffect(() => {
-    if (globalThis.location?.hash) {
+    if (globalThis.location.hash) {
       globalThis.history.replaceState(globalThis.history.state, "", "/reset-password");
     }
   }, []);
@@ -103,7 +103,7 @@ export default function ResetPassword() {
     );
   }
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
+  function onSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     const n = codePoints(password);
     if (n < PASSWORD_MIN || n > PASSWORD_MAX) {

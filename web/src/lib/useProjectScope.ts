@@ -16,7 +16,7 @@ export function useProjectScope() {
   const projects = useQuery({
     queryKey: queryKeys.projects,
     queryFn: listProjects,
-    enabled: session !== null && session !== undefined,
+    enabled: !!session,
     staleTime: 30_000,
   });
   const choice = resolveProjectChoice(saved, projects.data?.items);

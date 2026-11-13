@@ -1,9 +1,8 @@
-import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { useAuth } from "../auth/AuthProvider";
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import ErrorBoundary from "./ErrorBoundary";
 import { PAGE } from "./Layout";
-import ThemeToggle from "./ThemeToggle";
-import { Badge, Button, buttonClass, cx } from "./ui";
+import UserMenu from "./UserMenu";
+import { Badge, buttonClass, cx } from "./ui";
 
 const navClass = ({ isActive }: { isActive: boolean }) =>
   cx(
@@ -19,15 +18,7 @@ const navClass = ({ isActive }: { isActive: boolean }) =>
  * organization. The grey band is the signal that this is the privileged area.
  */
 export default function AdminLayout() {
-  const auth = useAuth();
-  const navigate = useNavigate();
   const location = useLocation();
-  const login = auth.session?.user.login;
-
-  async function onLogout() {
-    await auth.logout();
-    navigate("/login", { replace: true });
-  }
 
   return (
     <div className="flex min-h-dvh flex-col">
@@ -46,14 +37,10 @@ export default function AdminLayout() {
             <Badge tone="inverse">Platform admin</Badge>
           </div>
           <div className="flex items-center gap-3.5 py-1.5">
-            <span className="font-mono text-mono text-muted-foreground max-sm:hidden">{login}</span>
-            <ThemeToggle />
             <Link to="/" className={buttonClass("secondary", "small")}>
               Back to app
             </Link>
-            <Button variant="ghost" size="small" onClick={() => void onLogout()}>
-              Log out
-            </Button>
+            <UserMenu organization={false} />
           </div>
         </div>
         <div className={cx(PAGE, "flex h-11 items-stretch overflow-x-auto")}>

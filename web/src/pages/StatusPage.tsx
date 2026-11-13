@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useState, type SubmitEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ApiError, errorMessage, errorMeta } from "../api/client";
 import {
@@ -245,7 +245,7 @@ function CreatePage({
     },
   });
 
-  function onSubmit(e: FormEvent<HTMLFormElement>) {
+  function onSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     const next: Record<string, string> = {};
     if (!title.trim()) next.title = "Enter a title.";
@@ -488,7 +488,7 @@ function Branding({
     },
   });
 
-  function onSubmit(e: FormEvent<HTMLFormElement>) {
+  function onSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     const next: Record<string, string> = {};
     if (!value.title.trim()) next.title = "Enter a title.";
@@ -704,7 +704,7 @@ function ComponentEditor({ page, initial }: { page: Page; initial: StatusPageCom
     setErrors({});
   }
 
-  function onSubmit(e: FormEvent<HTMLFormElement>) {
+  function onSubmit(e: SubmitEvent<HTMLFormElement>) {
     e.preventDefault();
     const next: Record<string, string> = {};
     rows.forEach((r, i) => {
@@ -1040,6 +1040,8 @@ function StateMark({ status }: { status: PublicStatus | PublicOverallStatus }) {
     case "partial_outage":
     case "major_outage":
       return <TriangleShape className="text-down" />;
+    // default: also a status newer than the generated types.
+    case "no_data":
     default:
       return <HollowDotShape />;
   }
