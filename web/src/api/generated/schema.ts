@@ -1945,6 +1945,77 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/plans": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Plans with their limits
+     * @description Every plan: key, name, the limits every organization on it gets (`2147483647` is
+     *     unlimited), the number of organizations on it that are not deleted, whether it is a system
+     *     plan (`free`, `internal`, `community`: seeded, never deleted) and whether it can be deleted
+     *     now. System plans come first, then custom plans oldest first. Platform admins only.
+     */
+    get: operations["adminListPlans"];
+    put?: never;
+    /**
+     * Create a custom plan
+     * @description `key` is a slug (lowercase letters, digits and hyphens, 1 to 63 characters, starting with a
+     *     letter or digit) that never changes; `name` is 1 to 200 characters; `limits` must give every
+     *     limit (an integer from 0 to 2147483647, where 2147483647 is unlimited). A key that is taken
+     *     or a value out of range is 422 with `fieldErrors` (`key`, `name`, `limits.<resource>`).
+     *     Audited as `admin.plan.created` (`key`, `name`, `limits`). Platform admins only.
+     */
+    post: operations["adminCreatePlan"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/plans/{key}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Plan key (a slug) */
+        key: components["parameters"]["PlanKey"];
+      };
+      cookie?: never;
+    };
+    /**
+     * One plan with the highest use among its organizations
+     * @description Like an item of the list, plus `peakUsage`: for each resource the highest use among the
+     *     organizations that are not deleted and are on the plan, so the edit form can warn before a
+     *     limit goes below it. Organization overrides are not taken into account. Platform admins only.
+     */
+    get: operations["adminGetPlan"];
+    /**
+     * Change the name and limits of a plan
+     * @description Replaces the name and all limits, of a system plan too; the key never changes. It applies
+     *     at once to every organization on the plan. Resources above a lowered limit are kept: only
+     *     new ones are refused. A request that changes nothing does nothing. Validation as for
+     *     create (422 with `fieldErrors`). Audited as `admin.plan.updated` (`key`, `name`,
+     *     `previousName`, `limits`, `previousLimits`, `organizations`). Platform admins only.
+     */
+    put: operations["adminUpdatePlan"];
+    post?: never;
+    /**
+     * Delete a custom plan
+     * @description Only a custom plan that no organization refers to (a deleted organization still does):
+     *     a system plan is 409 `urn:proreta:problem:system-plan`, a plan in use is 409
+     *     `urn:proreta:problem:plan-in-use`. Audited as `admin.plan.deleted` (`key`, `name`,
+     *     `limits`). Platform admins only.
+     */
+    delete: operations["adminDeletePlan"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/retention": {
     parameters: {
       query?: never;
@@ -3448,6 +3519,31 @@ export interface components {
        */
       temporaryPassword: string;
     };
+    AdminPlan: {
+      key: string;
+      name: string;
+      limits: components["schemas"]["ResourceCounts"];
+      /** @description A seeded plan (`free`, `internal`, `community`); it can be edited, never deleted */
+      system: boolean;
+      /** @description Organizations on the plan that are not deleted */
+      organizations: number;
+      /** @description Custom plan that no organization refers to */
+      deletable: boolean;
+      peakUsage?: components["schemas"]["ResourceCounts"];
+    };
+    AdminPlanList: {
+      items: components["schemas"]["AdminPlan"][];
+    };
+    AdminPlanCreate: {
+      /** @description Slug, unique, never changes */
+      key: string;
+      name: string;
+      limits: components["schemas"]["ResourceCounts"];
+    };
+    AdminPlanUpdate: {
+      name: string;
+      limits: components["schemas"]["ResourceCounts"];
+    };
     AdminPlanCount: {
       key: string;
       name: string;
@@ -4108,6 +4204,8 @@ export interface components {
      *     | `urn:proreta:problem:email-taken` | 409 | The email is already registered |
      *     | `urn:proreta:problem:email-settings-conflict` | 409 | The email settings do not allow this now: no server configured, no successful test of the current settings, or a test already pending |
      *     | `urn:proreta:problem:plan-limit-reached` | 409 | The plan allows no more of a resource; carries `limit` and `max` |
+     *     | `urn:proreta:problem:system-plan` | 409 | A seeded plan (Free, Internal, Community) cannot be deleted |
+     *     | `urn:proreta:problem:plan-in-use` | 409 | An organization, a deleted one too, is still on the plan |
      *     | `urn:proreta:problem:protected-organization` | 409 | The default organization, or the admin's own, cannot be suspended or deleted |
      *     | `urn:proreta:problem:organization-deleted` | 409 | A deleted organization cannot be changed |
      *     | `urn:proreta:problem:system-admin` | 409 | The system admin's membership cannot be changed through the API, nor can it be disabled or revoked; the password of a platform admin cannot be reset by another admin |
@@ -4266,6 +4364,8 @@ export interface components {
     SpeculaId: string;
     /** @description Notification channel id; a value that is not a UUID is answered with 400 */
     ChannelId: string;
+    /** @description Plan key (a slug) */
+    PlanKey: string;
     /** @description Organization id; a value that is not a UUID is answered with 400 */
     OrganizationId: string;
     /** @description Project id; a value that is not a UUID is answered with 400 */
@@ -7073,6 +7173,153 @@ export interface operations {
       400: components["responses"]["BadRequest"];
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminListPlans: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The plans */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminPlanList"];
+        };
+      };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminCreatePlan: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminPlanCreate"];
+      };
+    };
+    responses: {
+      /** @description The new plan */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminPlan"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      422: components["responses"]["UnprocessableEntity"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminGetPlan: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Plan key (a slug) */
+        key: components["parameters"]["PlanKey"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The plan */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminPlan"];
+        };
+      };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminUpdatePlan: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description Plan key (a slug) */
+        key: components["parameters"]["PlanKey"];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminPlanUpdate"];
+      };
+    };
+    responses: {
+      /** @description The plan after the change */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminPlan"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      422: components["responses"]["UnprocessableEntity"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminDeletePlan: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description Plan key (a slug) */
+        key: components["parameters"]["PlanKey"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
       default: components["responses"]["Error"];
     };
   };

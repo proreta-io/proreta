@@ -69,6 +69,8 @@ const (
 	problemInternal           = "urn:proreta:problem:internal"
 	problemFeatureUnavailable = "urn:proreta:problem:feature-unavailable"
 	problemEmailConflict      = "urn:proreta:problem:email-settings-conflict"
+	problemSystemPlan         = "urn:proreta:problem:system-plan"
+	problemPlanInUse          = "urn:proreta:problem:plan-in-use"
 )
 
 // badRequestError is a request the handler itself rejected (the validator catches most).
@@ -195,6 +197,12 @@ func writeError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 	case errors.Is(err, admin.ErrEmailTestPending):
 		p.Type, p.Title, p.Status = problemEmailConflict, "A test email is already on its way", http.StatusConflict
 		p.Detail = "Wait for its result, up to three minutes."
+	case errors.Is(err, admin.ErrSystemPlan):
+		p.Type, p.Title, p.Status = problemSystemPlan, "A system plan cannot be deleted", http.StatusConflict
+		p.Detail = "Free, Internal and Community are part of the platform. Edit them instead."
+	case errors.Is(err, admin.ErrPlanInUse):
+		p.Type, p.Title, p.Status = problemPlanInUse, "The plan is in use", http.StatusConflict
+		p.Detail = "Move every organization (deleted ones included) to another plan first."
 	case errors.Is(err, admin.ErrTenantDeleted):
 		p.Type, p.Title, p.Status = problemOrgDeleted, "The organization is deleted", http.StatusConflict
 		p.Detail = "A deleted organization cannot be changed."

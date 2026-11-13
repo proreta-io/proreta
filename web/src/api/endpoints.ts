@@ -42,6 +42,9 @@ export type AdminEmailFeaturesUpdate = Schemas["AdminEmailFeaturesUpdate"];
 export type AdminEmailTestResult = Schemas["AdminEmailTestResult"];
 export type AdminRegistrationSettings = Schemas["AdminRegistrationSettings"];
 export type AdminRetentionSettings = Schemas["AdminRetentionSettings"];
+export type AdminPlan = Schemas["AdminPlan"];
+/** One number per resource: a plan's limits, or the use of them. */
+export type ResourceCounts = Schemas["ResourceCounts"];
 export type AdminUser = Schemas["AdminUser"];
 export type AdminProject = Schemas["AdminProject"];
 export type AdminUserList = Schemas["AdminUserList"];
@@ -108,6 +111,8 @@ export const queryKeys = {
   adminEmail: ["admin", "email"] as const,
   adminRegistration: ["admin", "registration"] as const,
   adminRetention: ["admin", "retention"] as const,
+  adminPlans: ["admin", "plans"] as const,
+  adminPlan: (key: string) => ["admin", "plans", key] as const,
   adminOrganizations: (query: string, offset: number, includeDeleted: boolean) =>
     ["admin", "organizations", { query, offset, includeDeleted }] as const,
   adminOrganization: (id: string) => ["admin", "organization", id] as const,
@@ -462,6 +467,17 @@ export const getAdminRetention = () => unwrap(client.GET("/api/v1/admin/retentio
 /** A null value returns that retention to its default. */
 export const updateAdminRetention = (deliveryDays: number | null, rollupMonths: number | null) =>
   unwrap(client.PUT("/api/v1/admin/retention", { body: { deliveryDays, rollupMonths } }));
+
+export const listAdminPlans = () => unwrap(client.GET("/api/v1/admin/plans"));
+/** One plan with `peakUsage`, the highest use of each resource among its organizations. */
+export const getAdminPlan = (key: string) =>
+  unwrap(client.GET("/api/v1/admin/plans/{key}", { params: { path: { key } } }));
+export const createAdminPlan = (body: Schemas["AdminPlanCreate"]) =>
+  unwrap(client.POST("/api/v1/admin/plans", { body }));
+export const updateAdminPlan = (key: string, body: Schemas["AdminPlanUpdate"]) =>
+  unwrap(client.PUT("/api/v1/admin/plans/{key}", { params: { path: { key } }, body }));
+export const deleteAdminPlan = (key: string) =>
+  unwrap(client.DELETE("/api/v1/admin/plans/{key}", { params: { path: { key } } }));
 
 /** Queues a real test message; poll getAdminEmailSettings for the result. */
 export const sendAdminTestEmail = (to: string) =>

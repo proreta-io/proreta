@@ -24,6 +24,8 @@ import StatusPageSettings from "./pages/StatusPage";
 import VerifyEmail from "./pages/VerifyEmail";
 import AdminEmail from "./pages/admin/AdminEmail";
 import AdminRegistration from "./pages/admin/AdminRegistration";
+import AdminPlanForm from "./pages/admin/AdminPlanForm";
+import AdminPlans from "./pages/admin/AdminPlans";
 import AdminRetention from "./pages/admin/AdminRetention";
 import AdminUserDetails from "./pages/admin/AdminUserDetails";
 import AdminUsers from "./pages/admin/AdminUsers";
@@ -71,6 +73,9 @@ export default function App() {
             <Route path="organizations/:id" element={<AdminOrganizationDetails />} />
             <Route path="users" element={<AdminUsers />} />
             <Route path="users/:id" element={<AdminUserDetails />} />
+            <Route path="plans" element={<AdminPlans />} />
+            <Route path="plans/new" element={<AdminPlanForm />} />
+            <Route path="plans/:key" element={<AdminPlanForm />} />
             <Route path="email" element={<AdminEmail />} />
             <Route path="registration" element={<AdminRegistration />} />
             <Route path="retention" element={<AdminRetention />} />
