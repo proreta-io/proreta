@@ -24,26 +24,6 @@ func (s *server) domainsGate() error {
 	return errCustomDomainsNotWired
 }
 
-func (s *server) ListStatusPageDomains(_ context.Context, _ gen.ListStatusPageDomainsRequestObject) (gen.ListStatusPageDomainsResponseObject, error) {
-	return nil, s.domainsGate()
-}
-
-func (s *server) AddStatusPageDomain(_ context.Context, _ gen.AddStatusPageDomainRequestObject) (gen.AddStatusPageDomainResponseObject, error) {
-	return nil, s.domainsGate()
-}
-
-func (s *server) VerifyStatusPageDomain(_ context.Context, _ gen.VerifyStatusPageDomainRequestObject) (gen.VerifyStatusPageDomainResponseObject, error) {
-	return nil, s.domainsGate()
-}
-
-func (s *server) SetPrimaryStatusPageDomain(_ context.Context, _ gen.SetPrimaryStatusPageDomainRequestObject) (gen.SetPrimaryStatusPageDomainResponseObject, error) {
-	return nil, s.domainsGate()
-}
-
-func (s *server) RemoveStatusPageDomain(_ context.Context, _ gen.RemoveStatusPageDomainRequestObject) (gen.RemoveStatusPageDomainResponseObject, error) {
-	return nil, s.domainsGate()
-}
-
 func (s *server) AdminListStatusPageDomains(_ context.Context, _ gen.AdminListStatusPageDomainsRequestObject) (gen.AdminListStatusPageDomainsResponseObject, error) {
 	return nil, s.domainsGate()
 }
