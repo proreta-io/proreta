@@ -2722,8 +2722,17 @@ CREATE OR REPLACE FUNCTION public.purge_expired_sessions()
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-    WITH d AS (DELETE FROM sessions WHERE expires_at < now() RETURNING 1)
-    SELECT count(*)::integer FROM d
+    WITH gone AS (
+        DELETE FROM sessions AS s
+        WHERE s.id IN (
+            SELECT e.id FROM sessions AS e
+            WHERE e.expires_at < now()
+            ORDER BY e.expires_at
+            LIMIT 1000
+        )
+        RETURNING 1
+    )
+    SELECT count(*)::integer FROM gone
 $function$
 CREATE OR REPLACE FUNCTION public.purge_mail_outbox(p_keep interval)
  RETURNS integer
