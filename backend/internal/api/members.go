@@ -49,7 +49,14 @@ func (s *server) authorize(f gen.StrictHandlerFunc, operationID string) gen.Stri
 		if p.MustChangePassword && !authz.AllowedWhileMustChangePassword(operationID) {
 			return nil, errPasswordChangeRequired
 		}
-		allowed := authz.Can(authz.Actor{UserID: p.UserID, Role: authz.Role(p.Role)}, operationID)
+		actor := authz.Actor{UserID: p.UserID, Role: authz.Role(p.Role)}
+		if perm, _ := authz.PermissionOf(operationID); perm == authz.PlatformAdmin {
+			// The flag is read again here, not trusted from the path-prefix middleware.
+			if actor.PlatformAdmin, err = s.auth.IsPlatformAdmin(ctx, p.UserID); err != nil {
+				return nil, err
+			}
+		}
+		allowed := authz.Can(actor, operationID)
 		if !allowed && authz.LevelOfOperation(operationID) == authz.LevelProject {
 			// Only now the direct project roles are needed (one query, cached for the request).
 			full, err := s.accessFor(r)
