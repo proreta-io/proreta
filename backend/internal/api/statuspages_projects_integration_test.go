@@ -407,3 +407,43 @@ func TestIntegrationChannelSecretsFollowTheOrganization(t *testing.T) {
 		t.Errorf("make a project channel organization-wide: %d %s", r.code, r.raw)
 	}
 }
+
+// TestIntegrationStatusPageLimitIsPerProject runs on the default Free limit (1): every project gets
+// its own page and so does the organization, a full scope answers 409 naming the scope, the list can
+// be filtered by project, and raising max_status_pages is all that allows a second page in a project.
+func TestIntegrationStatusPageLimitIsPerProject(t *testing.T) {
+	w := newProjectWorld(t, "statuspageperproject")
+	owner := w.hdr("owner")
+	create := func(project string) response {
+		body := `{"slug":"` + nextSlug() + `","title":"t"`
+		if project != "" {
+			body += `,"projectId":"` + project + `"`
+		}
+		return w.c.do(http.MethodPost, "/api/v1/status-pages", body+`}`, owner)
+	}
+	for _, p := range []string{w.alpha, w.beta, ""} {
+		if r := create(p); r.code != http.StatusCreated {
+			t.Fatalf("first page of %q: %d %s", p, r.code, r.raw)
+		}
+	}
+	for p, scope := range map[string]string{w.alpha: "Each project has its own allowance.", "": "pages that belong to no project"} {
+		r := create(p)
+		if r.code != http.StatusConflict || r.body["type"] != "urn:proreta:problem:plan-limit-reached" || r.body["limit"] != "statusPages" ||
+			r.body["max"] != float64(1) || !strings.Contains(fmt.Sprint(r.body["detail"]), scope) {
+			t.Fatalf("second page of %q: %d %s", p, r.code, r.raw)
+		}
+	}
+	if r := w.c.do(http.MethodGet, "/api/v1/status-pages?projectId="+w.beta, "", owner); r.code != http.StatusOK || len(r.body["items"].([]any)) != 1 {
+		t.Fatalf("list of one project: %d %s", r.code, r.raw)
+	}
+	if u := w.c.do(http.MethodGet, "/api/v1/usage", "", owner); u.code != http.StatusOK || u.body["usage"].(map[string]any)["statusPages"] != float64(1) {
+		t.Fatalf("usage: %d %s", u.code, u.raw)
+	}
+	pgtest.MustExec(t, w.env.AdminConn(t), `UPDATE tenants SET limits = '{"max_status_pages": 2}' WHERE slug = 'default'`)
+	if r := create(w.alpha); r.code != http.StatusCreated {
+		t.Fatalf("second page after raising the limit: %d %s", r.code, r.raw)
+	}
+	if r := w.c.do(http.MethodGet, "/api/v1/status-pages?projectId="+w.alpha, "", owner); len(r.body["items"].([]any)) != 2 {
+		t.Fatalf("list after raising: %s", r.raw)
+	}
+}

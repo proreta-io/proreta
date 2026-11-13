@@ -1,6 +1,6 @@
 # Runbook: public status page
 
-A page belongs to a project or to the organization. Owners and maintainers of the project (or of the organization) configure a project page in the app (**Status page**); it shows only monitors of that project. An organization-level page is configured by organization owners and maintainers only and may show monitors of every project; people who hold only project roles do not see it. Existing pages are organization-level. Visitors open `https://<host>/status/<slug>`, served by the `statuspage` process (chart value `statuspage.enabled`).
+A page belongs to a project or to the organization; every project can have its own. Owners and maintainers of the project (or of the organization) configure a project page in the app (**Status page**); it shows only monitors of that project. An organization-level page is configured by organization owners and maintainers only and may show monitors of every project; people who hold only project roles do not see it. Pages created before projects are organization-level. Visitors open `https://<host>/status/<slug>`, served by the `statuspage` process (chart value `statuspage.enabled`).
 
 ## Enabling it together with the db bootstrap (preferred)
 On an empty or an existing database, set `database.bootstrap.enabled: true` and `statuspage.enabled: true` in one change: the sync waves run the bootstrap (-3, creates `proreta_statuspage` and adds `statuspage_url`) and the migration (-1, grants `status_page_snapshot`) before the renderer starts (0). The bootstrap does not skip while `proreta-db` lacks the status page keys, so provide the admin login for this change; afterwards it may stay on and delete the admin Secret. The two-step order below is equally valid.
@@ -23,6 +23,7 @@ SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace AN
 
 ## A page shows old data
 - The renderer caches 15 s per replica; jobs rebuilds every 30 s (`proreta_jobs_housekeeping_runs_total{task="rebuild_status_pages"}`, `proreta_jobs_status_page_snapshots_total`). A configuration change is rebuilt by the api at once.
+- jobs rebuilds the published pages one after another, one snapshot per page, so the run time grows with the number of published pages (the jobs log shows the duration of each run).
 - jobs logs "status page snapshot rebuild failed" with the organization and page id when one page fails; the others continue.
 - A suspended or deleted organization's page answers 404 (by design).
 
@@ -40,7 +41,7 @@ A deleted page's address, and the old address after a rename, stay reserved for 
 - Limits trust `X-Forwarded-For` as the api does: requests without it all share one `unknown` bucket, and a pod inside the cluster can reach the `statuspage` Service directly (unless an enforced NetworkPolicy prevents it) and send a forged `X-Forwarded-For` to get a fresh bucket for every request. The limits therefore only hold for traffic through the gateway; treat them as a cost bound, not a protection against in-cluster clients.
 
 ## Projects
-- A page is created in one project or in the organization and stays there; there is no move yet. The address stays unique across every organization, and the plan limit counts pages per organization, not per project.
+- A page is created in one project or in the organization and stays there; there is no move yet. The address stays unique across every organization. The plan limit (`max_status_pages`, 1 on Free and Internal, unlimited on Community) counts the pages of one project, and separately the organization-level pages, so every project can have its own page. A project may hold several pages once the limit is raised (plan or per-organization override): nothing else changes. `/usage` reports the fullest scope against that limit.
 - Components of a project page must be monitors of that project (`422` on `items.<n>.monitorId` otherwise). When a monitor is moved to another project it is removed from the pages of its old project, and those pages are refreshed at once; organization-level pages keep it. The monitor's audit row records `statusPageComponentsRemoved`.
 - A project that still has a status page is not empty: delete the page before the project.
 - A page of a project the caller cannot see answers `404`, like other project data.

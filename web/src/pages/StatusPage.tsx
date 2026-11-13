@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { ApiError, errorMessage, errorMeta } from "../api/client";
 import {
   clearStatusPagePassword,
@@ -82,11 +83,24 @@ export default function StatusPageSettings() {
   const pages = useQuery({ queryKey: queryKeys.statusPages, queryFn: () => listStatusPages() });
   const [selected, setSelected] = useState<string>();
   const [adding, setAdding] = useState(false);
-  const items = pages.data?.items ?? [];
+  const [params, setParams] = useSearchParams();
+  const switcher = useProjectScope().projectId;
+  // ?project=<id> (the project's settings link) wins over the project switcher; ?project=all shows every page.
+  const asked = params.get("project");
+  const projectFilter = asked === "all" ? undefined : (asked ?? switcher);
+  const all = pages.data?.items ?? [];
+  const items = projectFilter ? all.filter((p) => p.projectId === projectFilter) : all;
   const page = items.find((p) => p.id === selected) ?? items[0];
-  const scopes = creatableScopes(can, projects);
   const usage = useUsage().data;
-  const atLimit = usage !== undefined && usage.usage.statusPages >= usage.limits.statusPages;
+  // The plan limit applies to each project and to the organization separately; where the limit is
+  // unknown (no usage permission) the server's 409 answers instead.
+  const limit = usage?.limits.statusPages;
+  const scopes = creatableScopes(can, projects).filter(
+    (s) =>
+      (!projectFilter || s.value === projectFilter) &&
+      (limit === undefined || all.filter((p) => (p.projectId ?? "") === s.value).length < limit),
+  );
+  const filterName = projectFilter ? channelScopeLabel(projectFilter, projects) : undefined;
 
   return (
     <section className="flex flex-col gap-6">
@@ -103,6 +117,14 @@ export default function StatusPageSettings() {
           <p className="text-caption text-muted-foreground">{ROLE_HINTS.manageStatusPage}</p>
         )}
       </div>
+      {filterName && (
+        <p className="text-caption text-muted-foreground">
+          Showing the pages of <span className="font-medium">{filterName}</span>.{" "}
+          <Button variant="ghost" size="small" onClick={() => setParams({ project: "all" })}>
+            Show every page
+          </Button>
+        </p>
+      )}
       {pages.isPending ? (
         <Loading label="Loading the status page…">
           <Skeleton className="w-2/3" />
@@ -126,11 +148,15 @@ export default function StatusPageSettings() {
             onCancel={page ? () => setAdding(false) : undefined}
           />
         ) : (
-          <EmptyNote>There is no status page you can see yet.</EmptyNote>
+          <EmptyNote>
+            {filterName
+              ? `${filterName} has no status page you can see or create.`
+              : "There is no status page you can see yet."}
+          </EmptyNote>
         )
       ) : (
         <>
-          {(items.length > 1 || (scopes.length > 0 && !atLimit)) && (
+          {(items.length > 1 || scopes.length > 0) && (
             <div className="flex flex-wrap items-end gap-3">
               {items.length > 1 && (
                 <div className="w-full max-w-[420px]">
@@ -147,7 +173,7 @@ export default function StatusPageSettings() {
                   </Field>
                 </div>
               )}
-              {scopes.length > 0 && !atLimit && (
+              {scopes.length > 0 && (
                 <Button variant="secondary" size="small" onClick={() => setAdding(true)}>
                   New status page
                 </Button>

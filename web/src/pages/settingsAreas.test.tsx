@@ -200,7 +200,7 @@ describe("settings links", () => {
     );
     expect(within(projects).getByRole("link", { name: "Status pages of Alpha" })).toHaveAttribute(
       "href",
-      "/status-page",
+      "/status-page?project=a",
     );
     expect(screen.getByRole("link", { name: "Roles and permissions" })).toHaveAttribute(
       "href",

@@ -977,6 +977,7 @@ describe("settings", () => {
       ["Notification channels", "1", "1"],
       ["Members and open invitations", "1", "3"],
       ["Projects", "1", "50"],
+      ["Status pages in the fullest project", "0", "1"],
       ["Specula", "0", "1"],
     ]);
     expect(screen.getByText("Limit reached")).toBeInTheDocument();

@@ -338,4 +338,101 @@ describe("status page settings", () => {
       expect(await screen.findByLabelText("New password")).toBeInTheDocument();
     },
   );
+
+  describe("several pages", () => {
+    const usage = (limit: number) =>
+      json({
+        plan: { key: "free", name: "Free" },
+        limits: {
+          monitors: 3,
+          heartbeats: 1,
+          channels: 1,
+          members: 3,
+          projects: 50,
+          statusPages: limit,
+          specula: 1,
+        },
+        usage: {
+          monitors: 0,
+          heartbeats: 0,
+          channels: 1,
+          members: 1,
+          projects: 2,
+          statusPages: 1,
+          specula: 0,
+        },
+      });
+    const twoProjects = {
+      ...as("maintainer"),
+      "GET /api/v1/projects": () =>
+        json({ items: [project("p1", "Web", "maintainer"), project("p2", "Data", "maintainer")] }),
+      "GET /api/v1/status-pages/sp/preview": () => json(snapshot()),
+      "GET /api/v1/status-pages/sp/components": () => json({ items: [] }),
+      "GET /api/v1/monitors": () => json({ items: [] }),
+    };
+
+    it("offers a project its own page while the project is under the limit", async () => {
+      mockApi({
+        ...twoProjects,
+        "GET /api/v1/usage": () => usage(1),
+        "GET /api/v1/status-pages": () => json({ items: [page({ projectId: "p1" })] }),
+      });
+      renderApp("/status-page");
+      await userEvent.click(await screen.findByRole("button", { name: "New status page" }));
+      // Web is full (limit 1); Data and the organization still have room.
+      const scope = await screen.findByLabelText("Belongs to");
+      expect(
+        within(scope)
+          .getAllByRole("option")
+          .map((o) => o.textContent),
+      ).toEqual(["Organization", "Data"]);
+    });
+
+    it("hides creation for a project at the limit and shows the create form for an empty one", async () => {
+      const mocks = {
+        ...twoProjects,
+        "GET /api/v1/usage": () => usage(1),
+        "GET /api/v1/status-pages": () => json({ items: [page({ projectId: "p1" })] }),
+      };
+      mockApi(mocks);
+      renderApp("/status-page?project=p1");
+      expect(await screen.findByText(/Showing the pages of/)).toHaveTextContent("Web");
+      expect(screen.queryByRole("button", { name: "New status page" })).not.toBeInTheDocument();
+    });
+
+    it("opens the create form of a project without a page", async () => {
+      mockApi({
+        ...twoProjects,
+        "GET /api/v1/usage": () => usage(1),
+        "GET /api/v1/status-pages": () => json({ items: [page({ projectId: "p1" })] }),
+      });
+      renderApp("/status-page?project=p2");
+      expect(await screen.findByRole("button", { name: "Create status page" })).toBeInTheDocument();
+      expect(screen.queryByLabelText("Belongs to")).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole("button", { name: "Show every page" }));
+      expect(await screen.findByText(/Belongs to:/)).toHaveTextContent("Belongs to: Web");
+    });
+
+    it("lists several pages of one project once the limit allows it", async () => {
+      mockApi({
+        ...twoProjects,
+        "GET /api/v1/usage": () => usage(2),
+        "GET /api/v1/status-pages": () =>
+          json({
+            items: [
+              page({ id: "sp", projectId: "p1", title: "Web one" }),
+              page({ id: "sp2", projectId: "p1", title: "Web two", slug: "web-two" }),
+            ],
+          }),
+      });
+      renderApp("/status-page?project=p1");
+      const select = await screen.findByLabelText("Page", { selector: "select" });
+      expect(
+        within(select)
+          .getAllByRole("option")
+          .map((o) => o.textContent),
+      ).toEqual(["Web one · Web", "Web two · Web"]);
+      expect(screen.queryByRole("button", { name: "New status page" })).not.toBeInTheDocument();
+    });
+  });
 });
