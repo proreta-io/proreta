@@ -234,6 +234,12 @@ type Bootstrap struct {
 // shutdownTimeout leaves 5 s of the chart's 30 s termination grace period for the process to exit.
 const shutdownTimeout = 25 * time.Second
 
+// The lowest argon2id cost accepted in the admin hash (OWASP minimum: 19 MiB, 2 passes).
+const (
+	minHashMemoryKiB  = 19 * 1024
+	minHashIterations = 2
+)
+
 // LoadAPI loads the api configuration.
 func LoadAPI(lookup LookupFunc) (API, error) {
 	l := &loader{lookup: lookup}
@@ -590,8 +596,13 @@ func (l *loader) passwordHash(name string) Secret {
 	if v == "" {
 		return ""
 	}
-	if _, err := crypto.ParseArgon2idHash(v); err != nil {
+	h, err := crypto.ParseArgon2idHash(v)
+	switch {
+	case err != nil:
 		l.fail(name, "must be an argon2id PHC hash (generate with `proretactl hashpw`)")
+	case h.Params.Memory < minHashMemoryKiB || h.Params.Iterations < minHashIterations:
+		// Every password set later is hashed with the parameters of this hash.
+		l.fail(name, fmt.Sprintf("argon2id cost is too low: need m>=%d KiB and t>=%d (generate with `proretactl hashpw`)", minHashMemoryKiB, minHashIterations))
 	}
 	return Secret(v)
 }

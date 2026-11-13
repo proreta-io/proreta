@@ -17,11 +17,30 @@ func env(m map[string]string) LookupFunc {
 
 func validHash(t *testing.T) string {
 	t.Helper()
-	h, err := crypto.HashPassword("pw", crypto.Argon2Params{Memory: 64, Iterations: 1, Parallelism: 1, SaltLength: 16, KeyLength: 32})
+	return hashWith(t, 19*1024, 2)
+}
+
+func hashWith(t *testing.T, memoryKiB, iterations uint32) string {
+	t.Helper()
+	h, err := crypto.HashPassword("pw", crypto.Argon2Params{Memory: memoryKiB, Iterations: iterations, Parallelism: 1, SaltLength: 16, KeyLength: 32})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return h
+}
+
+func TestLoadAPIRejectsCheapAdminHash(t *testing.T) {
+	for name, h := range map[string]string{
+		"low memory":     hashWith(t, 64, 2),
+		"low iterations": hashWith(t, 19*1024, 1),
+	} {
+		e := apiEnv(t)
+		e["PRORETA_ADMIN_PASSWORD_HASH"] = h
+		_, err := LoadAPI(env(e))
+		if err == nil || !strings.Contains(err.Error(), "argon2id cost is too low") {
+			t.Errorf("%s: err = %v, want a cost error", name, err)
+		}
+	}
 }
 
 func apiEnv(t *testing.T) map[string]string {
