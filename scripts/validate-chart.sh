@@ -23,6 +23,11 @@ trap 'rm -rf "$out"' EXIT
 eso_args=(--set externalSecrets.enabled=true --set externalSecrets.secretStoreRef.name=my-secret-store)
 eso="${eso_args[*]}"
 oauth_secret="--set secrets.oauth.existingSecret=proreta-oauth-clients"
+# Status pages on customer domains: the feature, its ask endpoint (token Secret and the proxy allowed
+# to reach it) and the optional route for a Gateway that terminates the customer hosts.
+cd_on="--set statuspage.customDomains.enabled=true --set statuspage.customDomains.cnameTarget=customers.example.net"
+cd_ask="--set statuspage.customDomains.tlsAsk.enabled=true --set secrets.tlsAsk.existingSecret=proreta-tls-ask --set statuspage.customDomains.tlsAsk.proxy.namespace=caddy"
+cd_route="--set statuspage.customDomains.httpRoute.enabled=true --set statuspage.customDomains.httpRoute.hostnames[0]=status.acme.com --set statuspage.customDomains.httpRoute.parentRef.name=edge --set statuspage.customDomains.httpRoute.parentRef.sectionName=https-customers"
 
 # A chart packaged like the release workflow does (appVersion from the tag), installed without image.tag.
 packaged=$out/packaged
@@ -64,6 +69,13 @@ combos=(
   "example-oauth-existing-default-name|-f $example $tag --set secrets.oauth.existingSecret=proreta-oauth --set oauth.google.enabled=true"
   "example-presync|-f $example $tag --set database.bootstrap.enabled=false --set migration.hookPhase=PreSync"
   "example-no-section-name|-f $example $tag --set httpRoute.parentRef.sectionName="
+  "defaults-domains|$min $cd_on"
+  "example-domains|-f $example $tag $cd_on"
+  "example-domains-ask|-f $example $tag $cd_on $cd_ask"
+  "example-domains-ask-netpol|-f $example $tag $cd_on $cd_ask --set networkPolicy.enabled=true --set statuspage.customDomains.tlsAsk.proxy.podSelector.app=caddy --set statuspage.customDomains.tlsAsk.port=9443"
+  "example-domains-ask-eso|-f $example $tag $eso $cd_on --set statuspage.customDomains.tlsAsk.enabled=true"
+  "example-domains-route|-f $example $tag $cd_on $cd_route"
+  "example-domains-all|-f $example $tag $eso $cd_on $cd_route --set statuspage.customDomains.tlsAsk.enabled=true --set networkPolicy.enabled=true --set statuspage.customDomains.tlsAsk.proxy.podSelector.app=caddy --set statuspage.customDomains.abuseUrl=https://example.com/abuse --set statuspage.customDomains.forbiddenSuffixes[0]=example.com --set statuspage.customDomains.forbiddenSuffixes[1]=example.org --set statuspage.customDomains.installationHosts[0]=proreta.example.com --set statuspage.customDomains.dns.resolver=10.0.0.2:53 --set statuspage.customDomains.dns.timeout=1500ms --set httpRoute.hostnames[0]=proreta.example.com --set httpRoute.hostnames[1]=*.example.com"
   "packaged-no-tag|chart=$packaged/proreta -f $example"
 )
 
@@ -179,6 +191,33 @@ expect_fail "upper-case allowed domain" --set oauth.allowedDomains[0]=Example.co
 expect_fail "wildcard allowed domain" --set "oauth.allowedDomains[0]=*.example.com"
 expect_fail "oauth without remote key" "${eso_args[@]}" --set oauth.google.enabled=true --set secrets.oauth.remoteKey=
 expect_fail "invalid worker location" --set worker.location=Home_1
+expect_fail "custom domains without a CNAME target" --msg "statuspage.customDomains.cnameTarget is required" --set statuspage.customDomains.enabled=true
+expect_fail "custom domains without the status page" --msg "needs statuspage.enabled" $cd_on --set statuspage.enabled=false
+expect_fail "CNAME target in upper case" --msg "cnameTarget" --set statuspage.customDomains.enabled=true --set statuspage.customDomains.cnameTarget=Customers.example.net
+expect_fail "CNAME target with a trailing dot" --msg "cnameTarget" --set statuspage.customDomains.enabled=true --set statuspage.customDomains.cnameTarget=customers.example.net.
+expect_fail "CNAME target without a dot" --msg "cnameTarget" --set statuspage.customDomains.enabled=true --set statuspage.customDomains.cnameTarget=customers
+expect_fail "ask endpoint without a token Secret" --msg "secrets.tlsAsk" $cd_on --set statuspage.customDomains.tlsAsk.enabled=true
+expect_fail "ask port equal to the HTTP port" --msg "tlsAsk.port must differ" $cd_on $cd_ask --set statuspage.customDomains.tlsAsk.port=8080
+expect_fail "ask port equal to the admin port" --msg "tlsAsk.port must differ" $cd_on $cd_ask --set statuspage.customDomains.tlsAsk.port=9090
+expect_fail "ask port below 1024" --msg "port" $cd_on $cd_ask --set statuspage.customDomains.tlsAsk.port=80
+expect_fail "ask endpoint with a NetworkPolicy and no proxy" --msg "tlsAsk.proxy" $cd_on --set statuspage.customDomains.tlsAsk.enabled=true --set secrets.tlsAsk.existingSecret=proreta-tls-ask --set networkPolicy.enabled=true
+expect_fail "ask token is not a value" --msg "additional properties 'token' not allowed" $cd_on --set secrets.tlsAsk.token=literal
+expect_fail "ask token key in the statuspage values" --msg "additional properties 'token' not allowed" $cd_on --set statuspage.customDomains.tlsAsk.token=literal
+expect_fail "ask token ExternalSecret without remote key" "${eso_args[@]}" $cd_on --set statuspage.customDomains.tlsAsk.enabled=true --set secrets.tlsAsk.remoteKey=
+expect_fail "customer hosts route without hosts" --msg "httpRoute.hostnames is required" $cd_on --set statuspage.customDomains.httpRoute.enabled=true --set statuspage.customDomains.httpRoute.parentRef.name=edge
+expect_fail "customer hosts route without a Gateway" --msg "httpRoute.parentRef.name is required" $cd_on --set statuspage.customDomains.httpRoute.enabled=true --set statuspage.customDomains.httpRoute.hostnames[0]=status.acme.com
+expect_fail "customer hosts route with the installation host" --msg "installation host proreta.example.com" $cd_on $cd_route --set statuspage.customDomains.httpRoute.hostnames[1]=proreta.example.com
+expect_fail "customer hosts route with a wildcard" --msg "hostnames" $cd_on $cd_route --set "statuspage.customDomains.httpRoute.hostnames[1]=*.acme.com"
+expect_fail "abuse URL over http" --msg "abuseUrl" $cd_on --set statuspage.customDomains.abuseUrl=http://example.com/abuse
+expect_fail "abuse URL with another scheme" --msg "abuseUrl" $cd_on --set statuspage.customDomains.abuseUrl=javascript:alert
+expect_fail "abuse mailto without an address" --msg "abuseUrl" $cd_on --set statuspage.customDomains.abuseUrl=mailto:abuse
+expect_fail "forbidden suffix in upper case" --msg "forbiddenSuffixes" $cd_on --set statuspage.customDomains.forbiddenSuffixes[0]=Example.com
+expect_fail "forbidden suffix with a wildcard" --msg "forbiddenSuffixes" $cd_on --set "statuspage.customDomains.forbiddenSuffixes[0]=*.example.com"
+expect_fail "installation host with a port" --msg "installationHosts" $cd_on --set statuspage.customDomains.installationHosts[0]=proreta.example.com:443
+expect_fail "DNS resolver that is not an address" --msg "resolver" $cd_on --set statuspage.customDomains.dns.resolver=dns.example.com
+expect_fail "DNS timeout that is not a duration" --msg "timeout" $cd_on --set statuspage.customDomains.dns.timeout=fast
+expect_fail "typo in the custom domain values" --msg "additional properties 'cnameTarge' not allowed" --set statuspage.customDomains.cnameTarge=x
+expect_fail "custom domain edge IPs do not exist" --msg "additional properties 'edgeIPs' not allowed" $cd_on --set statuspage.customDomains.edgeIPs[0]=192.0.2.1
 
 echo "== defaults: web on, host names from config.publicUrl"
 if ! { grep -q '^kind: Deployment' "$out/defaults.yaml" && grep -q 'name: proreta-web$' "$out/defaults.yaml"; }; then echo "FAIL: web is not enabled by default" >&2; exit 1; fi
@@ -270,6 +309,76 @@ grep -q 'name: proreta-oauth-clients' "$out/example-oauth.yaml" || { echo "FAIL:
 grep -q '^kind: ExternalSecret' "$out/example-eso-db-admin.yaml" || { echo "FAIL: no db admin ExternalSecret with externalSecrets.enabled" >&2; exit 1; }
 grep -q 'name: proreta-oauth$' "$out/example-oauth-eso.yaml" || { echo "FAIL: no OAuth ExternalSecret with externalSecrets.enabled" >&2; exit 1; }
 echo "ok"
+
+echo "== custom domains: variables per process, ask token, NetworkPolicy, customer hosts route"
+python3 - "$out" <<'EOF'
+import sys, yaml
+out = sys.argv[1]
+def load(name):
+    return [d for d in yaml.safe_load_all(open(f"{out}/{name}.yaml")) if d]
+def env(docs, comp):
+    d = next((d for d in docs if d["kind"] == "Deployment" and d["metadata"]["labels"]["app.kubernetes.io/component"] == comp), None)
+    return {e["name"]: e for e in d["spec"]["template"]["spec"]["containers"][0].get("env", [])}
+def val(docs, comp, name):
+    return env(docs, comp)[name]["value"]
+DOM = ("PRORETA_STATUS_PAGE_CUSTOM_DOMAINS", "PRORETA_STATUSPAGE_CNAME_TARGET", "PRORETA_STATUSPAGE_INSTALLATION_HOSTS",
+       "PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES", "PRORETA_ABUSE_URL", "PRORETA_DNS_RESOLVER", "PRORETA_DNS_TIMEOUT",
+       "PRORETA_STATUSPAGE_TLS_ASK_ADDR", "PRORETA_STATUSPAGE_TLS_ASK_TOKEN")
+for name in ("defaults", "example", "example-no-statuspage"):
+    docs = load(name)
+    for comp in ("api", "jobs", "worker", "statuspage", "web", "speculagw"):
+        if any(d["kind"] == "Deployment" and d["metadata"]["labels"]["app.kubernetes.io/component"] == comp for d in docs):
+            assert not set(DOM) & set(env(docs, comp)), f"{name}: {comp} has custom domain settings while off"
+    assert not any(d["metadata"]["name"].endswith(("-customer-hosts", "-tls-ask")) for d in docs), f"{name}: custom domain objects while off"
+
+docs = load("example-domains")
+assert val(docs, "api", "PRORETA_STATUSPAGE_CNAME_TARGET") == "customers.example.net"
+assert val(docs, "jobs", "PRORETA_STATUSPAGE_CNAME_TARGET") == "customers.example.net"
+assert val(docs, "jobs", "PRORETA_DNS_TIMEOUT") == "3s" and "PRORETA_DNS_RESOLVER" not in env(docs, "jobs")
+assert val(docs, "api", "PRORETA_STATUSPAGE_INSTALLATION_HOSTS") == "proreta.example.com"
+assert val(docs, "statuspage", "PRORETA_STATUSPAGE_INSTALLATION_HOSTS") == "proreta.example.com"
+assert "PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES" not in env(docs, "api"), "forbidden suffixes rendered while empty"
+assert "PRORETA_ABUSE_URL" not in env(docs, "statuspage"), "abuse URL rendered while empty"
+assert not any(n.startswith("PRORETA_STATUSPAGE_TLS_ASK") for n in env(docs, "statuspage")), "ask endpoint without tlsAsk.enabled"
+assert not any(d["kind"] in ("NetworkPolicy", "HTTPRoute") and d["metadata"]["name"].endswith(("-tls-ask", "-customer-hosts")) for d in docs)
+
+docs = load("example-domains-ask")
+tok = env(docs, "statuspage")["PRORETA_STATUSPAGE_TLS_ASK_TOKEN"]["valueFrom"]["secretKeyRef"]
+assert tok == {"name": "proreta-tls-ask", "key": "token"}, tok
+assert val(docs, "statuspage", "PRORETA_STATUSPAGE_TLS_ASK_ADDR") == ":9091"
+assert not [d for d in docs if d["kind"] == "ExternalSecret"], "an ExternalSecret without externalSecrets.enabled"
+assert not [d for d in docs if d["kind"] == "NetworkPolicy"], "a NetworkPolicy without networkPolicy.enabled"
+
+docs = load("example-domains-ask-netpol")
+pol = next(d for d in docs if d["kind"] == "NetworkPolicy" and d["metadata"]["name"] == "proreta-tls-ask")
+frm = pol["spec"]["ingress"][0]["from"]
+assert frm == [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "caddy"}}, "podSelector": {"matchLabels": {"app": "caddy"}}}], frm
+assert pol["spec"]["ingress"][0]["ports"] == [{"protocol": "TCP", "port": 9443}]
+main = next(d for d in docs if d["kind"] == "NetworkPolicy" and d["metadata"]["name"] == "proreta")
+assert 9443 not in {p["port"] for r in main["spec"]["ingress"] for p in r["ports"]}, "the main policy admits the ask port"
+
+docs = load("example-domains-ask-eso")
+es = next(d for d in docs if d["kind"] == "ExternalSecret" and d["metadata"]["name"] == "proreta-statuspage-ask")
+assert [(x["secretKey"], x["remoteRef"]["key"], x["remoteRef"]["property"]) for x in es["spec"]["data"]] == [("token", "proreta/statuspage-ask", "token")]
+assert env(docs, "statuspage")["PRORETA_STATUSPAGE_TLS_ASK_TOKEN"]["valueFrom"]["secretKeyRef"]["name"] == "proreta-statuspage-ask"
+
+docs = load("example-domains-route")
+route = next(d for d in docs if d["kind"] == "HTTPRoute" and d["metadata"]["name"] == "proreta-customer-hosts")
+assert route["spec"]["hostnames"] == ["status.acme.com"]
+assert route["spec"]["parentRefs"][0]["name"] == "edge" and "namespace" not in route["spec"]["parentRefs"][0]
+assert route["spec"]["parentRefs"][0]["sectionName"] == "https-customers"
+assert next(d for d in docs if d["kind"] == "HTTPRoute" and d["metadata"]["name"] == "proreta")["spec"]["hostnames"] == ["proreta.example.com"]
+
+docs = load("example-domains-all")
+assert val(docs, "api", "PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES") == "example.com,example.org"
+assert val(docs, "api", "PRORETA_STATUSPAGE_INSTALLATION_HOSTS") == "proreta.example.com"
+assert val(docs, "jobs", "PRORETA_DNS_RESOLVER") == "10.0.0.2:53" and val(docs, "jobs", "PRORETA_DNS_TIMEOUT") == "1500ms"
+assert val(docs, "statuspage", "PRORETA_ABUSE_URL") == "https://example.com/abuse"
+docs = load("defaults-domains")
+# Default installation hosts: httpRoute.hostnames without wildcards, then the public URL's host.
+assert val(docs, "api", "PRORETA_STATUSPAGE_INSTALLATION_HOSTS") == "proreta.example.com"
+print("ok")
+EOF
 
 echo "== invariants on rendered manifests"
 python3 scripts/check-rendered-chart.py "${renders[@]}"

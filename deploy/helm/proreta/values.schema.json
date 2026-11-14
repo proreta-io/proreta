@@ -646,6 +646,24 @@
             }
           ]
         },
+        "tlsAsk": {
+          "type": "object",
+          "title": "TLS ask token",
+          "description": "shared token of the status page TLS ask endpoint, key token: a Secret you created (existingSecret) or, with externalSecrets.enabled, the ExternalSecret <fullname>-statuspage-ask read from remoteKey (property token); only read with customDomains and tlsAsk enabled",
+          "additionalProperties": false,
+          "properties": {
+            "existingSecret": {
+              "type": "string",
+              "title": "existing TLS ask Secret",
+              "description": "Secret in the release namespace with key token (at least 32 characters of letters, digits and . _ ~ -); when set no ExternalSecret is rendered"
+            },
+            "remoteKey": {
+              "type": "string",
+              "title": "TLS ask remote key",
+              "description": "JSON secret in your store with property token, used when existingSecret is empty"
+            }
+          }
+        },
         "oauth": {
           "type": "object",
           "title": "OAuth client credentials",
@@ -705,6 +723,7 @@
         "crypto",
         "request",
         "statuspage",
+        "tlsAsk",
         "oauth",
         "bootstrap"
       ]
@@ -1152,6 +1171,192 @@
         },
         "service": {
           "$ref": "#/definitions/service"
+        },
+        "customDomains": {
+          "type": "object",
+          "title": "custom domains",
+          "description": "status pages on a customer's own domain; off by default, nothing is rendered when off",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "title": "custom domains enabled",
+              "description": "PRORETA_STATUS_PAGE_CUSTOM_DOMAINS (api, jobs, statuspage); needs statuspage.enabled and cnameTarget"
+            },
+            "cnameTarget": {
+              "type": "string",
+              "title": "CNAME target",
+              "description": "PRORETA_STATUSPAGE_CNAME_TARGET (api, jobs): the host customers point their CNAME at, a lowercase DNS name without a trailing dot, for example customers.example.net; required when enabled",
+              "maxLength": 253,
+              "pattern": "^$|^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
+            },
+            "forbiddenSuffixes": {
+              "type": "array",
+              "title": "forbidden suffixes",
+              "description": "PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES (api): domains no customer may claim a name under, lowercase, no wildcard; empty: the registrable domain of config.publicUrl",
+              "items": {
+                "type": "string",
+                "maxLength": 253,
+                "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
+              }
+            },
+            "installationHosts": {
+              "type": "array",
+              "title": "installation hosts",
+              "description": "PRORETA_STATUSPAGE_INSTALLATION_HOSTS (api, statuspage): host names that keep the /status/<slug> routes and that no customer may claim; empty: httpRoute.hostnames without wildcards plus the host of config.publicUrl",
+              "items": {
+                "type": "string",
+                "maxLength": 253,
+                "pattern": "^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
+              }
+            },
+            "abuseUrl": {
+              "type": "string",
+              "title": "abuse URL",
+              "description": "PRORETA_ABUSE_URL (statuspage): the Report abuse link on customer domains, an https URL or a mailto: address; empty: no link",
+              "maxLength": 2048,
+              "pattern": "^$|^https://[^\\s\\\"'<>@/]+(/[^\\s\\\"'<>]*)?$|^mailto:[^\\s\\\"'<>@]+@[^\\s\\\"'<>@]+$"
+            },
+            "dns": {
+              "type": "object",
+              "title": "DNS lookups",
+              "description": "the verification job's DNS lookups (jobs only)",
+              "additionalProperties": false,
+              "properties": {
+                "resolver": {
+                  "type": "string",
+                  "title": "DNS resolver",
+                  "description": "PRORETA_DNS_RESOLVER (jobs): a recursive resolver, ip or ip:port such as 10.0.0.2 or [::1]:53; empty: the pod's resolver",
+                  "pattern": "^$|^[0-9]{1,3}(\\.[0-9]{1,3}){3}(:[0-9]{1,5})?$|^[0-9A-Fa-f:]+$|^\\[[0-9A-Fa-f:]+\\](:[0-9]{1,5})?$"
+                },
+                "timeout": {
+                  "type": "string",
+                  "title": "DNS timeout",
+                  "description": "PRORETA_DNS_TIMEOUT (jobs): one lookup, a Go duration from 500ms to 10s",
+                  "pattern": "^([0-9]+(\\.[0-9]+)?(ms|s))+$"
+                }
+              },
+              "required": [
+                "resolver",
+                "timeout"
+              ]
+            },
+            "tlsAsk": {
+              "type": "object",
+              "title": "TLS ask endpoint",
+              "description": "the internal listener a TLS proxy asks before it requests a certificate; never routed through an HTTPRoute; the token is secrets.tlsAsk",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "title": "ask endpoint enabled",
+                  "description": "serve the endpoint (PRORETA_STATUSPAGE_TLS_ASK_ADDR, PRORETA_STATUSPAGE_TLS_ASK_TOKEN) and expose the Service port tls-ask"
+                },
+                "port": {
+                  "type": "integer",
+                  "title": "ask port",
+                  "description": "container and Service port of the endpoint (the address is :<port>); must differ from statuspage.httpPort and config.adminPort",
+                  "minimum": 1024,
+                  "maximum": 65535
+                },
+                "proxy": {
+                  "type": "object",
+                  "title": "proxy",
+                  "description": "with networkPolicy.enabled, the only sources admitted to the ask port: a namespace, a pod selector, or both (the matching pods of that namespace)",
+                  "additionalProperties": false,
+                  "properties": {
+                    "namespace": {
+                      "type": "string",
+                      "pattern": "^$|^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+                      "maxLength": 63,
+                      "title": "proxy namespace",
+                      "description": "namespace of the TLS proxy; empty with a podSelector: the release namespace"
+                    },
+                    "podSelector": {
+                      "type": "object",
+                      "title": "proxy pod labels",
+                      "description": "matchLabels of the proxy pods",
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "required": [
+                "enabled",
+                "port",
+                "proxy"
+              ]
+            },
+            "httpRoute": {
+              "type": "object",
+              "title": "customer hosts HTTPRoute",
+              "description": "optional second HTTPRoute for customer hosts terminated at your own Gateway, routed to the statuspage Service",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "title": "customer hosts route enabled",
+                  "description": "render the HTTPRoute <fullname>-customer-hosts"
+                },
+                "hostnames": {
+                  "type": "array",
+                  "title": "customer hosts",
+                  "description": "the customer hosts the Gateway terminates; required when enabled; no installation host",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 253,
+                    "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$"
+                  }
+                },
+                "parentRef": {
+                  "type": "object",
+                  "title": "Gateway",
+                  "description": "the Gateway (and listener) the route attaches to; name is required when enabled",
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "title": "Gateway name",
+                      "description": "name of the Gateway that terminates TLS for the customer hosts"
+                    },
+                    "namespace": {
+                      "type": "string",
+                      "pattern": "^$|^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+                      "maxLength": 63,
+                      "title": "Gateway namespace",
+                      "description": "namespace of the Gateway; empty: the release namespace"
+                    },
+                    "sectionName": {
+                      "type": "string",
+                      "title": "listener name",
+                      "description": "listener (sectionName); empty attaches to every listener that admits the route"
+                    }
+                  },
+                  "required": [
+                    "name"
+                  ]
+                }
+              },
+              "required": [
+                "enabled",
+                "hostnames",
+                "parentRef"
+              ]
+            }
+          },
+          "required": [
+            "enabled",
+            "cnameTarget",
+            "forbiddenSuffixes",
+            "installationHosts",
+            "abuseUrl",
+            "dns",
+            "tlsAsk",
+            "httpRoute"
+          ]
         }
       },
       "required": [
@@ -1159,7 +1364,8 @@
         "replicas",
         "httpPort",
         "resources",
-        "service"
+        "service",
+        "customDomains"
       ]
     },
     "speculagw": {

@@ -78,3 +78,41 @@ spec:
           weight: 1
     {{- end }}
 {{- end }}
+{{- if and .Values.statuspage.enabled (include "proreta.statusDomains.enabled" .) .Values.statuspage.customDomains.httpRoute.enabled }}
+{{- $r := .Values.statuspage.customDomains.httpRoute }}
+---
+# Customer hosts terminated at your own Gateway: every path of those hosts goes to the renderer, which
+# answers only for hosts it has verified. The Host header reaches it unchanged.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "proreta.fullname" . }}-customer-hosts
+  labels:
+    {{- include "proreta.labels" (dict "ctx" . "component" "statuspage") | nindent 4 }}
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ $r.parentRef.name }}
+      {{- with $r.parentRef.namespace }}
+      namespace: {{ . }}
+      {{- end }}
+      {{- with $r.parentRef.sectionName }}
+      sectionName: {{ . }}
+      {{- end }}
+  hostnames:
+    {{- toYaml $r.hostnames | nindent 4 }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      timeouts:
+        request: 15s
+      backendRefs:
+        - group: ""
+          kind: Service
+          name: {{ include "proreta.componentName" (dict "ctx" . "component" "statuspage") }}
+          port: {{ .Values.statuspage.service.port }}
+          weight: 1
+{{- end }}
