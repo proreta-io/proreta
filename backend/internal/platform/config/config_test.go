@@ -739,6 +739,34 @@ func TestLoadStatuspageTLSAsk(t *testing.T) {
 	}
 }
 
+func TestLoadJobsDomainChecks(t *testing.T) {
+	load := func(extra map[string]string) (Jobs, error) {
+		e := apiEnv(t)
+		for k, v := range extra {
+			e[k] = v
+		}
+		return LoadJobs(env(e))
+	}
+	cfg, err := load(nil)
+	if err != nil || cfg.DomainChecks.Enabled || cfg.DomainChecks.Timeout != 3*time.Second {
+		t.Fatalf("defaults: %+v %v", cfg.DomainChecks, err)
+	}
+	cfg, err = load(map[string]string{"PRORETA_STATUS_PAGE_CUSTOM_DOMAINS": "true", "PRORETA_STATUSPAGE_CNAME_TARGET": "edge.example.net", "PRORETA_DNS_RESOLVER": "10.0.0.2:53", "PRORETA_DNS_TIMEOUT": "2s"})
+	if err != nil || !cfg.DomainChecks.Enabled || cfg.DomainChecks.CNAMETarget != "edge.example.net" || cfg.DomainChecks.Resolver != "10.0.0.2:53" || cfg.DomainChecks.Timeout != 2*time.Second {
+		t.Fatalf("enabled: %+v %v", cfg.DomainChecks, err)
+	}
+	for name, extra := range map[string]map[string]string{
+		"target uppercase":   {"PRORETA_STATUSPAGE_CNAME_TARGET": "Edge.Example.Net"},
+		"target not a host":  {"PRORETA_STATUS_PAGE_CUSTOM_DOMAINS": "true", "PRORETA_STATUSPAGE_CNAME_TARGET": "https://edge.example.net"},
+		"resolver not an IP": {"PRORETA_DNS_RESOLVER": "dns.example.net"},
+		"timeout too small":  {"PRORETA_DNS_TIMEOUT": "1ms"},
+	} {
+		if _, err := load(extra); err == nil {
+			t.Errorf("%s: no error", name)
+		}
+	}
+}
+
 func TestStatusPageDomainRules(t *testing.T) {
 	e := apiEnv(t)
 	e["PRORETA_PUBLIC_URL"] = "https://proreta.klr-ops.net"
