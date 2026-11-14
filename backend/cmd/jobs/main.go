@@ -80,7 +80,7 @@ func run() error {
 	mon := monitors.NewService(pool, sched, incidents.NewService(sched))
 	domainChecks := jobs.StatusDomainsConfig{Enabled: cfg.DomainChecks.Enabled, CNAMETarget: cfg.DomainChecks.CNAMETarget, Log: log}
 	if domainChecks.Enabled {
-		if domainChecks.Resolver, err = domains.NewNetResolver(domains.NetResolverConfig{Server: cfg.DomainChecks.DNS.Resolver, Timeout: cfg.DomainChecks.DNS.Timeout}); err != nil {
+		if domainChecks.Resolver, err = domains.NewNetResolver(domains.NetResolverConfig{Server: cfg.DomainChecks.Resolver, Timeout: cfg.DomainChecks.Timeout}); err != nil {
 			return err
 		}
 	}

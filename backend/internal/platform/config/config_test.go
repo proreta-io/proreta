@@ -703,11 +703,11 @@ func TestLoadJobsDomainChecks(t *testing.T) {
 		return LoadJobs(env(e))
 	}
 	cfg, err := load(nil)
-	if err != nil || cfg.DomainChecks.Enabled || cfg.DomainChecks.DNS.Timeout != 3*time.Second {
+	if err != nil || cfg.DomainChecks.Enabled || cfg.DomainChecks.Timeout != 3*time.Second {
 		t.Fatalf("defaults: %+v %v", cfg.DomainChecks, err)
 	}
 	cfg, err = load(map[string]string{"PRORETA_STATUS_PAGE_CUSTOM_DOMAINS": "true", "PRORETA_STATUSPAGE_CNAME_TARGET": "edge.example.net", "PRORETA_DNS_RESOLVER": "10.0.0.2:53", "PRORETA_DNS_TIMEOUT": "2s"})
-	if err != nil || !cfg.DomainChecks.Enabled || cfg.DomainChecks.CNAMETarget != "edge.example.net" || cfg.DomainChecks.DNS.Resolver != "10.0.0.2:53" || cfg.DomainChecks.DNS.Timeout != 2*time.Second {
+	if err != nil || !cfg.DomainChecks.Enabled || cfg.DomainChecks.CNAMETarget != "edge.example.net" || cfg.DomainChecks.Resolver != "10.0.0.2:53" || cfg.DomainChecks.Timeout != 2*time.Second {
 		t.Fatalf("enabled: %+v %v", cfg.DomainChecks, err)
 	}
 	for name, extra := range map[string]map[string]string{
