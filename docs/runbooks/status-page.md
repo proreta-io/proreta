@@ -52,8 +52,8 @@ A deleted page's address, and the old address after a rename, stay reserved for 
 - A page shows only what its maintainers published: public names, groups, states, daily bars and generated incident titles. Ask a maintainer of the organization to rename or remove a component, or unpublish the page. As a last resort the platform admin suspends the organization (its page then answers 404).
 - Request floods are limited per client IP and per replica; more replicas multiply the effective limits.
 
-## Custom domains (behind a feature flag)
-The renderer can serve a page at the root of a customer's own domain, such as `https://status.example.com/`, once that host is verified. This is off by default and only the renderer side exists so far: adding and verifying domains, the TLS hook and the chart values come in later changes, so an installation cannot use it end to end yet.
+## Custom domains
+The renderer can serve a page at the root of a customer's own domain, such as `https://status.example.com/`, once that host is verified. Off by default. Turning it on, TLS for customer hosts, the DNS records and troubleshooting are in [custom status page domains](custom-domains.md); this section describes what the renderer does.
 
 Settings of the `statuspage` process (environment variables):
 
@@ -77,4 +77,4 @@ With host mode on:
 Not done yet: `<link rel="canonical">` on `/status/<slug>` pointing at the page's own domain (the renderer role cannot read a page's domain; a customer-domain page already names itself as canonical).
 
 ## Not available yet
-Manual incident updates and maintenance windows, subscriptions other than RSS, translations and custom styling.
+Manual incident updates and maintenance windows, subscriptions other than RSS, translations and custom styling. For custom domains: see the end of [custom status page domains](custom-domains.md).

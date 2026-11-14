@@ -1,11 +1,103 @@
 # Custom status page domains
 
-> **Behind a feature flag and incomplete.** Status pages on a customer's own domain are being built in phases and are off by default (`PRORETA_STATUS_PAGE_CUSTOM_DOMAINS`, API only). This runbook covers the operator interface only: the TLS permission endpoint, `proretactl status-domains list` and the platform admin's abuse switch. The Helm values, the renderer's host mode, the customer settings and the front proxy recipe are not part of a release yet, and this page is **incomplete until the chart package lands**: the variables below are plain environment variables of the `statuspage` process, and the chart does not set them.
+A customer can serve a status page at the root of its own host, such as `https://status.example.com/`, after proving control of the name in DNS. The feature is **off by default** and its API operations are still marked experimental. Proreta verifies hosts, routes them to the right page and tells a TLS proxy which hosts may get a certificate; **terminating TLS for customer hosts is the operator's job**, and the chart ships no proxy for it.
 
-## What an operator needs to know
-A customer can attach a host such as `status.example.com` to a status page and prove control of the name with a DNS record. Proreta only serves a host once it is verified; the operator terminates TLS (a proxy of their choice, or Caddy) and forwards the original `Host` header to the `statuspage` Service. The operator interface answers two questions:
+## Before you turn it on
+- `statuspage.enabled: true` and a working [status page](status-page.md) on the installation host.
+- A host name of your own for customers to point at (`cnameTarget`, for example `customers.example.net`) that resolves to the proxy or Gateway terminating TLS for customer hosts.
+- A way to get certificates for hosts you do not know in advance: a proxy with on-demand TLS that asks the [permission endpoint](#the-tls-permission-endpoint), or your own Gateway with one listener and certificate per customer host.
+- A plan that allows domains: the limit `Status page domains` is 0 on `free` and `internal` and unlimited on `community` ([platform admin panel](admin-panel.md)). An organization on a plan with 0 sees the section but cannot add a host.
 
-- *May a certificate be issued for this host?* The TLS permission endpoint (below).
+## Turning it on
+Chart values (all under `statuspage.customDomains`; the full list is in the [chart README](../../deploy/helm/proreta/README.md)):
+
+```yaml
+statuspage:
+  enabled: true
+  customDomains:
+    enabled: true
+    cnameTarget: customers.example.net   # required
+    abuseUrl: mailto:abuse@example.net    # the "Report abuse" link; a warning is printed without it
+```
+
+| Value | Variable (processes) | Meaning |
+|---|---|---|
+| `enabled` | `PRORETA_STATUS_PAGE_CUSTOM_DOMAINS` (api, jobs, statuspage) | Turns the feature on for the api, jobs and the renderer together. Off, the domain operations answer 404 `custom-domains-disabled`, the app hides the section and the renderer ignores the `Host` header |
+| `cnameTarget` | `PRORETA_STATUSPAGE_CNAME_TARGET` (api, jobs) | Required. The host customers point their CNAME at: lowercase, no trailing dot. The render fails without it |
+| `forbiddenSuffixes` | `PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES` (api) | Domains no customer may claim a name under. Empty: the registrable domain of `config.publicUrl` |
+| `installationHosts` | `PRORETA_STATUSPAGE_INSTALLATION_HOSTS` (api, statuspage) | Hosts that keep the `/status/<slug>` routes and that no customer may claim. Empty: `httpRoute.hostnames` without wildcards, plus the host of `config.publicUrl` |
+| `abuseUrl` | `PRORETA_ABUSE_URL` (statuspage) | An `https://` URL or `mailto:` address for the "Report abuse" link in the footer of customer-domain pages |
+| `dns.resolver`, `dns.timeout` | `PRORETA_DNS_RESOLVER`, `PRORETA_DNS_TIMEOUT` (jobs) | Resolver (`ip` or `ip:port`) and per-lookup timeout (500ms to 10s, default 3s) of the verification job. Empty resolver: the resolver of the pod |
+| `tlsAsk.*`, `secrets.tlsAsk.*` | `PRORETA_STATUSPAGE_TLS_ASK_ADDR`, `PRORETA_STATUSPAGE_TLS_ASK_TOKEN` (statuspage) | The permission endpoint for an on-demand TLS proxy, see below |
+| `httpRoute.*` | | A second HTTPRoute for customer hosts your own Gateway terminates, see below |
+
+The release that brings the feature runs its migrations as usual (the migration hook Job); turning the values on needs no manual database step and no database bootstrap run. Set `config.trustedProxyHops` to the number of proxies in front of the `statuspage` Service on the customer-host path: client limits and `Strict-Transport-Security` depend on it.
+
+## Terminating TLS for customer hosts
+Whatever sits in front must forward the **original `Host` header** to the `statuspage` Service (`X-Forwarded-Host` is never read) and set `X-Forwarded-For` and `X-Forwarded-Proto`. Two ways:
+
+**A proxy with on-demand TLS** (for example Caddy). It obtains a certificate the first time a host is requested, after asking the permission endpoint. Turn the endpoint on with `tlsAsk.enabled: true` and give it a token:
+
+```sh
+kubectl -n proreta create secret generic proreta-tls-ask --from-literal=token="$(openssl rand -hex 32)"
+```
+```yaml
+secrets:
+  tlsAsk:
+    existingSecret: proreta-tls-ask
+statuspage:
+  customDomains:
+    tlsAsk:
+      enabled: true
+      proxy:
+        namespace: caddy        # with networkPolicy.enabled: the only source admitted to the port
+```
+
+The proxy asks `http://<fullname>-statuspage.<namespace>:9091/internal/tls/allow` (port `tls-ask` of the statuspage Service; `<fullname>` is the release name, `<release>-proreta` when the release name does not contain `proreta`, or `fullnameOverride`). `proretactl status-domains list -format caddy` prints a Caddyfile fragment to start from. New verified hosts need no reload. The chart does not generate the token; with External Secrets use `secrets.tlsAsk.remoteKey` (property `token`) instead of `existingSecret`.
+
+**Your own Gateway.** Add a listener with its certificate for each customer host and list the hosts in `httpRoute.hostnames` (with `httpRoute.enabled: true` and `httpRoute.parentRef.name`); the chart renders the HTTPRoute `<fullname>-customer-hosts`, which sends every path of those hosts to the `statuspage` Service. Every new customer host is a values change, so this suits a handful of known hosts. The render fails when the list contains an installation host.
+
+## What the customer does
+Owners and maintainers of the page's project, or of the organization for an organization-level page, use the **Custom domain** section of the status page settings; people who can only read the page see the list.
+
+1. Enter the host name only, such as `status.example.com`. It must be a name below the customer's own domain: bare registrable domains, wildcards, IP addresses, public suffixes, reserved names, installation hosts, names under `forbiddenSuffixes` and malformed names are refused with a message that says why. Unicode characters are refused; the ASCII `xn--` form is accepted. A name another organization already holds can be added, but its check answers "This host is not available" until DNS carries a TXT record with this organization's token and none with the other's; then the host moves to the new holder. While both tokens are in DNS the current holder keeps it.
+2. Create two DNS records, shown in the app:
+
+   | Record | Name | Value | Purpose |
+   |---|---|---|---|
+   | TXT | `_proreta-status.status.example.com` | `proreta-verify=<token>` | Proves the domain is theirs |
+   | CNAME | `status.example.com` | the `cnameTarget` | Sends visitors to the page |
+
+3. Wait for the check, or press **Check now** (limited to 6 per minute and 30 per hour per organization).
+
+States:
+
+| State | Meaning | Served | Certificate allowed |
+|---|---|---|---|
+| `pending` | The TXT record was not seen yet. Checked every 10 minutes in the first 24 hours, then hourly; removed after 7 days without the record | no | no |
+| `verified` | The TXT record was seen; the CNAME does not end at the target yet. Checked every 6 hours | yes | yes |
+| `active` | Verified and the CNAME ends at the target. Checked every 6 hours | yes | yes |
+| `failed` | Neither record was found in at least 3 consecutive checks and for 7 days. Returns to `verified` when a record is seen again. Checked every 6 hours | no | no |
+
+Only the TXT record verifies a host: a CNAME alone never does, so a stale CNAME pointing at you cannot serve someone else's page. Once verified, either record keeps the host alive, so the TXT record may be removed after the CNAME is in place. A lookup that times out or fails counts as unknown, never as a missing record.
+
+Limits: 3 domains per page, 10 domains added per organization in 24 hours, and the plan limit for the organization as a whole. A page with several domains marks one as primary: it is listed first and replaced automatically when removed, and it does not change any link or redirect yet. Removing a domain stops serving it at once and frees its place in the plan.
+
+Changes are audited in the organization: `status_page.domain_added`, `status_page.domain_verified`, `status_page.domain_activated`, `status_page.domain_failed`, `status_page.domain_primary_changed` and `status_page.domain_removed`. A domain that fails is also logged by `jobs` at warn level. There is no in-app notice or email about a failure; the state shows in the settings.
+
+## The verification job
+The `jobs` process checks due domains every minute (`check_status_page_domains`): up to 500 per run in batches of 25, the rest at the next run. Metrics and suggested alerts (`DomainChecksStale`, `DomainChecksDNSErrors`, `DomainsFailedJump`) are in [observability](observability.md): `proreta_status_page_domains{state}` and `proreta_status_page_domains_checks_total{result}` with `ok`, `txt-missing`, `cname-missing`, `txt-mismatch` and `dns-error`. The renderer adds `proreta_statuspage_requests_total{mode}` (`path`, `host`) and `proreta_statuspage_host_lookups_total{result}` (`hit`, `miss`, `unknown`, `limited`); its limits in host mode are per replica: 20 requests per second per host (burst 200) and 50 lookups per second for hosts not in its 15 second cache.
+
+## Troubleshooting
+- **The section is missing in the app, or the API answers 404 `custom-domains-disabled`.** `statuspage.customDomains.enabled` is off, or the api pods were not restarted with it.
+- **A domain stays `pending`.** Check the TXT record from outside: `dig +short TXT _proreta-status.status.example.com` must print `"proreta-verify=<token>"` exactly as shown in the app. Some DNS providers append the zone name to what is typed: there the record name is entered without the zone (`_proreta-status.status`, not the full name). A TXT record with an old or wrong token counts as `txt-missing` (the token changes when a host is removed and added again). `txt-mismatch` in the checks metric means the host is already served for another organization, so this claim stays pending until its own token is the only one in DNS. Many `dns-error` results point at the resolver: set `dns.resolver`.
+- **A domain stays `verified`.** The CNAME chain does not end at `cnameTarget`: `dig +short CNAME status.example.com`. A proxied or flattened record at the customer's DNS provider hides the CNAME; the page is served anyway. "The CNAME target is not set up on this installation yet" in the app means `cnameTarget` is empty for the api.
+- **The host is verified but the browser shows a certificate error.** TLS is terminated before Proreta: look at the proxy. With on-demand TLS, `proreta_statuspage_tls_allow_total{result}` shows whether the proxy asks and what it is told (`unauthorized`: wrong token; no samples: the proxy cannot reach the port, check the network policy).
+- **The host answers 404.** The same 404 covers an unknown, unverified, failed, disabled or released host, an unpublished page and a suspended organization. Check the state with `proretactl status-domains list -all`, that the page is published, and that the proxy forwards the original `Host`. A change takes about 15 seconds at the renderer plus 30 seconds of browser cache.
+- **`/status/<slug>` answers 404 on the customer host.** By design: on a customer host the page is at `/`. Installation hosts keep `/status/<slug>`.
+
+## Operator interface
+- *May a certificate be issued for this host?* The TLS permission endpoint.
 - *Which hosts are served now?* `proretactl status-domains list`.
 
 A host stops being served, and stops being allowed a certificate, when its domain is disabled by a platform admin, no longer verified, released, its page is deleted or its organization is suspended or deleted. An unpublished page may still get a certificate for a verified host.
@@ -28,7 +120,7 @@ GET /internal/tls/allow?domain=<host>
 The body is always empty. The host is lowercased and a trailing dot removed before the lookup; IP addresses, wildcards, reserved names, non-ASCII names and public suffixes are refused without touching the database.
 
 ### Where it runs and how it is protected
-It runs on its **own listener** of the `statuspage` process, never behind the public Gateway and not on the admin port (`:9090`, metrics and probes). Its own port lets a network policy admit only the proxy while Prometheus and the probes keep the admin port. It is off unless you set the address.
+It runs on its **own listener** of the `statuspage` process, never behind the public Gateway and not on the admin port (`:9090`, metrics and probes). Its own port lets a network policy admit only the proxy while Prometheus and the probes keep the admin port. It is off unless you set the address; the chart sets both variables from `statuspage.customDomains.tlsAsk` and `secrets.tlsAsk`.
 
 | Variable | Meaning |
 |---|---|
@@ -65,6 +157,9 @@ proretactl status-domains list -all             # every unreleased domain with i
 The command reads nothing but host names, states and the slugs of the page and the organization; it never prints a verification token.
 
 ## Platform admin: the abuse switch
-`POST /api/v1/admin/status-page-domains/{domainId}/disable` (and `/enable`) with `{"reason": "..."}` stops or resumes serving one host at once, independent of the customer's state. The list is `GET /api/v1/admin/status-page-domains` with `state`, `query`, `limit` and `offset`. Audit, guard rails and timing are in the [platform admin panel](admin-panel.md) runbook.
+**Admin → Domains** (`/admin/domains`) lists the custom domains of every organization and disables or enables one host with a reason, at once and independent of the customer's state. The same through the API: `GET /api/v1/admin/status-page-domains` with `state`, `query`, `limit` and `offset`, and `POST /api/v1/admin/status-page-domains/{domainId}/disable` (and `/enable`) with `{"reason": "..."}`. Audit, guard rails and timing are in the [platform admin panel](admin-panel.md) runbook.
 
 Takedown timing: the renderer caches a host's lookup for about 15 seconds and browsers a page for 30 seconds; the permission endpoint caches answers for 10 seconds, and a certificate that was already issued keeps working at the proxy, but the renderer answers 404 for the host.
+
+## Not available yet
+A bundled TLS proxy in the chart, host names typed in Unicode (use the `xn--` form), a redirect from `/status/<slug>` to the page's own domain, and releasing domains automatically when a plan is lowered or an organization is deleted (remove them in the app first).
