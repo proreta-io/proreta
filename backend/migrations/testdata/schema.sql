@@ -861,6 +861,8 @@ admin_set_tenant_plan(uuid,uuid,text,uuid,inet) owner=proreta_owner definer=true
 admin_set_tenant_status(uuid,uuid,text,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_set_user_status(uuid,uuid,text,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_stats(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+admin_status_page_domain_set_disabled(uuid,uuid,boolean,text,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+admin_status_page_domains_list(uuid,uuid,text,text[],integer,integer) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_user_audit_tenant(uuid) owner=proreta_owner definer=false acl=proreta_owner=X/proreta_owner
 auth_count_other_memberships(uuid,uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 auth_create_tenant(uuid,text,text) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
@@ -920,6 +922,7 @@ status_page_domain_lookup(text) owner=proreta_owner definer=true acl=proreta_own
 status_page_domain_record_check(uuid,uuid,text,text,text) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 status_page_domain_takeover(text,uuid,text[]) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 status_page_domains_due(integer) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+status_page_domains_export(boolean) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 status_page_published_pages() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 status_page_slug_held(text) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 status_page_snapshot(text) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_statuspage=X/proreta_owner
@@ -1843,6 +1846,76 @@ BEGIN
                       ORDER BY p.key), '[]'::jsonb)
                   FROM plans AS p)
     );
+END
+$function$
+CREATE OR REPLACE FUNCTION public.admin_status_page_domain_set_disabled(p_actor uuid, p_id uuid, p_disabled boolean, p_reason text, p_audit_id uuid, p_ip inet)
+ RETURNS boolean
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_tenant  uuid;
+    v_page    uuid;
+    v_host    text;
+    v_disabled timestamptz;
+    v_deleted timestamptz;
+    v_reason  text := btrim(COALESCE(p_reason, ''));
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    IF p_disabled IS NULL OR v_reason = '' OR char_length(v_reason) > 500 THEN
+        RAISE EXCEPTION 'admin: invalid reason' USING ERRCODE = 'PRA18';
+    END IF;
+    SELECT d.tenant_id, d.page_id, d.host, d.disabled_at, t.deleted_at INTO v_tenant, v_page, v_host, v_disabled, v_deleted
+    FROM status_page_domains AS d
+    JOIN tenants AS t ON t.id = d.tenant_id
+    WHERE d.id = p_id AND d.released_at IS NULL
+    FOR UPDATE OF d;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'admin: domain not found' USING ERRCODE = 'PRA02';
+    END IF;
+    IF v_deleted IS NOT NULL THEN
+        RAISE EXCEPTION 'admin: tenant is deleted' USING ERRCODE = 'PRA08';
+    END IF;
+    IF (v_disabled IS NOT NULL) = p_disabled THEN
+        RETURN false;
+    END IF;
+    UPDATE status_page_domains SET disabled_at = CASE WHEN p_disabled THEN now() END, updated_at = now() WHERE id = p_id;
+    PERFORM admin_audit(v_tenant, p_actor, p_audit_id,
+                        CASE WHEN p_disabled THEN 'admin.status_page_domain.disabled' ELSE 'admin.status_page_domain.enabled' END,
+                        'status_page_domain', p_id::text,
+                        jsonb_build_object('host', v_host, 'pageId', v_page, 'reason', v_reason), p_ip);
+    RETURN true;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.admin_status_page_domains_list(p_actor uuid, p_id uuid, p_query text, p_states text[], p_limit integer, p_offset integer)
+ RETURNS TABLE(id uuid, host text, state text, is_primary boolean, disabled_at timestamp with time zone, tenant_id uuid, tenant_slug text, page_id uuid, page_slug text, verified_at timestamp with time zone, last_checked_at timestamp with time zone, last_error text, created_at timestamp with time zone, total_count integer)
+ LANGUAGE plpgsql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+#variable_conflict use_column
+DECLARE
+    q text := lower(btrim(COALESCE(p_query, '')));
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    IF EXISTS (SELECT 1 FROM unnest(COALESCE(p_states, ARRAY[]::text[])) AS s WHERE s NOT IN ('pending', 'verified', 'active', 'failed')) THEN
+        RAISE EXCEPTION 'admin: invalid state' USING ERRCODE = 'PRA04';
+    END IF;
+    RETURN QUERY
+    SELECT d.id, d.host, d.state, d.is_primary, d.disabled_at, d.tenant_id, t.slug, d.page_id, p.slug,
+           d.verified_at, d.last_checked_at, d.last_error, d.created_at,
+           (count(*) OVER ())::integer
+    FROM status_page_domains AS d
+    JOIN tenants AS t ON t.id = d.tenant_id
+    JOIN status_pages AS p ON p.tenant_id = d.tenant_id AND p.id = d.page_id
+    WHERE d.released_at IS NULL
+      AND (p_id IS NULL OR d.id = p_id)
+      AND (COALESCE(cardinality(p_states), 0) = 0 OR d.state = ANY (p_states))
+      AND (q = '' OR strpos(d.host, q) > 0 OR strpos(lower(t.slug), q) > 0 OR strpos(lower(t.name), q) > 0)
+    ORDER BY d.created_at DESC, d.id
+    LIMIT least(greatest(COALESCE(p_limit, 25), 1), 100)
+    OFFSET greatest(COALESCE(p_offset, 0), 0);
 END
 $function$
 CREATE OR REPLACE FUNCTION public.admin_user_audit_tenant(p_user_id uuid)
@@ -3331,6 +3404,22 @@ BEGIN
     LIMIT greatest(1, least(coalesce(p_limit, 1), 1000))
     FOR UPDATE OF d SKIP LOCKED;
 END
+$function$
+CREATE OR REPLACE FUNCTION public.status_page_domains_export(p_all boolean)
+ RETURNS TABLE(host text, state text, is_primary boolean, disabled boolean, tenant_slug text, page_slug text, verified_at timestamp with time zone)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    SELECT d.host, d.state, d.is_primary, d.disabled_at IS NOT NULL, t.slug, p.slug, d.verified_at
+    FROM status_page_domains AS d
+    JOIN status_pages AS p ON p.tenant_id = d.tenant_id AND p.id = d.page_id
+    JOIN tenants AS t ON t.id = d.tenant_id
+    WHERE d.released_at IS NULL
+      AND (COALESCE(p_all, false)
+           OR (d.state IN ('verified', 'active') AND d.disabled_at IS NULL
+               AND p.deleted_at IS NULL AND t.status = 'active' AND t.deleted_at IS NULL))
+    ORDER BY d.host, d.id
 $function$
 CREATE OR REPLACE FUNCTION public.status_page_published_pages()
  RETURNS TABLE(tenant_id uuid, page_id uuid)

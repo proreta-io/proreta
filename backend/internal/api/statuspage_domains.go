@@ -1,37 +1,7 @@
 package api
 
-import (
-	"context"
-	"errors"
-
-	"github.com/proreta-io/proreta/backend/internal/api/gen"
-)
+import "errors"
 
 // errCustomDomainsDisabled answers every status page domain operation while
 // PRORETA_STATUS_PAGE_CUSTOM_DOMAINS is off.
 var errCustomDomainsDisabled = errors.New("custom domains disabled")
-
-// errCustomDomainsNotWired is what an operation returns with the switch on but no service behind
-// it yet; it is a 500 on purpose, so nobody mistakes the half-built feature for a working one.
-var errCustomDomainsNotWired = errors.New("custom domains: service not wired")
-
-// domainsGate is the first step of every domain operation: it refuses with 404 while the feature
-// is off, and for now also when it is on, until the service behind these operations exists.
-func (s *server) domainsGate() error {
-	if !s.cfg.StatusPageCustomDomains {
-		return errCustomDomainsDisabled
-	}
-	return errCustomDomainsNotWired
-}
-
-func (s *server) AdminListStatusPageDomains(_ context.Context, _ gen.AdminListStatusPageDomainsRequestObject) (gen.AdminListStatusPageDomainsResponseObject, error) {
-	return nil, s.domainsGate()
-}
-
-func (s *server) AdminDisableStatusPageDomain(_ context.Context, _ gen.AdminDisableStatusPageDomainRequestObject) (gen.AdminDisableStatusPageDomainResponseObject, error) {
-	return nil, s.domainsGate()
-}
-
-func (s *server) AdminEnableStatusPageDomain(_ context.Context, _ gen.AdminEnableStatusPageDomainRequestObject) (gen.AdminEnableStatusPageDomainResponseObject, error) {
-	return nil, s.domainsGate()
-}

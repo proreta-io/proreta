@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -24,7 +23,6 @@ func TestDomainErrorsBecomeProblems(t *testing.T) {
 		{"forbidden host", hostErr, http.StatusUnprocessableEntity, "urn:proreta:problem:domain-forbidden", "host"},
 		{"wrapped forbidden host", fmt.Errorf("add: %w", hostErr), http.StatusUnprocessableEntity, "urn:proreta:problem:domain-forbidden", "host"},
 		{"host not available", fmt.Errorf("verify: %w", domains.ErrUnavailable), http.StatusConflict, "urn:proreta:problem:domain-unavailable", ""},
-		{"service not wired", errCustomDomainsNotWired, http.StatusInternalServerError, "urn:proreta:problem:internal", ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -41,16 +39,5 @@ func TestDomainErrorsBecomeProblems(t *testing.T) {
 				t.Fatalf("field errors %+v", p.FieldErrors)
 			}
 		})
-	}
-}
-
-// The domain operations answer 404 while the switch is off and never succeed before the service
-// exists, with it on.
-func TestDomainsGate(t *testing.T) {
-	if err := (&server{}).domainsGate(); !errors.Is(err, errCustomDomainsDisabled) {
-		t.Fatalf("switch off: %v", err)
-	}
-	if err := (&server{cfg: Config{StatusPageCustomDomains: true}}).domainsGate(); !errors.Is(err, errCustomDomainsNotWired) {
-		t.Fatalf("switch on: %v", err)
 	}
 }
