@@ -59,6 +59,7 @@ export type StatusPageUpdate = Schemas["StatusPageUpdate"];
 export type StatusPageComponent = Schemas["StatusPageComponent"];
 export type StatusPageComponentInput = Schemas["StatusPageComponentInput"];
 export type StatusPageSnapshot = Schemas["StatusPageSnapshot"];
+export type StatusPageDomain = Schemas["StatusPageDomain"];
 export type OAuthProvider = Schemas["OAuthProvider"];
 export type AuthProviders = Schemas["AuthProviders"];
 export type Identity = Schemas["Identity"];
@@ -92,6 +93,7 @@ export const queryKeys = {
   statusPages: ["status-pages"] as const,
   statusPageComponents: (id: string) => ["status-pages", id, "components"] as const,
   statusPagePreview: (id: string) => ["status-pages", id, "preview"] as const,
+  statusPageDomains: (id: string) => ["status-pages", id, "domains"] as const,
   publicConfig: ["public-config"] as const,
   authProviders: ["auth-providers"] as const,
   identities: ["identities"] as const,
@@ -646,6 +648,47 @@ export const putStatusPageComponents = (statusPageId: string, items: StatusPageC
 /** The public view as /status/<slug>.json would serve it now, also while unpublished. */
 export const previewStatusPage = (statusPageId: string) =>
   unwrap(client.GET("/api/v1/status-pages/{statusPageId}/preview", statusPagePath(statusPageId)));
+
+// Custom domains of a status page (404 `custom-domains-disabled` when the installation has them off).
+
+const domainPath = (statusPageId: string, domainId: string) => ({
+  params: { path: { statusPageId, domainId } },
+});
+
+export const listStatusPageDomains = (statusPageId: string) =>
+  unwrap(client.GET("/api/v1/status-pages/{statusPageId}/domains", statusPagePath(statusPageId)));
+
+export const addStatusPageDomain = (statusPageId: string, host: string) =>
+  unwrap(
+    client.POST("/api/v1/status-pages/{statusPageId}/domains", {
+      ...statusPagePath(statusPageId),
+      body: { host },
+    }),
+  );
+
+export const verifyStatusPageDomain = (statusPageId: string, domainId: string) =>
+  unwrap(
+    client.POST(
+      "/api/v1/status-pages/{statusPageId}/domains/{domainId}/verify",
+      domainPath(statusPageId, domainId),
+    ),
+  );
+
+export const setPrimaryStatusPageDomain = (statusPageId: string, domainId: string) =>
+  unwrap(
+    client.PATCH("/api/v1/status-pages/{statusPageId}/domains/{domainId}", {
+      ...domainPath(statusPageId, domainId),
+      body: { primary: true },
+    }),
+  );
+
+export const removeStatusPageDomain = (statusPageId: string, domainId: string) =>
+  unwrap(
+    client.DELETE(
+      "/api/v1/status-pages/{statusPageId}/domains/{domainId}",
+      domainPath(statusPageId, domainId),
+    ),
+  );
 
 // OAuth sign-in.
 
