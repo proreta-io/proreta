@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"golang.org/x/net/publicsuffix"
 
 	"github.com/proreta-io/proreta/backend/internal/platform/crypto"
 	"github.com/proreta-io/proreta/backend/internal/platform/logging"
@@ -117,7 +118,16 @@ type API struct {
 	// StatusPageCustomDomains turns on status pages on a customer's own domain
 	// (PRORETA_STATUS_PAGE_CUSTOM_DOMAINS, default false); off, the domain operations answer 404.
 	StatusPageCustomDomains bool
-	OAuth                   OAuth
+	// StatusPageCNAMETarget is where a custom domain's CNAME must point
+	// (PRORETA_STATUSPAGE_CNAME_TARGET); empty means domains stay verified and never become active.
+	StatusPageCNAMETarget string
+	// StatusPageInstallationHosts are the host names of this installation, which no customer may
+	// claim: the host of PRORETA_PUBLIC_URL and PRORETA_STATUSPAGE_INSTALLATION_HOSTS.
+	StatusPageInstallationHosts []string
+	// StatusPageForbiddenSuffixes are domains no customer may claim a name under
+	// (PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES); the registrable domain of PRORETA_PUBLIC_URL when unset.
+	StatusPageForbiddenSuffixes []string
+	OAuth                       OAuth
 }
 
 // OAuth holds the OAuth client credentials. A provider without both values is off.
@@ -211,6 +221,19 @@ type Statuspage struct {
 	// TLSAskToken is PRORETA_STATUSPAGE_TLS_ASK_TOKEN: the shared token the proxy presents; required
 	// when TLSAskAddr is set.
 	TLSAskToken Secret
+	// CustomDomains turns on host mode (PRORETA_STATUS_PAGE_CUSTOM_DOMAINS, default false, the same
+	// variable as the api's): a request to a host that is not an installation host is looked up as a
+	// customer's domain. Off, the Host header is ignored.
+	CustomDomains bool
+	// InstallationHosts are the host names that keep the /status/<slug> routes: the host of
+	// PublicURL plus PRORETA_STATUSPAGE_INSTALLATION_HOSTS (comma separated).
+	InstallationHosts []string
+	// ForbiddenSuffixes is PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES (the api's variable): names under
+	// them are never a customer's host. Default: the registrable domain of PublicURL.
+	ForbiddenSuffixes []string
+	// AbuseURL is PRORETA_ABUSE_URL, the "Report abuse" link on customer domains: an https URL or a
+	// mailto: address; empty means no link.
+	AbuseURL string
 }
 
 // CtlDatabase is the configuration of the proretactl commands that read the database with the
@@ -281,10 +304,36 @@ func LoadAPI(lookup LookupFunc) (API, error) {
 		l.fail("PRORETA_HTTP_ADDR", "must differ from PRORETA_ADMIN_ADDR")
 	}
 	l.cookieMatchesURL(cfg.CookieSecure, cfg.PublicURL)
+	l.statusPageDomains(&cfg)
 	if !cfg.PasswordLoginEnabled && !cfg.OAuth.GoogleEnabled() && !cfg.OAuth.GitHubEnabled() {
 		l.fail("PRORETA_PASSWORD_LOGIN_ENABLED", "false needs at least one OAuth provider (PRORETA_OAUTH_GOOGLE_* or PRORETA_OAUTH_GITHUB_*)")
 	}
 	return cfg, l.err()
+}
+
+// statusPageDomains reads the installation's side of the custom domain rules. The public URL's own
+// host is always forbidden, and so is everything under the operator's list, which defaults to the
+// registrable domain of the public URL.
+func (l *loader) statusPageDomains(cfg *API) {
+	if t := l.optional("PRORETA_STATUSPAGE_CNAME_TARGET"); t != "" {
+		if len(t) > 253 || !domainName.MatchString(t) {
+			l.fail("PRORETA_STATUSPAGE_CNAME_TARGET", fmt.Sprintf("%q is not a lowercase domain name such as customers.example.com", t))
+		} else {
+			cfg.StatusPageCNAMETarget = t
+		}
+	}
+	cfg.StatusPageInstallationHosts = l.domains("PRORETA_STATUSPAGE_INSTALLATION_HOSTS")
+	if u, err := url.Parse(cfg.PublicURL); err == nil && u.Hostname() != "" {
+		if h := strings.ToLower(u.Hostname()); !slices.Contains(cfg.StatusPageInstallationHosts, h) {
+			cfg.StatusPageInstallationHosts = append(cfg.StatusPageInstallationHosts, h)
+		}
+	}
+	cfg.StatusPageForbiddenSuffixes = l.domains("PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES")
+	if l.optional("PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES") == "" && len(cfg.StatusPageInstallationHosts) > 0 {
+		if d, err := publicsuffix.EffectiveTLDPlusOne(cfg.StatusPageInstallationHosts[len(cfg.StatusPageInstallationHosts)-1]); err == nil {
+			cfg.StatusPageForbiddenSuffixes = []string{d}
+		}
+	}
 }
 
 // oauth reads the client credentials of each provider: both the id and the secret, or neither.
@@ -408,6 +457,15 @@ func LoadStatuspage(lookup LookupFunc) (Statuspage, error) {
 		l.fail("PRORETA_HTTP_ADDR", "must differ from PRORETA_ADMIN_ADDR")
 	}
 	l.cookieMatchesURL(cfg.CookieSecure, cfg.PublicURL)
+	cfg.CustomDomains = l.boolean("PRORETA_STATUS_PAGE_CUSTOM_DOMAINS", false)
+	cfg.InstallationHosts = l.installationHosts("PRORETA_STATUSPAGE_INSTALLATION_HOSTS", cfg.PublicURL)
+	cfg.AbuseURL = l.abuseURL("PRORETA_ABUSE_URL")
+	cfg.ForbiddenSuffixes = l.domains("PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES")
+	if l.optional("PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES") == "" && len(cfg.InstallationHosts) > 0 {
+		if d, err := publicsuffix.EffectiveTLDPlusOne(cfg.InstallationHosts[0]); err == nil {
+			cfg.ForbiddenSuffixes = []string{d}
+		}
+	}
 	return cfg, l.err()
 }
 
@@ -443,6 +501,46 @@ func LoadCtlDatabase(lookup LookupFunc) (CtlDatabase, error) {
 	l := &loader{lookup: lookup}
 	cfg := CtlDatabase{Base: l.base(), DatabaseURL: l.databaseURL("PRORETA_DATABASE_URL")}
 	return cfg, l.err()
+}
+
+// installationHosts reads a comma separated list of plain host names (lowercase, no scheme, port
+// or path) and adds the host of publicURL.
+func (l *loader) installationHosts(name, publicURL string) []string {
+	var out []string
+	if u, err := url.Parse(publicURL); err == nil && u.Hostname() != "" {
+		out = append(out, strings.ToLower(u.Hostname()))
+	}
+	for _, h := range strings.Split(l.optional(name), ",") {
+		h = strings.ToLower(strings.TrimSpace(h))
+		if h == "" {
+			continue
+		}
+		if !installationHostRe.MatchString(h) {
+			l.fail(name, "must be a comma separated list of plain host names such as proreta.example.com")
+			return out
+		}
+		out = append(out, h)
+	}
+	return out
+}
+
+var installationHostRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$`)
+
+// abuseURL reads an optional https URL or mailto: address.
+func (l *loader) abuseURL(name string) string {
+	v := l.optional(name)
+	if v == "" {
+		return ""
+	}
+	u, err := url.Parse(v)
+	ok := err == nil && u.User == nil && !strings.ContainsAny(v, " \t\n\"'<>")
+	switch {
+	case ok && u.Scheme == "https" && u.Host != "":
+	case ok && u.Scheme == "mailto" && u.Opaque != "" && strings.Contains(u.Opaque, "@"):
+	default:
+		l.fail(name, "must be an https URL or a mailto: address")
+	}
+	return v
 }
 
 // base64Key reads a required standard-base64 key of at least minBytes bytes; the decoded bytes are

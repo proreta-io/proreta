@@ -75,15 +75,17 @@ func RequestID(next http.Handler) http.Handler {
 // ClientIP returns the client address. With trustedHops > 0 it takes the entry of
 // X-Forwarded-For appended by the outermost trusted proxy (counting from the right), so
 // clients cannot spoof it by sending their own header; otherwise the TCP peer address.
-// If the header is missing or invalid it falls back to the peer (see ForwardedClientIP).
+// If the header is missing, has fewer entries than trustedHops or the entry is invalid it
+// falls back to the peer (see ForwardedClientIP).
 func ClientIP(r *http.Request, trustedHops int) netip.Addr {
 	a, _ := ForwardedClientIP(r, trustedHops)
 	return a
 }
 
 // ForwardedClientIP is ClientIP that also reports whether the address is the client's. It is
-// false when trustedHops > 0 but X-Forwarded-For is missing or invalid: the returned address
-// is then the proxy (the TCP peer), which must not be used to tell clients apart.
+// false when trustedHops > 0 but X-Forwarded-For is missing, has fewer entries than trustedHops
+// (the leftmost one would then be client-supplied) or the entry is invalid: the returned
+// address is then the proxy (the TCP peer), which must not be used to tell clients apart.
 func ForwardedClientIP(r *http.Request, trustedHops int) (netip.Addr, bool) {
 	if trustedHops > 0 {
 		var hops []string
@@ -94,9 +96,8 @@ func ForwardedClientIP(r *http.Request, trustedHops int) (netip.Addr, bool) {
 				}
 			}
 		}
-		if len(hops) > 0 {
-			i := max(len(hops)-trustedHops, 0)
-			if a, err := netip.ParseAddr(hops[i]); err == nil {
+		if len(hops) >= trustedHops {
+			if a, err := netip.ParseAddr(hops[len(hops)-trustedHops]); err == nil {
 				return a.Unmap(), true
 			}
 		}

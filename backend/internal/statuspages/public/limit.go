@@ -107,6 +107,9 @@ func (l *Limiter) Len() int {
 // PRORETA_STATUSPAGE_COOKIE_KEY: it unlocks one page until it expires or the password changes.
 const (
 	CookieName = "proreta_status_unlock"
+	// HostCookieName is the cookie on a customer's own domain: the __Host- prefix makes browsers
+	// accept it only with Secure, Path=/ and no Domain, so it belongs to that exact host.
+	HostCookieName = "__Host-" + CookieName
 	// CookieTTL is how long an unlocked page stays unlocked in a browser.
 	CookieTTL = 12 * time.Hour
 )
@@ -121,10 +124,19 @@ func NewCookieSigner(key []byte) *CookieSigner {
 	return &CookieSigner{key: append([]byte(nil), key...)}
 }
 
-func (s *CookieSigner) mac(slug, passwordHash string, expires int64) []byte {
+// mac signs a cookie. host is "" on the installation host (the original layout, so existing
+// cookies stay valid) and the custom host otherwise, so a cookie of one host never unlocks a page on
+// another.
+func (s *CookieSigner) mac(host, slug, passwordHash string, expires int64) []byte {
 	ph := sha256.Sum256([]byte(passwordHash))
 	m := hmac.New(sha256.New, s.key)
-	m.Write([]byte("proreta-statuspage-unlock-v1\x00"))
+	if host == "" {
+		m.Write([]byte("proreta-statuspage-unlock-v1\x00"))
+	} else {
+		m.Write([]byte("proreta-statuspage-unlock-host-v1\x00"))
+		m.Write([]byte(host))
+		m.Write([]byte{0})
+	}
 	m.Write([]byte(slug))
 	m.Write([]byte{0})
 	m.Write(ph[:])
@@ -134,17 +146,27 @@ func (s *CookieSigner) mac(slug, passwordHash string, expires int64) []byte {
 	return m.Sum(nil)
 }
 
-// Value returns the cookie value for a page unlocked now.
+// Value returns the cookie value for a page unlocked now on the installation host.
 func (s *CookieSigner) Value(slug, passwordHash string, now time.Time) string {
+	return s.HostValue("", slug, passwordHash, now)
+}
+
+// HostValue is Value for a page unlocked on a customer's own domain.
+func (s *CookieSigner) HostValue(host, slug, passwordHash string, now time.Time) string {
 	exp := now.Add(CookieTTL).Unix()
 	buf := make([]byte, 8, 8+sha256.Size)
 	binary.BigEndian.PutUint64(buf, uint64(exp)) //nolint:gosec // G115: unix seconds are positive
-	buf = append(buf, s.mac(slug, passwordHash, exp)...)
+	buf = append(buf, s.mac(host, slug, passwordHash, exp)...)
 	return base64.RawURLEncoding.EncodeToString(buf)
 }
 
 // Valid reports whether value unlocks the page with this password hash at now.
 func (s *CookieSigner) Valid(value, slug, passwordHash string, now time.Time) bool {
+	return s.HostValid(value, "", slug, passwordHash, now)
+}
+
+// HostValid is Valid for a cookie issued on the customer's own domain host.
+func (s *CookieSigner) HostValid(value, host, slug, passwordHash string, now time.Time) bool {
 	raw, err := base64.RawURLEncoding.DecodeString(value)
 	if err != nil || len(raw) != 8+sha256.Size {
 		return false
@@ -153,5 +175,5 @@ func (s *CookieSigner) Valid(value, slug, passwordHash string, now time.Time) bo
 	if exp <= now.Unix() || exp > now.Add(CookieTTL+time.Minute).Unix() {
 		return false
 	}
-	return hmac.Equal(raw[8:], s.mac(slug, passwordHash, exp))
+	return hmac.Equal(raw[8:], s.mac(host, slug, passwordHash, exp))
 }

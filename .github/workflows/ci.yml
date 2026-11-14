@@ -33,6 +33,22 @@ jobs:
         run: bash scripts/check-todos.sh
       - name: No internal record references
         run: bash scripts/check-internal-refs.sh
+      - name: Install shellcheck (pinned, checksum verified)
+        env:
+          SHELLCHECK_VERSION: 0.11.0
+          # linux.x86_64 tarball of the release above (the release publishes no checksums file).
+          SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+        run: |
+          set -euo pipefail
+          dir="${RUNNER_TEMP}/shellcheck"
+          mkdir -p "$dir"
+          curl -fsSL -o "$dir/shellcheck.tar.xz" \
+            "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          echo "${SHELLCHECK_SHA256}  $dir/shellcheck.tar.xz" | sha256sum --check --strict
+          tar -xJf "$dir/shellcheck.tar.xz" -C "$dir" --strip-components=1 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
+          echo "$dir" >> "$GITHUB_PATH"
+      - name: Shell scripts
+        run: git ls-files -z '*.sh' | xargs -0 shellcheck -S style
       - name: Migration file naming
         run: |
           set -euo pipefail
@@ -193,6 +209,13 @@ jobs:
           cache-dependency-path: backend/go.sum
       - name: Generated code is up to date
         run: make check-generated
+      # Pinned by version (the Go checksum database verifies the module). The toolchain is the one
+      # in go.mod, the same as the release image; any reachable advisory fails the job.
+      - name: Known vulnerabilities (govulncheck)
+        working-directory: backend
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          "$(go env GOPATH)/bin/govulncheck" ./...
       - name: Test
         run: make test
       # TEST_DATABASE_ADMIN_URL comes from the job env above, like the normal tests.

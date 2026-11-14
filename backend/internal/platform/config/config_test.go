@@ -453,6 +453,45 @@ func TestLoadStatuspage(t *testing.T) {
 	}
 }
 
+func TestLoadStatuspageCustomDomains(t *testing.T) {
+	key := base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+	base := func() map[string]string {
+		return map[string]string{
+			"PRORETA_DATABASE_URL": "postgres://proreta_statuspage:pw@db:5432/proreta?sslmode=require", "PRORETA_PUBLIC_URL": "https://proreta.example.com",
+			"PRORETA_STATUSPAGE_COOKIE_KEY": key,
+		}
+	}
+	cfg, err := LoadStatuspage(env(base()))
+	if err != nil || cfg.CustomDomains || cfg.AbuseURL != "" || len(cfg.InstallationHosts) != 1 || cfg.InstallationHosts[0] != "proreta.example.com" {
+		t.Fatalf("defaults: %+v %v", cfg, err)
+	}
+	e := base()
+	e["PRORETA_STATUS_PAGE_CUSTOM_DOMAINS"] = "true"
+	e["PRORETA_STATUSPAGE_INSTALLATION_HOSTS"] = "Proreta.Internal.example.com, status.example.org"
+	e["PRORETA_ABUSE_URL"] = "mailto:abuse@example.com"
+	cfg, err = LoadStatuspage(env(e))
+	if err != nil || !cfg.CustomDomains || cfg.AbuseURL != "mailto:abuse@example.com" ||
+		strings.Join(cfg.InstallationHosts, ",") != "proreta.example.com,proreta.internal.example.com,status.example.org" {
+		t.Fatalf("custom: %+v %v", cfg, err)
+	}
+	for k, v := range map[string]string{
+		"PRORETA_STATUS_PAGE_CUSTOM_DOMAINS":    "yes",
+		"PRORETA_STATUSPAGE_INSTALLATION_HOSTS": "https://x.example.com",
+		"PRORETA_ABUSE_URL":                     "javascript:alert(1)",
+	} {
+		m := base()
+		m[k] = v
+		if _, err := LoadStatuspage(env(m)); err == nil || !strings.Contains(err.Error(), k) {
+			t.Errorf("%s=%q: %v", k, v, err)
+		}
+	}
+	m := base()
+	m["PRORETA_ABUSE_URL"] = "http://example.com/abuse"
+	if _, err := LoadStatuspage(env(m)); err == nil {
+		t.Error("plain http abuse URL accepted")
+	}
+}
+
 func TestLoadAPIOAuth(t *testing.T) {
 	cfg, err := LoadAPI(env(apiEnv(t)))
 	if err != nil {
@@ -697,5 +736,42 @@ func TestLoadStatuspageTLSAsk(t *testing.T) {
 		} else if strings.Contains(err.Error(), good) {
 			t.Errorf("%s: the error echoes the token: %v", name, err)
 		}
+	}
+}
+
+func TestStatusPageDomainRules(t *testing.T) {
+	e := apiEnv(t)
+	e["PRORETA_PUBLIC_URL"] = "https://proreta.klr-ops.net"
+	e["PRORETA_STATUSPAGE_CNAME_TARGET"] = "customers.example.net"
+	e["PRORETA_STATUSPAGE_INSTALLATION_HOSTS"] = "app.example.net"
+	cfg, err := LoadAPI(env(e))
+	if err != nil || cfg.StatusPageCNAMETarget != "customers.example.net" ||
+		strings.Join(cfg.StatusPageInstallationHosts, ",") != "app.example.net,proreta.klr-ops.net" ||
+		strings.Join(cfg.StatusPageForbiddenSuffixes, ",") != "klr-ops.net" {
+		t.Fatalf("%+v, %v", cfg, err)
+	}
+	e["PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES"] = "corp.example.com"
+	if cfg, err = LoadAPI(env(e)); err != nil || strings.Join(cfg.StatusPageForbiddenSuffixes, ",") != "corp.example.com" {
+		t.Fatalf("explicit suffixes: %v, %v", cfg.StatusPageForbiddenSuffixes, err)
+	}
+	e["PRORETA_STATUSPAGE_CNAME_TARGET"] = "Not A Host"
+	if _, err = LoadAPI(env(e)); err == nil || !strings.Contains(err.Error(), "PRORETA_STATUSPAGE_CNAME_TARGET") {
+		t.Fatalf("bad target accepted: %v", err)
+	}
+}
+
+func TestLoadStatuspageForbiddenSuffixes(t *testing.T) {
+	e := map[string]string{
+		"PRORETA_DATABASE_URL":          "postgres://proreta_statuspage:pw@db:5432/proreta?sslmode=require",
+		"PRORETA_PUBLIC_URL":            "https://proreta.klr-ops.net",
+		"PRORETA_STATUSPAGE_COOKIE_KEY": base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")),
+	}
+	cfg, err := LoadStatuspage(env(e))
+	if err != nil || strings.Join(cfg.ForbiddenSuffixes, ",") != "klr-ops.net" {
+		t.Fatalf("default: %v %v", cfg.ForbiddenSuffixes, err)
+	}
+	e["PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES"] = "corp.example.com"
+	if cfg, err = LoadStatuspage(env(e)); err != nil || strings.Join(cfg.ForbiddenSuffixes, ",") != "corp.example.com" {
+		t.Fatalf("explicit: %v %v", cfg.ForbiddenSuffixes, err)
 	}
 }

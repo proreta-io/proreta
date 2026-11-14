@@ -1,7 +1,8 @@
 // Command statuspage serves the public status pages under /status/<slug>: HTML, JSON,
 // RSS, a badge and an embed script, from snapshots prepared by the api and jobs. It runs as the
-// database role proreta_statuspage, which may only call status_page_snapshot(slug), and keeps no
-// sessions.
+// database role proreta_statuspage, which may only call status_page_snapshot(slug) and the two host
+// definers, and keeps no sessions. With PRORETA_STATUS_PAGE_CUSTOM_DOMAINS it also serves a page at
+// the root of a verified customer domain.
 package main
 
 import (
@@ -18,6 +19,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/platform/httpx"
 	"github.com/proreta-io/proreta/backend/internal/platform/logging"
 	"github.com/proreta-io/proreta/backend/internal/platform/metrics"
+	"github.com/proreta-io/proreta/backend/internal/statuspages/domains"
 	"github.com/proreta-io/proreta/backend/internal/statuspages/public"
 	"github.com/proreta-io/proreta/backend/internal/statuspages/tlsask"
 )
@@ -43,6 +45,9 @@ func run() error {
 	log := logging.New(os.Stdout, cfg.LogLevel).With("service", "statuspage", "version", version)
 	if config.CookieInsecureOverHTTPS(cfg.CookieSecure, cfg.PublicURL) {
 		log.Warn("PRORETA_COOKIE_SECURE is false while PRORETA_PUBLIC_URL is https: cookies are sent without the Secure attribute")
+	}
+	if cfg.CustomDomains && cfg.AbuseURL == "" {
+		log.Warn("PRORETA_ABUSE_URL is empty: pages on customer domains show no \"Report abuse\" link")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
@@ -73,7 +78,7 @@ func run() error {
 	if cfg.TLSAskAddr != "" {
 		// Its own listener, so a NetworkPolicy can let only the front proxy reach it while
 		// Prometheus and the probes keep the admin port.
-		ask, err := tlsask.New(tlsask.DBAllower{Pool: pool}, tlsask.Options{Token: cfg.TLSAskToken.Value(), Logger: log, Registerer: reg})
+		ask, err := tlsask.New(tlsask.DBAllower{Pool: pool}, tlsask.Options{Token: cfg.TLSAskToken.Value(), Rules: domains.NewRules(cfg.InstallationHosts, cfg.ForbiddenSuffixes), Logger: log, Registerer: reg})
 		if err != nil {
 			return err
 		}

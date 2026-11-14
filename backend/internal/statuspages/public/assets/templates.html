@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="light dark">
-{{if .NoIndex}}<meta name="robots" content="noindex, nofollow">{{end}}
+{{if .NoIndex}}<meta name="robots" content="noindex, nofollow">{{end}}{{if .Canonical}}<link rel="canonical" href="{{.Canonical}}">{{end}}
 <title>{{.Title}}</title>
 <link rel="stylesheet" href="{{.CSSURL}}">
 {{if .AccentCSS}}<style nonce="{{.Nonce}}">{{.AccentCSS}}</style>{{end}}
@@ -84,7 +84,7 @@
   <span class="grow">Times are UTC. Automatic checks; updates within a minute.</span>
   <a href="{{.RSSURL}}">RSS</a>
   <a href="{{.JSONURL}}">JSON</a>
-  <span>Powered by Proreta</span>
+  {{if .Custom}}<span>Status page by Proreta</span>{{if .AbuseURL}}<a href="{{.AbuseURL}}" rel="noopener noreferrer">Report abuse</a>{{end}}{{else}}<span>Powered by Proreta</span>{{end}}
 </footer>
 </div>
 </body>
@@ -96,13 +96,15 @@
 <body>
 <main class="lock">
   <h1>{{.Title}}</h1>
-  <p>This status page is protected. Enter the password you were given.</p>
+  <p>This status page is protected. Enter the password you were given.</p>{{if .Custom}}
+  <p>This password protects this status page only. Never enter your account password here.</p>{{end}}
   <form method="post" action="{{.UnlockURL}}">
     <label for="password">Password</label>
     <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="128" autofocus{{if .Error}} aria-describedby="lock-error" aria-invalid="true"{{end}}>
     {{if .Error}}<p id="lock-error" class="error" role="alert">{{.Error}}</p>{{end}}
     <button type="submit">Open status page</button>
-  </form>
+  </form>{{if .Custom}}
+  <p>Status page by Proreta{{if .AbuseURL}} · <a href="{{.AbuseURL}}" rel="noopener noreferrer">Report abuse</a>{{end}}</p>{{end}}
 </main>
 </body>
 </html>
