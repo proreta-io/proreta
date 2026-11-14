@@ -30,7 +30,7 @@ func TestIntegrationMigrateFromScratchAndRerun(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "audit_log,auth_identities,check_results,email_settings,email_verifications,heartbeat_tokens,incident_monitors,incidents,invitations,mail_outbox,memberships,monitor_channels,monitor_location_state," +
-		"monitor_locations,monitor_state,monitors,notification_channels,notification_deliveries,org_auth_domains,password_resets,plans,platform_settings,probe_locations,project_members,projects,result_rollups_hourly,rollup_state,sessions," +
+		"monitor_locations,monitor_schedule_epochs,monitor_state,monitors,notification_channels,notification_deliveries,org_auth_domains,password_resets,plans,platform_settings,probe_locations,project_members,projects,result_rollups_hourly,rollup_dirty_hours,rollup_state,sessions," +
 		"specula_agents,specula_projects,status_page_components,status_page_domains,status_page_released_slugs,status_page_snapshots,status_pages,tenants,users"
 	if got := strings.Join(tables, ","); got != want {
 		t.Fatalf("tables = %s, want %s", got, want)
@@ -75,6 +75,14 @@ var definerAllowList = map[string][]string{
 	"specula_authenticate":         {"proreta_worker"},
 	"specula_hello":                {"proreta_worker"},
 	"specula_agents_sync_location": {},
+	// Specula schedule mode: the schedule of one Specula, the hour marks of late results, and the
+	// epoch functions and triggers that only the monitor and state triggers call.
+	"specula_schedule":                  {"proreta_worker"},
+	"rollup_mark_dirty":                 {"proreta_worker"},
+	"specula_epoch_open":                {},
+	"specula_epoch_close":               {},
+	"monitors_epoch_sync":               {},
+	"monitor_location_state_epoch_sync": {},
 	// Runs a monitor at the worker or at a Specula of its organization.
 	"monitor_set_location": {"proreta_api"},
 	// Marks the monitors of a revoked or silent Specula unknown.
@@ -224,6 +232,8 @@ var extraPolicies = map[string]struct {
 	// specula_authenticate, specula_hello, specula_revoke and the claim's access check.
 	"specula_agents.owner_specula":        {cmd: "*", roles: []string{"proreta_owner"}},
 	"specula_projects.owner_specula_read": {cmd: "r", roles: []string{"proreta_owner"}},
+	// specula_epoch_open and specula_epoch_close, specula_schedule.
+	"monitor_schedule_epochs.owner_schedule_epochs": {cmd: "*", roles: []string{"proreta_owner"}},
 	// specula_mark_unreachable.
 	"monitor_state.owner_specula_unreachable_read":  {cmd: "r", roles: []string{"proreta_owner"}},
 	"monitor_state.owner_specula_unreachable_write": {cmd: "w", roles: []string{"proreta_owner"}},

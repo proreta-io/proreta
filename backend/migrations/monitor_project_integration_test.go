@@ -40,7 +40,7 @@ func TestIntegrationMonitorProjectRequired(t *testing.T) {
 		t.Fatalf("monitor in its Default project: %v", err)
 	}
 	var triggers int
-	if err := admin.QueryRow(ctx, `SELECT count(*) FROM pg_trigger WHERE tgrelid = 'monitors'::regclass AND NOT tgisinternal`).Scan(&triggers); err != nil || triggers != 0 {
-		t.Fatalf("triggers on monitors: %d (%v), want none", triggers, err)
+	if err := admin.QueryRow(ctx, `SELECT count(*) FROM pg_trigger WHERE tgrelid = 'monitors'::regclass AND NOT tgisinternal AND tgname <> 'monitors_epoch_sync'`).Scan(&triggers); err != nil || triggers != 0 {
+		t.Fatalf("triggers on monitors: %d (%v), want none besides the epoch maintenance", triggers, err)
 	}
 }

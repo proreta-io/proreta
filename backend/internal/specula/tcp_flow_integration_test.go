@@ -50,6 +50,8 @@ func TestIntegrationSpeculaTCPFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The executor announces tcp at its hello; the claim hands out tcp only to one that did.
+	pgtest.MustExec(t, admin, `UPDATE specula_agents SET capabilities = '{tcp}' WHERE id = '`+s.ID.String()+`'`)
 	// A free port: nothing listens until the test opens it.
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

@@ -110,9 +110,17 @@ var definerCalls = map[string]string{
 	"specula_agents_sync_location": `SELECT specula_agents_sync_location()`,
 	"monitor_set_location":         `SELECT monitor_set_location(gen_random_uuid(), gen_random_uuid())`,
 	"specula_mark_unreachable":     `SELECT specula_mark_unreachable()`,
-	"specula_sync_offline":         `SELECT * FROM specula_sync_offline()`,
-	"specula_status_counts":        `SELECT * FROM specula_status_counts()`,
-	"specula_delivery_context":     `SELECT * FROM specula_delivery_context(gen_random_uuid(), gen_random_uuid())`,
+	// Schedule mode: the schedule of an unknown Specula is empty, the hour mark of an open hour is
+	// ignored, the epoch functions find no monitor, the triggers are not callable.
+	"specula_schedule":                  `SELECT * FROM specula_schedule(gen_random_uuid(), gen_random_uuid())`,
+	"rollup_mark_dirty":                 `SELECT rollup_mark_dirty(now())`,
+	"specula_epoch_open":                `SELECT specula_epoch_open(gen_random_uuid(), gen_random_uuid(), gen_random_uuid())`,
+	"specula_epoch_close":               `SELECT specula_epoch_close(gen_random_uuid(), gen_random_uuid(), gen_random_uuid())`,
+	"monitors_epoch_sync":               `SELECT monitors_epoch_sync()`,
+	"monitor_location_state_epoch_sync": `SELECT monitor_location_state_epoch_sync()`,
+	"specula_sync_offline":              `SELECT * FROM specula_sync_offline()`,
+	"specula_status_counts":             `SELECT * FROM specula_status_counts()`,
+	"specula_delivery_context":          `SELECT * FROM specula_delivery_context(gen_random_uuid(), gen_random_uuid())`,
 }
 
 // Every definer function in the allow-list is executable by exactly the roles listed there: a

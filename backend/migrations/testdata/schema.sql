@@ -18,6 +18,7 @@ memberships kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arwd/
 monitor_channels kind=r owner=proreta_owner rls=true force=true acl=proreta_api=ard/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=r/proreta_owner
 monitor_location_state kind=r owner=proreta_owner rls=true force=true options=fillfactor=70 acl=proreta_api=ar/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=rw/proreta_owner
 monitor_locations kind=r owner=proreta_owner rls=true force=true acl=proreta_api=ar/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=r/proreta_owner
+monitor_schedule_epochs kind=r owner=proreta_owner rls=true force=true acl=proreta_owner=arwdDxt/proreta_owner,proreta_worker=r/proreta_owner
 monitor_state kind=r owner=proreta_owner rls=true force=true options=fillfactor=80 acl=proreta_api=ar/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=rw/proreta_owner
 monitors kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arw/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=r/proreta_owner
 notification_channels kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arw/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=r/proreta_owner
@@ -30,6 +31,8 @@ probe_locations kind=r owner=proreta_owner rls=false force=false acl=proreta_api
 project_members kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arwd/proreta_owner,proreta_owner=arwdDxt/proreta_owner
 projects kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arw/proreta_owner,proreta_owner=arwdDxt/proreta_owner
 result_rollups_hourly kind=r owner=proreta_owner rls=true force=true acl=proreta_api=r/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=r/proreta_owner
+rollup_dirty_hours kind=r owner=proreta_owner rls=true force=false acl=proreta_owner=arwdDxt/proreta_owner
+rollup_dirty_seq kind=S owner=proreta_owner rls=false force=false acl=proreta_owner=rwU/proreta_owner
 rollup_state kind=r owner=proreta_owner rls=true force=false acl=proreta_owner=arwdDxt/proreta_owner
 sessions kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arwd/proreta_owner,proreta_owner=arwdDxt/proreta_owner
 specula_agents kind=r owner=proreta_owner rls=true force=true acl=proreta_api=ar/proreta_owner,proreta_owner=arwdDxt/proreta_owner
@@ -165,6 +168,14 @@ monitor_locations.1 tenant_id uuid not null
 monitor_locations.2 monitor_id uuid not null
 monitor_locations.3 location_id uuid not null
 monitor_locations.4 created_at timestamp with time zone not null default now()
+monitor_schedule_epochs.1 tenant_id uuid not null
+monitor_schedule_epochs.2 monitor_id uuid not null
+monitor_schedule_epochs.3 location_id uuid not null
+monitor_schedule_epochs.4 epoch integer not null
+monitor_schedule_epochs.5 anchor bigint not null
+monitor_schedule_epochs.6 interval_seconds integer not null
+monitor_schedule_epochs.7 active_from timestamp with time zone not null
+monitor_schedule_epochs.8 active_until timestamp with time zone
 monitor_state.1 tenant_id uuid not null
 monitor_state.2 monitor_id uuid not null
 monitor_state.3 status text not null default 'unknown'::text acl=proreta_api=w/proreta_owner
@@ -278,6 +289,9 @@ result_rollups_hourly.6 ok_count integer not null
 result_rollups_hourly.7 latency_sum_ms bigint not null
 result_rollups_hourly.8 latency_histogram integer[] not null
 result_rollups_hourly.9 computed_at timestamp with time zone not null default now()
+rollup_dirty_hours.1 hour timestamp with time zone not null
+rollup_dirty_hours.2 seq bigint not null
+rollup_dirty_hours.3 marked_at timestamp with time zone not null default now()
 rollup_state.1 singleton boolean not null default true
 rollup_state.2 watermark timestamp with time zone not null
 rollup_state.3 updated_at timestamp with time zone not null default now()
@@ -304,6 +318,12 @@ specula_agents.10 revoked_at timestamp with time zone
 specula_agents.11 created_by uuid
 specula_agents.12 created_at timestamp with time zone not null default now()
 specula_agents.13 updated_at timestamp with time zone not null default now() acl=proreta_api=w/proreta_owner
+specula_agents.14 capabilities text[] not null default '{}'::text[]
+specula_agents.15 instance_id text
+specula_agents.16 schedule_issued_at timestamp with time zone
+specula_agents.17 buffer_depth integer
+specula_agents.18 oldest_unsent_at timestamp with time zone
+specula_agents.19 buffer_degraded boolean not null default false
 specula_projects.1 tenant_id uuid not null
 specula_projects.2 specula_id uuid not null
 specula_projects.3 project_id uuid not null
@@ -476,6 +496,12 @@ monitor_locations monitor_locations_location_id_fkey FOREIGN KEY (location_id) R
 monitor_locations monitor_locations_pkey PRIMARY KEY (monitor_id, location_id)
 monitor_locations monitor_locations_tenant_id_monitor_id_fkey FOREIGN KEY (tenant_id, monitor_id) REFERENCES monitors(tenant_id, id)
 monitor_locations monitor_locations_tenant_id_monitor_id_location_id_key UNIQUE (tenant_id, monitor_id, location_id)
+monitor_schedule_epochs monitor_schedule_epochs_anchor_check CHECK ((anchor > 0))
+monitor_schedule_epochs monitor_schedule_epochs_check CHECK (((active_until IS NULL) OR (active_until >= active_from)))
+monitor_schedule_epochs monitor_schedule_epochs_epoch_check CHECK ((epoch >= 1))
+monitor_schedule_epochs monitor_schedule_epochs_interval_seconds_check CHECK ((interval_seconds > 0))
+monitor_schedule_epochs monitor_schedule_epochs_pkey PRIMARY KEY (monitor_id, location_id, epoch)
+monitor_schedule_epochs monitor_schedule_epochs_tenant_id_monitor_id_location_id_fkey FOREIGN KEY (tenant_id, monitor_id, location_id) REFERENCES monitor_locations(tenant_id, monitor_id, location_id)
 monitor_state monitor_state_current_incident_fkey FOREIGN KEY (tenant_id, current_incident_id) REFERENCES incidents(tenant_id, id)
 monitor_state monitor_state_last_error_kind_check CHECK (((length(last_error_kind) >= 1) AND (length(last_error_kind) <= 64)))
 monitor_state monitor_state_pkey PRIMARY KEY (monitor_id)
@@ -577,6 +603,8 @@ result_rollups_hourly result_rollups_hourly_latency_sum_ms_check CHECK ((latency
 result_rollups_hourly result_rollups_hourly_pkey PRIMARY KEY (monitor_id, location_id, hour)
 result_rollups_hourly result_rollups_hourly_tenant_id_monitor_id_fkey FOREIGN KEY (tenant_id, monitor_id) REFERENCES monitors(tenant_id, id)
 result_rollups_hourly result_rollups_hourly_total_check CHECK ((total > 0))
+rollup_dirty_hours rollup_dirty_hours_hour_check CHECK ((hour = date_trunc('hour'::text, hour, 'UTC'::text)))
+rollup_dirty_hours rollup_dirty_hours_pkey PRIMARY KEY (hour)
 rollup_state rollup_state_pkey PRIMARY KEY (singleton)
 rollup_state rollup_state_singleton_check CHECK (singleton)
 rollup_state rollup_state_watermark_check CHECK ((watermark = date_trunc('hour'::text, watermark, 'UTC'::text)))
@@ -585,9 +613,12 @@ sessions sessions_tenant_id_user_id_fkey FOREIGN KEY (tenant_id, user_id) REFERE
 sessions sessions_token_hash_check CHECK ((length(token_hash) = 32))
 sessions sessions_token_hash_key UNIQUE (token_hash)
 sessions sessions_user_agent_check CHECK ((length(user_agent) <= 512))
+specula_agents specula_agents_buffer_depth_check CHECK ((buffer_depth >= 0))
+specula_agents specula_agents_capabilities_check CHECK ((cardinality(capabilities) <= 16))
 specula_agents specula_agents_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id)
 specula_agents specula_agents_hostname_check CHECK ((length(hostname) <= 253))
 specula_agents specula_agents_id_key UNIQUE (id)
+specula_agents specula_agents_instance_id_check CHECK ((length(instance_id) <= 64))
 specula_agents specula_agents_location_id_fkey FOREIGN KEY (location_id) REFERENCES probe_locations(id)
 specula_agents specula_agents_location_id_key UNIQUE (location_id)
 specula_agents specula_agents_name_check CHECK (((char_length(name) >= 1) AND (char_length(name) <= 80)))
@@ -692,6 +723,9 @@ CREATE UNIQUE INDEX monitor_location_state_pkey ON public.monitor_location_state
 CREATE INDEX monitor_locations_location_idx ON public.monitor_locations USING btree (location_id)
 CREATE UNIQUE INDEX monitor_locations_pkey ON public.monitor_locations USING btree (monitor_id, location_id)
 CREATE UNIQUE INDEX monitor_locations_tenant_id_monitor_id_location_id_key ON public.monitor_locations USING btree (tenant_id, monitor_id, location_id)
+CREATE INDEX monitor_schedule_epochs_location_idx ON public.monitor_schedule_epochs USING btree (location_id) WHERE (active_until IS NULL)
+CREATE UNIQUE INDEX monitor_schedule_epochs_open_idx ON public.monitor_schedule_epochs USING btree (monitor_id, location_id) WHERE (active_until IS NULL)
+CREATE UNIQUE INDEX monitor_schedule_epochs_pkey ON public.monitor_schedule_epochs USING btree (monitor_id, location_id, epoch)
 CREATE UNIQUE INDEX monitor_state_pkey ON public.monitor_state USING btree (monitor_id)
 CREATE UNIQUE INDEX monitors_pkey ON public.monitors USING btree (id)
 CREATE INDEX monitors_project_idx ON public.monitors USING btree (tenant_id, project_id) WHERE (deleted_at IS NULL)
@@ -728,6 +762,7 @@ CREATE UNIQUE INDEX projects_slug_idx ON public.projects USING btree (tenant_id,
 CREATE UNIQUE INDEX projects_tenant_id_id_key ON public.projects USING btree (tenant_id, id)
 CREATE INDEX result_rollups_hourly_hour_idx ON public.result_rollups_hourly USING btree (hour)
 CREATE UNIQUE INDEX result_rollups_hourly_pkey ON public.result_rollups_hourly USING btree (monitor_id, location_id, hour)
+CREATE UNIQUE INDEX rollup_dirty_hours_pkey ON public.rollup_dirty_hours USING btree (hour)
 CREATE UNIQUE INDEX rollup_state_pkey ON public.rollup_state USING btree (singleton)
 CREATE INDEX sessions_expires_at_idx ON public.sessions USING btree (expires_at)
 CREATE UNIQUE INDEX sessions_pkey ON public.sessions USING btree (id)
@@ -788,6 +823,8 @@ monitor_location_state owner_claim_read cmd=r permissive=true to=proreta_owner u
 monitor_location_state tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
 monitor_locations owner_specula_offline_locations cmd=r permissive=true to=proreta_owner using true
 monitor_locations tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
+monitor_schedule_epochs owner_schedule_epochs cmd=* permissive=true to=proreta_owner using true check true
+monitor_schedule_epochs tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
 monitor_state owner_specula_unreachable_read cmd=r permissive=true to=proreta_owner using true
 monitor_state owner_specula_unreachable_write cmd=w permissive=true to=proreta_owner using true check true
 monitor_state tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
@@ -826,6 +863,8 @@ status_pages owner_statuspage_read cmd=r permissive=true to=proreta_owner using 
 status_pages tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
 
 -- triggers
+CREATE TRIGGER monitor_location_state_epoch_sync AFTER INSERT OR DELETE ON public.monitor_location_state FOR EACH ROW EXECUTE FUNCTION monitor_location_state_epoch_sync()
+CREATE TRIGGER monitors_epoch_sync AFTER UPDATE OF paused, deleted_at, config, type, interval_seconds, timeout_seconds ON public.monitors FOR EACH ROW WHEN (((old.paused IS DISTINCT FROM new.paused) OR (old.deleted_at IS DISTINCT FROM new.deleted_at) OR (old.config IS DISTINCT FROM new.config) OR (old.type IS DISTINCT FROM new.type) OR (old.interval_seconds IS DISTINCT FROM new.interval_seconds) OR (old.timeout_seconds IS DISTINCT FROM new.timeout_seconds))) EXECUTE FUNCTION monitors_epoch_sync()
 CREATE TRIGGER specula_agents_sync_location AFTER UPDATE OF name ON public.specula_agents FOR EACH ROW EXECUTE FUNCTION specula_agents_sync_location()
 CREATE TRIGGER status_pages_release_domains AFTER UPDATE OF deleted_at ON public.status_pages FOR EACH ROW WHEN (((old.deleted_at IS NULL) AND (new.deleted_at IS NOT NULL))) EXECUTE FUNCTION status_pages_release_domains()
 CREATE TRIGGER tenants_create_default_project AFTER INSERT ON public.tenants FOR EACH ROW EXECUTE FUNCTION tenants_create_default_project()
@@ -893,7 +932,9 @@ heartbeat_ping(bytea) owner=proreta_owner definer=true acl=proreta_api=X/proreta
 list_droppable_partitions() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 list_due_heartbeats(integer) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 mail_pending() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+monitor_location_state_epoch_sync() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner
 monitor_set_location(uuid,uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+monitors_epoch_sync() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner
 org_delete_tenant(uuid,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 outbox_pending() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 plan_limits_valid(jsonb) owner=proreta_owner definer=false acl=proreta_owner=X/proreta_owner
@@ -906,13 +947,17 @@ purge_notification_deliveries(integer) owner=proreta_owner definer=true acl=pror
 purge_password_resets() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 purge_result_rollups(integer) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 reset_monitor_runtime(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+rollup_mark_dirty(timestamp with time zone) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_agents_sync_location() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner
 specula_authenticate(bytea) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_create(uuid,text,bytea,boolean,uuid[],uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 specula_delivery_context(uuid,uuid) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+specula_epoch_close(uuid,uuid,uuid) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner
+specula_epoch_open(uuid,uuid,uuid) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner
 specula_hello(uuid,text,text) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_mark_unreachable(interval) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_revoke(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+specula_schedule(uuid,uuid) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_status_counts(interval) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_sync_offline(interval) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 status_page_domain_allowed(text) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_statuspage=X/proreta_owner
@@ -2178,6 +2223,8 @@ AS $function$
           AND (l.kind = 'platform' OR EXISTS (
                 SELECT 1 FROM specula_agents AS a
                 WHERE a.location_id = l.id AND a.tenant_id = s.tenant_id AND a.revoked_at IS NULL
+                  AND NOT ('schedule/1' = ANY (a.capabilities))
+                  AND (m.type = 'http' OR 'tcp' = ANY (a.capabilities))
                   AND (a.all_projects OR EXISTS (
                         SELECT 1 FROM specula_projects AS sp
                         WHERE sp.specula_id = a.id AND sp.project_id = m.project_id))))
@@ -2703,6 +2750,21 @@ CREATE OR REPLACE FUNCTION public.mail_pending()
 AS $function$
     SELECT count(*) FROM mail_outbox WHERE status = 'pending'
 $function$
+CREATE OR REPLACE FUNCTION public.monitor_location_state_epoch_sync()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        PERFORM specula_epoch_open(NEW.tenant_id, NEW.monitor_id, NEW.location_id);
+    ELSE
+        PERFORM specula_epoch_close(OLD.tenant_id, OLD.monitor_id, OLD.location_id);
+    END IF;
+    RETURN NULL;
+END
+$function$
 CREATE OR REPLACE FUNCTION public.monitor_set_location(p_monitor_id uuid, p_location_id uuid)
  RETURNS text
  LANGUAGE plpgsql
@@ -2744,6 +2806,32 @@ BEGIN
             CASE WHEN mon_paused THEN 'infinity'::timestamptz ELSE now() + random() * interval '30 seconds' END)
     ON CONFLICT DO NOTHING;
     RETURN 'ok';
+END
+$function$
+CREATE OR REPLACE FUNCTION public.monitors_epoch_sync()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    loc uuid;
+BEGIN
+    FOR loc IN SELECT s.location_id FROM monitor_location_state AS s
+               WHERE s.tenant_id = NEW.tenant_id AND s.monitor_id = NEW.id
+    LOOP
+        IF NEW.paused OR NEW.deleted_at IS NOT NULL THEN
+            PERFORM specula_epoch_close(NEW.tenant_id, NEW.id, loc);
+        ELSE
+            IF NEW.config IS DISTINCT FROM OLD.config OR NEW.type IS DISTINCT FROM OLD.type
+               OR NEW.interval_seconds IS DISTINCT FROM OLD.interval_seconds
+               OR NEW.timeout_seconds IS DISTINCT FROM OLD.timeout_seconds THEN
+                PERFORM specula_epoch_close(NEW.tenant_id, NEW.id, loc);
+            END IF;
+            PERFORM specula_epoch_open(NEW.tenant_id, NEW.id, loc);
+        END IF;
+    END LOOP;
+    RETURN NULL;
 END
 $function$
 CREATE OR REPLACE FUNCTION public.org_delete_tenant(p_actor uuid, p_audit_id uuid, p_ip inet)
@@ -2975,6 +3063,28 @@ BEGIN
     RETURN n;
 END
 $function$
+CREATE OR REPLACE FUNCTION public.rollup_mark_dirty(p_hour timestamp with time zone)
+ RETURNS boolean
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    h      timestamptz;
+    closed timestamptz := date_trunc('hour', now(), 'UTC');
+BEGIN
+    IF p_hour IS NULL THEN
+        RETURN false;
+    END IF;
+    h := date_trunc('hour', p_hour, 'UTC');
+    IF h >= closed OR h < closed - interval '7 days' THEN
+        RETURN false;
+    END IF;
+    INSERT INTO rollup_dirty_hours AS d (hour, seq) VALUES (h, nextval('rollup_dirty_seq'))
+    ON CONFLICT (hour) DO UPDATE SET seq = nextval('rollup_dirty_seq'), marked_at = now();
+    RETURN true;
+END
+$function$
 CREATE OR REPLACE FUNCTION public.specula_agents_sync_location()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -3055,6 +3165,56 @@ AS $function$
     JOIN notification_channels AS c ON c.tenant_id = s.tenant_id AND c.id = p_channel_id
     WHERE s.tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::uuid AND s.id = p_specula_id
 $function$
+CREATE OR REPLACE FUNCTION public.specula_epoch_close(p_tenant uuid, p_monitor uuid, p_location uuid)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    n integer;
+BEGIN
+    UPDATE monitor_schedule_epochs SET active_until = now()
+    WHERE tenant_id = p_tenant AND monitor_id = p_monitor AND location_id = p_location AND active_until IS NULL;
+    GET DIAGNOSTICS n = ROW_COUNT;
+    RETURN n;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.specula_epoch_open(p_tenant uuid, p_monitor uuid, p_location uuid)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    ival   integer;
+    cur    integer;
+    nxt    integer;
+    start  bigint := ceil(extract(epoch FROM now()))::bigint;
+    phase  bigint;
+BEGIN
+    SELECT m.interval_seconds INTO ival
+    FROM monitors AS m
+    JOIN probe_locations AS l ON l.id = p_location AND l.kind = 'agent'
+    WHERE m.tenant_id = p_tenant AND m.id = p_monitor
+      AND m.type IN ('http', 'tcp') AND NOT m.paused AND m.deleted_at IS NULL;
+    IF ival IS NULL THEN
+        RETURN NULL;
+    END IF;
+    SELECT e.epoch INTO cur FROM monitor_schedule_epochs AS e
+    WHERE e.monitor_id = p_monitor AND e.location_id = p_location AND e.active_until IS NULL;
+    IF cur IS NOT NULL THEN
+        RETURN cur;
+    END IF;
+    SELECT COALESCE(max(e.epoch), 0) + 1 INTO nxt FROM monitor_schedule_epochs AS e
+    WHERE e.monitor_id = p_monitor AND e.location_id = p_location;
+    phase := ((('x' || encode(substring(sha256(convert_to(p_monitor::text || p_location::text, 'UTF8')) FROM 1 FOR 8), 'hex'))::bit(64)::bigint)
+              % ival + ival) % ival;
+    INSERT INTO monitor_schedule_epochs (tenant_id, monitor_id, location_id, epoch, anchor, interval_seconds, active_from)
+    VALUES (p_tenant, p_monitor, p_location, nxt, start + phase, ival, now());
+    RETURN nxt;
+END
+$function$
 CREATE OR REPLACE FUNCTION public.specula_hello(p_specula_id uuid, p_version text, p_hostname text)
  RETURNS boolean
  LANGUAGE sql
@@ -3115,6 +3275,28 @@ BEGIN
     UPDATE probe_locations SET status = 'disabled' WHERE id = loc;
     RETURN true;
 END
+$function$
+CREATE OR REPLACE FUNCTION public.specula_schedule(p_tenant uuid, p_specula uuid)
+ RETURNS TABLE(monitor_id uuid, epoch integer, anchor bigint, interval_seconds integer, timeout_seconds integer, monitor_type text, url text, expected_status text, method text, request text, host text, port integer)
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    SELECT e.monitor_id, e.epoch, e.anchor, e.interval_seconds, m.timeout_seconds, m.type,
+           COALESCE(m.config ->> 'url', ''), COALESCE(m.config ->> 'expectedStatus', '2xx'),
+           COALESCE(m.config ->> 'method', 'GET'), COALESCE(m.config ->> 'request', ''),
+           COALESCE(m.config ->> 'host', ''), COALESCE((m.config ->> 'port')::integer, 0)
+    FROM specula_agents AS a
+    JOIN tenants AS t ON t.id = a.tenant_id AND t.status = 'active' AND t.deleted_at IS NULL
+    JOIN probe_locations AS l ON l.id = a.location_id AND l.status = 'active'
+    JOIN monitor_schedule_epochs AS e ON e.tenant_id = a.tenant_id AND e.location_id = a.location_id AND e.active_until IS NULL
+    JOIN monitors AS m ON m.tenant_id = e.tenant_id AND m.id = e.monitor_id
+    WHERE a.tenant_id = p_tenant AND a.id = p_specula AND a.revoked_at IS NULL
+      AND m.type IN ('http', 'tcp') AND NOT m.paused AND m.deleted_at IS NULL
+      AND (a.all_projects OR EXISTS (
+            SELECT 1 FROM specula_projects AS sp WHERE sp.specula_id = a.id AND sp.project_id = m.project_id))
+    ORDER BY e.monitor_id
+    LIMIT 5001
 $function$
 CREATE OR REPLACE FUNCTION public.specula_status_counts(p_after interval DEFAULT '00:03:00'::interval)
  RETURNS TABLE(status text, n bigint)
