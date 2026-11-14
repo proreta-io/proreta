@@ -30,6 +30,7 @@ describe("the Admin Area shell", () => {
       ["Overview", "/admin"],
       ["Organizations", "/admin/organizations"],
       ["Users", "/admin/users"],
+      ["Domains", "/admin/domains"],
       ["Plans", "/admin/plans"],
       ["Email", "/admin/email"],
       ["Registration", "/admin/registration"],
