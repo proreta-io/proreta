@@ -77,6 +77,8 @@ plus owner_password, api_password, worker_password, statuspage_password.
 {{- define "proreta.secret.request" -}}{{ include "proreta.fullname" . }}-request{{- end }}
 {{/* Cookie key of the status page renderer. */}}
 {{- define "proreta.secret.statuspage" -}}{{ include "proreta.fullname" . }}-statuspage{{- end }}
+{{/* Shared token of the status page TLS ask endpoint: a Secret you created (secrets.tlsAsk.existingSecret) or the ExternalSecret target. */}}
+{{- define "proreta.secret.tlsAsk" -}}{{ .Values.secrets.tlsAsk.existingSecret | default (printf "%s-statuspage-ask" (include "proreta.fullname" .)) }}{{- end }}
 {{/* OAuth client credentials: a Secret you created (secrets.oauth.existingSecret) or the ExternalSecret target. */}}
 {{- define "proreta.secret.oauth" -}}{{ .Values.secrets.oauth.existingSecret | default (printf "%s-oauth" (include "proreta.fullname" .)) }}{{- end }}
 
@@ -264,6 +266,113 @@ with it and the worker opens them. The worker's only key. Arg: root context
       key: cookie_key
 {{- end }}
 
+{{/*
+Status pages on customer domains. True when statuspage.customDomains.enabled; fails the render for a
+combination the processes would refuse to start with. Arg: root context
+*/}}
+{{- define "proreta.statusDomains.enabled" -}}
+{{- $cd := .Values.statuspage.customDomains }}
+{{- if $cd.enabled }}
+{{- if not .Values.statuspage.enabled }}
+{{- fail "statuspage.customDomains.enabled needs statuspage.enabled=true (the renderer serves the customer hosts)" }}
+{{- end }}
+{{- if not $cd.cnameTarget }}
+{{- fail "statuspage.customDomains.cnameTarget is required when statuspage.customDomains.enabled: the host customers point their CNAME at, for example customers.example.net" }}
+{{- end }}
+{{- if $cd.tlsAsk.enabled }}
+{{- if or (eq (int $cd.tlsAsk.port) (int .Values.statuspage.httpPort)) (eq (int $cd.tlsAsk.port) (int .Values.config.adminPort)) }}
+{{- fail "statuspage.customDomains.tlsAsk.port must differ from statuspage.httpPort and config.adminPort" }}
+{{- end }}
+{{- if and (not .Values.secrets.tlsAsk.existingSecret) (not .Values.externalSecrets.enabled) }}
+{{- fail "statuspage.customDomains.tlsAsk needs its token: create a Secret with key token and set secrets.tlsAsk.existingSecret, or enable externalSecrets and set secrets.tlsAsk.remoteKey" }}
+{{- end }}
+{{- if and .Values.networkPolicy.enabled (not $cd.tlsAsk.proxy.namespace) (not $cd.tlsAsk.proxy.podSelector) }}
+{{- fail "statuspage.customDomains.tlsAsk.proxy.namespace or .podSelector is required when networkPolicy.enabled: the only sources admitted to the ask port" }}
+{{- end }}
+{{- end }}
+{{- if $cd.httpRoute.enabled }}
+{{- if not $cd.httpRoute.hostnames }}
+{{- fail "statuspage.customDomains.httpRoute.hostnames is required when statuspage.customDomains.httpRoute.enabled: the customer hosts your Gateway terminates" }}
+{{- end }}
+{{- if not $cd.httpRoute.parentRef.name }}
+{{- fail "statuspage.customDomains.httpRoute.parentRef.name is required when statuspage.customDomains.httpRoute.enabled: the name of the Gateway that terminates TLS for the customer hosts" }}
+{{- end }}
+{{- $inst := splitList "," (include "proreta.statusDomains.installationHosts" .) }}
+{{- range $h := $cd.httpRoute.hostnames }}
+{{- if has $h $inst }}
+{{- fail (printf "statuspage.customDomains.httpRoute.hostnames contains the installation host %s: customer hosts only" $h) }}
+{{- end }}
+{{- end }}
+{{- end }}
+true
+{{- end }}
+{{- end }}
+
+{{/* Installation hosts, comma separated: statuspage.customDomains.installationHosts, or httpRoute.hostnames (no wildcards) plus the host of config.publicUrl. Arg: root context */}}
+{{- define "proreta.statusDomains.installationHosts" -}}
+{{- $cd := .Values.statuspage.customDomains }}
+{{- if $cd.installationHosts }}
+{{- join "," $cd.installationHosts }}
+{{- else }}
+{{- $pub := regexReplaceAll ":[0-9]+$" ((urlParse (include "proreta.publicUrl" .)).host | lower) "" }}
+{{- $l := list }}
+{{- range .Values.httpRoute.hostnames }}
+{{- if and (not (hasPrefix "*" .)) (ne . $pub) }}{{ $l = append $l . }}{{ end }}
+{{- end }}
+{{- join "," (append $l $pub) }}
+{{- end }}
+{{- end }}
+
+{{/*
+Custom domain env, each variable only in the processes that read it: api (flag, CNAME target,
+installation hosts, forbidden suffixes), jobs (flag, CNAME target, DNS), statuspage (flag,
+installation hosts, abuse URL, ask endpoint). Args: dict ctx, process
+*/}}
+{{- define "proreta.env.statusDomains" -}}
+{{- $cd := .ctx.Values.statuspage.customDomains }}
+{{- $p := .process -}}
+- name: PRORETA_STATUS_PAGE_CUSTOM_DOMAINS
+  value: "true"
+{{- if has $p (list "api" "jobs") }}
+- name: PRORETA_STATUSPAGE_CNAME_TARGET
+  value: {{ $cd.cnameTarget | quote }}
+{{- end }}
+{{- if has $p (list "api" "statuspage") }}
+- name: PRORETA_STATUSPAGE_INSTALLATION_HOSTS
+  value: {{ include "proreta.statusDomains.installationHosts" .ctx | quote }}
+{{- end }}
+{{- if and (eq $p "api") $cd.forbiddenSuffixes }}
+- name: PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES
+  value: {{ join "," $cd.forbiddenSuffixes | quote }}
+{{- end }}
+{{- if and (eq $p "jobs") $cd.dns.resolver }}
+- name: PRORETA_DNS_RESOLVER
+  value: {{ $cd.dns.resolver | quote }}
+{{- end }}
+{{- if eq $p "jobs" }}
+- name: PRORETA_DNS_TIMEOUT
+  value: {{ $cd.dns.timeout | quote }}
+{{- end }}
+{{- if and (eq $p "statuspage") $cd.abuseUrl }}
+- name: PRORETA_ABUSE_URL
+  value: {{ $cd.abuseUrl | quote }}
+{{- end }}
+{{- if and (eq $p "statuspage") $cd.tlsAsk.enabled }}
+- name: PRORETA_STATUSPAGE_TLS_ASK_ADDR
+  value: {{ printf ":%d" (int $cd.tlsAsk.port) | quote }}
+- name: PRORETA_STATUSPAGE_TLS_ASK_TOKEN
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "proreta.secret.tlsAsk" .ctx }}
+      key: token
+{{- end }}
+{{- end }}
+
+{{/* The env list plus the custom domain variables of a process, unchanged when the feature is off. Args: dict ctx, env, process */}}
+{{- define "proreta.env.withStatusDomains" -}}
+{{- if include "proreta.statusDomains.enabled" .ctx }}{{ printf "%s\n%s" .env (include "proreta.env.statusDomains" (dict "ctx" .ctx "process" .process)) }}{{ else }}{{ .env }}{{ end }}
+{{- end }}
+
 {{/* Specula gateway env (config.SpeculaGateway). Arg: root context */}}
 {{- define "proreta.env.speculagw" -}}
 - name: PRORETA_HTTP_ADDR
@@ -287,7 +396,8 @@ with it and the worker opens them. The worker's only key. Arg: root context
 
 {{/*
 Backend Deployment (api / worker / jobs / statuspage). Args: dict
-  ctx, component, cfg (component values), env (pre-rendered env list yaml), httpPort (0 = none)
+  ctx, component, cfg (component values), env (pre-rendered env list yaml), httpPort (0 = none),
+  askPort (optional, the TLS ask listener of the statuspage; 0 or absent = none)
 The container runs /app/<component>, the binary of that name in the backend image.
 All three expose the admin port; probes hit /healthz and /readyz there.
 NOTE: hostNetwork is intentionally never set (see values.yaml worker comment).
@@ -347,6 +457,11 @@ spec:
             - name: admin
               containerPort: {{ $ctx.Values.config.adminPort }}
               protocol: TCP
+            {{- if .askPort }}
+            - name: tls-ask
+              containerPort: {{ .askPort }}
+              protocol: TCP
+            {{- end }}
           env:
             {{- .env | nindent 12 }}
             {{- with .cfg.env }}

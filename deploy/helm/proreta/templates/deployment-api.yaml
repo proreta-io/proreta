@@ -5,4 +5,5 @@
   (include "proreta.env.guard" .)
   (include "proreta.env.publicUrl" .)
   (include "proreta.env.api" .)) -}}
+{{- $env = include "proreta.env.withStatusDomains" (dict "ctx" . "env" $env "process" "api") -}}
 {{ include "proreta.backendDeployment" (dict "ctx" . "component" "api" "cfg" .Values.api "env" $env "httpPort" .Values.api.httpPort) }}

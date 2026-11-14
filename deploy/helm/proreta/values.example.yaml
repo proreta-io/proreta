@@ -59,6 +59,11 @@ database:
 # Public status pages (docs/runbooks/status-page.md).
 statuspage:
   enabled: true
+  # Status pages on customers' own domains (off by default): see the chart README for every key.
+  # customDomains:
+  #   enabled: true
+  #   cnameTarget: customers.example.net     # where customers point their CNAME; required
+  #   abuseUrl: mailto:abuse@example.com     # "Report abuse" link on customer domains
 
 # Optional: sign-in with Google and/or GitHub (docs/runbooks/oauth.md). Create the Secret first.
 # oauth:

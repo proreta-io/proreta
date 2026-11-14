@@ -135,6 +135,17 @@ secrets:
     source: generate
     # externalSecret mode: JSON secret with property cookie_key (standard base64 of 32 random bytes)
     remoteKey: proreta/statuspage
+  # Shared token of the status page TLS ask endpoint (statuspage.customDomains.tlsAsk), key `token`
+  # (at least 32 characters of letters, digits and . _ ~ -; `openssl rand -hex 32` makes one). Never
+  # put it in a values file. Only read with customDomains and tlsAsk enabled. Either
+  #   existingSecret  the name of a Secret you create in the namespace, or
+  #   remoteKey       a JSON secret with property `token` in your store, read through the
+  #                   ExternalSecret `<fullname>-statuspage-ask` (needs externalSecrets.enabled; used
+  #                   when existingSecret is empty).
+  # There is no generated mode yet: the secrets bootstrap does not create this token.
+  tlsAsk:
+    existingSecret: ""
+    remoteKey: proreta/statuspage-ask
   # OAuth client credentials, only read when a provider in `oauth` is enabled. Keys
   # google_client_id, google_client_secret, github_client_id, github_client_secret (only those of the
   # enabled providers). Never put them in a values file. Either
@@ -278,6 +289,59 @@ statuspage:
   env: []
   service:
     port: 8080
+  # Status pages on a customer's own domain (docs/runbooks/custom-domains.md). Off by default; with
+  # it off nothing below is rendered and the renderer ignores the Host header. Needs
+  # statuspage.enabled. Customers prove a host with a DNS TXT record and point a CNAME at
+  # `cnameTarget`; you terminate TLS for those hosts yourself (a proxy of your choice, or your own
+  # Gateway: see `httpRoute` below) and forward the original Host header to the statuspage Service.
+  customDomains:
+    enabled: false
+    # PRORETA_STATUSPAGE_CNAME_TARGET (api and jobs), REQUIRED when enabled: the host customers point
+    # their CNAME at, a lowercase DNS name such as customers.example.net, without a trailing dot. It
+    # must resolve to your TLS proxy.
+    cnameTarget: ""
+    # PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES (api): domains no customer may claim a name under,
+    # lowercase, no wildcard, e.g. [example.com]. Empty: the app's default, the registrable domain of
+    # config.publicUrl.
+    forbiddenSuffixes: []
+    # PRORETA_STATUSPAGE_INSTALLATION_HOSTS (api and statuspage): host names that keep the
+    # /status/<slug> routes and that no customer may claim. Empty: httpRoute.hostnames (wildcard
+    # entries left out) plus the host of config.publicUrl. The host of config.publicUrl is always
+    # included by the app.
+    installationHosts: []
+    # PRORETA_ABUSE_URL (statuspage): the "Report abuse" link on customer domains, an https URL or a
+    # mailto: address. Optional, but without it pages on customer domains show no link (a warning is
+    # printed at install).
+    abuseUrl: ""
+    # DNS lookups of the verification job (jobs only).
+    dns:
+      # PRORETA_DNS_RESOLVER: pin a recursive resolver, "ip" or "ip:port" ("[::1]:53"). Empty: the
+      # resolver of the pod.
+      resolver: ""
+      # PRORETA_DNS_TIMEOUT: one lookup, a Go duration from 500ms to 10s.
+      timeout: 3s
+    # Internal endpoint a TLS proxy asks before it requests a certificate for a host (Caddy's
+    # on-demand TLS). Its own listener and Service port `tls-ask` on the statuspage pods; never
+    # routed through an HTTPRoute. The token comes from `secrets.tlsAsk`.
+    tlsAsk:
+      enabled: false
+      port: 9091            # PRORETA_STATUSPAGE_TLS_ASK_ADDR is :<port>; differs from httpPort and config.adminPort
+      # With networkPolicy.enabled: the only sources admitted to the port. Set `namespace` (all pods of
+      # it, or with `podSelector` only the matching ones) or `podSelector` alone (pods of the release
+      # namespace). Rendering fails when networkPolicy.enabled and tlsAsk.enabled and neither is set.
+      proxy:
+        namespace: ""
+        podSelector: {}     # matchLabels of the proxy pods, e.g. {app.kubernetes.io/name: caddy}
+    # Optional second HTTPRoute: customer hosts terminated at your own Gateway, routed to the
+    # statuspage Service (path / only). `hostnames` is a list of the customer hosts, each needing a
+    # listener with its certificate on that Gateway; it must not contain an installation host.
+    httpRoute:
+      enabled: false
+      hostnames: []
+      parentRef:
+        name: ""            # REQUIRED when enabled
+        namespace: ""       # empty: the release namespace
+        sectionName: ""
 
 # Specula gateway: the endpoint of the Specula executors that customers run inside their own networks
 # (Deployment <fullname>-speculagw, routed at httpRoute.speculaPathPrefix). Off by default; turn it

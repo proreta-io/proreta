@@ -46,6 +46,13 @@ spec:
       port: {{ .Values.statuspage.service.port }}
       targetPort: http
       protocol: TCP
+    {{- if and (include "proreta.statusDomains.enabled" .) .Values.statuspage.customDomains.tlsAsk.enabled }}
+    {{- /* Reached by the TLS proxy only: no HTTPRoute refers to this port. */}}
+    - name: tls-ask
+      port: {{ .Values.statuspage.customDomains.tlsAsk.port }}
+      targetPort: tls-ask
+      protocol: TCP
+    {{- end }}
   selector:
     {{- include "proreta.selectorLabels" (dict "ctx" . "component" "statuspage") | nindent 4 }}
 {{- end }}

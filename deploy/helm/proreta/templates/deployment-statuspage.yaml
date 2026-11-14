@@ -5,5 +5,8 @@
   (include "proreta.env.common" (dict "ctx" . "dbKey" "statuspage_url"))
   (include "proreta.env.publicUrl" .)
   (include "proreta.env.statuspage" .)) -}}
-{{ include "proreta.backendDeployment" (dict "ctx" . "component" "statuspage" "cfg" .Values.statuspage "env" $env "httpPort" .Values.statuspage.httpPort) }}
+{{- $env = include "proreta.env.withStatusDomains" (dict "ctx" . "env" $env "process" "statuspage") -}}
+{{- $ask := 0 }}
+{{- if and (include "proreta.statusDomains.enabled" .) .Values.statuspage.customDomains.tlsAsk.enabled }}{{ $ask = int .Values.statuspage.customDomains.tlsAsk.port }}{{ end -}}
+{{ include "proreta.backendDeployment" (dict "ctx" . "component" "statuspage" "cfg" .Values.statuspage "env" $env "httpPort" .Values.statuspage.httpPort "askPort" $ask) }}
 {{- end }}

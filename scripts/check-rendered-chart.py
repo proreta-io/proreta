@@ -36,6 +36,21 @@ STATUSPAGE_ENV = {"PRORETA_LOG_LEVEL", "PRORETA_ADMIN_ADDR", "PRORETA_DATABASE_U
                   "PRORETA_HTTP_ADDR", "PRORETA_COOKIE_SECURE", "PRORETA_TRUSTED_PROXY_HOPS", "PRORETA_STATUSPAGE_COOKIE_KEY"}
 
 
+# Status pages on customer domains: each variable belongs to exactly the processes that read it.
+DOMAIN_FLAG = "PRORETA_STATUS_PAGE_CUSTOM_DOMAINS"
+DOMAIN_ENV = {
+    "api": {DOMAIN_FLAG, "PRORETA_STATUSPAGE_CNAME_TARGET", "PRORETA_STATUSPAGE_INSTALLATION_HOSTS", "PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES"},
+    "jobs": {DOMAIN_FLAG, "PRORETA_STATUSPAGE_CNAME_TARGET", "PRORETA_DNS_RESOLVER", "PRORETA_DNS_TIMEOUT"},
+    "statuspage": {DOMAIN_FLAG, "PRORETA_STATUSPAGE_INSTALLATION_HOSTS", "PRORETA_ABUSE_URL", "PRORETA_STATUSPAGE_TLS_ASK_ADDR", "PRORETA_STATUSPAGE_TLS_ASK_TOKEN"},
+}
+DOMAIN_REQUIRED = {"api": {DOMAIN_FLAG, "PRORETA_STATUSPAGE_CNAME_TARGET", "PRORETA_STATUSPAGE_INSTALLATION_HOSTS"},
+                   "jobs": {DOMAIN_FLAG, "PRORETA_STATUSPAGE_CNAME_TARGET", "PRORETA_DNS_TIMEOUT"},
+                   "statuspage": {DOMAIN_FLAG, "PRORETA_STATUSPAGE_INSTALLATION_HOSTS"}}
+ALL_DOMAIN_ENV = set().union(*DOMAIN_ENV.values())
+CUSTOMER_ROUTE_SUFFIX = "-customer-hosts"
+TLS_ASK_POLICY_SUFFIX = "-tls-ask"
+
+
 LOOPBACK_HTTP = re.compile(r"^http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]+)?(/.*)?$")
 
 
@@ -263,8 +278,8 @@ def check(path):
     # Status page renderer: least privilege.
     sp = env_of("statuspage")
     if sp:
-        if set(sp) != STATUSPAGE_ENV:
-            fail(f"statuspage env is {sorted(sp)}, want exactly {sorted(STATUSPAGE_ENV)}")
+        if set(sp) - ALL_DOMAIN_ENV != STATUSPAGE_ENV:
+            fail(f"statuspage env is {sorted(set(sp) - ALL_DOMAIN_ENV)}, want exactly {sorted(STATUSPAGE_ENV)} plus custom domain settings")
         db_ref = sp.get("PRORETA_DATABASE_URL", {}).get("valueFrom", {}).get("secretKeyRef", {})
         if db_ref.get("key") != "statuspage_url":
             fail(f"statuspage must use the statuspage_url key, got {db_ref}")
@@ -277,6 +292,69 @@ def check(path):
     for comp, env in (("api", api), ("worker", worker), ("jobs", jobs)):
         if "PRORETA_STATUSPAGE_COOKIE_KEY" in env or env.get("PRORETA_DATABASE_URL", {}).get("valueFrom", {}).get("secretKeyRef", {}).get("key") == "statuspage_url":
             fail(f"{comp} has the status page's credentials")
+
+    # Custom domains: all three processes agree on the flag, each gets only its own variables, the
+    # ask token is a Secret reference, and the ask listener exists only with its token and its port.
+    dom = {c: {n for n in env_of(c) if n in ALL_DOMAIN_ENV} for c in ("api", "jobs", "statuspage") if c in deployments}
+    for comp in deployments:
+        if comp not in dom and ALL_DOMAIN_ENV & set(env_of(comp)):
+            fail(f"{comp} has custom domain settings: {sorted(ALL_DOMAIN_ENV & set(env_of(comp)))}")
+    flags = {c: env_of(c).get(DOMAIN_FLAG, {}).get("value") for c in dom}
+    domains_on = any(v is not None for v in flags.values())
+    if domains_on and set(flags.values()) != {"true"}:
+        fail(f"custom domains flag differs between processes: {flags}")
+    for comp, names in dom.items():
+        if not domains_on and names:
+            fail(f"{comp} has custom domain settings {sorted(names)} without {DOMAIN_FLAG}")
+        if domains_on:
+            if names - DOMAIN_ENV[comp]:
+                fail(f"{comp} has custom domain settings it does not read: {sorted(names - DOMAIN_ENV[comp])}")
+            if DOMAIN_REQUIRED[comp] - names:
+                fail(f"{comp} lacks custom domain settings {sorted(DOMAIN_REQUIRED[comp] - names)}")
+    sp_ask = {"PRORETA_STATUSPAGE_TLS_ASK_ADDR", "PRORETA_STATUSPAGE_TLS_ASK_TOKEN"} & set(sp)
+    ask_port = None
+    if sp_ask:
+        if len(sp_ask) != 2:
+            fail("statuspage has only one of the TLS ask address and token")
+        else:
+            tok = sp["PRORETA_STATUSPAGE_TLS_ASK_TOKEN"]
+            ref = tok.get("valueFrom", {}).get("secretKeyRef", {})
+            if "value" in tok or ref.get("key") != "token" or not ref.get("name"):
+                fail(f"statuspage TLS ask token must come from a Secret key token, got {tok}")
+            addr = sp["PRORETA_STATUSPAGE_TLS_ASK_ADDR"].get("value", "")
+            if not re.fullmatch(r":[0-9]{4,5}", addr):
+                fail(f"statuspage TLS ask address {addr!r} must be :<port>")
+            else:
+                ask_port = int(addr[1:])
+            http_port = int(sp["PRORETA_HTTP_ADDR"]["value"][1:])
+            admin_port = int(sp["PRORETA_ADMIN_ADDR"]["value"][1:])
+            if ask_port in (http_port, admin_port):
+                fail("the TLS ask port equals the HTTP or admin port")
+            cports = {p["name"]: p["containerPort"] for p in deployments["statuspage"]["spec"]["template"]["spec"]["containers"][0]["ports"]}
+            if cports.get("tls-ask") != ask_port:
+                fail(f"statuspage container port tls-ask is {cports.get('tls-ask')}, want {ask_port}")
+            svc = [d for d in docs if d["kind"] == "Service" and component(d) == "statuspage"]
+            if not svc or {p["name"]: p["port"] for p in svc[0]["spec"]["ports"]}.get("tls-ask") != ask_port:
+                fail("statuspage Service lacks the tls-ask port")
+    else:
+        if any(p.get("name") == "tls-ask" for d in docs if d["kind"] in ("Deployment", "Service") for p in
+               (d["spec"]["template"]["spec"]["containers"][0].get("ports", []) if d["kind"] == "Deployment" else d["spec"]["ports"])):
+            fail("tls-ask port rendered without the TLS ask settings")
+    # NetworkPolicy: the main policy never lists the ask port; the ask policy admits named sources only.
+    for d in docs:
+        if d["kind"] != "NetworkPolicy":
+            continue
+        ports = {p["port"] for r in d["spec"].get("ingress", []) for p in r.get("ports", [])}
+        if d["metadata"]["name"].endswith(TLS_ASK_POLICY_SUFFIX):
+            if ask_port is None or ports != {ask_port}:
+                fail(f"NetworkPolicy {d['metadata']['name']}: ports {sorted(ports)}, want only the ask port {ask_port}")
+            if d["spec"]["podSelector"]["matchLabels"].get("app.kubernetes.io/component") != "statuspage":
+                fail("the tls-ask NetworkPolicy must select the statuspage pods only")
+            for r in d["spec"]["ingress"]:
+                if not r.get("from") or any(not f for f in r["from"]):
+                    fail("the tls-ask NetworkPolicy has an ingress rule open to every source")
+        elif ask_port in ports:
+            fail(f"NetworkPolicy {d['metadata']['name']} admits the TLS ask port")
 
     # One database Secret: every consumer reads it under its fixed key, and the bootstrap Job writes
     # exactly that Secret and may update nothing else.
@@ -389,7 +467,27 @@ def check(path):
 
     # Web and routing.
     web = "web" in deployments
-    routes = [d for d in docs if d["kind"] == "HTTPRoute"]
+    all_routes = [d for d in docs if d["kind"] == "HTTPRoute"]
+    routes = [d for d in all_routes if not d["metadata"]["name"].endswith(CUSTOMER_ROUTE_SUFFIX)]
+    main_hosts = {h for r in routes for h in r["spec"]["hostnames"]}
+    for r in all_routes:
+        for rule in r["spec"]["rules"]:
+            for ref in rule["backendRefs"]:
+                if ask_port is not None and ref.get("port") == ask_port:
+                    fail(f"HTTPRoute {r['metadata']['name']} routes to the TLS ask port")
+    for r in all_routes:
+        if not r["metadata"]["name"].endswith(CUSTOMER_ROUTE_SUFFIX):
+            continue
+        # Customer hosts: everything goes to the renderer on its HTTP port, nothing else, and never the installation's hosts.
+        if not sp or not domains_on:
+            fail("customer hosts HTTPRoute rendered without the status page or the custom domains")
+        if set(r["spec"]["hostnames"]) & main_hosts:
+            fail("customer hosts HTTPRoute lists an installation host")
+        if len(r["spec"]["rules"]) != 1 or r["spec"]["rules"][0]["matches"] != [{"path": {"type": "PathPrefix", "value": "/"}}]:
+            fail("customer hosts HTTPRoute must have the single rule /")
+        for ref in r["spec"]["rules"][0]["backendRefs"]:
+            if not ref["name"].endswith("-statuspage") or ref["port"] != 8080:
+                fail(f"customer hosts HTTPRoute backend {ref['name']}:{ref['port']} is not the statuspage http port")
     for r in routes:
         rules = r["spec"]["rules"]
         by_path = {m["path"]["value"]: (rule, rule["backendRefs"][0]["name"]) for rule in rules for m in rule["matches"]}
