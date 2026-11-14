@@ -2,8 +2,6 @@ package statuspages
 
 import (
 	"context"
-	"errors"
-	"net"
 	"slices"
 	"testing"
 
@@ -57,12 +55,5 @@ func TestProofText(t *testing.T) {
 		if got := proofText(p); got != want {
 			t.Errorf("%d: %s", p, got)
 		}
-	}
-}
-
-// Only a definite "no such record" is a missing record; any other resolver error is unknown.
-func TestSystemResolverNotFound(t *testing.T) {
-	if !notFound(&net.DNSError{IsNotFound: true}) || notFound(&net.DNSError{IsTimeout: true}) || notFound(errors.New("boom")) {
-		t.Fatal("notFound")
 	}
 }

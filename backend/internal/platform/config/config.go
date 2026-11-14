@@ -121,6 +121,8 @@ type API struct {
 	// StatusPageCNAMETarget is where a custom domain's CNAME must point
 	// (PRORETA_STATUSPAGE_CNAME_TARGET); empty means domains stay verified and never become active.
 	StatusPageCNAMETarget string
+	// DNS configures the resolver of the synchronous domain check.
+	DNS DNS
 	// StatusPageInstallationHosts are the host names of this installation, which no customer may
 	// claim: the host of PRORETA_PUBLIC_URL and PRORETA_STATUSPAGE_INSTALLATION_HOSTS.
 	StatusPageInstallationHosts []string
@@ -199,6 +201,8 @@ type Jobs struct {
 	Guard
 	// PublicURL is PRORETA_PUBLIC_URL, linked from Slack messages and emails.
 	PublicURL string
+	// DomainChecks configures the verification of status page domains.
+	DomainChecks DomainChecks
 }
 
 // Statuspage is the configuration of cmd/statuspage, the public status page renderer.
@@ -294,17 +298,22 @@ func LoadAPI(lookup LookupFunc) (API, error) {
 	return cfg, l.err()
 }
 
+// cnameTarget reads PRORETA_STATUSPAGE_CNAME_TARGET, the same in api and jobs.
+func (l *loader) cnameTarget() string {
+	t := l.optional("PRORETA_STATUSPAGE_CNAME_TARGET")
+	if t != "" && (len(t) > 253 || !domainName.MatchString(t)) {
+		l.fail("PRORETA_STATUSPAGE_CNAME_TARGET", fmt.Sprintf("%q is not a lowercase domain name such as customers.example.com", t))
+		return ""
+	}
+	return t
+}
+
 // statusPageDomains reads the installation's side of the custom domain rules. The public URL's own
 // host is always forbidden, and so is everything under the operator's list, which defaults to the
 // registrable domain of the public URL.
 func (l *loader) statusPageDomains(cfg *API) {
-	if t := l.optional("PRORETA_STATUSPAGE_CNAME_TARGET"); t != "" {
-		if len(t) > 253 || !domainName.MatchString(t) {
-			l.fail("PRORETA_STATUSPAGE_CNAME_TARGET", fmt.Sprintf("%q is not a lowercase domain name such as customers.example.com", t))
-		} else {
-			cfg.StatusPageCNAMETarget = t
-		}
-	}
+	cfg.StatusPageCNAMETarget = l.cnameTarget()
+	cfg.DNS = l.dns()
 	cfg.StatusPageInstallationHosts = l.domains("PRORETA_STATUSPAGE_INSTALLATION_HOSTS")
 	if u, err := url.Parse(cfg.PublicURL); err == nil && u.Hostname() != "" {
 		if h := strings.ToLower(u.Hostname()); !slices.Contains(cfg.StatusPageInstallationHosts, h) {
@@ -417,6 +426,7 @@ func LoadSpecula(lookup LookupFunc) (Specula, error) {
 func LoadJobs(lookup LookupFunc) (Jobs, error) {
 	l := &loader{lookup: lookup}
 	cfg := Jobs{Server: l.server(5), Encryption: l.encryption(), Guard: l.guard(), PublicURL: l.publicURL("PRORETA_PUBLIC_URL")}
+	cfg.DomainChecks = l.domainChecks()
 	return cfg, l.err()
 }
 

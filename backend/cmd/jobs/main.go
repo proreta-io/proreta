@@ -26,6 +26,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/platform/metrics"
 	"github.com/proreta-io/proreta/backend/internal/scheduler"
 	"github.com/proreta-io/proreta/backend/internal/statuspages"
+	"github.com/proreta-io/proreta/backend/internal/statuspages/domains"
 	"github.com/proreta-io/proreta/backend/migrations"
 )
 
@@ -77,7 +78,13 @@ func run() error {
 	})
 	sched := scheduler.New()
 	mon := monitors.NewService(pool, sched, incidents.NewService(sched))
-	tasks := append(jobs.DefaultTasks(m, log, mon), jobs.StatusPageTask(statuspages.NewService(pool, statuspages.Options{Logger: log}), m))
+	domainChecks := jobs.StatusDomainsConfig{Enabled: cfg.DomainChecks.Enabled, CNAMETarget: cfg.DomainChecks.CNAMETarget, Log: log}
+	if domainChecks.Enabled {
+		if domainChecks.Resolver, err = domains.NewNetResolver(domains.NetResolverConfig{Server: cfg.DomainChecks.Resolver, Timeout: cfg.DomainChecks.Timeout}); err != nil {
+			return err
+		}
+	}
+	tasks := append(jobs.DefaultTasks(m, log, mon), jobs.StatusPageTask(statuspages.NewService(pool, statuspages.Options{Logger: log}), m), jobs.CheckStatusPageDomains(domainChecks, m))
 	housekeeper := jobs.NewHousekeeper(pool, tasks, m, log, clock.System{})
 
 	g, gctx := errgroup.WithContext(ctx)
