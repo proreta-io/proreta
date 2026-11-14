@@ -25,9 +25,9 @@ eso="${eso_args[*]}"
 oauth_secret="--set secrets.oauth.existingSecret=proreta-oauth-clients"
 # Status pages on customer domains: the feature, its ask endpoint (token Secret and the proxy allowed
 # to reach it) and the optional route for a Gateway that terminates the customer hosts.
-cd_on="--set statuspage.customDomains.enabled=true --set statuspage.customDomains.cnameTarget=customers.example.net"
-cd_ask="--set statuspage.customDomains.tlsAsk.enabled=true --set secrets.tlsAsk.existingSecret=proreta-tls-ask --set statuspage.customDomains.tlsAsk.proxy.namespace=caddy"
-cd_route="--set statuspage.customDomains.httpRoute.enabled=true --set statuspage.customDomains.httpRoute.hostnames[0]=status.acme.com --set statuspage.customDomains.httpRoute.parentRef.name=edge --set statuspage.customDomains.httpRoute.parentRef.sectionName=https-customers"
+cd_on=(--set statuspage.customDomains.enabled=true --set statuspage.customDomains.cnameTarget=customers.example.net)
+cd_ask=(--set statuspage.customDomains.tlsAsk.enabled=true --set secrets.tlsAsk.existingSecret=proreta-tls-ask --set statuspage.customDomains.tlsAsk.proxy.namespace=caddy)
+cd_route=(--set statuspage.customDomains.httpRoute.enabled=true --set "statuspage.customDomains.httpRoute.hostnames[0]=status.acme.com" --set statuspage.customDomains.httpRoute.parentRef.name=edge --set statuspage.customDomains.httpRoute.parentRef.sectionName=https-customers)
 
 # A chart packaged like the release workflow does (appVersion from the tag), installed without image.tag.
 packaged=$out/packaged
@@ -69,13 +69,13 @@ combos=(
   "example-oauth-existing-default-name|-f $example $tag --set secrets.oauth.existingSecret=proreta-oauth --set oauth.google.enabled=true"
   "example-presync|-f $example $tag --set database.bootstrap.enabled=false --set migration.hookPhase=PreSync"
   "example-no-section-name|-f $example $tag --set httpRoute.parentRef.sectionName="
-  "defaults-domains|$min $cd_on"
-  "example-domains|-f $example $tag $cd_on"
-  "example-domains-ask|-f $example $tag $cd_on $cd_ask"
-  "example-domains-ask-netpol|-f $example $tag $cd_on $cd_ask --set networkPolicy.enabled=true --set statuspage.customDomains.tlsAsk.proxy.podSelector.app=caddy --set statuspage.customDomains.tlsAsk.port=9443"
-  "example-domains-ask-eso|-f $example $tag $eso $cd_on --set statuspage.customDomains.tlsAsk.enabled=true"
-  "example-domains-route|-f $example $tag $cd_on $cd_route"
-  "example-domains-all|-f $example $tag $eso $cd_on $cd_route --set statuspage.customDomains.tlsAsk.enabled=true --set networkPolicy.enabled=true --set statuspage.customDomains.tlsAsk.proxy.podSelector.app=caddy --set statuspage.customDomains.abuseUrl=https://example.com/abuse --set statuspage.customDomains.forbiddenSuffixes[0]=example.com --set statuspage.customDomains.forbiddenSuffixes[1]=example.org --set statuspage.customDomains.installationHosts[0]=proreta.example.com --set statuspage.customDomains.dns.resolver=10.0.0.2:53 --set statuspage.customDomains.dns.timeout=1500ms --set httpRoute.hostnames[0]=proreta.example.com --set httpRoute.hostnames[1]=*.example.com"
+  "defaults-domains|$min ${cd_on[*]}"
+  "example-domains|-f $example $tag ${cd_on[*]}"
+  "example-domains-ask|-f $example $tag ${cd_on[*]} ${cd_ask[*]}"
+  "example-domains-ask-netpol|-f $example $tag ${cd_on[*]} ${cd_ask[*]} --set networkPolicy.enabled=true --set statuspage.customDomains.tlsAsk.proxy.podSelector.app=caddy --set statuspage.customDomains.tlsAsk.port=9443"
+  "example-domains-ask-eso|-f $example $tag $eso ${cd_on[*]} --set statuspage.customDomains.tlsAsk.enabled=true"
+  "example-domains-route|-f $example $tag ${cd_on[*]} ${cd_route[*]}"
+  "example-domains-all|-f $example $tag $eso ${cd_on[*]} ${cd_route[*]} --set statuspage.customDomains.tlsAsk.enabled=true --set networkPolicy.enabled=true --set statuspage.customDomains.tlsAsk.proxy.podSelector.app=caddy --set statuspage.customDomains.abuseUrl=https://example.com/abuse --set statuspage.customDomains.forbiddenSuffixes[0]=example.com --set statuspage.customDomains.forbiddenSuffixes[1]=example.org --set statuspage.customDomains.installationHosts[0]=proreta.example.com --set statuspage.customDomains.dns.resolver=10.0.0.2:53 --set statuspage.customDomains.dns.timeout=1500ms --set httpRoute.hostnames[0]=proreta.example.com --set httpRoute.hostnames[1]=*.example.com"
   "packaged-no-tag|chart=$packaged/proreta -f $example"
 )
 
@@ -192,32 +192,32 @@ expect_fail "wildcard allowed domain" --set "oauth.allowedDomains[0]=*.example.c
 expect_fail "oauth without remote key" "${eso_args[@]}" --set oauth.google.enabled=true --set secrets.oauth.remoteKey=
 expect_fail "invalid worker location" --set worker.location=Home_1
 expect_fail "custom domains without a CNAME target" --msg "statuspage.customDomains.cnameTarget is required" --set statuspage.customDomains.enabled=true
-expect_fail "custom domains without the status page" --msg "needs statuspage.enabled" $cd_on --set statuspage.enabled=false
+expect_fail "custom domains without the status page" --msg "needs statuspage.enabled" "${cd_on[@]}" --set statuspage.enabled=false
 expect_fail "CNAME target in upper case" --msg "cnameTarget" --set statuspage.customDomains.enabled=true --set statuspage.customDomains.cnameTarget=Customers.example.net
 expect_fail "CNAME target with a trailing dot" --msg "cnameTarget" --set statuspage.customDomains.enabled=true --set statuspage.customDomains.cnameTarget=customers.example.net.
 expect_fail "CNAME target without a dot" --msg "cnameTarget" --set statuspage.customDomains.enabled=true --set statuspage.customDomains.cnameTarget=customers
-expect_fail "ask endpoint without a token Secret" --msg "secrets.tlsAsk" $cd_on --set statuspage.customDomains.tlsAsk.enabled=true
-expect_fail "ask port equal to the HTTP port" --msg "tlsAsk.port must differ" $cd_on $cd_ask --set statuspage.customDomains.tlsAsk.port=8080
-expect_fail "ask port equal to the admin port" --msg "tlsAsk.port must differ" $cd_on $cd_ask --set statuspage.customDomains.tlsAsk.port=9090
-expect_fail "ask port below 1024" --msg "port" $cd_on $cd_ask --set statuspage.customDomains.tlsAsk.port=80
-expect_fail "ask endpoint with a NetworkPolicy and no proxy" --msg "tlsAsk.proxy" $cd_on --set statuspage.customDomains.tlsAsk.enabled=true --set secrets.tlsAsk.existingSecret=proreta-tls-ask --set networkPolicy.enabled=true
-expect_fail "ask token is not a value" --msg "additional properties 'token' not allowed" $cd_on --set secrets.tlsAsk.token=literal
-expect_fail "ask token key in the statuspage values" --msg "additional properties 'token' not allowed" $cd_on --set statuspage.customDomains.tlsAsk.token=literal
-expect_fail "ask token ExternalSecret without remote key" "${eso_args[@]}" $cd_on --set statuspage.customDomains.tlsAsk.enabled=true --set secrets.tlsAsk.remoteKey=
-expect_fail "customer hosts route without hosts" --msg "httpRoute.hostnames is required" $cd_on --set statuspage.customDomains.httpRoute.enabled=true --set statuspage.customDomains.httpRoute.parentRef.name=edge
-expect_fail "customer hosts route without a Gateway" --msg "httpRoute.parentRef.name is required" $cd_on --set statuspage.customDomains.httpRoute.enabled=true --set statuspage.customDomains.httpRoute.hostnames[0]=status.acme.com
-expect_fail "customer hosts route with the installation host" --msg "installation host proreta.example.com" $cd_on $cd_route --set statuspage.customDomains.httpRoute.hostnames[1]=proreta.example.com
-expect_fail "customer hosts route with a wildcard" --msg "hostnames" $cd_on $cd_route --set "statuspage.customDomains.httpRoute.hostnames[1]=*.acme.com"
-expect_fail "abuse URL over http" --msg "abuseUrl" $cd_on --set statuspage.customDomains.abuseUrl=http://example.com/abuse
-expect_fail "abuse URL with another scheme" --msg "abuseUrl" $cd_on --set statuspage.customDomains.abuseUrl=javascript:alert
-expect_fail "abuse mailto without an address" --msg "abuseUrl" $cd_on --set statuspage.customDomains.abuseUrl=mailto:abuse
-expect_fail "forbidden suffix in upper case" --msg "forbiddenSuffixes" $cd_on --set statuspage.customDomains.forbiddenSuffixes[0]=Example.com
-expect_fail "forbidden suffix with a wildcard" --msg "forbiddenSuffixes" $cd_on --set "statuspage.customDomains.forbiddenSuffixes[0]=*.example.com"
-expect_fail "installation host with a port" --msg "installationHosts" $cd_on --set statuspage.customDomains.installationHosts[0]=proreta.example.com:443
-expect_fail "DNS resolver that is not an address" --msg "resolver" $cd_on --set statuspage.customDomains.dns.resolver=dns.example.com
-expect_fail "DNS timeout that is not a duration" --msg "timeout" $cd_on --set statuspage.customDomains.dns.timeout=fast
+expect_fail "ask endpoint without a token Secret" --msg "secrets.tlsAsk" "${cd_on[@]}" --set statuspage.customDomains.tlsAsk.enabled=true
+expect_fail "ask port equal to the HTTP port" --msg "tlsAsk.port must differ" "${cd_on[@]}" "${cd_ask[@]}" --set statuspage.customDomains.tlsAsk.port=8080
+expect_fail "ask port equal to the admin port" --msg "tlsAsk.port must differ" "${cd_on[@]}" "${cd_ask[@]}" --set statuspage.customDomains.tlsAsk.port=9090
+expect_fail "ask port below 1024" --msg "port" "${cd_on[@]}" "${cd_ask[@]}" --set statuspage.customDomains.tlsAsk.port=80
+expect_fail "ask endpoint with a NetworkPolicy and no proxy" --msg "tlsAsk.proxy" "${cd_on[@]}" --set statuspage.customDomains.tlsAsk.enabled=true --set secrets.tlsAsk.existingSecret=proreta-tls-ask --set networkPolicy.enabled=true
+expect_fail "ask token is not a value" --msg "additional properties 'token' not allowed" "${cd_on[@]}" --set secrets.tlsAsk.token=literal
+expect_fail "ask token key in the statuspage values" --msg "additional properties 'token' not allowed" "${cd_on[@]}" --set statuspage.customDomains.tlsAsk.token=literal
+expect_fail "ask token ExternalSecret without remote key" "${eso_args[@]}" "${cd_on[@]}" --set statuspage.customDomains.tlsAsk.enabled=true --set secrets.tlsAsk.remoteKey=
+expect_fail "customer hosts route without hosts" --msg "httpRoute.hostnames is required" "${cd_on[@]}" --set statuspage.customDomains.httpRoute.enabled=true --set statuspage.customDomains.httpRoute.parentRef.name=edge
+expect_fail "customer hosts route without a Gateway" --msg "httpRoute.parentRef.name is required" "${cd_on[@]}" --set statuspage.customDomains.httpRoute.enabled=true --set statuspage.customDomains.httpRoute.hostnames[0]=status.acme.com
+expect_fail "customer hosts route with the installation host" --msg "installation host proreta.example.com" "${cd_on[@]}" "${cd_route[@]}" --set statuspage.customDomains.httpRoute.hostnames[1]=proreta.example.com
+expect_fail "customer hosts route with a wildcard" --msg "hostnames" "${cd_on[@]}" "${cd_route[@]}" --set "statuspage.customDomains.httpRoute.hostnames[1]=*.acme.com"
+expect_fail "abuse URL over http" --msg "abuseUrl" "${cd_on[@]}" --set statuspage.customDomains.abuseUrl=http://example.com/abuse
+expect_fail "abuse URL with another scheme" --msg "abuseUrl" "${cd_on[@]}" --set statuspage.customDomains.abuseUrl=javascript:alert
+expect_fail "abuse mailto without an address" --msg "abuseUrl" "${cd_on[@]}" --set statuspage.customDomains.abuseUrl=mailto:abuse
+expect_fail "forbidden suffix in upper case" --msg "forbiddenSuffixes" "${cd_on[@]}" --set statuspage.customDomains.forbiddenSuffixes[0]=Example.com
+expect_fail "forbidden suffix with a wildcard" --msg "forbiddenSuffixes" "${cd_on[@]}" --set "statuspage.customDomains.forbiddenSuffixes[0]=*.example.com"
+expect_fail "installation host with a port" --msg "installationHosts" "${cd_on[@]}" --set statuspage.customDomains.installationHosts[0]=proreta.example.com:443
+expect_fail "DNS resolver that is not an address" --msg "resolver" "${cd_on[@]}" --set statuspage.customDomains.dns.resolver=dns.example.com
+expect_fail "DNS timeout that is not a duration" --msg "timeout" "${cd_on[@]}" --set statuspage.customDomains.dns.timeout=fast
 expect_fail "typo in the custom domain values" --msg "additional properties 'cnameTarge' not allowed" --set statuspage.customDomains.cnameTarge=x
-expect_fail "custom domain edge IPs do not exist" --msg "additional properties 'edgeIPs' not allowed" $cd_on --set statuspage.customDomains.edgeIPs[0]=192.0.2.1
+expect_fail "custom domain edge IPs do not exist" --msg "additional properties 'edgeIPs' not allowed" "${cd_on[@]}" --set statuspage.customDomains.edgeIPs[0]=192.0.2.1
 
 echo "== defaults: web on, host names from config.publicUrl"
 if ! { grep -q '^kind: Deployment' "$out/defaults.yaml" && grep -q 'name: proreta-web$' "$out/defaults.yaml"; }; then echo "FAIL: web is not enabled by default" >&2; exit 1; fi
