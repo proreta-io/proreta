@@ -377,6 +377,8 @@ installation hosts, abuse URL, ask endpoint). Args: dict ctx, process
 {{- define "proreta.env.speculagw" -}}
 - name: PRORETA_HTTP_ADDR
   value: {{ printf ":%d" (int .Values.speculagw.httpPort) | quote }}
+- name: PRORETA_TRUSTED_PROXY_HOPS
+  value: {{ .Values.config.trustedProxyHops | quote }}
 {{- end }}
 
 {{/* worker-only env (config.Worker). Arg: root context */}}

@@ -616,7 +616,8 @@ func TestIntegrationHousekeeping(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	m := jobs.NewMetrics(reg)
 	log := slog.New(slog.NewJSONHandler(e, nil))
-	pool := e.Pool(t, e.WorkerURL, 2)
+	// Tasks run concurrently and the outside-transaction ones need a second connection each.
+	pool := e.Pool(t, e.WorkerURL, 8)
 	sched := scheduler.New()
 	tasks := jobs.DefaultTasks(m, log, monitors.NewService(pool, sched, incidents.NewService(sched)))
 	h := jobs.NewHousekeeper(pool, tasks, m, log, nil)
@@ -1028,4 +1029,41 @@ func TestIntegrationRetentionTasks(t *testing.T) {
 	if got := count(`SELECT count(*) FROM result_rollups_hourly`); got != 0 {
 		t.Fatalf("rollups after the 4 month purge = %d, want 0", got)
 	}
+}
+
+// A task that never finishes delays neither another task nor its own lock.
+func TestIntegrationHousekeeperTasksAreIndependent(t *testing.T) {
+	e := newEnv(t, "jobshkparallel")
+	m := jobs.NewMetrics(prometheus.NewRegistry())
+	pool := e.Pool(t, e.WorkerURL, 4)
+	release := make(chan struct{})
+	var fast atomic.Int32
+	tasks := []jobs.Task{
+		{Name: "blocked", Every: time.Hour, LockKey: 1, Run: func(ctx context.Context, _ pgx.Tx, _ time.Time) (int, error) {
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+			return 0, nil
+		}},
+		{Name: "fast", Every: 20 * time.Millisecond, LockKey: 2, Run: func(context.Context, pgx.Tx, time.Time) (int, error) {
+			fast.Add(1)
+			return 0, nil
+		}},
+	}
+	h := jobs.NewHousekeeper(pool, tasks, m, slog.New(slog.DiscardHandler), nil)
+	h.Poll = 5 * time.Millisecond
+	ctx, cancel := context.WithCancel(e.ctx)
+	done := make(chan struct{})
+	go func() { _ = h.Run(ctx); close(done) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for fast.Load() < 5 {
+		if time.Now().After(deadline) {
+			t.Fatalf("fast task ran %d times while another task was blocked", fast.Load())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	close(release)
+	cancel()
+	<-done
 }

@@ -633,6 +633,9 @@ INSERT INTO status_page_snapshots (page_id, tenant_id, slug, payload, etag, gene
 VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (page_id) DO UPDATE
 SET slug = EXCLUDED.slug, payload = EXCLUDED.payload, etag = EXCLUDED.etag, generated_at = EXCLUDED.generated_at
+WHERE status_page_snapshots.etag IS DISTINCT FROM EXCLUDED.etag
+   OR status_page_snapshots.slug IS DISTINCT FROM EXCLUDED.slug
+   OR status_page_snapshots.generated_at < EXCLUDED.generated_at - interval '5 minutes'
 `
 
 type UpsertSnapshotParams struct {
@@ -644,6 +647,7 @@ type UpsertSnapshotParams struct {
 	GeneratedAt time.Time
 }
 
+// Unchanged content is not rewritten, except to refresh generated_at every 5 minutes.
 func (q *Queries) UpsertSnapshot(ctx context.Context, arg UpsertSnapshotParams) error {
 	_, err := q.db.Exec(ctx, upsertSnapshot,
 		arg.PageID,

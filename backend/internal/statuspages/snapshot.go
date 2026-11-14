@@ -87,13 +87,19 @@ type Incident struct {
 	DurationSeconds int64      `json:"durationSeconds"`
 }
 
-// Encode returns the JSON of s and its ETag (32 hex characters of its SHA-256).
+// Encode returns the JSON of s and its ETag: 32 hex characters of the SHA-256 of the JSON without
+// generatedAt, so the ETag changes only when the content does, not at every rebuild.
 func (s Snapshot) Encode() ([]byte, string, error) {
 	b, err := json.Marshal(s)
 	if err != nil {
 		return nil, "", err
 	}
-	sum := sha256.Sum256(b)
+	s.GeneratedAt = time.Time{}
+	content, err := json.Marshal(s)
+	if err != nil {
+		return nil, "", err
+	}
+	sum := sha256.Sum256(content)
 	return b, hex.EncodeToString(sum[:16]), nil
 }
 

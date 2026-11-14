@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -19,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/proreta-io/proreta/backend/internal/auth"
 	"github.com/proreta-io/proreta/backend/internal/checkresult"
 	"github.com/proreta-io/proreta/backend/internal/checks"
 	"github.com/proreta-io/proreta/backend/internal/monitorrequest"
@@ -54,12 +56,18 @@ type Deps struct {
 	Clock       clock.Clock
 	Log         *slog.Logger
 	Registerer  prometheus.Registerer
+	// TrustedProxyHops is PRORETA_TRUSTED_PROXY_HOPS: how many proxies in front of the gateway
+	// append to X-Forwarded-For. 0 uses the TCP peer as the client address.
+	TrustedProxyHops int
 }
 
 // Handler serves BasePath.
 type Handler struct {
 	d       Deps
 	metrics *metrics
+	cache   *authCache
+	failIP  *auth.Limiter
+	lookups chan struct{}
 }
 
 type ctxKey struct{}
@@ -76,7 +84,11 @@ func New(d Deps) http.Handler {
 	if d.Recorder.Jitter == nil {
 		d.Recorder.Jitter = func() time.Duration { return 0 }
 	}
-	g := &Handler{d: d, metrics: newMetrics(d.Registerer)}
+	g := &Handler{
+		d: d, metrics: newMetrics(d.Registerer), cache: newAuthCache(authCacheTTL, authCacheMax),
+		failIP:  auth.NewLimiter(authFailLimit, authFailWindow, authFailKeys, d.Clock),
+		lookups: make(chan struct{}, authLookups),
+	}
 	mux := http.NewServeMux()
 	mux.Handle("POST "+wire.BasePath+"/hello", g.auth(http.HandlerFunc(g.hello)))
 	mux.Handle("POST "+wire.BasePath+"/claim", g.auth(http.HandlerFunc(g.claim)))
@@ -96,18 +108,60 @@ func (g *Handler) auth(next http.Handler) http.Handler {
 			g.unauthorized(w, r)
 			return
 		}
-		id, err := specula.Authenticate(r.Context(), g.d.Pool, token)
-		if errors.Is(err, specula.ErrUnauthorized) {
-			g.unauthorized(w, r)
-			return
-		}
-		if err != nil {
-			g.d.Log.ErrorContext(r.Context(), "specula authenticate failed", "error", err)
-			problem(w, r, http.StatusServiceUnavailable, "unavailable", "Temporarily unavailable")
+		id, ok := g.resolve(w, r, token)
+		if !ok {
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, id)))
 	})
+}
+
+// resolve turns a token into an identity: from the cache of recently verified tokens, else from the
+// database, where every lookup first takes a slot of the client's per-IP budget (refunded when the
+// token is valid) and one of the replica's concurrent lookup slots. It answers the request itself
+// and reports false when there is no identity.
+func (g *Handler) resolve(w http.ResponseWriter, r *http.Request, token string) (specula.Identity, bool) {
+	key := string(specula.HashToken(token))
+	if id, ok := g.cache.get(key, g.d.Clock.Now()); ok {
+		return id, true
+	}
+	ip := ""
+	if a, trusted := httpx.ForwardedClientIP(r, g.d.TrustedProxyHops); trusted {
+		ip = a.String()
+	} // else the peer is the proxy: all such requests share one bucket instead of one per client
+	if ok, wait := g.failIP.Reserve(ip); !ok {
+		g.metrics.limited.Inc()
+		tooMany(w, r, wait)
+		return specula.Identity{}, false
+	}
+	select {
+	case g.lookups <- struct{}{}:
+		defer func() { <-g.lookups }()
+	default:
+		g.failIP.Refund(ip)
+		g.metrics.limited.Inc()
+		tooMany(w, r, 0)
+		return specula.Identity{}, false
+	}
+	id, err := specula.Authenticate(r.Context(), g.d.Pool, token)
+	if errors.Is(err, specula.ErrUnauthorized) {
+		g.unauthorized(w, r)
+		return specula.Identity{}, false
+	}
+	g.failIP.Refund(ip)
+	if err != nil {
+		g.d.Log.ErrorContext(r.Context(), "specula authenticate failed", "error", err)
+		problem(w, r, http.StatusServiceUnavailable, "unavailable", "Temporarily unavailable")
+		return specula.Identity{}, false
+	}
+	g.cache.put(key, id, g.d.Clock.Now())
+	return id, true
+}
+
+func tooMany(w http.ResponseWriter, r *http.Request, wait time.Duration) {
+	secs := int(wait.Seconds()) + 1
+	w.Header().Set("Retry-After", strconv.Itoa(secs))
+	problem(w, r, http.StatusTooManyRequests, "rate-limited", "Too many requests")
 }
 
 func identity(r *http.Request) specula.Identity {

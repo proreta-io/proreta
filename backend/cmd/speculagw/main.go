@@ -65,7 +65,7 @@ func run() error {
 	handler := gateway.New(gateway.Deps{
 		Pool: pool, Scheduler: sched,
 		Recorder:    checkresult.Recorder{Scheduler: sched, Incidents: incidents.NewService(sched), Clock: clock.System{}},
-		RequestKeys: requestKeys, Log: log, Registerer: reg,
+		RequestKeys: requestKeys, Log: log, Registerer: reg, TrustedProxyHops: cfg.TrustedProxyHops,
 	})
 	return httpx.Serve(ctx, log, cfg.ShutdownTimeout,
 		httpx.NewServer(cfg.HTTPAddr, handler, log),

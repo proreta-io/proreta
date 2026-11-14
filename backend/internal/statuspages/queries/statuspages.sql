@@ -134,7 +134,11 @@ SELECT status_page_slug_held(@slug::text)::boolean AS held;
 INSERT INTO status_page_snapshots (page_id, tenant_id, slug, payload, etag, generated_at)
 VALUES (@page_id, @tenant_id, @slug, @payload, @etag, @generated_at)
 ON CONFLICT (page_id) DO UPDATE
-SET slug = EXCLUDED.slug, payload = EXCLUDED.payload, etag = EXCLUDED.etag, generated_at = EXCLUDED.generated_at;
+SET slug = EXCLUDED.slug, payload = EXCLUDED.payload, etag = EXCLUDED.etag, generated_at = EXCLUDED.generated_at
+-- Unchanged content is not rewritten, except to refresh generated_at every 5 minutes.
+WHERE status_page_snapshots.etag IS DISTINCT FROM EXCLUDED.etag
+   OR status_page_snapshots.slug IS DISTINCT FROM EXCLUDED.slug
+   OR status_page_snapshots.generated_at < EXCLUDED.generated_at - interval '5 minutes';
 
 -- name: DeleteSnapshot :exec
 DELETE FROM status_page_snapshots

@@ -157,6 +157,30 @@ func TestIntegrationSnapshotBuildAndRebuild(t *testing.T) {
 		t.Fatalf("RebuildAll = %d, %v", n, err)
 	}
 
+	// An unchanged page is not rewritten (same row version, same ETag) until its generatedAt is 5 minutes old.
+	rowVersion := func() (v, etag string) {
+		t.Helper()
+		if err := f.admin.QueryRow(ctx, `SELECT xmin::text, etag FROM status_page_snapshots WHERE slug = 'page-a'`).Scan(&v, &etag); err != nil {
+			t.Fatal(err)
+		}
+		return v, etag
+	}
+	v0, e0 := rowVersion()
+	// Same instant: nothing changed. (With time passing, an open incident's duration changes the content.)
+	if _, err := jobs.RebuildAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if v1, e1 := rowVersion(); v1 != v0 || e1 != e0 {
+		t.Fatalf("unchanged snapshot rewritten: xmin %s -> %s, etag %s -> %s", v0, v1, e0, e1)
+	}
+	f.exec(`UPDATE status_page_snapshots SET generated_at = generated_at - interval '10 minutes' WHERE slug = 'page-a'`)
+	if _, err := jobs.RebuildAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if v2, e2 := rowVersion(); v2 == v0 || e2 != e0 {
+		t.Fatalf("stale generatedAt not refreshed with the same ETag: xmin %s -> %s, etag %s -> %s", v0, v2, e0, e2)
+	}
+
 	public := env.Conn(t, env.StatuspageURL)
 	read := func(slug string) statuspages.Snapshot {
 		t.Helper()

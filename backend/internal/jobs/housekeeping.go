@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -374,29 +375,40 @@ const (
 	resultError   = "error"
 )
 
-// Run executes due tasks until ctx ends. A task running at shutdown is cancelled and rolls back.
+// Run executes every task on its own schedule, one goroutine per task, until ctx ends: a slow
+// task delays only its own next run, never another task's (heartbeat evaluation in particular).
+// A task running at shutdown is cancelled and rolls back.
 func (h *Housekeeper) Run(ctx context.Context) error {
-	next := make([]time.Time, len(h.tasks))
+	var wg sync.WaitGroup
+	for _, t := range h.tasks {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			h.loop(ctx, t)
+		}()
+	}
+	wg.Wait()
+	return nil
+}
+
+func (h *Housekeeper) loop(ctx context.Context, t Task) {
+	var next time.Time
 	tick := time.NewTicker(h.Poll)
 	defer tick.Stop()
 	for {
-		for i, t := range h.tasks {
-			now := h.clock.Now()
-			if ctx.Err() != nil || now.Before(next[i]) {
-				continue
-			}
+		if now := h.clock.Now(); ctx.Err() == nil && !now.Before(next) {
 			// A skipped or failed run is retried at the next interval, except that a failure
 			// retries sooner (1 minute) so a transient error does not cost a whole day.
 			switch h.RunTask(ctx, t) {
 			case resultError:
-				next[i] = now.Add(min(time.Minute, t.Every))
+				next = now.Add(min(time.Minute, t.Every))
 			default:
-				next[i] = now.Add(t.Every)
+				next = now.Add(t.Every)
 			}
 		}
 		select {
 		case <-ctx.Done():
-			return nil
+			return
 		case <-tick.C:
 		}
 	}

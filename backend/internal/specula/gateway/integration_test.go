@@ -322,12 +322,44 @@ func TestIntegrationGateway(t *testing.T) {
 		}
 	})
 
-	t.Run("a revoked token is refused at once", func(t *testing.T) {
+	t.Run("flood of random tokens leaves the database to a valid executor", func(t *testing.T) {
+		// One address sends far more bad tokens than its budget; the rest is refused with 429
+		// before it reaches the database, and the executor's own calls still work.
+		limited := 0
+		for i := 0; i < 200; i++ {
+			code, _ := call(t, srv, specula.TokenPrefix+uuid.NewString(), "/hello", wire.HelloRequest{})
+			if code == http.StatusTooManyRequests {
+				limited++
+			} else if code != http.StatusUnauthorized {
+				t.Fatalf("flood: %d", code)
+			}
+		}
+		if limited < 100 {
+			t.Fatalf("only %d of 200 bad tokens were limited", limited)
+		}
+		if code, b := call(t, srv, token, "/hello", wire.HelloRequest{Version: "1"}); code != http.StatusOK {
+			t.Fatalf("valid executor during flood: %d %s", code, b)
+		}
+	})
+
+	t.Run("a revoked token stops working within the cache window", func(t *testing.T) {
+		fresh := build(keys) // its own budget: the flood above used this address up on srv
+		if code, _ := call(t, fresh, token, "/claim", wire.ClaimRequest{Max: 1}); code != http.StatusOK {
+			t.Fatalf("before revoke: %d", code)
+		}
 		if err := svc.Revoke(ctx, actorA, s.ID); err != nil {
 			t.Fatal(err)
 		}
-		if code, _ := call(t, srv, token, "/claim", wire.ClaimRequest{Max: 1}); code != http.StatusUnauthorized {
-			t.Fatalf("after revoke: %d", code)
+		deadline := time.Now().Add(7 * time.Second) // cache window is 5 s
+		for {
+			code, _ := call(t, fresh, token, "/claim", wire.ClaimRequest{Max: 1})
+			if code == http.StatusUnauthorized {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("still accepted after the cache window: %d", code)
+			}
+			time.Sleep(250 * time.Millisecond)
 		}
 	})
 }

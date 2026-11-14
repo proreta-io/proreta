@@ -267,7 +267,7 @@ def check(path):
     # Specula gateway: the worker's database role and the request keyring, nothing else.
     gw = env_of("speculagw")
     if gw:
-        allowed = {"PRORETA_LOG_LEVEL", "PRORETA_ADMIN_ADDR", "PRORETA_DATABASE_URL", "PRORETA_HTTP_ADDR"} | ENV_NAMES_REQUEST
+        allowed = {"PRORETA_LOG_LEVEL", "PRORETA_ADMIN_ADDR", "PRORETA_DATABASE_URL", "PRORETA_HTTP_ADDR", "PRORETA_TRUSTED_PROXY_HOPS"} | ENV_NAMES_REQUEST
         extra = set(gw) - allowed
         if extra:
             fail(f"speculagw env has {sorted(extra)}; it may only have {sorted(allowed)} (no data keys, admin credentials or SSRF settings)")

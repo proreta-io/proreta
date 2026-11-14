@@ -175,6 +175,9 @@ type Worker struct {
 type SpeculaGateway struct {
 	Server
 	HTTPAddr string
+	// TrustedProxyHops is PRORETA_TRUSTED_PROXY_HOPS (default 0): the number of proxies in front of the
+	// gateway; the rate limit of failed token checks is keyed by the client address it yields.
+	TrustedProxyHops int
 	// Request opens the sealed headers and bodies of monitor requests handed to an executor.
 	Request RequestSeal
 }
@@ -412,9 +415,10 @@ func LoadWorker(lookup LookupFunc) (Worker, error) {
 func LoadSpeculaGateway(lookup LookupFunc) (SpeculaGateway, error) {
 	l := &loader{lookup: lookup}
 	cfg := SpeculaGateway{
-		Server:   l.server(10),
-		HTTPAddr: l.addr("PRORETA_HTTP_ADDR", ":8080"),
-		Request:  l.requestSeal(),
+		Server:           l.server(10),
+		HTTPAddr:         l.addr("PRORETA_HTTP_ADDR", ":8080"),
+		TrustedProxyHops: l.integer("PRORETA_TRUSTED_PROXY_HOPS", 0, 0, 10),
+		Request:          l.requestSeal(),
 	}
 	if cfg.HTTPAddr != "" && cfg.HTTPAddr == cfg.AdminAddr {
 		l.fail("PRORETA_HTTP_ADDR", "must differ from PRORETA_ADMIN_ADDR")
