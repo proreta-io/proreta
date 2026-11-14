@@ -42,6 +42,8 @@ export type AdminPlan = Schemas["AdminPlan"];
 export type ResourceCounts = Schemas["ResourceCounts"];
 export type AdminProject = Schemas["AdminProject"];
 export type AdminUserSummary = Schemas["AdminUserSummary"];
+export type AdminStatusPageDomain = Schemas["AdminStatusPageDomain"];
+export type StatusPageDomainState = Schemas["StatusPageDomainState"];
 export type AdminUserDetail = Schemas["AdminUserDetail"];
 export type AdminUserMembership = Schemas["AdminUserMembership"];
 export type AdminMember = Schemas["AdminMember"];
@@ -110,6 +112,8 @@ export const queryKeys = {
     ["admin", "organization", id, "projects", projectId, "members"] as const,
   adminAllUsers: (query: string, status: string, offset: number) =>
     ["admin", "all-users", { query, status, offset }] as const,
+  adminDomains: (query: string, state: string, offset: number) =>
+    ["admin", "domains", { query, state, offset }] as const,
   adminUser: (id: string) => ["admin", "user", id] as const,
   adminMembers: (id: string) => ["admin", "organization", id, "members"] as const,
   adminInvitations: (id: string) => ["admin", "organization", id, "invitations"] as const,
@@ -399,6 +403,34 @@ export const listAdminAllUsers = (
         query: { query, offset, limit: ADMIN_PAGE_SIZE, ...(status ? { status } : {}) },
       },
     }),
+  );
+
+export const listAdminStatusPageDomains = (
+  query: string,
+  state: StatusPageDomainState | "",
+  offset: number,
+) =>
+  unwrap(
+    client.GET("/api/v1/admin/status-page-domains", {
+      params: {
+        query: { query, offset, limit: ADMIN_PAGE_SIZE, ...(state ? { state: [state] } : {}) },
+      },
+    }),
+  );
+
+/** The abuse switch: stops (or restores) serving a host; the reason is audited. */
+export const setAdminStatusPageDomainDisabled = (
+  domainId: string,
+  disabled: boolean,
+  reason: string,
+) =>
+  unwrap(
+    client.POST(
+      disabled
+        ? "/api/v1/admin/status-page-domains/{domainId}/disable"
+        : "/api/v1/admin/status-page-domains/{domainId}/enable",
+      { params: { path: { domainId } }, body: { reason } },
+    ),
   );
 
 const userPath = (userId: string) => ({ params: { path: { userId } } });
