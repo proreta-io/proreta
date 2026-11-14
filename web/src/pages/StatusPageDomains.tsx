@@ -402,8 +402,8 @@ function DomainRow({
           onCancel={() => setMaking(false)}
         >
           <p>
-            Canonical links, the feed and the badge of this page will use {d.hostUnicode}. The other
-            domains keep serving the page.
+            {d.hostUnicode} will be listed first and marked as primary. Every domain keeps serving
+            the page, and no link changes.
           </p>
         </ConfirmDialog>
       )}

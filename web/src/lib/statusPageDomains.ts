@@ -27,7 +27,8 @@ export const isServing = (d: StatusPageDomain) =>
 
 export const ERROR_TEXT: Record<NonNullable<StatusPageDomain["lastError"]>, string> = {
   "txt-missing": "The TXT record was not found.",
-  "txt-mismatch": "A TXT record exists, but its value is not the one shown.",
+  "txt-mismatch":
+    "This host is already served elsewhere. Leave only the TXT record shown here for it, then check again.",
   "cname-missing": "The CNAME record was not found.",
   "cname-wrong": "The CNAME record points somewhere else.",
   "dns-error": "The DNS lookup itself failed. This is not counted against the domain.",
