@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"errors"
+	"math/rand/v2"
 	"testing"
 	"time"
 
@@ -21,6 +22,8 @@ func TestBackoff(t *testing.T) {
 }
 
 func TestDecide(t *testing.T) {
+	jitter = func() float64 { return 0 }
+	t.Cleanup(func() { jitter = rand.Float64 })
 	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 	cases := []struct {
 		name     string
@@ -37,10 +40,14 @@ func TestDecide(t *testing.T) {
 			outcome{status: statusPending, errKind: "connect", retryAt: now.Add(2 * time.Minute)}},
 		{"fifth failure is final", 4, &notify.SendError{Kind: notify.KindTimeout},
 			outcome{status: statusFailed, errKind: "timeout"}},
-		{"retry-after longer than backoff wins", 0, &notify.SendError{Kind: notify.KindRateLimited, Status: 429, RetryAfter: 40 * time.Second},
-			outcome{status: statusPending, errKind: "rate_limited", retryAt: now.Add(40 * time.Second)}},
-		{"retry-after shorter than backoff", 2, &notify.SendError{Kind: notify.KindRateLimited, Status: 429, RetryAfter: time.Second},
-			outcome{status: statusPending, errKind: "rate_limited", retryAt: now.Add(30 * time.Second)}},
+		{"429 is throttled, Retry-After wins", 0, &notify.SendError{Kind: notify.KindRateLimited, Status: 429, RetryAfter: 40 * time.Second},
+			outcome{status: statusThrottled, errKind: "rate_limited", retryAt: now.Add(40 * time.Second)}},
+		{"429 never counts, however many attempts", 4, &notify.SendError{Kind: notify.KindRateLimited, Status: 429, RetryAfter: time.Second},
+			outcome{status: statusThrottled, errKind: "rate_limited", retryAt: now.Add(time.Second)}},
+		{"429 without Retry-After waits 1s", 0, &notify.SendError{Kind: notify.KindRateLimited, Status: 429},
+			outcome{status: statusThrottled, errKind: "rate_limited", retryAt: now.Add(time.Second)}},
+		{"429 Retry-After is capped at 10m", 0, &notify.SendError{Kind: notify.KindRateLimited, Status: 429, RetryAfter: time.Hour},
+			outcome{status: statusThrottled, errKind: "rate_limited", retryAt: now.Add(10 * time.Minute)}},
 		{"404 permanent, channel failed", 0, &notify.SendError{Kind: notify.KindNotFound, Status: 404, Permanent: true},
 			outcome{status: statusFailed, errKind: "webhook_not_found", failChannel: true}},
 		{"invalid url permanent, channel failed", 0, &notify.SendError{Kind: notify.KindInvalidURL, Permanent: true},
@@ -89,5 +96,15 @@ func TestChannelLimiterPrunes(t *testing.T) {
 	l.reserve(uuid.New(), clk.Now())
 	if len(l.next) > 2 {
 		t.Fatalf("limiter keeps %d idle channels", len(l.next))
+	}
+}
+
+func TestDecideThrottleJitter(t *testing.T) {
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	for range 50 {
+		o := decide(0, &notify.SendError{Kind: notify.KindRateLimited, Status: 429, RetryAfter: 40 * time.Second}, now)
+		if d := o.retryAt.Sub(now); d < 40*time.Second || d > 50*time.Second {
+			t.Fatalf("jittered delay %v outside [40s, 50s]", d)
+		}
 	}
 }

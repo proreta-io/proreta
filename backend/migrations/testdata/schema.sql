@@ -2619,20 +2619,27 @@ CREATE OR REPLACE FUNCTION public.finish_delivery(p_id uuid, p_token uuid, p_sta
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 BEGIN
-    IF p_status IS NULL OR p_status NOT IN ('sent', 'failed', 'pending') THEN
+    IF p_status IS NULL OR p_status NOT IN ('sent', 'failed', 'pending', 'throttled') THEN
         RAISE EXCEPTION 'finish_delivery: invalid status' USING ERRCODE = '22023';
     END IF;
-    IF p_status = 'pending' AND p_retry_at IS NULL THEN
+    IF p_status IN ('pending', 'throttled') AND p_retry_at IS NULL THEN
         RAISE EXCEPTION 'finish_delivery: retry_at is required for pending' USING ERRCODE = '22023';
     END IF;
     UPDATE notification_deliveries AS d
-    SET status = p_status,
-        attempts = d.attempts + 1,
+    SET status = CASE
+            WHEN p_status = 'throttled' THEN
+                CASE WHEN d.created_at < now() - interval '1 hour' THEN 'failed' ELSE 'pending' END
+            ELSE p_status
+        END,
+        attempts = d.attempts + CASE
+            WHEN p_status = 'throttled' AND d.created_at >= now() - interval '1 hour' THEN 0
+            ELSE 1
+        END,
         lease_until = NULL,
         claim_token = NULL,
         last_error = CASE WHEN p_status = 'sent' THEN NULL ELSE left(p_error, 500) END,
         sent_at = CASE WHEN p_status = 'sent' THEN now() END,
-        next_attempt_at = CASE WHEN p_status = 'pending' THEN p_retry_at ELSE d.next_attempt_at END
+        next_attempt_at = CASE WHEN p_status IN ('pending', 'throttled') THEN p_retry_at ELSE d.next_attempt_at END
     WHERE d.id = p_id AND d.status = 'in_progress' AND d.claim_token = p_token;
     RETURN FOUND;
 END

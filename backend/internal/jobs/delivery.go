@@ -329,7 +329,7 @@ func (r *Deliverer) finish(ctx context.Context, log *slog.Logger, dl delivery, c
 		errText = &o.errKind
 	}
 	var retryAt *time.Time
-	if o.status == statusPending {
+	if o.status == statusPending || o.status == statusThrottled {
 		retryAt = &o.retryAt
 	}
 	var recorded bool
@@ -355,7 +355,7 @@ func (r *Deliverer) finish(ctx context.Context, log *slog.Logger, dl delivery, c
 		return
 	}
 	label := o.status
-	if label == statusPending {
+	if label == statusPending || label == statusThrottled {
 		label = "retry"
 	}
 	r.d.Metrics.deliveries.WithLabelValues(channelType, label).Inc()

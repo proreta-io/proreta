@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"errors"
+	"math/rand/v2"
 	"strconv"
 	"sync"
 	"time"
@@ -27,6 +28,8 @@ const (
 	statusSent    = "sent"
 	statusFailed  = "failed"
 	statusPending = "pending"
+	// statusThrottled is a 429: retried without using up an attempt (finish_delivery bounds it by age).
+	statusThrottled = "throttled"
 )
 
 // outcome is what to record for one attempt.
@@ -39,6 +42,9 @@ type outcome struct {
 	// so every later delivery to it would fail the same way.
 	failChannel bool
 }
+
+// jitter returns a value in [0, 1); tests replace it.
+var jitter = rand.Float64
 
 // decide maps a send result to what finish_delivery records. attempts is the number of earlier
 // attempts (the claimed row's value); this attempt is attempts+1.
@@ -56,6 +62,12 @@ func decide(attempts int, sendErr error, now time.Time) outcome {
 	}
 	if se.Permanent {
 		return outcome{status: statusFailed, errKind: kind, failChannel: se.Kind == notify.KindNotFound || se.Kind == notify.KindInvalidURL}
+	}
+	if se.Kind == notify.KindRateLimited {
+		// 1 s to 10 min, plus up to 25% so replicas that were throttled together do not return together.
+		d := min(max(se.RetryAfter, Backoff(1)), Backoff(MaxAttempts))
+		d += time.Duration(jitter() * float64(d) / 4)
+		return outcome{status: statusThrottled, errKind: kind, retryAt: now.Add(d)}
 	}
 	done := attempts + 1
 	if done >= MaxAttempts {

@@ -313,10 +313,38 @@ func TestIntegrationDelivery(t *testing.T) {
 		e.slack.queue(429)
 		d.RunOnce(e.ctx)
 		r := e.row(id)
-		if r.status != "pending" || r.retryIn < 40*time.Second || r.retryIn > 50*time.Second || *r.lastError != "rate_limited" {
+		if r.status != "pending" || r.retryIn < 40*time.Second || r.retryIn > 60*time.Second || r.attempts != 0 || *r.lastError != "rate_limited" {
 			t.Fatalf("after 429: %+v", r)
 		}
 		pgtest.MustExec(t, e.admin, `UPDATE notification_deliveries SET status = 'failed' WHERE id = '`+id.String()+`'`)
+	})
+
+	t.Run("a 429 sequence does not use up attempts but is bounded by age", func(t *testing.T) {
+		m := e.monitor(tenantA, "Burst")
+		id := e.deliver(tenantA, m, notify.DeliveryResolved, map[string]any{"monitorName": "Burst", "durationSeconds": 5})
+		e.slack.retryAfter = "1"
+		for i := 0; i < 2*jobs.MaxAttempts; i++ {
+			e.slack.queue(429)
+			e.makeDue()
+			d.RunOnce(e.ctx)
+			if r := e.row(id); r.status != "pending" || r.attempts != 0 || *r.lastError != "rate_limited" {
+				t.Fatalf("after %d 429s: %+v", i+1, r)
+			}
+		}
+		e.makeDue()
+		d.RunOnce(e.ctx)
+		if r := e.row(id); r.status != "sent" || r.attempts != 1 {
+			t.Fatalf("after the burst: %+v", r)
+		}
+
+		old := e.deliver(tenantA, m, notify.DeliveryResolved, map[string]any{"monitorName": "Burst", "durationSeconds": 6})
+		pgtest.MustExec(t, e.admin, `UPDATE notification_deliveries SET created_at = now() - interval '61 minutes' WHERE id = '`+old.String()+`'`)
+		e.slack.queue(429)
+		d.RunOnce(e.ctx)
+		if r := e.row(old); r.status != "failed" || r.attempts != 1 || *r.lastError != "rate_limited" {
+			t.Fatalf("429 on a row older than an hour: %+v", r)
+		}
+		e.slack.retryAfter = ""
 	})
 
 	t.Run("five failures mark failed", func(t *testing.T) {
