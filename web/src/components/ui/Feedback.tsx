@@ -172,11 +172,14 @@ export function CopyField({
   label,
   value,
   copyLabel = "Copy",
+  copyAriaLabel,
   once = true,
 }: {
   label: string;
   value: string;
   copyLabel?: string;
+  /** A fuller name for the button when several fields share a page ("Copy TXT name"). */
+  copyAriaLabel?: string;
   once?: boolean;
 }) {
   const id = useId();
@@ -209,7 +212,11 @@ export function CopyField({
           aria-describedby={once ? `${id}-once` : undefined}
           onFocus={(e) => e.currentTarget.select()}
         />
-        <Button className="min-w-[88px] flex-none" onClick={() => void copy()}>
+        <Button
+          className="min-w-[88px] flex-none"
+          aria-label={state === "copied" ? undefined : copyAriaLabel}
+          onClick={() => void copy()}
+        >
           {state === "copied" ? "Copied ✓" : copyLabel}
         </Button>
       </div>

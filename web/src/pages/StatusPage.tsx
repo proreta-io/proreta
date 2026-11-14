@@ -44,6 +44,7 @@ import {
   TriangleShape,
   WriteOnlyValue,
 } from "../components/ui";
+import { DomainsSection } from "./StatusPageDomains";
 import { channelScopeLabel } from "../lib/projects";
 import { canManageStatusPageOf, usePermissions } from "../lib/permissions";
 import { ROLE_HINTS } from "../lib/roles";
@@ -358,6 +359,7 @@ function ReadOnly({ page }: { page: Page }) {
       ) : (
         <p className="text-muted-foreground">The page is not published yet.</p>
       )}
+      <DomainsSection page={page} canManage={false} />
     </div>
   );
 }
@@ -427,6 +429,7 @@ function Editor({ page }: { page: Page }) {
         <Components page={page} />
         <Password page={page} />
         <Embed page={page} />
+        <DomainsSection page={page} canManage />
         <DangerZone page={page} />
       </div>
       <aside aria-label="Live preview" className="min-w-0 lg:sticky lg:top-6 lg:self-start">
