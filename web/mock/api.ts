@@ -438,6 +438,47 @@ function sessionInfo(): S["SessionInfo"] {
   };
 }
 
+const domains: S["AdminStatusPageDomain"][] = [
+  ["status.acme.example", "o-acme", "acme-example-com", "main", "active", true, 3, null],
+  ["uptime.acme.example", "o-acme", "acme-example-com", "main", "verified", false, 2, null],
+  [
+    "status.xn--bcher-kva.example",
+    "o-acme",
+    "acme-example-com",
+    "main",
+    "pending",
+    false,
+    null,
+    "txt-missing",
+  ],
+  [
+    "status.old.example",
+    "o-acme",
+    "acme-example-com",
+    "main",
+    "failed",
+    false,
+    null,
+    "txt-mismatch",
+  ],
+].map(([host, orgId, slug, page, state, primary, verified, lastError], i) => ({
+  id: `d-${i + 1}`,
+  host: String(host),
+  hostUnicode: String(host).replace("xn--bcher-kva", "bücher"),
+  state: state as S["StatusPageDomainState"],
+  primary: primary as boolean,
+  disabled: false,
+  disabledAt: null as string | null,
+  organizationId: String(orgId),
+  organizationSlug: String(slug),
+  statusPageId: `sp-${i + 1}`,
+  statusPageSlug: String(page),
+  verifiedAt: verified === null ? null : day(verified as number),
+  lastCheckedAt: day(0),
+  lastError: lastError as S["StatusPageDomainError"] | null,
+  createdAt: day(5),
+}));
+
 function adminOrg(o: Org): S["AdminOrganization"] {
   return {
     id: o.id,
@@ -1063,6 +1104,37 @@ const routes: Route[] = [
     "POST",
     "/api/v1/admin/users/:userId/reset-password",
     () => ok({ temporaryPassword: "Mock-Temp-Password-1234" }),
+  ],
+  [
+    "GET",
+    "/api/v1/admin/status-page-domains",
+    ({ query }) => {
+      const q = (query.get("query") ?? "").toLowerCase();
+      const states = (query.get("state") ?? "").split(",").filter(Boolean);
+      const items = domains.filter(
+        (d) =>
+          (!states.length || states.includes(d.state)) &&
+          (!q || d.host.includes(q) || d.organizationSlug.includes(q)),
+      );
+      const offset = Number(query.get("offset") ?? 0);
+      return ok({
+        items: items.slice(offset, offset + 25),
+        total: items.length,
+        limit: 25,
+        offset,
+      });
+    },
+  ],
+  [
+    "POST",
+    "/api/v1/admin/status-page-domains/:id/:action",
+    ({ params, body }) => {
+      const d = domains.find((x) => x.id === params.id);
+      if (!d || !String(body.reason ?? "").trim()) return notFound();
+      d.disabled = params.action === "disable";
+      d.disabledAt = d.disabled ? ago(0) : null;
+      return ok(d);
+    },
   ],
   [
     "GET",

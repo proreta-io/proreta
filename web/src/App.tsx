@@ -22,6 +22,7 @@ import ResetPassword from "./pages/ResetPassword";
 import Settings from "./pages/Settings";
 import StatusPageSettings from "./pages/StatusPage";
 import VerifyEmail from "./pages/VerifyEmail";
+import AdminDomains from "./pages/admin/AdminDomains";
 import AdminEmail from "./pages/admin/AdminEmail";
 import AdminRegistration from "./pages/admin/AdminRegistration";
 import AdminPlanForm from "./pages/admin/AdminPlanForm";
@@ -73,6 +74,7 @@ export default function App() {
             <Route path="organizations/:id" element={<AdminOrganizationDetails />} />
             <Route path="users" element={<AdminUsers />} />
             <Route path="users/:id" element={<AdminUserDetails />} />
+            <Route path="domains" element={<AdminDomains />} />
             <Route path="plans" element={<AdminPlans />} />
             <Route path="plans/new" element={<AdminPlanForm />} />
             <Route path="plans/:key" element={<AdminPlanForm />} />

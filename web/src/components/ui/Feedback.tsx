@@ -6,6 +6,7 @@ import {
   useState,
   type ReactElement,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { Button, type ButtonVariant } from "./Button";
 import { Skeleton } from "./Data";
@@ -281,6 +282,7 @@ export function ConfirmDialog({
   confirmVariant = "destructive",
   cancelLabel = "Cancel",
   busy = false,
+  initialFocus,
   onConfirm,
   onCancel,
 }: {
@@ -290,6 +292,8 @@ export function ConfirmDialog({
   confirmVariant?: ButtonVariant;
   cancelLabel?: string;
   busy?: boolean;
+  /** A field inside the dialog that takes focus instead of Cancel (a dialog that asks for input). */
+  initialFocus?: RefObject<HTMLElement | null>;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -301,8 +305,10 @@ export function ConfirmDialog({
     const element = dialog.current;
     if (!element) return;
     element.showModal();
-    cancel.current?.focus();
+    (initialFocus?.current ?? cancel.current)?.focus();
     return () => element.close();
+    // Only on mount: the dialog is mounted when opened.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
