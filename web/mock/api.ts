@@ -545,6 +545,53 @@ function removeMember(orgId: string, userId: string) {
 
 const projectById = (pid: string) => projects.find((p) => p.id === pid);
 
+const problem = (status: number, title: string, summary: string, extra: object = {}): Result => ({
+  status,
+  body: { type: `urn:proreta:problem:${title}`, title: summary, status, ...extra },
+});
+
+const statusPage = {
+  id: "sp-acme",
+  projectId: null,
+  slug: "acme",
+  title: "Acme status",
+  description: "",
+  logoUrl: null,
+  accentColor: null,
+  published: true,
+  passwordProtected: false,
+  publicUrl: "http://localhost:5173/status/acme",
+  componentCount: 0,
+  createdAt: day(20),
+  updatedAt: day(2),
+};
+
+function mockDomain(host: string, state: S["StatusPageDomain"]["state"]): S["StatusPageDomain"] {
+  return {
+    id: id("d"),
+    host,
+    hostUnicode: host,
+    state,
+    primary: false,
+    disabled: false,
+    verification: {
+      txtName: `_proreta-status.${host}`,
+      txtValue: "proreta-verify=0123456789abcdef0123456789abcdef",
+      cnameTarget: "customers.proreta.example.net",
+    },
+    verifiedAt: state === "pending" ? null : day(3),
+    lastCheckedAt: state === "pending" ? null : day(0),
+    lastError: state === "pending" ? "txt-missing" : null,
+    expiresAt: state === "pending" ? new Date(Date.now() + 7 * 86_400_000).toISOString() : null,
+    createdAt: day(3),
+  };
+}
+
+const statusPageDomains: S["StatusPageDomain"][] = [
+  { ...mockDomain("status.acme.test", "active"), primary: true },
+  mockDomain("uptime.acme.test", "pending"),
+];
+
 const routes: Route[] = [
   ["GET", "/api/v1/public/config", () => ok({ registrationEnabled: true })],
   [
@@ -642,6 +689,7 @@ const routes: Route[] = [
           projects: 10,
           statusPages: 5,
           specula: 3,
+          statusPageDomains: 3,
         },
         usage: {
           monitors: monitors.length,
@@ -651,6 +699,7 @@ const routes: Route[] = [
           projects: projectsOf(session.orgId).length,
           statusPages: 1,
           specula: 0,
+          statusPageDomains: statusPageDomains.length,
         },
       }),
   ],
@@ -803,7 +852,103 @@ const routes: Route[] = [
     },
   ],
   ["GET", "/api/v1/specula", () => ok({ items: [] })],
-  ["GET", "/api/v1/status-pages", () => ok({ items: [] })],
+  ["GET", "/api/v1/status-pages", () => ok({ items: [statusPage] })],
+  ["GET", "/api/v1/status-pages/:id/components", () => ok({ items: [] })],
+  [
+    "GET",
+    "/api/v1/status-pages/:id/preview",
+    () =>
+      ok({
+        version: 1,
+        page: {
+          slug: "acme",
+          title: "Acme status",
+          description: "",
+          logoUrl: null,
+          accentColor: null,
+        },
+        status: "operational",
+        generatedAt: new Date().toISOString(),
+        components: [],
+        activeIncidents: [],
+        pastIncidents: [],
+      }),
+  ],
+  // Custom domains. Hosts starting with "bad" are refused (422), "taken" ones are unavailable (409);
+  // "Check now" moves a domain pending -> verified -> active, except hosts starting with "fail".
+  ["GET", "/api/v1/status-pages/:id/domains", () => ok({ items: statusPageDomains })],
+  [
+    "POST",
+    "/api/v1/status-pages/:id/domains",
+    ({ body }) => {
+      const host = String(body.host ?? "")
+        .trim()
+        .toLowerCase();
+      if (host.startsWith("bad"))
+        return problem(422, "domain-forbidden", "This host cannot be used", {
+          fieldErrors: [
+            {
+              field: "host",
+              message: "This is a public suffix; use a name below your own domain.",
+            },
+          ],
+        });
+      if (host.startsWith("taken"))
+        return problem(409, "domain-unavailable", "This host is not available");
+      if (statusPageDomains.length >= 3)
+        return problem(409, "plan-limit-reached", "Domain limit of the page reached", {
+          detail: "A status page can have at most 3 domains.",
+          limit: "statusPageDomains",
+          max: 3,
+        });
+      const d = mockDomain(host, "pending");
+      statusPageDomains.push(d);
+      return created(d);
+    },
+  ],
+  [
+    "POST",
+    "/api/v1/status-pages/:id/domains/:domainId/verify",
+    ({ params }) => {
+      const d = statusPageDomains.find((x) => x.id === params.domainId);
+      if (!d) return notFound();
+      d.lastCheckedAt = new Date().toISOString();
+      if (d.host.startsWith("fail")) {
+        d.state = "failed";
+        d.lastError = "txt-missing";
+      } else if (d.state === "pending" || d.state === "failed") {
+        d.state = "verified";
+        d.lastError = "cname-missing";
+        d.verifiedAt = d.lastCheckedAt;
+        d.expiresAt = null;
+      } else {
+        d.state = "active";
+        d.lastError = null;
+      }
+      return { status: 202, body: d };
+    },
+  ],
+  [
+    "PATCH",
+    "/api/v1/status-pages/:id/domains/:domainId",
+    ({ params }) => {
+      const d = statusPageDomains.find((x) => x.id === params.domainId);
+      if (!d) return notFound();
+      for (const x of statusPageDomains) x.primary = x === d;
+      statusPageDomains.sort((a, b) => Number(b.primary) - Number(a.primary));
+      return ok(d);
+    },
+  ],
+  [
+    "DELETE",
+    "/api/v1/status-pages/:id/domains/:domainId",
+    ({ params }) => {
+      const was = statusPageDomains.find((x) => x.id === params.domainId);
+      dropById(statusPageDomains, params.domainId!);
+      if (was?.primary && statusPageDomains[0]) statusPageDomains[0].primary = true;
+      return noContent;
+    },
+  ],
 
   // Admin Area.
   [
