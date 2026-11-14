@@ -3310,7 +3310,7 @@ BEGIN
 END
 $function$
 CREATE OR REPLACE FUNCTION public.status_page_domains_due(p_limit integer)
- RETURNS TABLE(tenant_id uuid, id uuid, host text, token text, state text, created_at timestamp with time zone, last_proof_at timestamp with time zone, check_failures integer)
+ RETURNS TABLE(tenant_id uuid, id uuid, page_id uuid, host text, token text, state text, created_at timestamp with time zone, last_proof_at timestamp with time zone, check_failures integer)
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
@@ -3318,7 +3318,7 @@ AS $function$
 #variable_conflict use_column
 BEGIN
     RETURN QUERY
-    SELECT d.tenant_id, d.id, d.host, d.token, d.state, d.created_at, d.last_proof_at, d.check_failures
+    SELECT d.tenant_id, d.id, d.page_id, d.host, d.token, d.state, d.created_at, d.last_proof_at, d.check_failures
     FROM status_page_domains AS d
     JOIN tenants AS t ON t.id = d.tenant_id
     WHERE d.released_at IS NULL

@@ -33,6 +33,9 @@ type Metrics struct {
 	// opened (event offline) and resolved (online) by the offline task.
 	speculaAgents    *prometheus.GaugeVec
 	speculaIncidents *prometheus.CounterVec
+	// domains is the status page domains by state, domainChecks the DNS checks by result.
+	domains      *prometheus.GaugeVec
+	domainChecks *prometheus.CounterVec
 	// mail* are the outgoing email metrics (the mail outbox).
 	mail            *prometheus.CounterVec
 	mailDuration    prometheus.Histogram
@@ -94,6 +97,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "proreta_jobs_mail_claim_errors_total", Help: "Failed claim_mail calls.",
 		}),
 	}
+	m.domains, m.domainChecks = newDomainMetrics()
 	for _, k := range mail.Kinds() {
 		for _, s := range []string{statusSent, "retry", statusFailed} {
 			m.mail.WithLabelValues(string(k), s)
@@ -117,6 +121,6 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.partitionsKept.WithLabelValues(r)
 	}
 	reg.MustRegister(m.deliveries, m.duration, m.pending, m.claimErrors, m.housekeeping, m.lastSuccess, m.partitionsKept, m.purgedRows, m.heartbeatsMissed, m.statusSnapshots,
-		m.speculaAgents, m.speculaIncidents, m.mail, m.mailDuration, m.mailPending, m.mailClaimErrors)
+		m.speculaAgents, m.speculaIncidents, m.domains, m.domainChecks, m.mail, m.mailDuration, m.mailPending, m.mailClaimErrors)
 	return m
 }
