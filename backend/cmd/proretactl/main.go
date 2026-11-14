@@ -2,6 +2,7 @@
 //
 //	proretactl hashpw [-m KiB] [-t iterations] [-p parallelism]   print an argon2id hash of a password read from stdin
 //	proretactl db bootstrap                                       create/repair the database and roles, or skip when they are ready (see internal/dbbootstrap)
+//	proretactl status-domains list [-format json|caddy|text] [-all]   list the custom status page domains (database URL of the api in PRORETA_DATABASE_URL)
 //	proretactl secrets bootstrap                                  create the admin and encryption Secrets if absent (see internal/secretsbootstrap)
 package main
 
@@ -39,6 +40,7 @@ const usage = `usage:
   proretactl hashpw [-m KiB] [-t iterations] [-p parallelism]
   proretactl db bootstrap
   proretactl secrets bootstrap
+  proretactl status-domains list [-format json|caddy|text] [-all]
   proretactl version
 `
 
@@ -61,6 +63,8 @@ func run(args []string) error {
 		return dbBootstrap()
 	case args[0] == "secrets" && len(args) > 1 && args[1] == "bootstrap":
 		return secretsBootstrap()
+	case args[0] == "status-domains":
+		return statusDomains(args[1:], os.LookupEnv, os.Stdout)
 	case args[0] == "version":
 		fmt.Printf("proretactl %s (%s)\n", version, commit)
 		return nil

@@ -694,6 +694,51 @@ func TestLoadSpecula(t *testing.T) {
 	}
 }
 
+func TestLoadStatuspageTLSAsk(t *testing.T) {
+	base := map[string]string{
+		"PRORETA_DATABASE_URL":          "postgres://proreta_statuspage:pw@db:5432/proreta?sslmode=require",
+		"PRORETA_PUBLIC_URL":            "https://proreta.example.com",
+		"PRORETA_STATUSPAGE_COOKIE_KEY": base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")),
+	}
+	with := func(kv map[string]string) map[string]string {
+		m := map[string]string{}
+		for k, v := range base {
+			m[k] = v
+		}
+		for k, v := range kv {
+			m[k] = v
+		}
+		return m
+	}
+	const good = "abcdefghijklmnopqrstuvwxyz0123456789._~-"
+	// Off by default; a token alone does not turn it on.
+	cfg, err := LoadStatuspage(env(with(map[string]string{"PRORETA_STATUSPAGE_TLS_ASK_TOKEN": good})))
+	if err != nil || cfg.TLSAskAddr != "" || cfg.TLSAskToken != "" {
+		t.Fatalf("default: %+v %v", cfg, err)
+	}
+	cfg, err = LoadStatuspage(env(with(map[string]string{"PRORETA_STATUSPAGE_TLS_ASK_ADDR": ":9091", "PRORETA_STATUSPAGE_TLS_ASK_TOKEN": good})))
+	if err != nil || cfg.TLSAskAddr != ":9091" || cfg.TLSAskToken.Value() != good {
+		t.Fatalf("on: %+v %v", cfg, err)
+	}
+	if s := fmt.Sprintf("%v %+v", cfg.TLSAskToken, cfg); strings.Contains(s, good) {
+		t.Fatal("ask token printed")
+	}
+	for name, kv := range map[string]map[string]string{
+		"no token":         {"PRORETA_STATUSPAGE_TLS_ASK_ADDR": ":9091"},
+		"short token":      {"PRORETA_STATUSPAGE_TLS_ASK_ADDR": ":9091", "PRORETA_STATUSPAGE_TLS_ASK_TOKEN": "short"},
+		"url unsafe token": {"PRORETA_STATUSPAGE_TLS_ASK_ADDR": ":9091", "PRORETA_STATUSPAGE_TLS_ASK_TOKEN": good + "&x=y/"},
+		"bad address":      {"PRORETA_STATUSPAGE_TLS_ASK_ADDR": "9091", "PRORETA_STATUSPAGE_TLS_ASK_TOKEN": good},
+		"admin port":       {"PRORETA_STATUSPAGE_TLS_ASK_ADDR": ":9090", "PRORETA_STATUSPAGE_TLS_ASK_TOKEN": good},
+		"http port":        {"PRORETA_STATUSPAGE_TLS_ASK_ADDR": ":8080", "PRORETA_STATUSPAGE_TLS_ASK_TOKEN": good},
+	} {
+		if _, err := LoadStatuspage(env(with(kv))); err == nil {
+			t.Errorf("%s: want an error", name)
+		} else if strings.Contains(err.Error(), good) {
+			t.Errorf("%s: the error echoes the token: %v", name, err)
+		}
+	}
+}
+
 func TestLoadJobsDomainChecks(t *testing.T) {
 	load := func(extra map[string]string) (Jobs, error) {
 		e := apiEnv(t)
@@ -740,5 +785,21 @@ func TestStatusPageDomainRules(t *testing.T) {
 	e["PRORETA_STATUSPAGE_CNAME_TARGET"] = "Not A Host"
 	if _, err = LoadAPI(env(e)); err == nil || !strings.Contains(err.Error(), "PRORETA_STATUSPAGE_CNAME_TARGET") {
 		t.Fatalf("bad target accepted: %v", err)
+	}
+}
+
+func TestLoadStatuspageForbiddenSuffixes(t *testing.T) {
+	e := map[string]string{
+		"PRORETA_DATABASE_URL":          "postgres://proreta_statuspage:pw@db:5432/proreta?sslmode=require",
+		"PRORETA_PUBLIC_URL":            "https://proreta.klr-ops.net",
+		"PRORETA_STATUSPAGE_COOKIE_KEY": base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")),
+	}
+	cfg, err := LoadStatuspage(env(e))
+	if err != nil || strings.Join(cfg.ForbiddenSuffixes, ",") != "klr-ops.net" {
+		t.Fatalf("default: %v %v", cfg.ForbiddenSuffixes, err)
+	}
+	e["PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES"] = "corp.example.com"
+	if cfg, err = LoadStatuspage(env(e)); err != nil || strings.Join(cfg.ForbiddenSuffixes, ",") != "corp.example.com" {
+		t.Fatalf("explicit: %v %v", cfg.ForbiddenSuffixes, err)
 	}
 }

@@ -169,6 +169,10 @@ var definerAllowList = map[string][]string{
 	"status_page_domain_held_by_other": {"proreta_api"},
 	"status_page_domain_takeover":      {"proreta_api"},
 	"status_page_domain_counts":        {"proreta_worker"},
+	// Operator interface: the admin list and abuse switch, and the export of proretactl.
+	"admin_status_page_domains_list":        {"proreta_api"},
+	"admin_status_page_domain_set_disabled": {"proreta_api"},
+	"status_page_domains_export":            {"proreta_api"},
 	// OAuth login: a Google sign-in finds the organization that claimed its
 	// Workspace domain before the tenant is known.
 	"auth_domain_lookup": {"proreta_api"},

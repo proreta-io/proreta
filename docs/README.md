@@ -25,6 +25,7 @@ Operator and contributor documentation for Proreta.
 | [Webhook alert channels](runbooks/alerts-webhook.md) | What a webhook channel sends, message templates and placeholders, JSON escaping, SSRF limits, retries |
 | [Specula executors](runbooks/specula.md) | Checking services inside your own network: registering, running the executor, sharing with projects, revoking |
 | [Public status page](runbooks/status-page.md) | Enabling the renderer, caching, protected pages, abuse |
+| [Custom status page domains](runbooks/custom-domains.md) | Operator interface (incomplete until the chart package): the TLS permission endpoint, `proretactl status-domains list`, the admin switch |
 | [Heartbeats with Alertmanager](runbooks/heartbeat-alertmanager.md) | Watchdog heartbeats for Prometheus Alertmanager |
 | [Observability](runbooks/observability.md) | Metrics, logs and suggested alert rules |
 

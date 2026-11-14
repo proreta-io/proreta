@@ -35,6 +35,12 @@ import (
 // newAdminServer wires the admin panel next to registration, monitors and heartbeats.
 func newAdminServer(t *testing.T, env *pgtest.Env, logs *lockedBuffer) *client {
 	t.Helper()
+	return newAdminServerWith(t, env, logs, func(*api.Config) {})
+}
+
+// newAdminServerWith is newAdminServer with a change to the api configuration.
+func newAdminServerWith(t *testing.T, env *pgtest.Env, logs *lockedBuffer, mod func(*api.Config)) *client {
+	t.Helper()
 	ctx := context.Background()
 	pool := env.Pool(t, env.APIURL, 8)
 	log := logging.New(logs, slog.LevelDebug)
@@ -64,7 +70,9 @@ func newAdminServer(t *testing.T, env *pgtest.Env, logs *lockedBuffer) *client {
 		t.Fatal(err)
 	}
 	sched := scheduler.New()
-	h, err := api.NewHandler(api.Config{Version: "test", Commit: "test", CookieSecure: true, TrustedProxyHops: 1, RegistrationEnabled: true, PublicURL: heartbeatPublicURL},
+	cfg := api.Config{Version: "test", Commit: "test", CookieSecure: true, TrustedProxyHops: 1, RegistrationEnabled: true, PublicURL: heartbeatPublicURL}
+	mod(&cfg)
+	h, err := api.NewHandler(cfg,
 		api.Deps{Auth: svc, Monitors: monitors.NewService(pool, sched, incidents.NewService(sched)), Queries: queries.New(pool, nil),
 			Plans: plansSvc, Projects: projects.NewService(pool), Specula: speculaSvc, Channels: channelsSvc, StatusPages: pagesSvc, Admin: adminSvc, Registration: registration, Logger: log, Pings: api.NewPingMetrics(prometheus.NewRegistry())})
 	if err != nil {
