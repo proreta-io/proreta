@@ -56,6 +56,30 @@ Proreta for several independent organizations.
 NOTE: config.trustedProxyHops is 0. Behind a Gateway set it to 1, or every client shares one
 rate-limit bucket (the peer address is the Gateway's).
 {{- end }}
+{{- if include "proreta.statusDomains.enabled" . }}
+{{- $cd := .Values.statuspage.customDomains }}
+
+Status pages on customer domains are ON (CNAME target {{ $cd.cnameTarget }}). Terminate TLS for the customer hosts yourself and forward the Host header to {{ include "proreta.componentName" (dict "ctx" . "component" "statuspage") }}.
+{{- if not $cd.abuseUrl }}
+
+WARNING: statuspage.customDomains.abuseUrl is empty: pages on customer domains show no "Report abuse"
+link. Set an https URL or a mailto: address you read.
+{{- end }}
+{{- if eq (int .Values.config.trustedProxyHops) 0 }}
+
+WARNING: config.trustedProxyHops is 0 with customer domains on. Behind your TLS proxy or Gateway set
+it to the number of proxies in front of the statuspage Service (1 for one), or every visitor of every
+customer host shares one rate-limit bucket.
+{{- end }}
+{{- if $cd.tlsAsk.enabled }}
+{{- if not .Values.networkPolicy.enabled }}
+
+WARNING: the TLS ask endpoint listens on port {{ $cd.tlsAsk.port }} of the statuspage pods and networkPolicy.enabled is
+false: any pod of the cluster can ask it, with only the token in the way. Enable networkPolicy and
+set statuspage.customDomains.tlsAsk.proxy, or restrict the port yourself.
+{{- end }}
+{{- end }}
+{{- end }}
 
 Upgrades: back up the database first; migrations run automatically before the new pods start, and
 an image older than the database schema refuses to start. See https://github.com/proreta-io/proreta/blob/main/docs/install.md

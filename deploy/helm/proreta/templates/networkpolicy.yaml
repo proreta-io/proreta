@@ -38,4 +38,36 @@ spec:
               kubernetes.io/metadata.name: {{ .Values.networkPolicy.monitoringNamespace }}
       ports:
         - {protocol: TCP, port: {{ .Values.config.adminPort }}}
+{{- if and .Values.statuspage.enabled (include "proreta.statusDomains.enabled" .) .Values.statuspage.customDomains.tlsAsk.enabled }}
+{{- $ask := .Values.statuspage.customDomains.tlsAsk }}
+---
+# The TLS ask port of the statuspage pods: only the proxy below may reach it. Policies add up, so
+# every other source stays denied by the policy above, which does not list this port.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "proreta.fullname" . }}-tls-ask
+  labels:
+    {{- include "proreta.labels" (dict "ctx" . "component" "statuspage") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "proreta.selectorLabels" (dict "ctx" . "component" "statuspage") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - {{- with $ask.proxy.namespace }}
+          namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+          {{- end }}
+          {{- with $ask.proxy.podSelector }}
+          podSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+          {{- end }}
+      ports:
+        - {protocol: TCP, port: {{ $ask.port }}}
+{{- end }}
 {{- end }}
