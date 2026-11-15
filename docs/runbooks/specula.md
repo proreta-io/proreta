@@ -1,6 +1,6 @@
 # Specula: checking services inside your network
 
-Proreta checks public HTTPS addresses from its own worker. Services that have no public address (inside a Kubernetes cluster, a VPC or an office network) need an executor on the inside. That executor is a **Specula**: a small program that you run in your network. It only makes outbound HTTPS calls to Proreta, claims the checks that are due, runs them against your services and reports the results. Nothing connects in.
+Proreta checks public HTTPS addresses from its own worker. Services that have no public address (inside a Kubernetes cluster, a VPC or an office network) need an executor on the inside. That executor is a **Specula**: a small program that you run in your network. It only makes outbound HTTPS calls to Proreta, fetches the schedule of its checks, runs them against your services on its own clock and reports the results. Nothing connects in.
 
 Everything else stays in Proreta: the schedule, incidents, notifications and the status page work the same for a monitor that runs at a Specula.
 
@@ -31,14 +31,75 @@ helm upgrade --install specula oci://ghcr.io/proreta-io/charts/proreta-specula -
 | `PRORETA_URL` | The address of Proreta, for example `https://proreta.example.com` (no trailing slash). |
 | `PRORETA_SPECULA_TOKEN` | The token from the registration. |
 
-Optional: `PRORETA_SPECULA_CONCURRENCY` (checks in flight, default 20), `PRORETA_SPECULA_POLL_INTERVAL` (how often it asks for work, default 5s), `PRORETA_ADMIN_ADDR` (metrics, default `:9090`), `PRORETA_LOG_LEVEL`.
+Optional: `PRORETA_SPECULA_STATE_DIR` (a writable directory for the schedule and the buffer; unset means memory only), `PRORETA_SPECULA_CONCURRENCY` (checks in flight, default 20), `PRORETA_SPECULA_POLL_INTERVAL` (how often it asks for work, default 5s), `PRORETA_ADMIN_ADDR` (metrics, default `:9090`), `PRORETA_LOG_LEVEL`.
 
-It has no database and keeps nothing on disk; run two replicas with the same token if you want it to survive a restart without a gap (a check is leased to one of them at a time).
+It has no database. It keeps a small state directory (`PRORETA_SPECULA_STATE_DIR`, see [The buffer](#the-buffer)); the chart provides one. Run one executor per Specula: a second one with the same token runs every check twice.
 
 The executor stops with an error when Proreta rejects its token: the token is wrong or the Specula was revoked.
 
 ## Enable the gateway
 Operators: the gateway is a separate Deployment of the Proreta chart, off by default. Turn it on with `speculagw.enabled: true`. It is routed at `/specula/v1` on the same host as the app (the app's own Specula page is `/specula`), uses the worker's database role and the request keys (`secrets.request`) to hand decrypted monitor requests to an executor, and makes no outbound calls. Check that executors can reach `config.publicUrl` over HTTPS from their networks. See the [chart README](../../deploy/helm/proreta/README.md).
+
+## How the schedule works
+An executor of the current version does not ask for each check. It fetches the **schedule** of its Specula once (`GET /specula/v1/schedule`) and runs every check on its own clock:
+
+- For each monitor the schedule holds the check definition, the interval and an **anchor** time that Proreta assigns. The check runs at the anchor plus a whole number of intervals, so a monitor is checked at the same seconds of every minute (or other interval) no matter how many times the executor restarts.
+- The executor refreshes the schedule every few minutes and when Proreta tells it that something changed (a version number in every answer). A pause, resume, edit, move or delete of a monitor reaches a connected executor within about a minute. An executor that cannot be reached picks the change up when it reconnects.
+- The schedule is valid for a limited time (24 hours by default). When it runs out the executor **stops starting checks** and keeps trying to refresh; this bounds what a lost or decommissioned executor can do to your services.
+- Each result is reported with the **slot** it belongs to (the scheduled time, not the time it arrived), and Proreta stores it under that time. Proreta accepts a result only for a slot that the schedule really had, for a monitor that was active then, at most 24 hours old and not in the future. A result sent twice is stored once; a result for a monitor that was paused, edited or moved in the meantime is ignored.
+- Because the executor does not lease checks, a monitor at a Specula no longer has a "next run" in Proreta; its cadence comes from the schedule only.
+
+## When the link to Proreta drops
+The checks keep running. Results that cannot be delivered go into the buffer, in order, and are sent when the connection is back, oldest first, at a limited rate (a backlog of one hour for a thousand monitors takes a couple of minutes). A failed check is sent as soon as there is a connection; a successful one may wait a few seconds so that results travel in batches.
+
+What you see:
+
+- While Proreta hears nothing from the Specula, its status becomes **Offline** and, after 3 minutes, its monitors show **unknown** and the *Specula offline* incident opens, as described under [Status](#status). The checks are being made; the results are simply not here yet.
+- When the link returns, the buffered results are stored with their original times. The history of the outage fills in, the *unknown* is replaced by the real states, and incidents and rollups are corrected.
+- An incident that began and ended during the outage is created with its real start and end. If the service was already healthy again by the time Proreta hears about a failure, you get one late "recovered" message and no "down" message (the late notification rules are still being finished: see the notes for the release you run).
+- A **gap** means expected slots with no stored result. The buffer closes gaps as long as the outage is shorter than the schedule's validity and the buffer limits (24 hours and 256 MiB by default), the executor keeps running, and its state directory survives. Beyond that the missing part stays missing: a day or an hour without results is shown as **no data**, never as downtime, and uptime is computed over the results that exist.
+- A failing check is not a gap: it is a result. If your network is gone and the checks fail, those failures are recorded and reported when possible.
+- A restart of the executor loses the few seconds in which it was down. Checks are not run for the past.
+
+This protects against a lost link between the executor and Proreta, and against an outage of Proreta's gateway or database. It does not help when Proreta's own cloud location is down (nothing runs there to be replayed), or when the executor itself is down and the state directory is lost.
+
+## The buffer
+The buffer and the cached schedule live in the state directory as plain files (a few MiB per segment file, checked for corruption, written with the owner-only permission `0600`). It is bounded: when it reaches its size or age limit (256 MiB or 24 hours by default) the oldest results are dropped and counted, never the newest. A result takes roughly 150 bytes, which gives this guide:
+
+| Monitors at a 60 s interval | Results per day | Disk per day | Fits 256 MiB for a full day |
+|---|---|---|---|
+| 100 | 144 000 | about 22 MB | yes |
+| 1 000 | 1 440 000 | about 220 MB | just |
+| 2 000 | 2 880 000 | about 440 MB | no, about 14 hours |
+
+Shorter intervals count proportionally. These numbers are estimates, not guarantees.
+
+In the chart the state directory is an `emptyDir` (`state.sizeLimit`, 512Mi). It survives a restart of the container but **not the replacement of the pod** (an upgrade, an eviction or a node drain). When the pod is replaced while the link is up, the executor sends what it holds before it stops. When it is replaced while the link is down, the buffer and the cached schedule are lost, and the executor checks nothing until it reaches Proreta again. A volume that outlives the pod is not part of the chart yet.
+
+The cached schedule contains the decrypted headers and bodies of your monitors (tokens may be among them). Treat the state directory like the executor's own memory: do not mount it from shared storage and do not back it up.
+
+## Degraded state
+If the state directory is unusable (full, read-only, removed, or not configured) the executor does not stop. It keeps the schedule and a small number of recent results in memory and reports itself as **degraded**. In that mode:
+
+- checks keep running while the executor is up and the schedule is valid;
+- a link outage is bridged only for as long as the memory holds (about two thousand results: roughly 20 minutes for a hundred monitors at 60 s, 2 minutes for a thousand), and a restart during an outage loses the schedule, so no checks run until Proreta can be reached;
+- nothing about your monitors is written to disk.
+
+You can choose this mode on purpose with `state.enabled: false` in the chart if you do not want monitor settings on disk. Otherwise treat a degraded executor as a fault to fix (check the logs for the reason and the disk space of the node).
+
+## Upgrade and downgrade
+**Upgrade.** Upgrade the executor chart or image. No setting is needed in Proreta. When it starts, the executor tells Proreta what it supports, fetches its schedule and takes over from the next slot. From then on Proreta hands that Specula no more checks to claim, so no check runs twice. A check that was already claimed by the old executor finishes within 30 seconds. The gateway must be upgraded first or at the same time: a new executor that finds an older gateway (no schedule endpoint) stays in the previous mode, in which it claims one check at a time as before.
+
+**Downgrade.** Install the previous chart or image. The old executor does not announce the schedule capability, so Proreta serves it checks to claim again from its first call. There is nothing to clean up in Proreta, and results the new executor had not yet delivered are lost with its state directory. An executor of the previous version also does not run TCP monitors, and Proreta does not hand it any; they show *unknown* until you upgrade again.
+
+The chart now runs a single pod and replaces it only after the old one has stopped. If you installed an earlier version with two replicas, the upgrade reduces it to one.
+
+## Behind a gateway or proxy
+Operators, for the [Specula gateway](#enable-the-gateway) on the Proreta side:
+
+- **Rate limits.** The gateway limits how often one token may call it (reports, schedule and the periodic hello). A call over the limit gets **429 Too Many Requests** with a `Retry-After` header (seconds), and nothing is stored. The executor waits at least that long, adds a random delay, and sends the same batch again; the same applies to `503` when the gateway is busy. Proxies and load balancers in front of the gateway must pass the status and the header through unchanged and must not retry on their own.
+- **Client address.** Failed token checks are limited per client address. Set `config.trustedProxyHops` (`PRORETA_TRUSTED_PROXY_HOPS`) to the number of proxies between the executors and the gateway. The chart default is `1`, which is right for the Gateway of `httpRoute`. With `0` behind a proxy every executor appears to come from the proxy's address, so a few wrong tokens can lock out all of them; with a number larger than the real one a client can choose its own address by sending `X-Forwarded-For`. Use `0` only when nothing sits in front of the gateway.
+- **Timeouts.** A batch of results is a normal POST of up to 100 results; proxy timeouts of a few seconds are enough. Do not limit the request rate of `/specula/v1` below what the limits above allow, or a replay after an outage will be slowed down.
 
 ## Use it in a monitor
 When a project may use at least one Specula, the monitor form has a **Run from** field: *Proreta cloud* or one of them.
@@ -53,7 +114,7 @@ When a project may use at least one Specula, the monitor form has a **Run from**
 |---|---|
 | Waiting | Registered, never connected. |
 | Online | Heard from in the last 90 seconds (it reports every minute). |
-| Offline | Connected before, silent for longer. Its monitors are not being checked. After 3 minutes without a call they show **unknown**, not *down*, so a lost link does not look like an outage of your services. They return to up or down with the first check after it reconnects. At the same moment an **incident** with the reason `agent_offline` opens (it lists the monitors that run there, and ends when the Specula is heard again), and channels that receive the event *Specula offline* are told. A Specula that never connected, or is revoked, opens none. |
+| Offline | Connected before, silent for longer. Proreta has no news of its monitors; an executor of the current version keeps checking and buffers the results ([below](#when-the-link-to-proreta-drops)), an older one does not. After 3 minutes without a call they show **unknown**, not *down*, so a lost link does not look like an outage of your services. They return to up or down with the first check after it reconnects. At the same moment an **incident** with the reason `agent_offline` opens (it lists the monitors that run there, and ends when the Specula is heard again), and channels that receive the event *Specula offline* are told. A Specula that never connected, or is revoked, opens none. |
 | Revoked | The token no longer works. Its monitors show *unknown* at once. |
 
 ## Change who can use it, rename, revoke
@@ -73,5 +134,6 @@ Under **Settings → Notification channels** a Slack or webhook channel can subs
 ## Limits
 - Going offline opens an incident and notifies; revoking does not (it is deliberate): the incident of a revoked Specula ends and no *back online* message follows. The silence threshold is fixed at 3 minutes and the check runs every minute, so the message comes 3 to 4 minutes after the last call. The incident is not reminded while it stays open.
 - HTTP, HTTPS and TCP checks only.
+- Proreta shows no coverage percentage yet: a partly covered day is computed over the results that exist.
 - The plan limits how many Specula an organization may have (`max_agents`: `free` 1, `internal` 20, `community` unlimited). Revoked ones do not count; at the limit, registering another fails with "plan limit reached" until you revoke one. The operator can override it per organization in `tenants.limits`.
 - A token has no expiry; rotate by registering a new Specula and revoking the old one.
