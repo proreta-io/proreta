@@ -1,10 +1,10 @@
 name: ci
 
-# Full CI runs on pull requests to main (and by hand). It does not run again on push to main: the
-# merge only starts `release`, which builds images. The single required status check is `ci-ok`.
+# Full CI runs on every pull request, whatever its base branch, so a stacked series is checked before
+# it is retargeted to main (and by hand). It does not run again on push to main: the merge only starts
+# `release`, which builds images. The single required status check is `ci-ok`.
 on:
   pull_request:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:
