@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 
+	"github.com/proreta-io/proreta/backend/internal/platform/pagecursor"
+
 	"github.com/google/uuid"
 
 	"github.com/proreta-io/proreta/backend/internal/auth"
@@ -44,7 +46,9 @@ func (s *Service) ListMembers(ctx context.Context, actor Actor, orgID uuid.UUID)
 	if _, err := s.memberActor(ctx, actor, orgID, false); err != nil {
 		return nil, err
 	}
-	return s.auth.ListMembers(ctx, orgID)
+	// The admin list is not paged yet (it is a platform admin's own, small view).
+	list, _, err := s.auth.ListMembers(ctx, orgID, pagecursor.Page{Limit: pagecursor.All})
+	return list, err
 }
 
 // SetMember adds an existing account to the organization or changes its role.

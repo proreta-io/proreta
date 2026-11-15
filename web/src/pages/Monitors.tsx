@@ -1,10 +1,10 @@
 import { usePermissions } from "../lib/permissions";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ApiError, errorMessage, errorMeta } from "../api/client";
 import {
-  listMonitors,
+  listMonitorsPage,
   POLL_MS,
   queryKeys,
   type MonitorList,
@@ -40,6 +40,7 @@ import {
   statusText,
   summaryLine,
   summaryParts,
+  totalMonitors,
 } from "../lib/monitors";
 import { atHeartbeatLimit, atMonitorLimit, countOf, useUsage } from "../lib/usage";
 import { useNow } from "../lib/useNow";
@@ -53,11 +54,26 @@ export default function Monitors() {
   const filter = useRef<HTMLInputElement>(null);
   const { projectId, projects, setChoice } = useProjectScope();
   const queryClient = useQueryClient();
-  const monitors = useQuery({
-    queryKey: queryKeys.monitorList(projectId),
-    queryFn: () => listMonitors(projectId),
+  const monitors = useInfiniteQuery({
+    queryKey: queryKeys.monitorPages(projectId),
+    queryFn: ({ pageParam }) => listMonitorsPage(projectId, pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+    // The summary counts every monitor, so the first page has it; the items are the loaded pages.
+    select: (data): MonitorList => ({
+      summary: data.pages[0]!.summary,
+      items: data.pages.flatMap((p) => p.items),
+      nextCursor: data.pages.at(-1)!.nextCursor,
+    }),
     refetchInterval: POLL_MS,
   });
+  // The filter works on loaded rows: while it is set, the rest of the list loads, so it never
+  // misses a monitor that is on a later page.
+  const { hasNextPage, isFetchingNextPage, isError, fetchNextPage } = monitors;
+  const filtering = query.trim() !== "";
+  useEffect(() => {
+    if (filtering && hasNextPage && !isFetchingNextPage && !isError) void fetchNextPage();
+  }, [filtering, hasNextPage, isFetchingNextPage, isError, fetchNextPage]);
   const projectName = projects.data?.items.find((p) => p.id === projectId)?.name;
   // The remembered project was deleted or the user lost access to it (404): back to all projects,
   // with a fresh project list.
@@ -177,6 +193,11 @@ export default function Monitors() {
             filter.current?.focus();
           }}
           focusFilter={() => filter.current?.focus()}
+          more={
+            list.nextCursor
+              ? { loading: monitors.isFetchingNextPage, load: () => void monitors.fetchNextPage() }
+              : null
+          }
           sweepKey={
             monitors.dataUpdatedAt > firstLoad && firstLoad > 0 ? monitors.dataUpdatedAt : 0
           }
@@ -220,6 +241,7 @@ function MonitorTable({
   now,
   clearQuery,
   focusFilter,
+  more,
   sweepKey,
   updated,
 }: {
@@ -228,6 +250,7 @@ function MonitorTable({
   now: number;
   clearQuery: () => void;
   focusFilter: () => void;
+  more: { loading: boolean; load: () => void } | null;
   sweepKey: number;
   updated: string;
 }) {
@@ -329,6 +352,17 @@ function MonitorTable({
               ))}
             </tbody>
           </Table>
+        </div>
+      )}
+
+      {more && (
+        <div className="flex flex-wrap items-center gap-3 pt-3">
+          <Button variant="secondary" size="small" disabled={more.loading} onClick={more.load}>
+            {more.loading ? "Loading…" : "Load more"}
+          </Button>
+          <span className="text-caption text-muted-foreground">
+            Showing {list.items.length} of {totalMonitors(list)} monitors
+          </span>
         </div>
       )}
 

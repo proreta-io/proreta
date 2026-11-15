@@ -808,9 +808,16 @@ paths:
         belongs to; every project for owners and maintainers), with the current status and summary
         counts. `projectId` limits the list to one project (404 when the caller does not see it).
         Answered from the state tables and rollups, never by scanning raw results.
+
+        The list is paged, oldest monitor first: at most `limit` items (default 100, at most 200)
+        and `nextCursor`, the `cursor` of the next page, null on the last page. The `summary`
+        counts every monitor the list covers, not only the page. A `cursor` that this API did not
+        issue is 400.
       tags: [monitors]
       parameters:
         - $ref: "#/components/parameters/ProjectFilter"
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageCursor"
       responses:
         "200":
           description: The monitors of the organization
@@ -2005,7 +2012,14 @@ paths:
         viewers. A person without an organization role (a member of projects only) gets only the
         people they share a project with: everyone who has an organization role and everyone with a
         role in one of their projects, never the rest of the directory, and never logins.
+
+        The list is paged: at most `limit` items (default 100, at most 200) and `nextCursor`, the
+        `cursor` of the next page, null on the last page. A `cursor` that this API did not issue
+        is 400.
       tags: [members]
+      parameters:
+        - $ref: "#/components/parameters/PageLimit"
+        - $ref: "#/components/parameters/PageCursor"
       responses:
         "200":
           description: The members
@@ -2013,6 +2027,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MemberList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
         default:
@@ -4997,6 +5013,25 @@ components:
       schema:
         type: string
         format: uuid
+    PageLimit:
+      name: limit
+      in: query
+      required: false
+      description: Page size of a cursor-paged list
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 100
+    PageCursor:
+      name: cursor
+      in: query
+      required: false
+      description: The `nextCursor` of the previous page; opaque, valid only for the same list
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
     Limit:
       name: limit
       in: query
@@ -5767,7 +5802,7 @@ components:
       type: object
       additionalProperties: false
       required: [up, down, paused, unknown]
-      description: Counts over all non-deleted monitors. A paused monitor counts only as paused.
+      description: Counts over every monitor the list covers (the caller's projects, or the one project asked for), not only the page. A paused monitor counts only as paused.
       properties:
         up:
           type: integer
@@ -5780,7 +5815,7 @@ components:
     MonitorList:
       type: object
       additionalProperties: false
-      required: [summary, items]
+      required: [summary, items, nextCursor]
       properties:
         summary:
           $ref: "#/components/schemas/MonitorSummary"
@@ -5788,6 +5823,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/MonitorListItem"
+        nextCursor:
+          $ref: "#/components/schemas/NextCursor"
     Uptime:
       type: object
       additionalProperties: false
@@ -7086,15 +7123,21 @@ components:
         isSystemAdmin:
           type: boolean
           description: The system admin; its role cannot be changed and it cannot be removed
+    NextCursor:
+      type: string
+      nullable: true
+      description: The `cursor` that returns the next page; null on the last page
     MemberList:
       type: object
       additionalProperties: false
-      required: [items]
+      required: [items, nextCursor]
       properties:
         items:
           type: array
           items:
             $ref: "#/components/schemas/Member"
+        nextCursor:
+          $ref: "#/components/schemas/NextCursor"
     MemberUpdate:
       type: object
       additionalProperties: false

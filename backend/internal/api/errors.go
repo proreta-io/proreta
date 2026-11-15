@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/proreta-io/proreta/backend/internal/platform/pagecursor"
+
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/getkin/kin-openapi/routers"
@@ -371,4 +373,29 @@ func slackFailureDetail(e *notify.SendError) string {
 		return "Slack did not answer in time."
 	}
 	return "Slack could not be reached (" + e.Kind + ")."
+}
+
+// pageOf reads the limit and cursor parameters of a cursor-paged list; a cursor this API did not
+// issue is 400. The limit's range is checked by the request validator.
+func pageOf(limit *int, cursor *string) (pagecursor.Page, error) {
+	var page pagecursor.Page
+	if limit != nil {
+		page.Limit = *limit
+	}
+	if cursor != nil {
+		pos, err := pagecursor.Decode(*cursor)
+		if err != nil {
+			return page, &badRequestError{detail: "cursor: not a cursor of this list"}
+		}
+		page.After = &pos
+	}
+	return page, nil
+}
+
+// nextCursor is the nextCursor property: null on the last page.
+func nextCursor(c string) *string {
+	if c == "" {
+		return nil
+	}
+	return &c
 }

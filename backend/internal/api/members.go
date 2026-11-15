@@ -81,19 +81,24 @@ func (s *server) memberActor(ctx context.Context) (auth.Actor, error) {
 	return auth.Actor{TenantID: p.TenantID, UserID: p.UserID, IP: httpx.ClientIP(httpRequest(ctx), s.cfg.TrustedProxyHops)}, nil
 }
 
-func (s *server) ListMembers(ctx context.Context, _ gen.ListMembersRequestObject) (gen.ListMembersResponseObject, error) {
+func (s *server) ListMembers(ctx context.Context, req gen.ListMembersRequestObject) (gen.ListMembersResponseObject, error) {
 	p, err := s.principal(ctx)
 	if err != nil {
 		return nil, err
 	}
+	page, err := pageOf(req.Params.Limit, req.Params.Cursor)
+	if err != nil {
+		return nil, err
+	}
 	var list []auth.Member
+	var next string
 	if authz.Has(authz.Role(p.Role), "organization.members.read") {
-		list, err = s.auth.ListMembers(ctx, p.TenantID)
+		list, next, err = s.auth.ListMembers(ctx, p.TenantID, page)
 	} else {
 		// Only through projects: the directory is limited to the people they share a project with.
 		var scope authz.Scope
 		if scope, err = s.scope(ctx); err == nil {
-			list, err = s.auth.ListMembersInProjects(ctx, p.TenantID, scope.IDs)
+			list, next, err = s.auth.ListMembersInProjects(ctx, p.TenantID, scope.IDs, page)
 		}
 	}
 	if err != nil {
@@ -101,7 +106,7 @@ func (s *server) ListMembers(ctx context.Context, _ gen.ListMembersRequestObject
 	}
 	// Logins are email addresses: owners and maintainers only.
 	showLogins := authz.Role(p.Role).AtLeast(authz.Maintainer)
-	out := gen.ListMembers200JSONResponse{Items: make([]gen.Member, len(list))}
+	out := gen.ListMembers200JSONResponse{Items: make([]gen.Member, len(list)), NextCursor: nextCursor(next)}
 	for i, m := range list {
 		out.Items[i] = toMember(m, showLogins)
 	}

@@ -79,6 +79,8 @@ export const queryKeys = {
   me: ["me"] as const,
   monitors: ["monitors"] as const,
   monitorList: (projectId: string | undefined) => ["monitors", "list", projectId ?? "all"] as const,
+  monitorPages: (projectId: string | undefined) =>
+    ["monitors", "list", projectId ?? "all", "pages"] as const,
   monitor: (id: string) => ["monitors", id] as const,
   stats: (id: string, range: StatsRange) => ["monitors", id, "stats", range] as const,
   checks: (id: string) => ["monitors", id, "checks"] as const,
@@ -199,9 +201,34 @@ export async function logout(): Promise<void> {
   }
 }
 
-/** The monitors the user sees; with a project id only that project's. */
+/**
+ * Follows nextCursor to the end, for the callers that need the whole list (a picker, a lookup).
+ * shortcut: no cap, a tenant with thousands of rows makes several requests; page the caller's UI
+ * (as the monitors page does) when that matters.
+ */
+async function fetchAll<I, P extends { items: I[]; nextCursor: string | null }>(
+  page: (cursor?: string) => Promise<P>,
+): Promise<P> {
+  let res = await page();
+  const items = [...res.items];
+  while (res.nextCursor) {
+    res = await page(res.nextCursor);
+    items.push(...res.items);
+  }
+  return { ...res, items, nextCursor: null };
+}
+
+/** One page of the monitors the user sees; with a project id only that project's. */
+export const listMonitorsPage = (projectId?: string, cursor?: string) =>
+  unwrap(
+    client.GET("/api/v1/monitors", {
+      params: { query: { ...(projectId ? { projectId } : {}), ...(cursor ? { cursor } : {}) } },
+    }),
+  );
+
+/** Every monitor the user sees (all pages); with a project id only that project's. */
 export const listMonitors = (projectId?: string) =>
-  unwrap(client.GET("/api/v1/monitors", { params: { query: projectId ? { projectId } : {} } }));
+  fetchAll((cursor) => listMonitorsPage(projectId, cursor));
 
 const monitorPath = (monitorId: string) => ({ params: { path: { monitorId } } });
 
@@ -510,7 +537,11 @@ export async function switchOrganization(organizationId: string): Promise<Sessio
   return session;
 }
 
-export const listMembers = () => unwrap(client.GET("/api/v1/members"));
+/** Every member the user sees (all pages). */
+export const listMembers = () =>
+  fetchAll((cursor) =>
+    unwrap(client.GET("/api/v1/members", { params: { query: cursor ? { cursor } : {} } })),
+  );
 
 const memberPath = (userId: string) => ({ params: { path: { userId } } });
 

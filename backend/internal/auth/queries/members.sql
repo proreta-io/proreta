@@ -1,11 +1,14 @@
 -- Members and invitations. Every query runs in a tenant transaction.
 
 -- name: ListMembers :many
+-- Keyset page: rows after (after_at, after_id), at most max_rows (NULL: all).
 SELECT m.user_id, u.email, u.display_name, u.status, u.is_platform_admin, u.is_system_admin, coalesce(m.role, '')::text AS role, m.created_at
 FROM memberships AS m
 JOIN users AS u ON u.id = m.user_id
 WHERE m.tenant_id = @tenant_id
-ORDER BY m.created_at, m.user_id;
+  AND (sqlc.narg(after_at)::timestamptz IS NULL OR (m.created_at, m.user_id) > (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
+ORDER BY m.created_at, m.user_id
+LIMIT sqlc.narg(max_rows)::int;
 
 -- name: LockMember :one
 -- The membership a role change or removal acts on, locked until the end of the transaction.
@@ -42,7 +45,9 @@ WHERE m.tenant_id = @tenant_id
   AND (m.role IS NOT NULL
        OR EXISTS (SELECT 1 FROM project_members AS pm
                   WHERE pm.tenant_id = m.tenant_id AND pm.user_id = m.user_id AND pm.project_id = ANY(@project_ids::uuid[])))
-ORDER BY m.created_at, m.user_id;
+  AND (sqlc.narg(after_at)::timestamptz IS NULL OR (m.created_at, m.user_id) > (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
+ORDER BY m.created_at, m.user_id
+LIMIT sqlc.narg(max_rows)::int;
 
 -- name: InsertInvitation :exec
 INSERT INTO invitations (id, tenant_id, role, label, token_hash, created_by, created_at, expires_at, project_id)

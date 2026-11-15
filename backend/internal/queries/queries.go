@@ -19,6 +19,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/authz"
 	"github.com/proreta-io/proreta/backend/internal/platform/clock"
 	"github.com/proreta-io/proreta/backend/internal/platform/db"
+	"github.com/proreta-io/proreta/backend/internal/platform/pagecursor"
 )
 
 // ErrNotFound means no live monitor with that id exists in the tenant.
@@ -207,15 +208,32 @@ func scopeArgs(sc authz.Scope) []any {
 	return []any{sc.All, ids}
 }
 
-// ListMonitors returns the live monitors of the tenant in the scope's projects, oldest first,
-// with summary counts. Uptime comes from the hourly rollups plus the raw rows of the hours not
-// rolled up yet.
-func (s *Service) ListMonitors(ctx context.Context, tenantID uuid.UUID, sc authz.Scope) ([]Monitor, Summary, error) {
+// ListMonitors returns one page of the live monitors of the tenant in the scope's projects,
+// oldest first (created_at, id: a total order, so pages neither skip nor repeat a monitor), and
+// the cursor of the next page ("" on the last). The summary counts every monitor of the scope,
+// not the page. Uptime comes from the hourly rollups plus the raw rows of the hours not rolled up
+// yet, for the page only.
+func (s *Service) ListMonitors(ctx context.Context, tenantID uuid.UUID, sc authz.Scope, page pagecursor.Page) ([]Monitor, Summary, string, error) {
 	now := s.clock.Now()
 	var out []Monitor
 	var sum Summary
+	var next string
 	err := db.WithTenantTx(ctx, s.pool, tenantID, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, monitorColumns+scopeSQL(2)+` ORDER BY m.created_at, m.id`, append([]any{tenantID}, scopeArgs(sc)...)...)
+		args := append([]any{tenantID}, scopeArgs(sc)...)
+		if err := tx.QueryRow(ctx, summarySQL+scopeSQL(2), args...).Scan(&sum.Up, &sum.Down, &sum.Paused, &sum.Unknown); err != nil {
+			return fmt.Errorf("summary: %w", err)
+		}
+		q := monitorColumns + scopeSQL(2)
+		if page.After != nil {
+			args = append(args, page.After.At, page.After.ID)
+			q += ` AND (m.created_at, m.id) > ($4, $5)`
+		}
+		q += ` ORDER BY m.created_at, m.id`
+		if n := page.Size(); n > 0 {
+			args = append(args, n)
+			q += fmt.Sprintf(` LIMIT $%d`, len(args))
+		}
+		rows, err := tx.Query(ctx, q, args...)
 		if err != nil {
 			return err
 		}
@@ -223,6 +241,9 @@ func (s *Service) ListMonitors(ctx context.Context, tenantID uuid.UUID, sc authz
 		if err != nil {
 			return err
 		}
+		out, next = pagecursor.Trim(page, out, func(m Monitor) pagecursor.Position {
+			return pagecursor.Position{At: m.CreatedAt, ID: m.ID}
+		})
 		ids := make([]uuid.UUID, len(out))
 		for i, m := range out {
 			ids[i] = m.ID
@@ -233,27 +254,28 @@ func (s *Service) ListMonitors(ctx context.Context, tenantID uuid.UUID, sc authz
 		}
 		for i := range out {
 			out[i].Uptime24h = up[out[i].ID]
-			switch {
-			case out[i].Paused:
-				sum.Paused++
-			case out[i].Status == StatusUp:
-				sum.Up++
-			case out[i].Status == StatusDown:
-				sum.Down++
-			default:
-				sum.Unknown++
-			}
 		}
 		return nil
 	})
 	if err != nil {
-		return nil, Summary{}, fmt.Errorf("queries: list monitors: %w", err)
+		return nil, Summary{}, "", fmt.Errorf("queries: list monitors: %w", err)
 	}
 	if out == nil {
 		out = []Monitor{}
 	}
-	return out, sum, nil
+	return out, sum, next, nil
 }
+
+// summarySQL counts the live monitors of the scope by what the list shows: a paused monitor only
+// as paused, then up, down, and everything else as unknown. Shares its WHERE with monitorColumns.
+const summarySQL = `
+SELECT count(*) FILTER (WHERE NOT m.paused AND s.status = '` + StatusUp + `'),
+       count(*) FILTER (WHERE NOT m.paused AND s.status = '` + StatusDown + `'),
+       count(*) FILTER (WHERE m.paused),
+       count(*) FILTER (WHERE NOT m.paused AND s.status NOT IN ('` + StatusUp + `', '` + StatusDown + `'))
+FROM monitors AS m
+JOIN monitor_state AS s ON s.tenant_id = m.tenant_id AND s.monitor_id = m.id
+WHERE m.tenant_id = $1 AND m.deleted_at IS NULL`
 
 // Monitor returns one live monitor of the scope's projects with uptime over 24 h, 7 d and 30 d;
 // ErrNotFound for a monitor of another project.

@@ -140,6 +140,7 @@ describe("monitors list", () => {
         paused: true,
       }),
     ],
+    nextCursor: null,
   };
 
   it("shows the summary, statuses and filters by name or URL", async () => {
@@ -159,6 +160,47 @@ describe("monitors list", () => {
     await userEvent.clear(screen.getByLabelText("Filter by name or URL"));
     await userEvent.type(screen.getByLabelText("Filter by name or URL"), "zzz");
     expect(screen.getByText("No monitors match “zzz”.")).toBeInTheDocument();
+  });
+
+  describe("with more than one page", () => {
+    const summary = { up: 3, down: 0, paused: 0, unknown: 0 };
+    const page1 = [
+      listItem({ id: "a", name: "Alpha", http: httpOf({ url: "https://alpha.example.com/" }) }),
+      listItem({ id: "b", name: "Bravo", http: httpOf({ url: "https://bravo.example.com/" }) }),
+    ];
+    const page2 = [
+      listItem({ id: "c", name: "Charlie", http: httpOf({ url: "https://charlie.example.com/" }) }),
+    ];
+    // The summary counts all three monitors on both pages.
+    const pages = (request: Request) =>
+      new URL(request.url).searchParams.get("cursor") === "next"
+        ? json({ summary, items: page2, nextCursor: null })
+        : json({ summary, items: page1, nextCursor: "next" });
+
+    it("loads the next page on demand and counts every monitor", async () => {
+      const fetchMock = mockApi({ ...signedIn, "GET /api/v1/monitors": pages });
+      renderApp("/");
+      expect(await screen.findByText("3 monitors · 3 up · 0 down · 0 paused")).toBeInTheDocument();
+      expect(screen.getByText("Showing 2 of 3 monitors")).toBeInTheDocument();
+      expect(screen.queryByText("Charlie")).not.toBeInTheDocument();
+
+      await userEvent.click(screen.getByRole("button", { name: "Load more" }));
+      expect(await screen.findByText("Charlie")).toBeInTheDocument();
+      expect(screen.getByText("Alpha")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
+      expect(
+        fetchMock.mock.calls.filter(([r]) => new Request(r).url.includes("cursor=next")),
+      ).toHaveLength(1);
+    });
+
+    it("searches the monitors of the pages that are not loaded yet", async () => {
+      mockApi({ ...signedIn, "GET /api/v1/monitors": pages });
+      renderApp("/");
+      await userEvent.type(await screen.findByLabelText("Filter by name or URL"), "charlie");
+      // Charlie is on the second page, which the filter loads by itself.
+      expect(await screen.findByText("Charlie")).toBeInTheDocument();
+      expect(screen.queryByText("Alpha")).not.toBeInTheDocument();
+    });
   });
 
   it("puts the newest outage first and works from the keyboard", async () => {

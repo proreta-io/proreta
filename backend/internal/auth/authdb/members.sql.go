@@ -166,8 +166,17 @@ SELECT m.user_id, u.email, u.display_name, u.status, u.is_platform_admin, u.is_s
 FROM memberships AS m
 JOIN users AS u ON u.id = m.user_id
 WHERE m.tenant_id = $1
+  AND ($2::timestamptz IS NULL OR (m.created_at, m.user_id) > ($2::timestamptz, $3::uuid))
 ORDER BY m.created_at, m.user_id
+LIMIT $4::int
 `
+
+type ListMembersParams struct {
+	TenantID uuid.UUID
+	AfterAt  *time.Time
+	AfterID  *uuid.UUID
+	MaxRows  *int32
+}
 
 type ListMembersRow struct {
 	UserID          uuid.UUID
@@ -181,8 +190,14 @@ type ListMembersRow struct {
 }
 
 // Members and invitations. Every query runs in a tenant transaction.
-func (q *Queries) ListMembers(ctx context.Context, tenantID uuid.UUID) ([]ListMembersRow, error) {
-	rows, err := q.db.Query(ctx, listMembers, tenantID)
+// Keyset page: rows after (after_at, after_id), at most max_rows (NULL: all).
+func (q *Queries) ListMembers(ctx context.Context, arg ListMembersParams) ([]ListMembersRow, error) {
+	rows, err := q.db.Query(ctx, listMembers,
+		arg.TenantID,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.MaxRows,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -218,12 +233,17 @@ WHERE m.tenant_id = $1
   AND (m.role IS NOT NULL
        OR EXISTS (SELECT 1 FROM project_members AS pm
                   WHERE pm.tenant_id = m.tenant_id AND pm.user_id = m.user_id AND pm.project_id = ANY($2::uuid[])))
+  AND ($3::timestamptz IS NULL OR (m.created_at, m.user_id) > ($3::timestamptz, $4::uuid))
 ORDER BY m.created_at, m.user_id
+LIMIT $5::int
 `
 
 type ListMembersInProjectsParams struct {
 	TenantID   uuid.UUID
 	ProjectIds []uuid.UUID
+	AfterAt    *time.Time
+	AfterID    *uuid.UUID
+	MaxRows    *int32
 }
 
 type ListMembersInProjectsRow struct {
@@ -241,7 +261,13 @@ type ListMembersInProjectsRow struct {
 // project) and everyone with a direct role in one of the projects. Reads project_members, owned by
 // internal/projects, read-only.
 func (q *Queries) ListMembersInProjects(ctx context.Context, arg ListMembersInProjectsParams) ([]ListMembersInProjectsRow, error) {
-	rows, err := q.db.Query(ctx, listMembersInProjects, arg.TenantID, arg.ProjectIds)
+	rows, err := q.db.Query(ctx, listMembersInProjects,
+		arg.TenantID,
+		arg.ProjectIds,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.MaxRows,
+	)
 	if err != nil {
 		return nil, err
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/netip"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/auth/authdb"
 	"github.com/proreta-io/proreta/backend/internal/authz"
 	"github.com/proreta-io/proreta/backend/internal/platform/db"
+	"github.com/proreta-io/proreta/backend/internal/platform/pagecursor"
 	"github.com/proreta-io/proreta/backend/internal/platform/uuidv7"
 	"github.com/proreta-io/proreta/backend/internal/tenants"
 )
@@ -66,33 +68,45 @@ type Member struct {
 	Status string
 }
 
-// ListMembers returns the members of the organization, oldest first.
-func (s *Service) ListMembers(ctx context.Context, tenantID uuid.UUID) ([]Member, error) {
-	return s.listMembers(ctx, tenantID, nil)
+// ListMembers returns one page of the members of the organization, oldest first, and the cursor
+// of the next page ("" on the last).
+func (s *Service) ListMembers(ctx context.Context, tenantID uuid.UUID, page pagecursor.Page) ([]Member, string, error) {
+	return s.listMembers(ctx, tenantID, nil, page)
 }
 
 // ListMembersInProjects returns the people a person without an organization role may see: those
 // with an organization role (they are in every project) and those with a direct role in one of the
 // projects.
-func (s *Service) ListMembersInProjects(ctx context.Context, tenantID uuid.UUID, projectIDs []uuid.UUID) ([]Member, error) {
+func (s *Service) ListMembersInProjects(ctx context.Context, tenantID uuid.UUID, projectIDs []uuid.UUID, page pagecursor.Page) ([]Member, string, error) {
 	if projectIDs == nil {
 		projectIDs = []uuid.UUID{}
 	}
-	return s.listMembers(ctx, tenantID, projectIDs)
+	return s.listMembers(ctx, tenantID, projectIDs, page)
 }
 
-func (s *Service) listMembers(ctx context.Context, tenantID uuid.UUID, projectIDs []uuid.UUID) ([]Member, error) {
+func (s *Service) listMembers(ctx context.Context, tenantID uuid.UUID, projectIDs []uuid.UUID, page pagecursor.Page) ([]Member, string, error) {
 	var out []Member
+	var next string
 	err := db.WithTenantTx(ctx, s.pool, tenantID, func(tx pgx.Tx) error {
 		q := authdb.New(tx)
+		var afterAt *time.Time
+		var afterID *uuid.UUID
+		if a := page.After; a != nil {
+			afterAt, afterID = &a.At, &a.ID
+		}
+		var maxRows *int32
+		if n := page.Size(); n > 0 && n <= math.MaxInt32 {
+			v := int32(n)
+			maxRows = &v
+		}
 		var rows []authdb.ListMembersRow
 		if projectIDs == nil {
 			var err error
-			if rows, err = q.ListMembers(ctx, tenantID); err != nil {
+			if rows, err = q.ListMembers(ctx, authdb.ListMembersParams{TenantID: tenantID, AfterAt: afterAt, AfterID: afterID, MaxRows: maxRows}); err != nil {
 				return err
 			}
 		} else {
-			scoped, err := q.ListMembersInProjects(ctx, authdb.ListMembersInProjectsParams{TenantID: tenantID, ProjectIds: projectIDs})
+			scoped, err := q.ListMembersInProjects(ctx, authdb.ListMembersInProjectsParams{TenantID: tenantID, ProjectIds: projectIDs, AfterAt: afterAt, AfterID: afterID, MaxRows: maxRows})
 			if err != nil {
 				return err
 			}
@@ -105,12 +119,15 @@ func (s *Service) listMembers(ctx context.Context, tenantID uuid.UUID, projectID
 			out[i] = Member{UserID: r.UserID, Login: r.Email, DisplayName: r.DisplayName, Role: r.Role,
 				JoinedAt: r.CreatedAt, IsPlatformAdmin: r.IsPlatformAdmin, IsSystemAdmin: r.IsSystemAdmin, Status: r.Status}
 		}
+		out, next = pagecursor.Trim(page, out, func(m Member) pagecursor.Position {
+			return pagecursor.Position{At: m.JoinedAt, ID: m.UserID}
+		})
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("auth: list members: %w", err)
+		return nil, "", fmt.Errorf("auth: list members: %w", err)
 	}
-	return out, nil
+	return out, next, nil
 }
 
 // lockActorRole takes the tenant row lock, which serialises every role change, removal and

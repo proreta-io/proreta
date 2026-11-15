@@ -12,6 +12,7 @@ import (
 
 	"github.com/proreta-io/proreta/backend/internal/authz"
 	"github.com/proreta-io/proreta/backend/internal/platform/clock"
+	"github.com/proreta-io/proreta/backend/internal/platform/pagecursor"
 	"github.com/proreta-io/proreta/backend/internal/queries"
 	"github.com/proreta-io/proreta/backend/internal/testsupport/pgtest"
 )
@@ -158,7 +159,7 @@ func TestIntegrationListAndDetail(t *testing.T) {
 	f := newFixture(t)
 	f.seed()
 
-	list, sum, err := f.svc.ListMonitors(f.ctx, tenantA, everyProject)
+	list, sum, _, err := f.svc.ListMonitors(f.ctx, tenantA, everyProject, pagecursor.Page{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +210,7 @@ func TestIntegrationListAndDetail(t *testing.T) {
 func TestIntegrationTenantIsolationAndNotFound(t *testing.T) {
 	f := newFixture(t)
 	f.seed()
-	list, sum, err := f.svc.ListMonitors(f.ctx, tenantB, everyProject)
+	list, sum, _, err := f.svc.ListMonitors(f.ctx, tenantB, everyProject, pagecursor.Page{})
 	if err != nil || len(list) != 1 || list[0].ID != mOther || sum != (queries.Summary{Up: 1}) || !near(list[0].Uptime24h, 100) {
 		t.Fatalf("tenant B list: %+v %+v %v", list, sum, err)
 	}
@@ -357,4 +358,75 @@ func deref(p *float64) any {
 		return nil
 	}
 	return *p
+}
+
+func TestIntegrationListMonitorsPages(t *testing.T) {
+	f := newFixture(t)
+	f.seed()
+	// Five more monitors of tenant B created at the same instant (the id breaks the tie), one
+	// paused and one deleted: B then has 5 live monitors: mOther up, one paused, three unknown.
+	same := f.now.Add(-time.Hour).Truncate(time.Second)
+	want := []uuid.UUID{mOther}
+	for i := 0; i < 5; i++ {
+		id := uuid.MustParse("01920000-0000-7000-8000-0000000000d" + string(rune('1'+i)))
+		f.monitor(tenantB, id, same, i == 0, i == 4, "unknown")
+		if i != 4 {
+			want = append(want, id)
+		}
+	}
+	// mOther is the oldest (fixture time), the rest follow by id.
+	var got []uuid.UUID
+	var cursor string
+	var pages int
+	page := pagecursor.Page{Limit: 2}
+	for {
+		list, sum, next, err := f.svc.ListMonitors(f.ctx, tenantB, everyProject, page)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pages++
+		if sum != (queries.Summary{Up: 1, Paused: 1, Unknown: 3}) {
+			t.Fatalf("page %d summary %+v counts the page, not every monitor", pages, sum)
+		}
+		for _, m := range list {
+			got = append(got, m.ID)
+		}
+		if next == "" {
+			if pages != 3 || len(list) != 1 {
+				t.Fatalf("last page: %d pages, %d items", pages, len(list))
+			}
+			break
+		}
+		if len(list) != 2 {
+			t.Fatalf("page %d has %d items", pages, len(list))
+		}
+		cursor = next
+		pos, err := pagecursor.Decode(cursor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		page.After = &pos
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("order %v, want %v", got, want)
+		}
+	}
+	// Exactly one page of the size: no next cursor. Past the end: an empty page, summary intact.
+	list, _, next, err := f.svc.ListMonitors(f.ctx, tenantB, everyProject, pagecursor.Page{Limit: len(want)})
+	if err != nil || len(list) != len(want) || next != "" {
+		t.Fatalf("exact page: %d %q %v", len(list), next, err)
+	}
+	past := pagecursor.Position{At: same.Add(time.Hour), ID: uuid.New()}
+	list, sum, next, err := f.svc.ListMonitors(f.ctx, tenantB, everyProject, pagecursor.Page{After: &past})
+	if err != nil || list == nil || len(list) != 0 || next != "" || sum.Up != 1 {
+		t.Fatalf("empty page: %v %+v %q %v", list, sum, next, err)
+	}
+	all, _, _, err := f.svc.ListMonitors(f.ctx, tenantB, everyProject, pagecursor.Page{Limit: pagecursor.All})
+	if err != nil || len(all) != len(want) {
+		t.Fatalf("all: %d %v", len(all), err)
+	}
 }

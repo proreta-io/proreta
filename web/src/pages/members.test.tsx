@@ -174,6 +174,22 @@ describe("members page", () => {
     expect(await screen.findByRole("row", { name: /Dana/ })).toHaveTextContent("Projects only");
   });
 
+  it("follows the pages of the member list", async () => {
+    const dana = member({ userId: "u3", login: "dana@example.com", displayName: "Dana" });
+    const fetchMock = mockApi({
+      ...as("owner"),
+      "GET /api/v1/members": (r) =>
+        new URL(r.url).searchParams.get("cursor") === "p2"
+          ? json({ items: [dana], nextCursor: null })
+          : json({ items: [me, member({ role: "member" })], nextCursor: "p2" }),
+      "GET /api/v1/invitations": () => json({ items: [] }),
+      "GET /api/v1/projects": () => json({ items: [] }),
+    });
+    renderApp("/members");
+    expect(await screen.findByLabelText("Role of dana@example.com")).toBeInTheDocument();
+    expect(requests(fetchMock, "GET", "/api/v1/members")).toHaveLength(2);
+  });
+
   it("shows the project of an invitation into a project", async () => {
     mockApi({
       ...as("maintainer"),

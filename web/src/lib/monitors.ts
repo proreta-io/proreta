@@ -33,10 +33,15 @@ export function monitorState(monitor: Pick<MonitorListItem, "paused" | "status">
   return monitor.status;
 }
 
+/** How many monitors the list covers: the summary counts all of them, the items only the loaded pages. */
+export function totalMonitors({ summary }: Pick<MonitorList, "summary">): number {
+  return summary.up + summary.down + summary.paused + summary.unknown;
+}
+
 /** The parts of the summary line; `down` marks the part that needs attention. */
 export function summaryParts(list: MonitorList): { text: string; down: boolean }[] {
   const { up, down, paused, unknown } = list.summary;
-  const total = list.items.length;
+  const total = totalMonitors(list);
   const parts = [
     { text: `${total} ${total === 1 ? "monitor" : "monitors"}`, down: false },
     { text: `${up} up`, down: false },
@@ -73,19 +78,22 @@ export function sortMonitors<
  */
 export function quietState(list: MonitorList): { title: string; detail: string } | null {
   const active = list.items.filter((m) => !m.paused);
-  if (list.summary.down > 0 || active.length === 0) return null;
+  const { up, down, unknown } = list.summary;
+  if (down > 0 || up + unknown === 0) return null;
   const title = list.summary.unknown > 0 ? "Nothing is down." : "Everything is up.";
   const measured = active.filter((m) => m.uptime24h != null);
   const lowest = measured.reduce<(typeof measured)[number] | undefined>(
     (low, m) => (low === undefined || m.uptime24h! < low.uptime24h! ? m : low),
     undefined,
   );
+  // The figures come from the loaded pages; say so while more are to load.
+  const scope = list.nextCursor ? " among the monitors shown" : "";
   if (!lowest || lowest.uptime24h! >= 100) {
-    return { title, detail: "No failed checks in the last 24 hours." };
+    return { title, detail: `No failed checks in the last 24 hours${scope}.` };
   }
   return {
     title,
-    detail: `Lowest uptime in the last 24 hours: ${formatPercent(lowest.uptime24h)}, ${lowest.name}.`,
+    detail: `Lowest uptime in the last 24 hours${scope}: ${formatPercent(lowest.uptime24h)}, ${lowest.name}.`,
   };
 }
 

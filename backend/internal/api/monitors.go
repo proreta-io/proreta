@@ -37,7 +37,11 @@ func (s *server) ListMonitors(ctx context.Context, req gen.ListMonitorsRequestOb
 	if err != nil {
 		return nil, err
 	}
-	list, sum, err := s.queries.ListMonitors(ctx, p.TenantID, sc)
+	page, err := pageOf(req.Params.Limit, req.Params.Cursor)
+	if err != nil {
+		return nil, err
+	}
+	list, sum, next, err := s.queries.ListMonitors(ctx, p.TenantID, sc, page)
 	if err != nil {
 		return nil, err
 	}
@@ -53,8 +57,9 @@ func (s *server) ListMonitors(ctx context.Context, req gen.ListMonitorsRequestOb
 		}
 	}
 	return gen.ListMonitors200JSONResponse{
-		Items:   items,
-		Summary: gen.MonitorSummary{Up: sum.Up, Down: sum.Down, Paused: sum.Paused, Unknown: sum.Unknown},
+		Items:      items,
+		Summary:    gen.MonitorSummary{Up: sum.Up, Down: sum.Down, Paused: sum.Paused, Unknown: sum.Unknown},
+		NextCursor: nextCursor(next),
 	}, nil
 }
 

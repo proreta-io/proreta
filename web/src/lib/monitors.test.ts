@@ -12,6 +12,7 @@ import {
   statusText,
   summaryLine,
   summaryParts,
+  totalMonitors,
 } from "./monitors";
 
 const now = Date.parse("2026-10-20T14:30:00Z");
@@ -54,6 +55,7 @@ describe("summaryLine", () => {
     const list: MonitorList = {
       summary: { up: 1, down: 1, paused: 1, unknown: 0 },
       items: [item({ id: "a" }), item({ id: "b" }), item({ id: "c" })],
+      nextCursor: null,
     };
     expect(summaryLine(list)).toBe("3 monitors · 1 up · 1 down · 1 paused");
   });
@@ -62,8 +64,30 @@ describe("summaryLine", () => {
     const list: MonitorList = {
       summary: { up: 0, down: 0, paused: 0, unknown: 1 },
       items: [item({ status: "unknown" })],
+      nextCursor: null,
     };
     expect(summaryLine(list)).toBe("1 monitor · 0 up · 0 down · 0 paused · 1 pending");
+  });
+});
+
+describe("a partly loaded list", () => {
+  const partial: MonitorList = {
+    summary: { up: 5, down: 0, paused: 1, unknown: 0 },
+    items: [item({ id: "a", uptime24h: 99.5, name: "API" })],
+    nextCursor: "next",
+  };
+
+  it("counts every monitor from the summary, not the loaded ones", () => {
+    expect(totalMonitors(partial)).toBe(6);
+    expect(summaryLine(partial)).toBe("6 monitors · 5 up · 0 down · 1 paused");
+  });
+
+  it("says the figures cover the monitors shown, and is not fooled by paused ones on page one", () => {
+    expect(quietState(partial)?.detail).toBe(
+      "Lowest uptime in the last 24 hours among the monitors shown: 99.5%, API.",
+    );
+    const pausedFirst = { ...partial, items: [item({ paused: true })] };
+    expect(quietState(pausedFirst)?.title).toBe("Everything is up.");
   });
 });
 
@@ -155,6 +179,7 @@ describe("summaryParts", () => {
     const list = (down: number): MonitorList => ({
       summary: { up: 1, down, paused: 0, unknown: 0 },
       items: [item({})],
+      nextCursor: null,
     });
     expect(summaryParts(list(0)).some((p) => p.down)).toBe(false);
     expect(summaryParts(list(2)).filter((p) => p.down)).toEqual([{ text: "2 down", down: true }]);
@@ -186,6 +211,7 @@ describe("quietState", () => {
   const list = (items: MonitorListItem[], down = 0, unknown = 0): MonitorList => ({
     summary: { up: items.length, down, paused: 0, unknown },
     items,
+    nextCursor: null,
   });
 
   it("is quiet only when nothing is down", () => {
@@ -195,7 +221,12 @@ describe("quietState", () => {
 
   it("does not claim everything is up while some are pending, or when all are paused", () => {
     expect(quietState(list([item({ status: "unknown" })], 0, 1))?.title).toBe("Nothing is down.");
-    expect(quietState(list([item({ paused: true })]))).toBeNull();
+    const allPaused: MonitorList = {
+      summary: { up: 0, down: 0, paused: 1, unknown: 0 },
+      items: [item({ paused: true })],
+      nextCursor: null,
+    };
+    expect(quietState(allPaused)).toBeNull();
   });
 
   it("names the lowest uptime when some checks failed", () => {

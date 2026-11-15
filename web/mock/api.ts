@@ -338,6 +338,13 @@ const monitors: S["MonitorListItem"][] = monitorNames.map(
   }),
 );
 
+/** The page of a list the way the API cuts it: `limit` items from the offset in `cursor` (opaque to clients). */
+function pageOf<T>(all: T[], query: URLSearchParams) {
+  const start = Number(query.get("cursor") ?? 0);
+  const end = start + Number(query.get("limit") ?? 100);
+  return { items: all.slice(start, end), nextCursor: end < all.length ? String(end) : null };
+}
+
 const session = { userId: "u-me", orgId: "o-acme", signedIn: true };
 
 // --- views -----------------------------------------------------------------------------------
@@ -746,7 +753,11 @@ const routes: Route[] = [
   ],
 
   // Members and invitations of the session's organization.
-  ["GET", "/api/v1/members", () => ok({ items: membersOf(session.orgId).map(member) })],
+  [
+    "GET",
+    "/api/v1/members",
+    ({ query }) => ok(pageOf(membersOf(session.orgId).map(member), query)),
+  ],
   [
     "PATCH",
     "/api/v1/members/:userId",
@@ -865,7 +876,7 @@ const routes: Route[] = [
           unknown: count("unknown"),
           paused: items.filter((m) => m.paused).length,
         },
-        items,
+        ...pageOf(items, query),
       });
     },
   ],

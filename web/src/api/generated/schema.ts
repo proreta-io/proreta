@@ -525,6 +525,11 @@ export interface paths {
      *     belongs to; every project for owners and maintainers), with the current status and summary
      *     counts. `projectId` limits the list to one project (404 when the caller does not see it).
      *     Answered from the state tables and rollups, never by scanning raw results.
+     *
+     *     The list is paged, oldest monitor first: at most `limit` items (default 100, at most 200)
+     *     and `nextCursor`, the `cursor` of the next page, null on the last page. The `summary`
+     *     counts every monitor the list covers, not only the page. A `cursor` that this API did not
+     *     issue is 400.
      */
     get: operations["listMonitors"];
     put?: never;
@@ -1168,6 +1173,10 @@ export interface paths {
      *     viewers. A person without an organization role (a member of projects only) gets only the
      *     people they share a project with: everyone who has an organization role and everyone with a
      *     role in one of their projects, never the rest of the directory, and never logins.
+     *
+     *     The list is paged: at most `limit` items (default 100, at most 200) and `nextCursor`, the
+     *     `cursor` of the next page, null on the last page. A `cursor` that this API did not issue
+     *     is 400.
      */
     get: operations["listMembers"];
     put?: never;
@@ -3201,7 +3210,7 @@ export interface components {
        */
       pingUrl?: string;
     };
-    /** @description Counts over all non-deleted monitors. A paused monitor counts only as paused. */
+    /** @description Counts over every monitor the list covers (the caller's projects, or the one project asked for), not only the page. A paused monitor counts only as paused. */
     MonitorSummary: {
       up: number;
       down: number;
@@ -3211,6 +3220,7 @@ export interface components {
     MonitorList: {
       summary: components["schemas"]["MonitorSummary"];
       items: components["schemas"]["MonitorListItem"][];
+      nextCursor: components["schemas"]["NextCursor"];
     };
     /** @description Percentage of successful checks per window; null when no check ran in it */
     Uptime: {
@@ -3957,8 +3967,11 @@ export interface components {
       /** @description The system admin; its role cannot be changed and it cannot be removed */
       isSystemAdmin: boolean;
     };
+    /** @description The `cursor` that returns the next page; null on the last page */
+    NextCursor: string | null;
     MemberList: {
       items: components["schemas"]["Member"][];
+      nextCursor: components["schemas"]["NextCursor"];
     };
     MemberUpdate: {
       /** @description The organization role; null for a person who belongs to the organization only through projects */
@@ -4669,6 +4682,10 @@ export interface components {
     AdminQuery: string;
     /** @description User id; a value that is not a UUID is answered with 400 */
     AdminUserId: string;
+    /** @description Page size of a cursor-paged list */
+    PageLimit: number;
+    /** @description The `nextCursor` of the previous page; opaque, valid only for the same list */
+    PageCursor: string;
     /** @description Page size */
     Limit: number;
     /** @description Number of items to skip */
@@ -5236,6 +5253,10 @@ export interface operations {
       query?: {
         /** @description Only this project; 404 when the caller does not see it */
         projectId?: components["parameters"]["ProjectFilter"];
+        /** @description Page size of a cursor-paged list */
+        limit?: components["parameters"]["PageLimit"];
+        /** @description The `nextCursor` of the previous page; opaque, valid only for the same list */
+        cursor?: components["parameters"]["PageCursor"];
       };
       header?: never;
       path?: never;
@@ -6281,7 +6302,12 @@ export interface operations {
   };
   listMembers: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Page size of a cursor-paged list */
+        limit?: components["parameters"]["PageLimit"];
+        /** @description The `nextCursor` of the previous page; opaque, valid only for the same list */
+        cursor?: components["parameters"]["PageCursor"];
+      };
       header?: never;
       path?: never;
       cookie?: never;
@@ -6297,6 +6323,7 @@ export interface operations {
           "application/json": components["schemas"]["MemberList"];
         };
       };
+      400: components["responses"]["BadRequest"];
       401: components["responses"]["Unauthorized"];
       default: components["responses"]["Error"];
     };
