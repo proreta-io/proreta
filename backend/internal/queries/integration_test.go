@@ -3,7 +3,9 @@ package queries_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -159,11 +161,11 @@ func TestIntegrationListAndDetail(t *testing.T) {
 	f := newFixture(t)
 	f.seed()
 
-	list, sum, _, err := f.svc.ListMonitors(f.ctx, tenantA, everyProject, pagecursor.Page{})
+	list, sum, _, err := f.svc.ListMonitors(f.ctx, tenantA, everyProject, queries.MonitorFilter{}, pagecursor.Page{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list) != 3 || list[0].ID != mUp || list[1].ID != mPaused || list[2].ID != mNew {
+	if len(list) != 3 || list[0].ID != mUp || list[1].ID != mNew || list[2].ID != mPaused {
 		t.Fatalf("list = %+v", list)
 	}
 	if sum != (queries.Summary{Down: 1, Paused: 1, Unknown: 1}) {
@@ -181,11 +183,11 @@ func TestIntegrationListAndDetail(t *testing.T) {
 	if up.Ongoing == nil || up.Ongoing.ID != incOpen || up.Ongoing.Reason != "timeout" {
 		t.Fatalf("ongoing = %+v", up.Ongoing)
 	}
-	paused := list[1]
+	paused := list[2]
 	if !paused.Paused || paused.Status != "unknown" || !near(paused.Uptime24h, 100) {
 		t.Fatalf("paused = %+v", paused)
 	}
-	if n := list[2]; n.Uptime24h != nil || n.LastResponseMs != nil || n.LastCheckedAt != nil || n.Ongoing != nil {
+	if n := list[1]; n.Uptime24h != nil || n.LastResponseMs != nil || n.LastCheckedAt != nil || n.Ongoing != nil {
 		t.Fatalf("never checked = %+v", n)
 	}
 
@@ -210,7 +212,7 @@ func TestIntegrationListAndDetail(t *testing.T) {
 func TestIntegrationTenantIsolationAndNotFound(t *testing.T) {
 	f := newFixture(t)
 	f.seed()
-	list, sum, _, err := f.svc.ListMonitors(f.ctx, tenantB, everyProject, pagecursor.Page{})
+	list, sum, _, err := f.svc.ListMonitors(f.ctx, tenantB, everyProject, queries.MonitorFilter{}, pagecursor.Page{})
 	if err != nil || len(list) != 1 || list[0].ID != mOther || sum != (queries.Summary{Up: 1}) || !near(list[0].Uptime24h, 100) {
 		t.Fatalf("tenant B list: %+v %+v %v", list, sum, err)
 	}
@@ -374,13 +376,14 @@ func TestIntegrationListMonitorsPages(t *testing.T) {
 			want = append(want, id)
 		}
 	}
-	// mOther is the oldest (fixture time), the rest follow by id.
+	// Active monitors first (mOther, then by id), the paused one last.
+	want = append(want[:1], want[2], want[3], want[4], want[1])
 	var got []uuid.UUID
 	var cursor string
 	var pages int
 	page := pagecursor.Page{Limit: 2}
 	for {
-		list, sum, next, err := f.svc.ListMonitors(f.ctx, tenantB, everyProject, page)
+		list, sum, next, err := f.svc.ListMonitors(f.ctx, tenantB, everyProject, queries.MonitorFilter{}, page)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -416,17 +419,180 @@ func TestIntegrationListMonitorsPages(t *testing.T) {
 		}
 	}
 	// Exactly one page of the size: no next cursor. Past the end: an empty page, summary intact.
-	list, _, next, err := f.svc.ListMonitors(f.ctx, tenantB, everyProject, pagecursor.Page{Limit: len(want)})
+	list, _, next, err := f.svc.ListMonitors(f.ctx, tenantB, everyProject, queries.MonitorFilter{}, pagecursor.Page{Limit: len(want)})
 	if err != nil || len(list) != len(want) || next != "" {
 		t.Fatalf("exact page: %d %q %v", len(list), next, err)
 	}
-	past := pagecursor.Position{At: same.Add(time.Hour), ID: uuid.New()}
-	list, sum, next, err := f.svc.ListMonitors(f.ctx, tenantB, everyProject, pagecursor.Page{After: &past})
+	past := pagecursor.Position{Rank: 2, At: same.Add(time.Hour), ID: uuid.New()}
+	list, sum, next, err := f.svc.ListMonitors(f.ctx, tenantB, everyProject, queries.MonitorFilter{}, pagecursor.Page{After: &past})
 	if err != nil || list == nil || len(list) != 0 || next != "" || sum.Up != 1 {
 		t.Fatalf("empty page: %v %+v %q %v", list, sum, next, err)
 	}
-	all, _, _, err := f.svc.ListMonitors(f.ctx, tenantB, everyProject, pagecursor.Page{Limit: pagecursor.All})
+	all, _, _, err := f.svc.ListMonitors(f.ctx, tenantB, everyProject, queries.MonitorFilter{}, pagecursor.Page{Limit: pagecursor.All})
 	if err != nil || len(all) != len(want) {
 		t.Fatalf("all: %d %v", len(all), err)
+	}
+}
+
+// name sets the name and target of a fixture monitor; tcp turns it into a tcp monitor.
+func (f *fixture) name(id uuid.UUID, name, url string) {
+	f.t.Helper()
+	f.exec(`UPDATE monitors SET name = $2, config = jsonb_set(config, '{url}', to_jsonb($3::text)) WHERE id = $1`, id, name, url)
+}
+
+func ids(list []queries.Monitor) []string {
+	out := make([]string, len(list))
+	for i, m := range list {
+		out[i] = m.Name
+	}
+	return out
+}
+
+func sameNames(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestIntegrationListMonitorsFilterAndOrder(t *testing.T) {
+	f := newFixture(t)
+	f.exec(`UPDATE monitors SET deleted_at = now() WHERE id = $1`, mOther) // the fixture's own monitor of this tenant
+	base := f.now.Add(-time.Hour).Truncate(time.Second)
+	mk := func(i int, name, url, status string, paused bool) uuid.UUID {
+		id := uuid.MustParse(fmt.Sprintf("01920000-0000-7000-8000-0000000001%02d", i))
+		f.monitor(tenantB, id, base.Add(time.Duration(i)*time.Second), paused, false, status)
+		f.name(id, name, url)
+		return id
+	}
+	mk(1, "100% sure", "https://example.com/pct", "up", false)
+	mk(2, "a_b", "https://example.com/under", "up", false)
+	mk(3, "axb", "https://example.com/x", "up", false)
+	mk(4, "Alpha", "https://example.com/alpha", "down", false)
+	mk(5, "Beta", "https://example.com/beta", "down", false)
+	mk(6, "gamma", "https://example.com/gamma", "down", true)
+	tcp := mk(7, "db", "", "unknown", false)
+	f.exec(`UPDATE monitors SET type = 'tcp', config = '{"host":"db.internal","port":5432}' WHERE id = $1`, tcp)
+
+	full := queries.Summary{Up: 3, Down: 2, Paused: 1, Unknown: 1}
+	list := func(flt queries.MonitorFilter, page pagecursor.Page) ([]string, string) {
+		t.Helper()
+		l, sum, next, err := f.svc.ListMonitors(f.ctx, tenantB, everyProject, flt, page)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sum != full {
+			t.Fatalf("filter %+v: summary %+v counts the filtered rows, want %+v", flt, sum, full)
+		}
+		return ids(l), next
+	}
+
+	// Down first, then the active ones (up and pending) oldest first, paused last.
+	order := []string{"Alpha", "Beta", "100% sure", "a_b", "axb", "db", "gamma"}
+	if got, _ := list(queries.MonitorFilter{}, pagecursor.Page{}); !sameNames(got, order) {
+		t.Fatalf("order %v, want %v", got, order)
+	}
+	// Paging by two crosses the classes and yields the same order.
+	var walked []string
+	page := pagecursor.Page{Limit: 2}
+	for {
+		got, next := list(queries.MonitorFilter{}, page)
+		walked = append(walked, got...)
+		if next == "" {
+			break
+		}
+		pos, err := pagecursor.Decode(next)
+		if err != nil {
+			t.Fatal(err)
+		}
+		page.After = &pos
+	}
+	if !sameNames(walked, order) {
+		t.Fatalf("paged order %v, want %v", walked, order)
+	}
+
+	for _, c := range []struct {
+		name string
+		f    queries.MonitorFilter
+		want []string
+	}{
+		{"status down", queries.MonitorFilter{Status: "down"}, []string{"Alpha", "Beta"}},
+		{"status up", queries.MonitorFilter{Status: "up"}, []string{"100% sure", "a_b", "axb"}},
+		{"status paused (its last status was down)", queries.MonitorFilter{Status: "paused"}, []string{"gamma"}},
+		{"status unknown", queries.MonitorFilter{Status: "unknown"}, []string{"db"}},
+		{"case-insensitive name", queries.MonitorFilter{Search: "ALPHA"}, []string{"Alpha"}},
+		{"url", queries.MonitorFilter{Search: "EXAMPLE.com/be"}, []string{"Beta"}},
+		{"tcp host:port", queries.MonitorFilter{Search: "Internal:54"}, []string{"db"}},
+		{"percent is literal", queries.MonitorFilter{Search: "%"}, []string{"100% sure"}},
+		{"underscore is literal", queries.MonitorFilter{Search: "_"}, []string{"a_b"}},
+		{"backslash is literal", queries.MonitorFilter{Search: `\`}, []string{}},
+		{"search and status", queries.MonitorFilter{Search: "a", Status: "down"}, []string{"Alpha", "Beta"}},
+		{"no match", queries.MonitorFilter{Search: "nothing", Status: "up"}, []string{}},
+	} {
+		if got, next := list(c.f, pagecursor.Page{}); !sameNames(got, c.want) || next != "" {
+			t.Errorf("%s: %v %q, want %v", c.name, got, next, c.want)
+		}
+	}
+
+	// A cursor stays valid while rows change between requests: no repeat, no skip of rows after it.
+	got, next := list(queries.MonitorFilter{}, pagecursor.Page{Limit: 3})
+	if !sameNames(got, order[:3]) || next == "" {
+		t.Fatalf("first page %v %q", got, next)
+	}
+	f.exec(`UPDATE monitors SET deleted_at = now() WHERE name = 'a_b'`)
+	late := uuid.MustParse("01920000-0000-7000-8000-000000000199")
+	f.monitor(tenantB, late, base.Add(time.Hour), false, false, "up")
+	f.name(late, "zed", "https://example.com/zed")
+	pos, err := pagecursor.Decode(next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, _, _, err := f.svc.ListMonitors(f.ctx, tenantB, everyProject, queries.MonitorFilter{}, pagecursor.Page{After: &pos})
+	if want := []string{"axb", "db", "zed", "gamma"}; err != nil || !sameNames(ids(l), want) {
+		t.Fatalf("rest %v %v, want %v", ids(l), err, want)
+	}
+}
+
+// The list reads and sorts the tenant's own monitors (rank, created_at, id: the rank comes from
+// monitor_state, so no index gives the order; a top-N sort over the tenant's rows). With 5000 of
+// them next to 20000 of another tenant the monitors must be found through an index, not a scan
+// of the table; a filter only narrows those rows.
+func TestIntegrationListMonitorsPlan(t *testing.T) {
+	f := newFixture(t)
+	f.exec(`INSERT INTO monitors (id, tenant_id, project_id, name, config, paused, created_at)
+		SELECT gen_random_uuid(), $1, (SELECT id FROM projects WHERE tenant_id = $1 AND is_default), 'monitor ' || g,
+		       jsonb_build_object('url', 'https://example.com/' || g), false, $2::timestamptz + g * interval '1 second'
+		FROM generate_series(1, 5000) AS g`, tenantB, f.now.Add(-24*time.Hour))
+	f.exec(`INSERT INTO monitors (id, tenant_id, project_id, name, config, paused, created_at)
+		SELECT gen_random_uuid(), $1, (SELECT id FROM projects WHERE tenant_id = $1 AND is_default), 'other ' || g,
+		       jsonb_build_object('url', 'https://example.org/' || g), false, $2::timestamptz + g * interval '1 second'
+		FROM generate_series(1, 20000) AS g`, tenantA, f.now.Add(-24*time.Hour))
+	f.exec(`INSERT INTO monitor_state (tenant_id, monitor_id, status, status_changed_at)
+		SELECT tenant_id, id, CASE WHEN random() < 0.01 THEN 'down' ELSE 'up' END, created_at FROM monitors m WHERE NOT EXISTS (SELECT 1 FROM monitor_state x WHERE x.monitor_id = m.id)`)
+	f.exec(`ANALYZE monitors; ANALYZE monitor_state`)
+	rows, err := f.admin.Query(f.ctx, `EXPLAIN (ANALYZE, COSTS OFF, TIMING OFF) SELECT m.id FROM monitors m
+		JOIN monitor_state s ON s.tenant_id = m.tenant_id AND s.monitor_id = m.id
+		WHERE m.tenant_id = $1 AND m.deleted_at IS NULL
+		ORDER BY (CASE WHEN m.paused THEN 2 WHEN s.status = 'down' THEN 0 ELSE 1 END), m.created_at, m.id LIMIT 101`, tenantB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan string
+	for rows.Next() {
+		var l string
+		if err := rows.Scan(&l); err != nil {
+			t.Fatal(err)
+		}
+		plan += l + "\n"
+	}
+	t.Log(plan)
+	if strings.Contains(plan, "Seq Scan on monitors") {
+		t.Errorf("monitors read by a table scan:\n%s", plan)
 	}
 }

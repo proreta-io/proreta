@@ -6,7 +6,6 @@ import {
   clearStatusPagePassword,
   createStatusPage,
   deleteStatusPage,
-  listMonitors,
   listStatusPageComponents,
   listStatusPages,
   POLL_MS,
@@ -21,6 +20,7 @@ import {
   type Project,
   type StatusPageUpdate,
 } from "../api/endpoints";
+import MonitorPicker, { type PickedMonitor } from "../components/MonitorPicker";
 import { useToast } from "../components/Toasts";
 import {
   Alert,
@@ -664,18 +664,15 @@ function Components({ page }: { page: Page }) {
 function ComponentEditor({ page, initial }: { page: Page; initial: StatusPageComponent[] }) {
   const queryClient = useQueryClient();
   const toast = useToast();
-  const monitors = useQuery({
-    queryKey: queryKeys.monitorList(page.projectId ?? undefined),
-    queryFn: () => listMonitors(page.projectId ?? undefined),
-  });
   const [rows, setRows] = useState<Row[]>(() => toRows(initial));
-  const [pick, setPick] = useState("");
+  const [pick, setPick] = useState<PickedMonitor | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [added, setAdded] = useState<Map<string, string>>(new Map());
   const names = new Map<string, string>();
   for (const c of initial) names.set(c.monitorId, `${c.monitorName} · ${c.monitorType}`);
-  for (const m of monitors.data?.items ?? []) names.set(m.id, `${m.name} · ${m.type}`);
+  // Monitors added in this session are not in `initial`: their names come from the picker.
+  for (const [id, name] of added) names.set(id, name);
   const used = new Set(rows.map((r) => r.monitorId));
-  const available = (monitors.data?.items ?? []).filter((m) => !used.has(m.id));
   const dirty = JSON.stringify(rows) !== JSON.stringify(toRows(initial));
 
   const save = useMutation({
@@ -802,32 +799,23 @@ function ComponentEditor({ page, initial }: { page: Page; initial: StatusPageCom
         </ol>
       )}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-        <Field label="Add a monitor or heartbeat" className="sm:w-80">
-          {(c) => (
-            <Select {...c} value={pick} onChange={(e) => setPick(e.target.value)}>
-              <option value="">
-                {monitors.isPending
-                  ? "Loading monitors…"
-                  : available.length
-                    ? "Choose…"
-                    : "None left"}
-              </option>
-              {available.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name} (
-                  {m.type === "heartbeat" ? "heartbeat" : m.type === "tcp" ? "TCP" : "HTTPS"})
-                </option>
-              ))}
-            </Select>
-          )}
-        </Field>
+        <MonitorPicker
+          label="Add a monitor or heartbeat"
+          projectId={page.projectId ?? undefined}
+          exclude={used}
+          picked={pick}
+          onPick={setPick}
+          className="sm:w-80"
+        />
         <Button
           type="button"
           variant="secondary"
           disabled={!pick || rows.length >= COMPONENTS_MAX}
           onClick={() => {
-            setRows([...rows, { monitorId: pick, publicName: "", groupName: "" }]);
-            setPick("");
+            if (!pick) return;
+            setRows([...rows, { monitorId: pick.id, publicName: "", groupName: "" }]);
+            setAdded(new Map(added).set(pick.id, `${pick.name} · ${pick.type}`));
+            setPick(null);
           }}
         >
           Add component

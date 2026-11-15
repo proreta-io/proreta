@@ -3,7 +3,7 @@ import { useState, type ReactNode } from "react";
 import { ApiError, errorMessage, errorMeta, planLimitMessage } from "../api/client";
 import type { ProjectMember, ProjectRole } from "../api/endpoints";
 import { memberLabel } from "../lib/members";
-import { useRefreshPeople, type PeopleApi, type PeopleProject } from "../lib/people";
+import { useMembers, useRefreshPeople, type PeopleApi, type PeopleProject } from "../lib/people";
 import { ROLE_LABELS, roleLabel } from "../lib/roles";
 import { countOf } from "../lib/usage";
 import { useToast } from "./Toasts";
@@ -382,11 +382,7 @@ function ProjectMembers({
   });
   // Anyone the actor may add: they may give at least one role to someone without one here.
   const manage = api.projectRolesFor(project, null).length > 0;
-  const org = useQuery({
-    queryKey: api.keys.members,
-    queryFn: api.listMembers,
-    enabled: manage && api.canReadMembers,
-  });
+  const org = useMembers(api, manage && api.canReadMembers);
   const { put, remove } = useProjectRole(api, project);
   const [adding, setAdding] = useState("");
   const [newRole, setNewRole] = useState<ProjectRole>("member");
@@ -548,6 +544,16 @@ function ProjectMembers({
               </Select>
             )}
           </Field>
+          {org.hasNextPage && (
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={org.isFetchingNextPage}
+              onClick={() => void org.fetchNextPage()}
+            >
+              {org.isFetchingNextPage ? "Loading…" : "Load more people"}
+            </Button>
+          )}
           <Button type="submit" variant="secondary" disabled={!adding} busy={put.isPending}>
             Add to project
           </Button>

@@ -1,4 +1,9 @@
-import { useQueryClient, type InvalidateQueryFilters, type QueryKey } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useQueryClient,
+  type InvalidateQueryFilters,
+  type QueryKey,
+} from "@tanstack/react-query";
 import {
   createAdminProject,
   createProject,
@@ -7,7 +12,7 @@ import {
   listAdminMembers,
   listAdminProjectMembers,
   listAdminProjects,
-  listMembers,
+  listMembersPage,
   listProjectMembers,
   listProjects,
   putAdminProjectMember,
@@ -48,7 +53,8 @@ export interface PeopleApi {
   keys: { members: QueryKey; projects: QueryKey; projectMembers: (projectId: string) => QueryKey };
   /** Refetched after any change, besides the keys above. */
   related: InvalidateQueryFilters[];
-  listMembers: () => Promise<{ items: Person[] }>;
+  /** One page of the organization's people; `nextCursor` is null on the last (the admin list is not paged). */
+  listMembers: (cursor?: string) => Promise<{ items: Person[]; nextCursor: string | null }>;
   setRole: (userId: string, role: MembershipRole | null) => Promise<Person>;
   removeMember: (userId: string) => Promise<unknown>;
   listProjects: () => Promise<{ items: PeopleProject[] }>;
@@ -93,7 +99,7 @@ export function useOrganizationPeople(): PeopleApi {
       projectMembers: queryKeys.projectMembers,
     },
     related: [{ queryKey: queryKeys.permissions }, { queryKey: queryKeys.usage }],
-    listMembers,
+    listMembers: listMembersPage,
     setRole: updateMember,
     removeMember,
     listProjects,
@@ -140,7 +146,7 @@ export function adminPeople(organization: AdminOrganization): PeopleApi {
       { queryKey: queryKeys.adminOrganization(id), exact: true },
       { queryKey: ["admin", "organizations"] },
     ],
-    listMembers: () => listAdminMembers(id),
+    listMembers: async () => ({ ...(await listAdminMembers(id)), nextCursor: null }),
     setRole: (userId, role) => setAdminMember(id, userId, role),
     removeMember: (userId) => removeAdminMember(id, userId),
     listProjects: () => listAdminProjects(id),
@@ -161,6 +167,21 @@ export function adminPeople(organization: AdminOrganization): PeopleApi {
     canDelete: () => !readOnly,
     projectRolesFor: () => roles,
   };
+}
+
+/**
+ * The organization's people, a page at a time: `fetchNextPage` loads more, so a large organization
+ * is never read in full by the browser. `items` are the pages loaded so far.
+ */
+export function useMembers(api: PeopleApi, enabled = true) {
+  return useInfiniteQuery({
+    queryKey: api.keys.members,
+    queryFn: ({ pageParam }) => api.listMembers(pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
+    select: (data) => ({ items: data.pages.flatMap((p) => p.items) }),
+    enabled,
+  });
 }
 
 /**

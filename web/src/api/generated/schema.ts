@@ -526,10 +526,15 @@ export interface paths {
      *     counts. `projectId` limits the list to one project (404 when the caller does not see it).
      *     Answered from the state tables and rollups, never by scanning raw results.
      *
-     *     The list is paged, oldest monitor first: at most `limit` items (default 100, at most 200)
-     *     and `nextCursor`, the `cursor` of the next page, null on the last page. The `summary`
-     *     counts every monitor the list covers, not only the page. A `cursor` that this API did not
-     *     issue is 400.
+     *     The list is paged: at most `limit` items (default 100, at most 200) and `nextCursor`, the
+     *     `cursor` of the next page, null on the last page. The order is fixed: monitors that are
+     *     down first, then the other active ones (`up` and `unknown`), then paused ones, and inside
+     *     each group the oldest monitor first. `status` keeps only the monitors in one of those
+     *     states (a paused monitor is only `paused`, whatever its last check said) and `q` only
+     *     those whose name, URL or `host:port` contains the text, ignoring case; the text is
+     *     literal, `%` and `_` match themselves. The `summary` counts every monitor the list covers
+     *     (the project filter applies), never only the page or the `q` and `status` matches. A
+     *     `cursor` that this API did not issue is 400. Keep `q` and `status` the same while paging.
      */
     get: operations["listMonitors"];
     put?: never;
@@ -5253,6 +5258,10 @@ export interface operations {
       query?: {
         /** @description Only this project; 404 when the caller does not see it */
         projectId?: components["parameters"]["ProjectFilter"];
+        /** @description Text to find in the name, URL or `host:port` of a monitor (case-insensitive, literal) */
+        q?: string;
+        /** @description Only monitors in this state */
+        status?: "up" | "down" | "paused" | "unknown";
         /** @description Page size of a cursor-paged list */
         limit?: components["parameters"]["PageLimit"];
         /** @description The `nextCursor` of the previous page; opaque, valid only for the same list */

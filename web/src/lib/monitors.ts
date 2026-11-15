@@ -59,19 +59,6 @@ export function summaryLine(list: MonitorList): string {
     .join(" · ");
 }
 
-/** Down first, the newest failure on top; paused last; the rest by name. */
-export function sortMonitors<
-  T extends Pick<MonitorListItem, "name" | "paused" | "status" | "statusSince">,
->(items: T[]): T[] {
-  const rank = (m: T) => (m.paused ? 2 : m.status === "down" ? 0 : 1);
-  return [...items].sort(
-    (a, b) =>
-      rank(a) - rank(b) ||
-      (rank(a) === 0 ? Date.parse(b.statusSince) - Date.parse(a.statusSince) : 0) ||
-      a.name.localeCompare(b.name),
-  );
-}
-
 /**
  * The calm headline when nothing is down, from the list's own figures; null while something is
  * down or when every monitor is paused.
@@ -101,21 +88,6 @@ export function quietState(list: MonitorList): { title: string; detail: string }
 export function targetText(m: Pick<MonitorListItem, "http" | "tcp">): string {
   if (m.tcp) return `${m.tcp.host}:${m.tcp.port}`;
   return (m.http?.url ?? "").replace(/^https:\/\//i, "");
-}
-
-/** Case-insensitive match on name or target (URL or host:port); an empty query keeps everything. */
-export function filterMonitors<T extends Pick<MonitorListItem, "name" | "http" | "tcp">>(
-  items: T[],
-  query: string,
-): T[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return items;
-  return items.filter(
-    (m) =>
-      m.name.toLowerCase().includes(q) ||
-      (m.http?.url.toLowerCase().includes(q) ?? false) ||
-      (m.tcp ? `${m.tcp.host}:${m.tcp.port}`.includes(q) : false),
-  );
 }
 
 /** Why a monitor is down, in words: "Timed out after 10 s", "DNS lookup failed". */

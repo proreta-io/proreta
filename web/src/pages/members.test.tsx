@@ -174,7 +174,7 @@ describe("members page", () => {
     expect(await screen.findByRole("row", { name: /Dana/ })).toHaveTextContent("Projects only");
   });
 
-  it("follows the pages of the member list", async () => {
+  it("loads the member list a page at a time", async () => {
     const dana = member({ userId: "u3", login: "dana@example.com", displayName: "Dana" });
     const fetchMock = mockApi({
       ...as("owner"),
@@ -186,7 +186,13 @@ describe("members page", () => {
       "GET /api/v1/projects": () => json({ items: [] }),
     });
     renderApp("/members");
+    // Only the first page is read until someone asks for more.
+    expect(await screen.findByText("Showing 2 people")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Role of dana@example.com")).not.toBeInTheDocument();
+    expect(requests(fetchMock, "GET", "/api/v1/members")).toHaveLength(1);
+    await userEvent.click(screen.getByRole("button", { name: "Load more" }));
     expect(await screen.findByLabelText("Role of dana@example.com")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
     expect(requests(fetchMock, "GET", "/api/v1/members")).toHaveLength(2);
   });
 

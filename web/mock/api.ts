@@ -867,14 +867,24 @@ const routes: Route[] = [
     ({ query }) => {
       const pid = query.get("projectId");
       const ids = new Set(projectsOf(session.orgId).map((p) => p.id));
-      const items = monitors.filter((m) => ids.has(m.projectId) && (!pid || m.projectId === pid));
-      const count = (s: string) => items.filter((m) => !m.paused && m.status === s).length;
+      const scoped = monitors.filter((m) => ids.has(m.projectId) && (!pid || m.projectId === pid));
+      const state = (m: S["MonitorListItem"]) => (m.paused ? "paused" : m.status);
+      const q = (query.get("q") ?? "").toLowerCase();
+      const wanted = query.get("status");
+      const target = (m: S["MonitorListItem"]) =>
+        `${m.name} ${m.http?.url ?? ""} ${m.tcp ? `${m.tcp.host}:${m.tcp.port}` : ""}`.toLowerCase();
+      // The server's order: down, then the other active ones, then paused; the filters never change the summary.
+      const rank = (m: S["MonitorListItem"]) => ({ down: 0, paused: 2 })[state(m) as string] ?? 1;
+      const items = scoped
+        .filter((m) => (!q || target(m).includes(q)) && (!wanted || state(m) === wanted))
+        .sort((a, b) => rank(a) - rank(b));
+      const count = (s: string) => scoped.filter((m) => !m.paused && m.status === s).length;
       return ok({
         summary: {
           up: count("up"),
           down: count("down"),
           unknown: count("unknown"),
-          paused: items.filter((m) => m.paused).length,
+          paused: scoped.filter((m) => m.paused).length,
         },
         ...pageOf(items, query),
       });

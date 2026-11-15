@@ -77,9 +77,11 @@ func TestIntegrationListPagination(t *testing.T) {
 	for _, p := range pages {
 		all = append(all, p...)
 	}
-	for i := range created { // created oldest first, ids are UUIDv7: the order is the creation order
-		if all[i] != created[i] {
-			t.Fatalf("order %v, want %v", all, created)
+	// Active monitors oldest first (ids are UUIDv7: the creation order), the paused one last.
+	wantOrder := append(append([]string{}, created[1:]...), created[0])
+	for i := range wantOrder {
+		if all[i] != wantOrder[i] {
+			t.Fatalf("order %v, want %v", all, wantOrder)
 		}
 	}
 	for _, q := range []string{"?limit=2", "?limit=1"} {
@@ -117,5 +119,48 @@ func TestIntegrationListPagination(t *testing.T) {
 		rejected(t, c, path+"?cursor=", adm)
 		rejected(t, c, path+"?limit=0", adm)
 		rejected(t, c, path+"?limit=201", adm)
+	}
+}
+
+func TestIntegrationListMonitorsFilterParams(t *testing.T) {
+	env := pgtest.New(t, pgtest.DBName("apimonitorfilter"))
+	c := newRegistrationServer(t, env, membersOpts(), false, &lockedBuffer{})
+	adm := adminSession(c)
+	for _, n := range []string{"Alpha 100%", "a_b", "axb"} {
+		r := c.do(http.MethodPost, "/api/v1/monitors", fmt.Sprintf(`{"type":"http","name":%q,"http":{"url":"https://example.com/%s"}}`, n, url.PathEscape(strings.Fields(n)[0])), adm)
+		if r.code != http.StatusCreated {
+			t.Fatalf("create: %d %s", r.code, r.raw)
+		}
+	}
+	names := func(q string) []string {
+		r := c.do(http.MethodGet, "/api/v1/monitors?"+q, "", adm)
+		if r.code != http.StatusOK {
+			t.Fatalf("%s: %d %s", q, r.code, r.raw)
+		}
+		if sum, _ := r.body["summary"].(map[string]any); sum["unknown"] != 3.0 {
+			t.Fatalf("%s: summary %v counts the matches", q, sum)
+		}
+		var out []string
+		for _, it := range r.body["items"].([]any) {
+			out = append(out, it.(map[string]any)["name"].(string))
+		}
+		return out
+	}
+	for q, want := range map[string]string{"q=ALPHA": "Alpha 100%", "q=" + url.QueryEscape("%"): "Alpha 100%", "q=" + url.QueryEscape("_"): "a_b", "q=" + url.QueryEscape("  a_b ") + "&status=unknown": "a_b"} {
+		if got := names(q); len(got) != 1 || got[0] != want {
+			t.Errorf("%s = %v, want [%s]", q, got, want)
+		}
+	}
+	if got := names("status=down"); len(got) != 0 {
+		t.Errorf("status=down = %v", got)
+	}
+	if got := names("q=%20%20"); len(got) != 3 {
+		t.Errorf("blank q must be no filter, got %v", got)
+	}
+	for _, bad := range []string{"q=", "q=" + strings.Repeat("x", 101), "status=pending", "status="} {
+		rejected(t, c, "/api/v1/monitors?"+bad, adm)
+	}
+	if r := c.do(http.MethodGet, "/api/v1/monitors?q="+strings.Repeat("é", 100), "", adm); r.code != http.StatusOK {
+		t.Errorf("100 characters: %d %s", r.code, r.raw)
 	}
 }

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -41,7 +42,15 @@ func (s *server) ListMonitors(ctx context.Context, req gen.ListMonitorsRequestOb
 	if err != nil {
 		return nil, err
 	}
-	list, sum, next, err := s.queries.ListMonitors(ctx, p.TenantID, sc, page)
+	f := queries.MonitorFilter{}
+	if q := req.Params.Q; q != nil {
+		// The validator bounds the length; a blank text is no filter.
+		f.Search = strings.TrimSpace(*q)
+	}
+	if st := req.Params.Status; st != nil {
+		f.Status = string(*st)
+	}
+	list, sum, next, err := s.queries.ListMonitors(ctx, p.TenantID, sc, f, page)
 	if err != nil {
 		return nil, err
 	}

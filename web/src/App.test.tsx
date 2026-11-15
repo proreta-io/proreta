@@ -1,7 +1,7 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { getCsrfToken } from "./api/client";
-import { listMonitors, updateMonitor } from "./api/endpoints";
+import { listMonitorsPage, updateMonitor } from "./api/endpoints";
 import { redirectTarget } from "./auth/RequireAuth";
 import { json, mockApi, problem, renderApp, session, signedIn } from "./test/utils";
 
@@ -83,7 +83,7 @@ describe("auth guard", () => {
     });
     renderApp("/settings");
     expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
-    await act(() => listMonitors().catch(() => undefined));
+    await act(() => listMonitorsPage().catch(() => undefined));
     expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
     expect(getCsrfToken()).toBeNull();
   });

@@ -1,5 +1,5 @@
 import { usePermissions } from "../lib/permissions";
-import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ApiError, errorMessage, errorMeta } from "../api/client";
@@ -8,6 +8,7 @@ import {
   POLL_MS,
   queryKeys,
   type MonitorList,
+  type MonitorStatusFilter,
   type MonitorListItem,
   type Usage,
 } from "../api/endpoints";
@@ -19,6 +20,7 @@ import {
   DotShape,
   ErrorState,
   Input,
+  Select,
   Skeleton,
   StatusIndicator,
   Sweep,
@@ -32,17 +34,16 @@ import { expectationText, isHeartbeat } from "../lib/heartbeat";
 import { formatAgo, formatClock, formatMs, formatPercent, formatSince } from "../lib/format";
 import {
   downReason,
-  filterMonitors,
   targetText,
   monitorState,
   quietState,
-  sortMonitors,
   statusText,
   summaryLine,
   summaryParts,
   totalMonitors,
 } from "../lib/monitors";
 import { atHeartbeatLimit, atMonitorLimit, countOf, useUsage } from "../lib/usage";
+import { useDebounced } from "../lib/useDebounced";
 import { useNow } from "../lib/useNow";
 import { ROLE_HINTS } from "../lib/roles";
 import { useProjectScope } from "../lib/useProjectScope";
@@ -51,12 +52,18 @@ import { ALL_PROJECTS } from "../lib/projects";
 export default function Monitors() {
   const now = useNow();
   const [query, setQuery] = useState("");
+  const [status, setStatus] = useState<MonitorStatusFilter | "">("");
+  // The server does the searching and filtering; the text goes out when the typing pauses.
+  const search = useDebounced(query.trim(), 300);
   const filter = useRef<HTMLInputElement>(null);
   const { projectId, projects, setChoice } = useProjectScope();
   const queryClient = useQueryClient();
   const monitors = useInfiniteQuery({
-    queryKey: queryKeys.monitorPages(projectId),
-    queryFn: ({ pageParam }) => listMonitorsPage(projectId, pageParam),
+    queryKey: queryKeys.monitorPages(projectId, search, status),
+    queryFn: ({ pageParam }) =>
+      listMonitorsPage(projectId, pageParam, { q: search, status: status || undefined }),
+    // The previous result stays on screen while a new filter loads: the search box keeps its place.
+    placeholderData: keepPreviousData,
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
     // The summary counts every monitor, so the first page has it; the items are the loaded pages.
@@ -67,13 +74,6 @@ export default function Monitors() {
     }),
     refetchInterval: POLL_MS,
   });
-  // The filter works on loaded rows: while it is set, the rest of the list loads, so it never
-  // misses a monitor that is on a later page.
-  const { hasNextPage, isFetchingNextPage, isError, fetchNextPage } = monitors;
-  const filtering = query.trim() !== "";
-  useEffect(() => {
-    if (filtering && hasNextPage && !isFetchingNextPage && !isError) void fetchNextPage();
-  }, [filtering, hasNextPage, isFetchingNextPage, isError, fetchNextPage]);
   const projectName = projects.data?.items.find((p) => p.id === projectId)?.name;
   // The remembered project was deleted or the user lost access to it (404): back to all projects,
   // with a fresh project list.
@@ -98,7 +98,8 @@ export default function Monitors() {
     };
   }, [down]);
 
-  const hasMonitors = (monitors.data?.items.length ?? 0) > 0;
+  // The summary counts every monitor, so a filter with no match still has the filter box.
+  const hasMonitors = monitors.data !== undefined && totalMonitors(monitors.data) > 0;
 
   // "/" jumps to the filter from anywhere on the page, unless the user is typing.
   useEffect(() => {
@@ -128,10 +129,10 @@ export default function Monitors() {
           {projectName && (
             <p className="text-caption text-muted-foreground">Project {projectName}</p>
           )}
-          {list && list.items.length > 0 && <Summary list={list} />}
+          {hasMonitors && list && <Summary list={list} />}
           {monitors.isPending && <Skeleton className="w-60" />}
         </div>
-        {list && list.items.length > 0 && (
+        {hasMonitors && (
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 max-sm:w-full">
             <div className="relative min-w-0 flex-1 sm:w-[280px] sm:flex-none">
               <Input
@@ -167,6 +168,18 @@ export default function Monitors() {
                 }
               />
             </div>
+            <Select
+              aria-label="Status"
+              value={status}
+              onChange={(e) => setStatus(e.target.value as MonitorStatusFilter | "")}
+              className="max-sm:w-full sm:w-36"
+            >
+              <option value="">All statuses</option>
+              <option value="down">Down</option>
+              <option value="up">Up</option>
+              <option value="unknown">Pending</option>
+              <option value="paused">Paused</option>
+            </Select>
             <AddMonitor usage={usage.data} />
           </div>
         )}
@@ -181,15 +194,18 @@ export default function Monitors() {
           meta={errorMeta(monitors.error)}
           onRetry={() => void monitors.refetch()}
         />
-      ) : list && list.items.length === 0 ? (
+      ) : list && !hasMonitors ? (
         <EmptyMonitors usage={usage.data} />
       ) : list ? (
         <MonitorTable
           list={list}
-          query={query}
+          query={search}
+          status={status}
+          busy={monitors.isPlaceholderData}
           now={now}
           clearQuery={() => {
             setQuery("");
+            setStatus("");
             filter.current?.focus();
           }}
           focusFilter={() => filter.current?.focus()}
@@ -238,6 +254,8 @@ function Summary({ list }: { list: MonitorList }) {
 function MonitorTable({
   list,
   query,
+  status,
+  busy,
   now,
   clearQuery,
   focusFilter,
@@ -247,6 +265,8 @@ function MonitorTable({
 }: {
   list: MonitorList;
   query: string;
+  status: MonitorStatusFilter | "";
+  busy: boolean;
   now: number;
   clearQuery: () => void;
   focusFilter: () => void;
@@ -255,10 +275,14 @@ function MonitorTable({
   updated: string;
 }) {
   const navigate = useNavigate();
-  const visible = sortMonitors(filterMonitors(list.items, query));
-  const hiddenDown = list.items.filter((m) => monitorState(m) === "down" && !visible.includes(m));
+  // The server orders the list (down first) and filters it; this is what it sent.
+  const visible = list.items;
+  const filtering = query !== "" || status !== "";
+  const shownDown = visible.filter((m) => monitorState(m) === "down").length;
+  // Down monitors the filter leaves out, known once every match is loaded.
+  const hiddenDown = filtering && !list.nextCursor ? Math.max(0, list.summary.down - shownDown) : 0;
   const quiet = quietState(list);
-  const downNames = sortMonitors(list.items)
+  const downNames = visible
     .filter((m) => monitorState(m) === "down")
     .map((m) => `${m.name} is down.`)
     .join(" ");
@@ -277,7 +301,7 @@ function MonitorTable({
 
   return (
     <>
-      {quiet && !query && (
+      {quiet && !filtering && (
         <div className="flex flex-col gap-1.5 pb-5">
           <span className="eyebrow flex items-center gap-2">
             <DotShape className="text-success" />
@@ -293,17 +317,24 @@ function MonitorTable({
       <p aria-live="polite" className="sr-only">
         {downNames}
       </p>
+      {filtering && !busy && (
+        <p role="status" className="sr-only">
+          {visible.length === 0
+            ? "No monitors match."
+            : `${visible.length}${list.nextCursor ? " or more" : ""} ${visible.length === 1 && !list.nextCursor ? "monitor matches" : "monitors match"}.`}
+        </p>
+      )}
 
-      {hiddenDown.length > 0 && (
+      {hiddenDown > 0 && (
         <div
           role="status"
           className="flex flex-wrap items-center gap-2.5 border border-b-0 border-down-border bg-down-tint px-4 py-2.5 text-[13px]"
         >
           <TriangleShape className="text-down" />
           <span className="min-w-40 flex-1">
-            {hiddenDown.length === 1
-              ? `${hiddenDown[0]!.name} is down and hidden by this filter.`
-              : `${hiddenDown.length} down monitors are hidden by this filter.`}
+            {hiddenDown === 1
+              ? "1 down monitor is hidden by this filter."
+              : `${hiddenDown} down monitors are hidden by this filter.`}
           </span>
           <Button variant="link" onClick={clearQuery}>
             Show all
@@ -313,16 +344,22 @@ function MonitorTable({
 
       {visible.length === 0 ? (
         <div className="flex flex-col items-start gap-2.5 border border-border px-6 pt-11 pb-12">
-          <h2 className="text-[17px] font-semibold">No monitors match “{query.trim()}”.</h2>
+          <h2 className="text-[17px] font-semibold">
+            {query
+              ? `No monitors match “${query}”.`
+              : `No ${status === "unknown" ? "pending" : status} monitors.`}
+          </h2>
           <p className="text-muted-foreground">
-            Searched the names and URLs of {countOf(list.items.length, "monitor", "monitors")}.
+            {query
+              ? `Searched the names and URLs of ${countOf(totalMonitors(list), "monitor", "monitors")}.`
+              : `Of ${countOf(totalMonitors(list), "monitor", "monitors")}, none is ${status === "unknown" ? "pending" : status}.`}
           </p>
           <Button variant="secondary" size="small" className="mt-1" onClick={clearQuery}>
             Clear filter
           </Button>
         </div>
       ) : (
-        <div className="relative overflow-hidden">
+        <div className="relative overflow-hidden" aria-busy={busy}>
           <Sweep runKey={sweepKey} />
           <Table>
             <thead>
@@ -361,7 +398,9 @@ function MonitorTable({
             {more.loading ? "Loading…" : "Load more"}
           </Button>
           <span className="text-caption text-muted-foreground">
-            Showing {list.items.length} of {totalMonitors(list)} monitors
+            {filtering
+              ? `Showing ${list.items.length} matching monitors`
+              : `Showing ${list.items.length} of ${totalMonitors(list)} monitors`}
           </span>
         </div>
       )}

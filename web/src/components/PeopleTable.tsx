@@ -11,7 +11,13 @@ import {
 import { useAuth } from "../auth/AuthProvider";
 import { formatDate } from "../lib/format";
 import { memberLabel } from "../lib/members";
-import { useRefreshPeople, type PeopleApi, type PeopleProject, type Person } from "../lib/people";
+import {
+  useMembers,
+  useRefreshPeople,
+  type PeopleApi,
+  type PeopleProject,
+  type Person,
+} from "../lib/people";
 import { NO_ROLE, PROJECTS_ONLY_LABEL, ROLE_LABELS, roleAtLeast, roleLabel } from "../lib/roles";
 import { useProjectRole } from "./ProjectsPanel";
 import { useToast } from "./Toasts";
@@ -61,7 +67,7 @@ export default function PeopleTable({
   const queryClient = useQueryClient();
   const toast = useToast();
   const me = useAuth().session?.user.id;
-  const members = useQuery({ queryKey: api.keys.members, queryFn: api.listMembers });
+  const members = useMembers(api);
   const projects = useQuery({ queryKey: api.keys.projects, queryFn: api.listProjects });
   const projectItems = projects.data?.items ?? [];
   // shortcut: one request per project; ask the backend for a per-user list if organizations grow
@@ -316,6 +322,21 @@ export default function PeopleTable({
           })}
         </tbody>
       </Table>
+      {members.hasNextPage && (
+        <div className="flex flex-wrap items-center gap-3 pt-3">
+          <Button
+            variant="secondary"
+            size="small"
+            disabled={members.isFetchingNextPage}
+            onClick={() => void members.fetchNextPage()}
+          >
+            {members.isFetchingNextPage ? "Loading…" : "Load more"}
+          </Button>
+          <span className="text-caption text-muted-foreground">
+            Showing {members.data.items.length} people
+          </span>
+        </div>
+      )}
 
       {pending?.kind === "role" && (
         <ConfirmDialog

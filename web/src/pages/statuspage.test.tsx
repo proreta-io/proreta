@@ -191,10 +191,16 @@ describe("status page settings", () => {
         "GET /api/v1/status-pages": () => json({ items: [current] }),
         "GET /api/v1/status-pages/sp/preview": () => json(snapshot()),
         "GET /api/v1/status-pages/sp/components": () => json({ items: [component({})] }),
-        "GET /api/v1/monitors": () =>
-          json({
-            items: [monitor("m1", "api-internal"), monitor("m2", "nightly-cron", "heartbeat")],
-          }),
+        "GET /api/v1/monitors": (r) => {
+          const q = new URL(r.url).searchParams.get("q") ?? "";
+          return json({
+            items: [
+              monitor("m1", "api-internal"),
+              monitor("m2", "nightly-cron", "heartbeat"),
+            ].filter((m) => m.name.includes(q)),
+            nextCursor: null,
+          });
+        },
         "PUT /api/v1/status-pages/sp/components": async (r) => {
           saved = await r.json();
           return json({
@@ -222,10 +228,8 @@ describe("status page settings", () => {
       expect(await within(preview).findByText("All systems operational")).toBeInTheDocument();
       expect(within(preview).queryByText("api-internal")).not.toBeInTheDocument();
 
-      await userEvent.selectOptions(
-        await screen.findByLabelText("Add a monitor or heartbeat"),
-        "m2",
-      );
+      await userEvent.type(await screen.findByLabelText("Add a monitor or heartbeat"), "night");
+      await userEvent.click(await screen.findByRole("option", { name: /nightly-cron/ }));
       await userEvent.click(screen.getByRole("button", { name: "Add component" }));
       await userEvent.click(screen.getByRole("button", { name: "Save components" }));
       expect(await screen.findByText("Enter a public name.")).toBeInTheDocument();

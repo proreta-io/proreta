@@ -15,7 +15,7 @@ import TemporaryPasswordPanel from "../../components/TemporaryPasswordPanel";
 import { useToast } from "../../components/Toasts";
 import { Alert, Button, ConfirmDialog, Field, Input, Select } from "../../components/ui";
 import { memberLabel } from "../../lib/members";
-import { adminPeople, useRefreshPeople, type Person } from "../../lib/people";
+import { adminPeople, useMembers, useRefreshPeople, type Person } from "../../lib/people";
 import { NO_ROLE, PROJECTS_ONLY_LABEL, ROLE_LABELS, ROLES, roleLabel } from "../../lib/roles";
 
 /** How many matches the picker shows; the search narrows the rest. */
@@ -31,7 +31,7 @@ export default function AdminOrganizationMembers({
   const deleted = organization.deletedAt !== null;
   const api = adminPeople(organization);
   const refresh = useRefreshPeople(api);
-  const members = useQuery({ queryKey: api.keys.members, queryFn: api.listMembers });
+  const members = useMembers(api);
   const [resetting, setResetting] = useState<Person | null>(null);
   const [search, setSearch] = useState("");
   const [term, setTerm] = useState("");

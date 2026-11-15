@@ -208,12 +208,40 @@ func scopeArgs(sc authz.Scope) []any {
 	return []any{sc.All, ids}
 }
 
-// ListMonitors returns one page of the live monitors of the tenant in the scope's projects,
-// oldest first (created_at, id: a total order, so pages neither skip nor repeat a monitor), and
-// the cursor of the next page ("" on the last). The summary counts every monitor of the scope,
-// not the page. Uptime comes from the hourly rollups plus the raw rows of the hours not rolled up
-// yet, for the page only.
-func (s *Service) ListMonitors(ctx context.Context, tenantID uuid.UUID, sc authz.Scope, page pagecursor.Page) ([]Monitor, Summary, string, error) {
+// MaxSearchRunes bounds a monitor search text.
+const MaxSearchRunes = 100
+
+// MonitorFilter narrows the list; the zero value keeps every monitor. Status is "up", "down",
+// "paused" or "unknown" (the summary's own classes, see Summary); Search is a case-insensitive
+// substring of the name, URL or host:port, taken literally (no pattern characters).
+type MonitorFilter struct {
+	Search string
+	Status string
+}
+
+// monitorRank is the leading sort key: down monitors first, then the active ones, paused last.
+const monitorRank = `(CASE WHEN m.paused THEN 2 WHEN s.status = '` + StatusDown + `' THEN 0 ELSE 1 END)`
+
+// statusSQL is the condition of each status filter, the same classes as summarySQL.
+var statusSQL = map[string]string{
+	StatusUp:      `NOT m.paused AND s.status = '` + StatusUp + `'`,
+	StatusDown:    `NOT m.paused AND s.status = '` + StatusDown + `'`,
+	"paused":      `m.paused`,
+	StatusUnknown: `NOT m.paused AND s.status NOT IN ('` + StatusUp + `', '` + StatusDown + `')`,
+}
+
+// ValidStatus reports whether s is a status filter value.
+func ValidStatus(s string) bool { _, ok := statusSQL[s]; return ok }
+
+// ListMonitors returns one page of the live monitors of the tenant in the scope's projects that
+// match the filter. The order is explicit: down monitors, then the other active ones, then paused
+// ones, each oldest first (rank, created_at, id: a total order, so pages neither skip nor repeat
+// a monitor while rows are added or removed; a monitor whose state changes between two requests
+// may move to another class and be seen twice or missed, as with any keyset on a mutable key).
+// The cursor of the next page is "" on the last. The summary counts every monitor of the scope,
+// never the filtered rows. Uptime comes from the hourly rollups plus the raw rows of the hours
+// not rolled up yet, for the page only.
+func (s *Service) ListMonitors(ctx context.Context, tenantID uuid.UUID, sc authz.Scope, f MonitorFilter, page pagecursor.Page) ([]Monitor, Summary, string, error) {
 	now := s.clock.Now()
 	var out []Monitor
 	var sum Summary
@@ -224,11 +252,23 @@ func (s *Service) ListMonitors(ctx context.Context, tenantID uuid.UUID, sc authz
 			return fmt.Errorf("summary: %w", err)
 		}
 		q := monitorColumns + scopeSQL(2)
-		if page.After != nil {
-			args = append(args, page.After.At, page.After.ID)
-			q += ` AND (m.created_at, m.id) > ($4, $5)`
+		if c, ok := statusSQL[f.Status]; ok {
+			q += ` AND (` + c + `)`
 		}
-		q += ` ORDER BY m.created_at, m.id`
+		if f.Search != "" {
+			// position() on lower-cased text, not LIKE: the text has no wildcards to escape.
+			args = append(args, f.Search)
+			n := len(args)
+			q += fmt.Sprintf(` AND (position(lower($%[1]d) in lower(m.name)) > 0
+				OR position(lower($%[1]d) in lower(COALESCE(m.config ->> 'url', ''))) > 0
+				OR (m.type = 'tcp' AND position(lower($%[1]d) in lower((m.config ->> 'host') || ':' || (m.config ->> 'port'))) > 0))`, n)
+		}
+		if page.After != nil {
+			args = append(args, page.After.Rank, page.After.At, page.After.ID)
+			n := len(args)
+			q += fmt.Sprintf(` AND (%s, m.created_at, m.id) > ($%d, $%d, $%d)`, monitorRank, n-2, n-1, n)
+		}
+		q += ` ORDER BY ` + monitorRank + `, m.created_at, m.id`
 		if n := page.Size(); n > 0 {
 			args = append(args, n)
 			q += fmt.Sprintf(` LIMIT $%d`, len(args))
@@ -242,7 +282,14 @@ func (s *Service) ListMonitors(ctx context.Context, tenantID uuid.UUID, sc authz
 			return err
 		}
 		out, next = pagecursor.Trim(page, out, func(m Monitor) pagecursor.Position {
-			return pagecursor.Position{At: m.CreatedAt, ID: m.ID}
+			rank := 1
+			switch {
+			case m.Paused:
+				rank = 2
+			case m.Status == StatusDown:
+				rank = 0
+			}
+			return pagecursor.Position{Rank: rank, At: m.CreatedAt, ID: m.ID}
 		})
 		ids := make([]uuid.UUID, len(out))
 		for i, m := range out {

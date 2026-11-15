@@ -125,7 +125,6 @@ describe("monitors list", () => {
   const list = {
     summary: { up: 1, down: 1, paused: 1, unknown: 0 },
     items: [
-      listItem({ id: "a", name: "Website", http: httpOf({ url: "https://example.com/" }) }),
       listItem({
         id: "b",
         name: "API",
@@ -133,6 +132,7 @@ describe("monitors list", () => {
         status: "down",
         statusSince: new Date(Date.now() - 12 * 60_000 - 5_000).toISOString(),
       }),
+      listItem({ id: "a", name: "Website", http: httpOf({ url: "https://example.com/" }) }),
       listItem({
         id: "c",
         name: "Billing",
@@ -143,23 +143,61 @@ describe("monitors list", () => {
     nextCursor: null,
   };
 
-  it("shows the summary, statuses and filters by name or URL", async () => {
-    mockApi({ ...signedIn, "GET /api/v1/monitors": () => json(list) });
+  // The server filters by `q` and `status`; the summary stays the same.
+  const serve = (request: Request) => {
+    const params = new URL(request.url).searchParams;
+    const q = (params.get("q") ?? "").toLowerCase();
+    const wanted = params.get("status");
+    const items = list.items.filter(
+      (m) =>
+        (!q || `${m.name} ${m.http?.url}`.toLowerCase().includes(q)) &&
+        (!wanted || (m.paused ? "paused" : m.status) === wanted),
+    );
+    return json({ ...list, items });
+  };
+  const monitorCalls = (fetchMock: ReturnType<typeof mockApi>) =>
+    fetchMock.mock.calls
+      .map(([r]) => new URL(new Request(r).url))
+      .filter((u) => u.pathname === "/api/v1/monitors");
+
+  it("shows the summary, statuses and filters by name or URL on the server", async () => {
+    const fetchMock = mockApi({ ...signedIn, "GET /api/v1/monitors": serve });
     renderApp("/");
     expect(await screen.findByText("3 monitors · 1 up · 1 down · 1 paused")).toBeInTheDocument();
     expect(screen.getByText("Down 12 min")).toBeInTheDocument();
-    expect(screen.getByText("Paused")).toBeInTheDocument();
+    expect(within(screen.getByRole("table")).getByText("Paused")).toBeInTheDocument();
     expect(screen.getAllByText("40 s ago")).toHaveLength(3);
     expect(screen.getByText(/Last updated/)).toBeInTheDocument();
 
     await userEvent.type(screen.getByLabelText("Filter by name or URL"), "health");
+    await waitFor(() =>
+      expect(within(screen.getByRole("table")).getAllByRole("row")).toHaveLength(2),
+    );
+    expect(monitorCalls(fetchMock).at(-1)!.searchParams.get("q")).toBe("health");
+    // Typing sent one request for the settled text, not one per letter.
+    expect(monitorCalls(fetchMock).filter((u) => u.searchParams.has("q"))).toHaveLength(1);
     const rows = within(screen.getByRole("table")).getAllByRole("row");
-    expect(rows).toHaveLength(2); // header + API
     expect(within(rows[1]!).getByText("API")).toBeInTheDocument();
+    expect(screen.getByText("3 monitors · 1 up · 1 down · 1 paused")).toBeInTheDocument();
 
     await userEvent.clear(screen.getByLabelText("Filter by name or URL"));
     await userEvent.type(screen.getByLabelText("Filter by name or URL"), "zzz");
-    expect(screen.getByText("No monitors match “zzz”.")).toBeInTheDocument();
+    expect(await screen.findByText("No monitors match “zzz”.")).toBeInTheDocument();
+    // The box and the summary stay while nothing matches.
+    expect(screen.getByLabelText("Filter by name or URL")).toHaveValue("zzz");
+    expect(screen.getByText("3 monitors · 1 up · 1 down · 1 paused")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Clear filter" }));
+    expect(await screen.findByText("Website")).toBeInTheDocument();
+  });
+
+  it("filters by status on the server", async () => {
+    const fetchMock = mockApi({ ...signedIn, "GET /api/v1/monitors": serve });
+    renderApp("/");
+    await userEvent.selectOptions(await screen.findByLabelText("Status"), "paused");
+    await waitFor(() => expect(screen.queryByText("Website")).not.toBeInTheDocument());
+    expect(screen.getByText("Billing")).toBeInTheDocument();
+    expect(monitorCalls(fetchMock).at(-1)!.searchParams.get("status")).toBe("paused");
+    expect(screen.getByText("3 monitors · 1 up · 1 down · 1 paused")).toBeInTheDocument();
   });
 
   describe("with more than one page", () => {
@@ -193,18 +231,26 @@ describe("monitors list", () => {
       ).toHaveLength(1);
     });
 
-    it("searches the monitors of the pages that are not loaded yet", async () => {
-      mockApi({ ...signedIn, "GET /api/v1/monitors": pages });
+    it("asks the server for monitors on pages that are not loaded, without loading them", async () => {
+      const fetchMock = mockApi({
+        ...signedIn,
+        "GET /api/v1/monitors": (request: Request) =>
+          new URL(request.url).searchParams.get("q") === "charlie"
+            ? json({ summary, items: page2, nextCursor: null })
+            : pages(request),
+      });
       renderApp("/");
       await userEvent.type(await screen.findByLabelText("Filter by name or URL"), "charlie");
-      // Charlie is on the second page, which the filter loads by itself.
       expect(await screen.findByText("Charlie")).toBeInTheDocument();
-      expect(screen.queryByText("Alpha")).not.toBeInTheDocument();
+      await waitFor(() => expect(screen.queryByText("Alpha")).not.toBeInTheDocument());
+      expect(fetchMock.mock.calls.some(([r]) => new Request(r).url.includes("cursor="))).toBe(
+        false,
+      );
     });
   });
 
-  it("puts the newest outage first and works from the keyboard", async () => {
-    mockApi({ ...signedIn, "GET /api/v1/monitors": () => json(list) });
+  it("lists the server's order (down first) and works from the keyboard", async () => {
+    mockApi({ ...signedIn, "GET /api/v1/monitors": serve });
     renderApp("/");
     const filter = await screen.findByLabelText("Filter by name or URL");
     const links = within(screen.getByRole("table")).getAllByRole("link");
@@ -221,7 +267,7 @@ describe("monitors list", () => {
     expect(filter).toHaveFocus();
 
     await userEvent.keyboard("web");
-    expect(screen.getByText("API is down and hidden by this filter.")).toBeInTheDocument();
+    expect(await screen.findByText("1 down monitor is hidden by this filter.")).toBeInTheDocument();
     await userEvent.keyboard("{Escape}");
     expect(filter).toHaveValue("");
   });

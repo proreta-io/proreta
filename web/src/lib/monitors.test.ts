@@ -4,10 +4,8 @@ import {
   requestSummary,
   downReason,
   failureStreak,
-  filterMonitors,
   monitorState,
   quietState,
-  sortMonitors,
   statusLine,
   statusText,
   summaryLine,
@@ -91,33 +89,6 @@ describe("a partly loaded list", () => {
   });
 });
 
-describe("filterMonitors", () => {
-  const items = [
-    item({ id: "1", name: "Website", http: httpSettings({ url: "https://example.com/" }) }),
-    item({ id: "2", name: "API", http: httpSettings({ url: "https://api.example.org/health" }) }),
-    item({ id: "3", name: "Billing", http: httpSettings({ url: "https://pay.example.net/" }) }),
-    item({
-      id: "4",
-      name: "Cron",
-      type: "heartbeat",
-      http: undefined,
-      heartbeat: { expectedIntervalSeconds: 300, graceSeconds: 60, lastPingAt: null },
-    }),
-  ];
-
-  it.each([
-    ["", ["1", "2", "3", "4"]],
-    ["   ", ["1", "2", "3", "4"]],
-    ["cron", ["4"]],
-    ["web", ["1"]],
-    ["HEALTH", ["2"]],
-    [".example.", ["2", "3"]],
-    ["nothing", []],
-  ])("filter %j keeps %j", (query, ids) => {
-    expect(filterMonitors(items, query).map((m) => m.id)).toEqual(ids);
-  });
-});
-
 describe("statusText", () => {
   it("shows the down duration and plain labels otherwise", () => {
     expect(statusText(item({ status: "down", statusSince: "2026-10-20T14:18:00Z" }), now)).toBe(
@@ -183,27 +154,6 @@ describe("summaryParts", () => {
     });
     expect(summaryParts(list(0)).some((p) => p.down)).toBe(false);
     expect(summaryParts(list(2)).filter((p) => p.down)).toEqual([{ text: "2 down", down: true }]);
-  });
-});
-
-describe("sortMonitors", () => {
-  it("puts the newest failure first, paused last and the rest by name", () => {
-    const sorted = sortMonitors([
-      item({ name: "Zeta" }),
-      item({ name: "Old outage", status: "down", statusSince: "2026-10-20T10:00:00Z" }),
-      item({ name: "Alpha", paused: true }),
-      item({ name: "Beta", status: "unknown" }),
-      item({ name: "New outage", status: "down", statusSince: "2026-10-20T14:00:00Z" }),
-      item({ name: "Paused while down", paused: true, status: "down" }),
-    ]);
-    expect(sorted.map((m) => m.name)).toEqual([
-      "New outage",
-      "Old outage",
-      "Beta",
-      "Zeta",
-      "Alpha",
-      "Paused while down",
-    ]);
   });
 });
 
