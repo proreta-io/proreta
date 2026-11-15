@@ -34,11 +34,23 @@ export interface AuthValue {
 
 const AuthContext = createContext<AuthValue | null>(null);
 
+/**
+ * Answers that need no session and hold nothing of a user. Public pages read them while the
+ * session check may still answer 401 (again); removing a query in flight would leave its page
+ * loading for good, because nothing re-renders when the session was already empty.
+ */
+const PUBLIC_KEYS: ReadonlySet<unknown> = new Set([
+  queryKeys.me[0],
+  queryKeys.authProviders[0],
+  queryKeys.publicConfig[0],
+  queryKeys.invitationPreview("")[0],
+]);
+
 /** Forgets the session and every cached response of the previous user. */
 function dropSession(queryClient: QueryClient) {
   setCsrfToken(null);
   queryClient.setQueryData(queryKeys.me, null);
-  queryClient.removeQueries({ predicate: (q) => q.queryKey[0] !== queryKeys.me[0] });
+  queryClient.removeQueries({ predicate: (q) => !PUBLIC_KEYS.has(q.queryKey[0]) });
 }
 
 /**
