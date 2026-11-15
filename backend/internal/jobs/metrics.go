@@ -27,6 +27,10 @@ type Metrics struct {
 	purgedRows *prometheus.CounterVec
 	// heartbeatsMissed counts missed heartbeat deadlines applied to the incident machine.
 	heartbeatsMissed prometheus.Counter
+	// dirtyHours is the hours late results marked and the drain has not recomputed yet,
+	// dirtyHoursProcessed the hours it recomputed.
+	dirtyHours          prometheus.Gauge
+	dirtyHoursProcessed prometheus.Counter
 	// statusSnapshots counts status page snapshots stored by the rebuild task.
 	statusSnapshots prometheus.Counter
 	// speculaAgents is the number of Specula by status; speculaIncidents counts the incidents
@@ -74,6 +78,12 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		heartbeatsMissed: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "proreta_jobs_heartbeats_missed_total", Help: "Missed heartbeat deadlines applied as failures.",
 		}),
+		dirtyHours: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "proreta_jobs_rollup_dirty_hours", Help: "Hours marked by late results and not yet recomputed.",
+		}),
+		dirtyHoursProcessed: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "proreta_jobs_rollup_dirty_hours_processed_total", Help: "Marked hours recomputed by the rollup drain.",
+		}),
 		statusSnapshots: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "proreta_jobs_status_page_snapshots_total", Help: "Status page snapshots rebuilt and stored.",
 		}),
@@ -120,7 +130,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	for _, r := range []string{keptRollupsIncomplete, keptError} {
 		m.partitionsKept.WithLabelValues(r)
 	}
-	reg.MustRegister(m.deliveries, m.duration, m.pending, m.claimErrors, m.housekeeping, m.lastSuccess, m.partitionsKept, m.purgedRows, m.heartbeatsMissed, m.statusSnapshots,
+	reg.MustRegister(m.deliveries, m.duration, m.pending, m.claimErrors, m.housekeeping, m.lastSuccess, m.partitionsKept, m.purgedRows, m.heartbeatsMissed, m.dirtyHours, m.dirtyHoursProcessed, m.statusSnapshots,
 		m.speculaAgents, m.speculaIncidents, m.domains, m.domainChecks, m.mail, m.mailDuration, m.mailPending, m.mailClaimErrors)
 	return m
 }

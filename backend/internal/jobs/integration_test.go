@@ -158,7 +158,7 @@ func (e *env) deliver(tenant string, monitor uuid.UUID, kind string, payload map
 		// A reminder is checked against its open incident and monitor; the other kinds
 		// get incidents without a monitor, so several can be open for one monitor.
 		monitorCol := "NULL"
-		if kind == notify.DeliveryReminder {
+		if kind == notify.DeliveryReminder || payload["late"] == true {
 			monitorCol = "'" + monitor.String() + "'"
 		}
 		pgtest.MustExec(e.t, e.admin, fmt.Sprintf(`INSERT INTO incidents (id, tenant_id, monitor_id, started_at) VALUES ('%s', '%s', %s, now())`, inc, tenant, monitorCol))
@@ -495,6 +495,38 @@ func TestIntegrationDeliveryMentionReminderDeleted(t *testing.T) {
 	d.RunOnce(e.ctx)
 	if r := e.row(gone); r.status != "failed" || r.lastError == nil || *r.lastError != "channel_deleted" || len(e.slack.sent()) != 3 {
 		t.Fatalf("delivery to a deleted channel: %+v, posts %d", r, len(e.slack.sent()))
+	}
+}
+
+// The "down" of a replayed result is sent while its incident is open and dropped once the
+// incident is over (its late "recovered" says it all); a live "down" is sent either way.
+func TestIntegrationLateOpenedOfResolvedIncident(t *testing.T) {
+	e := newEnv(t, "jobslate")
+	d := e.deliverer(prometheus.NewRegistry(), nil)
+	over, open, live := e.monitor(tenantA, "Over"), e.monitor(tenantA, "Open"), e.monitor(tenantA, "Live")
+	p := func(name string, late bool) map[string]any {
+		return map[string]any{"monitorName": name, "reason": "timeout", "late": late}
+	}
+	lateOver := e.deliver(tenantA, over, notify.DeliveryOpened, p("Over", true))
+	lateOpen := e.deliver(tenantA, open, notify.DeliveryOpened, p("Open", true))
+	liveOver := e.deliver(tenantA, live, notify.DeliveryOpened, map[string]any{"monitorName": "Live", "reason": "timeout"})
+	pgtest.MustExec(t, e.admin,
+		`UPDATE incidents SET resolved_at = now(), resolve_reason = 'recovered' WHERE monitor_id = '`+over.String()+`'`,
+		`UPDATE notification_deliveries SET incident_id = (SELECT id FROM incidents WHERE monitor_id = '`+over.String()+`') WHERE id = '`+liveOver.String()+`'`)
+	for range 3 { // a claim hands out two rows per channel
+		d.RunOnce(e.ctx)
+	}
+	if r := e.row(lateOver); r.status != "failed" || r.lastError == nil || *r.lastError != "late_incident_resolved" {
+		t.Fatalf("late opened of a resolved incident: %+v", r)
+	}
+	for _, id := range []uuid.UUID{lateOpen, liveOver} {
+		if r := e.row(id); r.status != "sent" {
+			t.Fatalf("%s: %+v", id, r)
+		}
+	}
+	posts := e.slack.sent()
+	if len(posts) != 2 || !strings.Contains(posts[0].text, "*Open* is down (reported late)") || !strings.Contains(posts[1].text, "*Live* is down\n") {
+		t.Fatalf("posts = %+v", posts)
 	}
 }
 

@@ -67,6 +67,10 @@ type ResultInput struct {
 	Result     machine.Result
 	// Now is the current time (TLS expiry is measured from it).
 	Now time.Time
+	// Late marks a result that reached Proreta long after it was checked (a replayed slot). The
+	// state machine treats it like any other result, oldest first; only the outbox rows of an
+	// incident change or end carry late and observedAt, so a message can say it is late.
+	Late bool
 }
 
 // ApplyResult runs the state machine for one result in tx, which must be a tenant transaction
@@ -219,11 +223,13 @@ func (s *Service) enqueue(ctx context.Context, q *incidentsdb.Queries, in Result
 		case machine.KindOpened:
 			incident = incidentID
 			p.IncidentID, p.Reason, p.StartedAt = incidentID, in.Result.ErrorKind, &startedAt
+			p.lateAt(in)
 		case machine.KindResolved:
 			incident = incidentID
 			resolved := in.Result.CheckedAt.UTC()
 			p.IncidentID, p.StartedAt, p.ResolvedAt = incidentID, &startedAt, &resolved
 			p.DurationSeconds = int64(resolved.Sub(startedAt).Seconds())
+			p.lateAt(in)
 		case machine.KindTLSExpiring:
 			na := in.Result.TLSNotAfter.UTC()
 			days := int(na.Sub(in.Now).Hours() / 24)
@@ -312,6 +318,16 @@ type payload struct {
 	DurationSeconds int64      `json:"durationSeconds,omitempty"`
 	TLSNotAfter     *time.Time `json:"tlsNotAfter,omitempty"`
 	DaysLeft        *int       `json:"daysLeft,omitempty"`
+	// Late and ObservedAt: the result was replayed, and this is when Proreta received it.
+	Late       bool       `json:"late,omitempty"`
+	ObservedAt *time.Time `json:"observedAt,omitempty"`
+}
+
+func (p *payload) lateAt(in ResultInput) {
+	if in.Late {
+		at := in.Now.UTC()
+		p.Late, p.ObservedAt = true, &at
+	}
 }
 
 func displayURL(config []byte) string {

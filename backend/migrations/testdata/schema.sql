@@ -947,6 +947,7 @@ purge_notification_deliveries(integer) owner=proreta_owner definer=true acl=pror
 purge_password_resets() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 purge_result_rollups(integer) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 reset_monitor_runtime(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+rollup_drain_dirty(integer) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 rollup_mark_dirty(timestamp with time zone) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_agents_sync_location() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner
 specula_authenticate(bytea) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
@@ -2404,6 +2405,9 @@ BEGIN
     IF hi >= now() - interval '30 days' OR lo = date_trunc('month', now()) THEN
         RETURN false;
     END IF;
+    IF EXISTS (SELECT 1 FROM rollup_dirty_hours WHERE hour >= lo AND hour < hi) THEN
+        RETURN false;
+    END IF;
     -- Every raw row of the partition must be in a rollup. A rollup hour counts the raw rows it
     -- saw and never more than exist (raw rows are not deleted before the partition), so equal
     -- totals mean every hour matches. Two scalar aggregates instead of a group by over the whole
@@ -3069,6 +3073,29 @@ BEGIN
       AND s.tenant_id = m.tenant_id AND s.monitor_id = m.id;
     GET DIAGNOSTICS n = ROW_COUNT;
     RETURN n;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.rollup_drain_dirty(p_max integer)
+ RETURNS TABLE(processed integer, remaining bigint)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+ SET "TimeZone" TO 'UTC'
+AS $function$
+DECLARE
+    r    record;
+    done integer := 0;
+BEGIN
+    IF p_max IS NULL OR p_max NOT BETWEEN 1 AND 48 THEN
+        RAISE EXCEPTION 'rollup_drain_dirty: p_max must be 1..48' USING ERRCODE = '22023';
+    END IF;
+    PERFORM pg_advisory_xact_lock(hashtext('proreta.compute_rollups'));
+    FOR r IN SELECT d.hour, d.seq FROM rollup_dirty_hours AS d ORDER BY d.hour LIMIT p_max LOOP
+        PERFORM compute_rollups(r.hour, r.hour + interval '1 hour');
+        DELETE FROM rollup_dirty_hours AS d WHERE d.hour = r.hour AND d.seq = r.seq;
+        done := done + 1;
+    END LOOP;
+    RETURN QUERY SELECT done, (SELECT count(*) FROM rollup_dirty_hours);
 END
 $function$
 CREATE OR REPLACE FUNCTION public.rollup_mark_dirty(p_hour timestamp with time zone)

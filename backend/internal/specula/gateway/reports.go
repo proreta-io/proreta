@@ -22,6 +22,9 @@ import (
 // maxReportsBody bounds one reports call: 100 reports are about 30 KB.
 const maxReportsBody = 256 << 10
 
+// lateAlertAfter is how old a slot is, when it is received, for its alerts to say they are late.
+const lateAlertAfter = 10 * time.Minute
+
 func (g *Handler) reports(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxReportsBody)
 	var in wire.ReportsRequest
@@ -114,7 +117,7 @@ func (g *Handler) recordReport(ctx context.Context, tx pgx.Tx, id specula.Identi
 		OK: x.OK, StatusCode: x.StatusCode, LatencyMs: x.LatencyMs, ErrorKind: x.ErrorKind,
 		TLSNotAfter: x.TLSNotAfter, CheckedAt: time.Unix(x.Slot, 0).UTC(),
 	}
-	permanent, err := g.d.Recorder.WriteSlot(ctx, sp, id.TenantID, x.MonitorID, id.LocationID, res)
+	permanent, err := g.d.Recorder.WriteSlot(ctx, sp, id.TenantID, x.MonitorID, id.LocationID, res, now.Sub(res.CheckedAt) > lateAlertAfter)
 	switch {
 	case errors.Is(err, checkresult.ErrDuplicate):
 		return wire.OutcomeDuplicate, sp.Rollback(ctx)

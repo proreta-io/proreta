@@ -35,6 +35,7 @@ func TestIntegrationReports(t *testing.T) {
 	pgtest.MustExec(t, admin,
 		`INSERT INTO tenants (id, slug, name) VALUES ('`+tenantA+`', 'a', 'A'), ('`+tenantB+`', 'b', 'B')`,
 		`INSERT INTO users (id, email) VALUES ('`+user.String()+`', 'owner@example.com')`)
+	pgtest.MustExec(t, admin, `UPDATE tenants SET plan_key = 'internal'`)
 	apiPool, worker := pg.Pool(t, pg.APIURL, 4), pg.Pool(t, pg.WorkerURL, 4)
 	sched := scheduler.New()
 	inc := incidents.NewService(sched)
@@ -57,6 +58,12 @@ func TestIntegrationReports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	replay, err := mon.Create(ctx, macts(tenantA), monitors.CreateInput{Name: "Replay", SpeculaID: &s.ID, HTTP: &monitors.HTTPSettings{URL: &url, FailureThreshold: &one}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pgtest.MustExec(t, admin, `INSERT INTO notification_channels (id, tenant_id, type, config_encrypted, project_id)
+		VALUES (gen_random_uuid(), '`+tenantA+`', 'slack_webhook', '\x01', (SELECT id FROM projects WHERE tenant_id = '`+tenantA+`' AND is_default))`)
 	cloud, err := mon.Create(ctx, macts(tenantA), monitors.CreateInput{Name: "Cloud", HTTP: &monitors.HTTPSettings{URL: &url}})
 	if err != nil {
 		t.Fatal(err)
@@ -200,6 +207,30 @@ func TestIntegrationReports(t *testing.T) {
 		}
 		if n := count(`SELECT count(*) FROM incidents WHERE monitor_id = $1`, flaky.ID); n != 1 {
 			t.Fatalf("incidents %d", n)
+		}
+	})
+
+	t.Run("late alerts: a replayed outage keeps its real times and is marked late", func(t *testing.T) {
+		want("outage", send(
+			report(replay, 1, slot(replay, 60), false),
+			report(replay, 1, slot(replay, 59), false),
+			report(replay, 1, slot(replay, 58), true),
+		), "recorded", "recorded", "recorded")
+		var started, resolved time.Time
+		if err := admin.QueryRow(ctx, `SELECT started_at, resolved_at FROM incidents WHERE monitor_id = $1`, replay.ID).Scan(&started, &resolved); err != nil {
+			t.Fatal(err)
+		}
+		if started.Unix() != slot(replay, 60) || resolved.Unix() != slot(replay, 58) {
+			t.Fatalf("incident %v to %v, want the slots %d to %d", started, resolved, slot(replay, 60), slot(replay, 58))
+		}
+		if n := count(`SELECT count(*) FROM notification_deliveries WHERE monitor_id = $1 AND payload->>'late' = 'true' AND payload ? 'observedAt'
+			AND ((kind = 'opened') OR (kind = 'resolved')) `, replay.ID); n != 2 {
+			t.Fatalf("late deliveries %d, want one opened and one resolved", n)
+		}
+		// A result of the current slot is live: no late marker.
+		want("live", send(report(replay, 1, slot(replay, 0), false)), "recorded")
+		if n := count(`SELECT count(*) FROM notification_deliveries WHERE monitor_id = $1 AND kind = 'opened' AND NOT payload ? 'late'`, replay.ID); n != 1 {
+			t.Fatalf("live opened deliveries %d, want 1", n)
 		}
 	})
 

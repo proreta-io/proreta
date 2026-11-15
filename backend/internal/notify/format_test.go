@@ -59,6 +59,23 @@ func TestFormatResolved(t *testing.T) {
 	}
 }
 
+// A replayed result says so; the recovery also names the real outage.
+func TestFormatLate(t *testing.T) {
+	start, end := time.Date(2026, 10, 20, 8, 3, 0, 0, time.UTC), time.Date(2026, 10, 20, 8, 41, 0, 0, time.UTC)
+	p := map[string]any{"monitorId": monitorID, "monitorName": "API", "late": true, "startedAt": start, "resolvedAt": end, "durationSeconds": 2280}
+	got, err := Format(DeliveryResolved, mustJSON(t, p), publicURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := ":large_green_circle: *API* is back up after 38m (reported late)\nWas down 2026-10-20 08:03:00 to 2026-10-20 08:41:00 UTC"; got != want {
+		t.Fatalf("resolved: got %q want %q", got, want)
+	}
+	got, err = Format(DeliveryOpened, mustJSON(t, p), publicURL)
+	if err != nil || !strings.HasPrefix(got, ":red_circle: *API* is down (reported late)\n") {
+		t.Fatalf("opened: %q, %v", got, err)
+	}
+}
+
 func TestFormatTLS(t *testing.T) {
 	na := time.Date(2026, 11, 2, 23, 0, 0, 0, time.UTC)
 	got, err := Format(DeliveryTLSExpiring, mustJSON(t, map[string]any{

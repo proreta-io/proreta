@@ -48,19 +48,19 @@ func (r Recorder) Write(ctx context.Context, tx pgx.Tx, lease scheduler.Lease, i
 	if err != nil || !ok {
 		return false, "", err
 	}
-	permanent, err = r.apply(ctx, tx, lease.TenantID, lease.MonitorID, lease.LocationID, r.Clock.Now(), res)
+	permanent, err = r.apply(ctx, tx, lease.TenantID, lease.MonitorID, lease.LocationID, r.Clock.Now(), false, res)
 	return err == nil, permanent, err
 }
 
 // apply runs the state machine in a nested savepoint: a permanent error undoes only its part, the
 // result (and a completed lease) are kept, so the job is not repeated just to fail again.
-func (r Recorder) apply(ctx context.Context, tx pgx.Tx, tenantID, monitorID, locationID uuid.UUID, now time.Time, res checks.Result) (string, error) {
+func (r Recorder) apply(ctx context.Context, tx pgx.Tx, tenantID, monitorID, locationID uuid.UUID, now time.Time, late bool, res checks.Result) (string, error) {
 	sp, err := tx.Begin(ctx)
 	if err != nil {
 		return "", err
 	}
 	_, err = r.Incidents.ApplyResult(ctx, sp, incidents.ResultInput{
-		TenantID: tenantID, MonitorID: monitorID, LocationID: locationID, Now: now,
+		TenantID: tenantID, MonitorID: monitorID, LocationID: locationID, Now: now, Late: late,
 		Result: machine.Result{OK: res.OK, ErrorKind: res.ErrorKind, TLSNotAfter: res.TLSNotAfter, CheckedAt: res.CheckedAt},
 	})
 	if err == nil {
@@ -98,9 +98,9 @@ const rollupLookback = 3 * time.Hour
 // WriteSlot records the result of one slot of an autonomous executor in tx, a tenant transaction
 // of tenantID: the row is stored at res.CheckedAt (the slot), a row in an hour the rollup no
 // longer revisits marks that hour dirty, and the incident state machine runs as for any result.
-// There is no lease. The caller has validated the slot against the monitor's epoch. permanent
+// There is no lease. late says the slot is a replay (see incidents.ResultInput.Late). The caller has validated the slot against the monitor's epoch. permanent
 // has the meaning it has for Write.
-func (r Recorder) WriteSlot(ctx context.Context, tx pgx.Tx, tenantID, monitorID, locationID uuid.UUID, res checks.Result) (permanent string, err error) {
+func (r Recorder) WriteSlot(ctx context.Context, tx pgx.Tx, tenantID, monitorID, locationID uuid.UUID, res checks.Result, late bool) (permanent string, err error) {
 	if err := results.Insert(ctx, tx, results.Row{
 		TenantID: tenantID, MonitorID: monitorID, LocationID: locationID, CheckedAt: res.CheckedAt,
 		OK: res.OK, StatusCode: res.StatusCode, LatencyMs: res.LatencyMs, ErrorKind: res.ErrorKind, TLSNotAfter: res.TLSNotAfter,
@@ -117,6 +117,5 @@ func (r Recorder) WriteSlot(ctx context.Context, tx pgx.Tx, tenantID, monitorID,
 			return "", err
 		}
 	}
-	// The seam for late-alert handling: ApplyResult is called as for a pulled result.
-	return r.apply(ctx, tx, tenantID, monitorID, locationID, now, res)
+	return r.apply(ctx, tx, tenantID, monitorID, locationID, now, late, res)
 }

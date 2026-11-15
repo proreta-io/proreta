@@ -6,6 +6,7 @@ package jobs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -234,9 +235,10 @@ func (r *Deliverer) deliver(ctx context.Context, dl delivery) {
 			target.Hook = hook
 			return nil
 		}
-		if dl.Kind == notify.DeliveryReminder && dl.IncidentID != nil {
+		if (dl.Kind == notify.DeliveryReminder || dl.Kind == notify.DeliveryOpened && lateAlert(dl.Payload)) && dl.IncidentID != nil {
 			// A reminder queued before the incident resolved (or the monitor was paused or
-			// deleted) must not say the monitor is still down.
+			// deleted) must not say the monitor is still down, and neither must the "down" of
+			// a replayed result whose incident is over: its "recovered" tells the whole story.
 			if stillDown, err = incidents.StillDown(ctx, tx, dl.TenantID, *dl.IncidentID); err != nil || !stillDown {
 				return err
 			}
@@ -254,6 +256,8 @@ func (r *Deliverer) deliver(ctx context.Context, dl delivery) {
 	})
 	var reason string
 	switch {
+	case err == nil && !stillDown && dl.Kind == notify.DeliveryOpened:
+		reason = "late_incident_resolved"
 	case err == nil && !stillDown:
 		reason = "incident_resolved"
 	case errors.Is(err, notify.ErrChannelNotFound):
@@ -403,4 +407,12 @@ func orDefault[T comparable](v, def T) T {
 		return def
 	}
 	return v
+}
+
+// lateAlert reports whether an outbox payload was written for a replayed result.
+func lateAlert(payload []byte) bool {
+	var p struct {
+		Late bool `json:"late"`
+	}
+	return json.Unmarshal(payload, &p) == nil && p.Late
 }

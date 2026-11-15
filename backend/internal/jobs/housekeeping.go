@@ -83,7 +83,7 @@ func DefaultTasks(m *Metrics, log *slog.Logger, mon *monitors.Service) []Task {
 	return []Task{
 		{Name: "evaluate_heartbeats", Every: HeartbeatEvery, LockKey: lockHeartbeats, RunOutsideTx: evaluateHeartbeats(mon, m)},
 		{Name: "ensure_partitions", Every: 24 * time.Hour, LockKey: lockEnsurePartitions, Run: scalar(`SELECT ensure_partitions()`)},
-		{Name: "compute_rollups", Every: 5 * time.Minute, LockKey: lockComputeRollups, Run: computeRollups},
+		{Name: "compute_rollups", Every: 5 * time.Minute, LockKey: lockComputeRollups, Run: computeRollups(m)},
 		{Name: "drop_expired_partitions", Every: 24 * time.Hour, LockKey: lockDropPartitions, RunOutsideTx: r.dropExpiredPartitions},
 		{Name: "purge_expired_sessions", Every: time.Hour, LockKey: lockPurgeSessions, Run: purgeSessions},
 		{Name: "purge_mail_outbox", Every: time.Hour, LockKey: lockPurgeMail, Run: purgeMail},
@@ -233,16 +233,30 @@ func enqueueReminders(ctx context.Context, tx pgx.Tx, _ time.Time) (int, error) 
 	return int(n), err
 }
 
+// RollupDirtyPerRun is how many hours that late results marked are recomputed per run.
+const RollupDirtyPerRun = 6
+
 // computeRollups rolls up the closed hours from the database watermark (at most
-// RollupMaxHoursPerRun of them) and the lookback window; the function never rolls up the open
-// hour.
-func computeRollups(ctx context.Context, tx pgx.Tx, _ time.Time) (int, error) {
-	if err := allowLongStatement(ctx, tx); err != nil {
-		return 0, err
+// RollupMaxHoursPerRun of them) and the lookback window, then recomputes the hours marked by
+// late results (RollupDirtyPerRun of them); the functions never roll up the open hour.
+func computeRollups(m *Metrics) func(context.Context, pgx.Tx, time.Time) (int, error) {
+	return func(ctx context.Context, tx pgx.Tx, _ time.Time) (int, error) {
+		if err := allowLongStatement(ctx, tx); err != nil {
+			return 0, err
+		}
+		var n int32
+		if err := tx.QueryRow(ctx, `SELECT compute_rollups_catch_up($1, $2)`, RollupMaxHoursPerRun, int(RollupLookback/time.Hour)).Scan(&n); err != nil {
+			return 0, err
+		}
+		var done int32
+		var left int64
+		if err := tx.QueryRow(ctx, `SELECT processed, remaining FROM rollup_drain_dirty($1)`, RollupDirtyPerRun).Scan(&done, &left); err != nil {
+			return int(n), err
+		}
+		m.dirtyHours.Set(float64(left))
+		m.dirtyHoursProcessed.Add(float64(done))
+		return int(n), nil
 	}
-	var n int32
-	err := tx.QueryRow(ctx, `SELECT compute_rollups_catch_up($1, $2)`, RollupMaxHoursPerRun, int(RollupLookback/time.Hour)).Scan(&n)
-	return int(n), err
 }
 
 // allowLongStatement lifts the runtime role's statement_timeout (30 s) for the rest of tx: the

@@ -114,6 +114,7 @@ var definerCalls = map[string]string{
 	// ignored, the epoch functions find no monitor, the triggers are not callable.
 	"specula_schedule":                  `SELECT * FROM specula_schedule(gen_random_uuid(), gen_random_uuid())`,
 	"rollup_mark_dirty":                 `SELECT rollup_mark_dirty(now())`,
+	"rollup_drain_dirty":                `SELECT * FROM rollup_drain_dirty(1)`,
 	"specula_epoch_open":                `SELECT specula_epoch_open(gen_random_uuid(), gen_random_uuid(), gen_random_uuid())`,
 	"specula_epoch_close":               `SELECT specula_epoch_close(gen_random_uuid(), gen_random_uuid(), gen_random_uuid())`,
 	"monitors_epoch_sync":               `SELECT monitors_epoch_sync()`,

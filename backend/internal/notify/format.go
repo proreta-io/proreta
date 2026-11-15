@@ -37,6 +37,10 @@ type Payload struct {
 	DurationSeconds int64      `json:"durationSeconds,omitempty"`
 	TLSNotAfter     *time.Time `json:"tlsNotAfter,omitempty"`
 	DaysLeft        *int       `json:"daysLeft,omitempty"`
+	// Late is set when the result behind the message was replayed; ObservedAt is when Proreta
+	// received it.
+	Late       bool       `json:"late,omitempty"`
+	ObservedAt *time.Time `json:"observedAt,omitempty"`
 	// SpeculaID, SpeculaName and MonitorCount are set for agent_offline and agent_online.
 	SpeculaID    *uuid.UUID `json:"speculaId,omitempty"`
 	SpeculaName  string     `json:"speculaName,omitempty"`
@@ -100,6 +104,9 @@ func Message(kind string, raw []byte, publicURL string, mention []string) (strin
 func FormatOpened(p Payload, publicURL string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, ":red_circle: *%s* is down", Escape(p.MonitorName))
+	if p.Late {
+		b.WriteString(" (reported late)")
+	}
 	if u := DisplayURL(p.URL); u != "" {
 		b.WriteString("\n" + Escape(u))
 	}
@@ -162,8 +169,18 @@ func DisplayURL(raw string) string {
 }
 
 // FormatResolved: `:large_green_circle: *{name}* is back up after {duration}`.
+// A late one says it was reported late and when the outage really was.
 func FormatResolved(p Payload) string {
-	return fmt.Sprintf(":large_green_circle: *%s* is back up after %s", Escape(p.MonitorName), HumanDuration(time.Duration(p.DurationSeconds)*time.Second))
+	text := fmt.Sprintf(":large_green_circle: *%s* is back up after %s", Escape(p.MonitorName), HumanDuration(time.Duration(p.DurationSeconds)*time.Second))
+	if !p.Late {
+		return text
+	}
+	text += " (reported late)"
+	if p.StartedAt != nil && p.ResolvedAt != nil {
+		const layout = "2006-01-02 15:04:05"
+		text += "\nWas down " + p.StartedAt.UTC().Format(layout) + " to " + p.ResolvedAt.UTC().Format(layout) + " UTC"
+	}
+	return text
 }
 
 // FormatTLSExpiring: `:warning: TLS certificate for *{name}* expires in {n} days ({date})`.

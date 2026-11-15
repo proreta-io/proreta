@@ -286,3 +286,44 @@ func TestTLSWarning(t *testing.T) {
 }
 
 func durPtr(d time.Duration) *time.Duration { return &d }
+
+// The shapes of a replayed outage, results applied oldest first: the machine is the same as for
+// live results, so an incident that began and ended inside the replay opens and resolves in order
+// (the late-alert policy then drops the stale "down"), one still open stays open, and a flapping
+// target opens and resolves as it would have live.
+func TestReplayShapes(t *testing.T) {
+	opened, resolved := []Kind{KindOpened}, []Kind{KindResolved}
+	cases := []struct {
+		name  string
+		steps []step
+	}{
+		{"over: down then up inside the replay", []step{
+			{res: ok(0), status: Up, transition: None},
+			{res: fail(1), status: Up, transition: None},
+			{res: fail(2), status: Down, transition: Opened, emit: opened},
+			{res: fail(3), status: Down, transition: None},
+			{res: ok(4), status: Up, transition: Resolved, emit: resolved},
+		}},
+		{"still open at the end of the replay", []step{
+			{res: ok(0), status: Up, transition: None},
+			{res: fail(1), status: Up, transition: None},
+			{res: fail(2), status: Down, transition: Opened, emit: opened},
+			{res: fail(3), status: Down, transition: None},
+		}},
+		{"flapping", []step{
+			{res: fail(0), status: Unknown, transition: None},
+			{res: fail(1), status: Down, transition: Opened, emit: opened},
+			{res: ok(2), status: Up, transition: Resolved, emit: resolved},
+			{res: fail(3), status: Up, transition: None},
+			{res: fail(4), status: Down, transition: Opened, emit: opened},
+			{res: ok(5), status: Up, transition: Resolved, emit: resolved},
+		}},
+		{"a replayed slot older than the last applied one is ignored", []step{
+			{res: ok(5), status: Up, transition: None},
+			{res: fail(1), status: Up, transition: None, ignored: true},
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) { run(t, notify, c.steps) })
+	}
+}

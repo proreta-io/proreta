@@ -79,6 +79,7 @@ var definerAllowList = map[string][]string{
 	// epoch functions and triggers that only the monitor and state triggers call.
 	"specula_schedule":                  {"proreta_worker"},
 	"rollup_mark_dirty":                 {"proreta_worker"},
+	"rollup_drain_dirty":                {"proreta_worker"},
 	"specula_epoch_open":                {},
 	"specula_epoch_close":               {},
 	"monitors_epoch_sync":               {},
