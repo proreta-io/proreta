@@ -60,6 +60,9 @@ type Deps struct {
 	// TrustedProxyHops is PRORETA_TRUSTED_PROXY_HOPS: how many proxies in front of the gateway
 	// append to X-Forwarded-For. 0 uses the TCP peer as the client address.
 	TrustedProxyHops int
+	// ScheduleVersion returns the current schedule version of the Specula's location, echoed in
+	// the answer of reports; nil leaves it empty.
+	ScheduleVersion func(ctx context.Context, id specula.Identity) (string, error)
 }
 
 // Handler serves BasePath.
@@ -94,6 +97,7 @@ func New(d Deps) http.Handler {
 	mux.Handle("POST "+wire.BasePath+"/hello", g.auth(http.HandlerFunc(g.hello)))
 	mux.Handle("POST "+wire.BasePath+"/claim", g.auth(http.HandlerFunc(g.claim)))
 	mux.Handle("POST "+wire.BasePath+"/results", g.auth(http.HandlerFunc(g.results)))
+	mux.Handle("POST "+wire.BasePath+"/reports", g.auth(http.HandlerFunc(g.reports)))
 	var h http.Handler = mux
 	h = httpx.MaxBody(maxBody)(h)
 	h = httpx.Recover(d.Log)(h)

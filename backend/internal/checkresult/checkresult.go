@@ -8,7 +8,9 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/proreta-io/proreta/backend/internal/checks"
 	"github.com/proreta-io/proreta/backend/internal/incidents"
@@ -46,27 +48,32 @@ func (r Recorder) Write(ctx context.Context, tx pgx.Tx, lease scheduler.Lease, i
 	if err != nil || !ok {
 		return false, "", err
 	}
-	// The state machine runs in a nested savepoint: a permanent error undoes only its part, the
-	// result and the completed lease are kept, so the job is not repeated just to fail again.
+	permanent, err = r.apply(ctx, tx, lease.TenantID, lease.MonitorID, lease.LocationID, r.Clock.Now(), res)
+	return err == nil, permanent, err
+}
+
+// apply runs the state machine in a nested savepoint: a permanent error undoes only its part, the
+// result (and a completed lease) are kept, so the job is not repeated just to fail again.
+func (r Recorder) apply(ctx context.Context, tx pgx.Tx, tenantID, monitorID, locationID uuid.UUID, now time.Time, res checks.Result) (string, error) {
 	sp, err := tx.Begin(ctx)
 	if err != nil {
-		return false, "", err
+		return "", err
 	}
 	_, err = r.Incidents.ApplyResult(ctx, sp, incidents.ResultInput{
-		TenantID: lease.TenantID, MonitorID: lease.MonitorID, LocationID: lease.LocationID, Now: r.Clock.Now(),
+		TenantID: tenantID, MonitorID: monitorID, LocationID: locationID, Now: now,
 		Result: machine.Result{OK: res.OK, ErrorKind: res.ErrorKind, TLSNotAfter: res.TLSNotAfter, CheckedAt: res.CheckedAt},
 	})
 	if err == nil {
-		return true, "", sp.Commit(ctx)
+		return "", sp.Commit(ctx)
 	}
 	kind := PermanentKind(err)
 	if kind == "" {
-		return false, "", err
+		return "", err
 	}
 	if err := sp.Rollback(ctx); err != nil {
-		return false, "", err
+		return "", err
 	}
-	return true, kind, nil
+	return kind, nil
 }
 
 // PermanentKind names a permanent ApplyResult error, or returns "" for any other error.
@@ -78,4 +85,38 @@ func PermanentKind(err error) string {
 		return "inconsistent_state"
 	}
 	return ""
+}
+
+// ErrDuplicate means the slot already has a result (unique violation of the primary key). The
+// caller's savepoint must be rolled back.
+var ErrDuplicate = errors.New("checkresult: slot already recorded")
+
+// rollupLookback is how many closed hours the regular rollup run recomputes; a row in an older
+// hour needs a dirty mark.
+const rollupLookback = 3 * time.Hour
+
+// WriteSlot records the result of one slot of an autonomous executor in tx, a tenant transaction
+// of tenantID: the row is stored at res.CheckedAt (the slot), a row in an hour the rollup no
+// longer revisits marks that hour dirty, and the incident state machine runs as for any result.
+// There is no lease. The caller has validated the slot against the monitor's epoch. permanent
+// has the meaning it has for Write.
+func (r Recorder) WriteSlot(ctx context.Context, tx pgx.Tx, tenantID, monitorID, locationID uuid.UUID, res checks.Result) (permanent string, err error) {
+	if err := results.Insert(ctx, tx, results.Row{
+		TenantID: tenantID, MonitorID: monitorID, LocationID: locationID, CheckedAt: res.CheckedAt,
+		OK: res.OK, StatusCode: res.StatusCode, LatencyMs: res.LatencyMs, ErrorKind: res.ErrorKind, TLSNotAfter: res.TLSNotAfter,
+	}); err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return "", ErrDuplicate
+		}
+		return "", err
+	}
+	now := r.Clock.Now()
+	if res.CheckedAt.Before(now.UTC().Truncate(time.Hour).Add(-rollupLookback)) {
+		if _, err := tx.Exec(ctx, `SELECT rollup_mark_dirty($1)`, res.CheckedAt); err != nil {
+			return "", err
+		}
+	}
+	// The seam for late-alert handling: ApplyResult is called as for a pulled result.
+	return r.apply(ctx, tx, tenantID, monitorID, locationID, now, res)
 }
