@@ -80,14 +80,20 @@ func (g *Handler) reports(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, o := range outcomes {
-		g.metrics.results.WithLabelValues(o.Outcome).Inc()
+		g.metrics.reports.WithLabelValues(o.Outcome).Inc()
+		if o.Outcome == wire.OutcomeRecorded {
+			age := now.Sub(time.Unix(o.Slot, 0))
+			g.metrics.reportAge.Observe(age.Seconds())
+			if age > lateAlertAfter {
+				g.metrics.lateReports.Inc()
+			}
+		}
 	}
 	out := wire.ReportsResponse{Outcomes: outcomes}
-	if g.d.ScheduleVersion != nil {
-		if out.ScheduleVersion, err = g.d.ScheduleVersion(r.Context(), id); err != nil {
-			g.fail(w, r, "reports", err)
-			return
-		}
+	// The batch is committed, so a failure here must not fail the call (the executor would send it
+	// again): the version is only a hint that the schedule changed.
+	if out.ScheduleVersion, err = g.scheduleVersion(r.Context(), id); err != nil {
+		g.d.Log.ErrorContext(r.Context(), "specula reports: building the schedule version failed", "error", err)
 	}
 	write(w, http.StatusOK, out)
 }

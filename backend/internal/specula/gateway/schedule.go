@@ -22,7 +22,11 @@ import (
 
 const (
 	defaultScheduleTTL = 24 * time.Hour
-	refreshAfter       = 300 // seconds
+	// versionCacheTTL is how long hello and reports reuse a Specula's schedule version instead of
+	// decrypting the schedule again. A pause, a delete, an edit or a revocation shows in the answer
+	// at most this long later, like the token cache; GET /schedule is never cached.
+	versionCacheTTL = 5 * time.Second
+	refreshAfter    = 300 // seconds
 )
 
 var errScheduleTooLarge = errors.New("specula: schedule over the cap")
@@ -33,6 +37,8 @@ var errScheduleTooLarge = errors.New("specula: schedule over the cap")
 // tenant and location only (the SQL function takes both from the token's identity). A monitor
 // whose sealed request cannot be opened is left out and logged without values.
 func (g *Handler) buildSchedule(ctx context.Context, id specula.Identity) ([]wire.ScheduledMonitor, string, error) {
+	started := time.Now()
+	defer func() { g.metrics.scheduleBuild.Observe(time.Since(started).Seconds()) }()
 	out := []wire.ScheduledMonitor{}
 	err := db.WithTx(ctx, g.d.Pool, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT monitor_id, epoch, anchor, interval_seconds, timeout_seconds, monitor_type, url,
@@ -59,6 +65,7 @@ func (g *Handler) buildSchedule(ctx context.Context, id specula.Identity) ([]wir
 				if err != nil {
 					g.d.Log.ErrorContext(ctx, "cannot open the sealed request of a monitor, left out of the schedule",
 						"tenant_id", id.TenantID, "monitor_id", m.MonitorID, "error", err)
+					g.metrics.scheduleUnreadable.Inc()
 					continue
 				}
 				for _, h := range sec.Headers {
@@ -98,17 +105,36 @@ func (g *Handler) scheduleTTL() time.Duration {
 	return defaultScheduleTTL
 }
 
+// scheduleVersion is the version of the Specula's schedule, from a few seconds old cache. A schedule
+// over the cap has no version (""), which is cached too: it is the expensive case.
+func (g *Handler) scheduleVersion(ctx context.Context, id specula.Identity) (string, error) {
+	key, now := id.SpeculaID.String(), g.d.Clock.Now()
+	if v, ok := g.versions.get(key, now); ok {
+		return v, nil
+	}
+	_, v, err := g.buildSchedule(ctx, id)
+	if err != nil && !errors.Is(err, errScheduleTooLarge) {
+		return "", err
+	}
+	g.versions.put(key, v, now)
+	return v, nil
+}
+
 func (g *Handler) schedule(w http.ResponseWriter, r *http.Request) {
-	monitors, version, err := g.buildSchedule(r.Context(), identity(r))
+	id := identity(r)
+	monitors, version, err := g.buildSchedule(r.Context(), id)
 	if errors.Is(err, errScheduleTooLarge) {
+		g.metrics.scheduleRequests.WithLabelValues("413").Inc()
 		problem(w, r, http.StatusRequestEntityTooLarge, "schedule-too-large", "Too many monitors at this location")
 		return
 	}
 	if err != nil {
+		g.metrics.scheduleRequests.WithLabelValues("error").Inc()
 		g.fail(w, r, "schedule", err)
 		return
 	}
 	now := g.d.Clock.Now().UTC()
+	g.versions.put(id.SpeculaID.String(), version, now) // free: the executor's next hello or report reuses it
 	until := now.Add(g.scheduleTTL())
 	h := w.Header()
 	h.Set("ETag", `"`+version+`"`)
@@ -116,8 +142,10 @@ func (g *Handler) schedule(w http.ResponseWriter, r *http.Request) {
 	if etagMatches(r.Header.Get("If-None-Match"), version) {
 		h.Set(wire.HeaderScheduleValidUntil, until.Format(time.RFC3339))
 		w.WriteHeader(http.StatusNotModified)
+		g.metrics.scheduleRequests.WithLabelValues("304").Inc()
 		return
 	}
+	g.metrics.scheduleRequests.WithLabelValues("200").Inc()
 	write(w, http.StatusOK, wire.Schedule{
 		Version: version, ServerTime: now, IssuedAt: now, ValidUntil: until, RefreshAfterSeconds: refreshAfter, Monitors: monitors,
 	})

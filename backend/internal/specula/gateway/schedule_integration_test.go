@@ -101,16 +101,20 @@ func TestIntegrationSchedule(t *testing.T) {
 	}
 
 	var logs bytes.Buffer
+	var lastReg *prometheus.Registry
 	build := func(k *crypto.Keyring) *httptest.Server {
+		lastReg = prometheus.NewRegistry()
 		h := gateway.New(gateway.Deps{
-			Pool: worker, Scheduler: sched, Recorder: checkresult.Recorder{Scheduler: sched, Incidents: inc, Clock: clock.System{}},
-			RequestKeys: k, Log: slog.New(slog.NewTextHandler(&logs, nil)), Registerer: prometheus.NewRegistry(), ScheduleTTL: time.Hour,
+			Limits: openLimits,
+			Pool:   worker, Scheduler: sched, Recorder: checkresult.Recorder{Scheduler: sched, Incidents: inc, Clock: clock.System{}},
+			RequestKeys: k, Log: slog.New(slog.NewTextHandler(&logs, nil)), Registerer: lastReg, ScheduleTTL: time.Hour,
 		})
 		srv := httptest.NewServer(h)
 		t.Cleanup(srv.Close)
 		return srv
 	}
 	srv := build(keys)
+	reg := lastReg
 	fetch := func(inm string) (answer, wire.Schedule) {
 		t.Helper()
 		resp, b := getSchedule(t, srv, tokenA, inm)
@@ -164,7 +168,11 @@ func TestIntegrationSchedule(t *testing.T) {
 	if again.Version != first.Version {
 		t.Errorf("version changed without a change: %s %s", first.Version, again.Version)
 	}
+	builds := metricValue(t, reg, "proreta_specula_schedule_build_seconds")
 	code, b := call(t, srv, tokenA, "/hello", wire.HelloRequest{Version: "1", Hostname: "pod", Capabilities: []string{"schedule/1"}})
+	if metricValue(t, reg, "proreta_specula_schedule_build_seconds") != builds {
+		t.Error("hello rebuilt a schedule that GET /schedule had just produced")
+	}
 	var hello wire.HelloResponse
 	if code != http.StatusOK || json.Unmarshal(b, &hello) != nil || hello.ScheduleVersion != first.Version {
 		t.Errorf("hello: %d %s, want scheduleVersion %s", code, b, first.Version)
@@ -178,6 +186,12 @@ func TestIntegrationSchedule(t *testing.T) {
 	}
 	if resp, _ := fetch(`"stale"`); resp.StatusCode != http.StatusOK {
 		t.Errorf("a stale ETag: %d", resp.StatusCode)
+	}
+
+	for result, want := range map[string]float64{"200": 3, "304": 3, "413": 0, "error": 0} {
+		if got := metricValue(t, reg, "proreta_specula_schedule_requests_total", "result", result); got != want {
+			t.Errorf("schedule_requests_total{result=%q} = %v, want %v", result, got, want)
+		}
 	}
 
 	// Another organization's executor sees only its own monitor.
@@ -224,6 +238,9 @@ func TestIntegrationSchedule(t *testing.T) {
 	var sw wire.Schedule
 	if resp2.StatusCode != http.StatusOK || json.Unmarshal(bw, &sw) != nil || len(sw.Monitors) != 1 || sw.Monitors[0].Type != wire.TypeTCP {
 		t.Errorf("wrong keys: %d %s", resp2.StatusCode, bw)
+	}
+	if got := metricValue(t, lastReg, "proreta_specula_schedule_unreadable_monitors_total"); got != 1 {
+		t.Errorf("schedule_unreadable_monitors_total = %v, want 1", got)
 	}
 	if !strings.Contains(logs.String(), "cannot open the sealed request") {
 		t.Error("the unreadable monitor was not logged")
@@ -285,13 +302,18 @@ func TestIntegrationScheduleCap(t *testing.T) {
 		`CREATE TEMP TABLE cs AS SELECT s.*, map.new_id AS nid FROM monitor_location_state s, map WHERE s.monitor_id = `+id,
 		`UPDATE cs SET monitor_id = nid`, `ALTER TABLE cs DROP COLUMN nid`, `INSERT INTO monitor_location_state SELECT * FROM cs`)
 
+	reg := prometheus.NewRegistry()
 	srv := httptest.NewServer(gateway.New(gateway.Deps{
-		Pool: worker, Scheduler: sched, Recorder: checkresult.Recorder{Scheduler: sched, Incidents: inc, Clock: clock.System{}},
-		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Registerer: prometheus.NewRegistry(),
+		Limits: openLimits,
+		Pool:   worker, Scheduler: sched, Recorder: checkresult.Recorder{Scheduler: sched, Incidents: inc, Clock: clock.System{}},
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Registerer: reg,
 	}))
 	t.Cleanup(srv.Close)
 	if resp, b := getSchedule(t, srv, token, ""); resp.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Errorf("5001 monitors: %d %.200s", resp.StatusCode, b)
+	}
+	if got := metricValue(t, reg, "proreta_specula_schedule_requests_total", "result", "413"); got != 1 {
+		t.Errorf("schedule_requests_total{result=\"413\"} = %v, want 1", got)
 	}
 	code, b := call(t, srv, token, "/hello", wire.HelloRequest{Version: "1", Capabilities: []string{"schedule/1"}})
 	var hello wire.HelloResponse

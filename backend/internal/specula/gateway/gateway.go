@@ -62,9 +62,8 @@ type Deps struct {
 	// TrustedProxyHops is PRORETA_TRUSTED_PROXY_HOPS: how many proxies in front of the gateway
 	// append to X-Forwarded-For. 0 uses the TCP peer as the client address.
 	TrustedProxyHops int
-	// ScheduleVersion returns the current schedule version of the Specula's location, echoed in
-	// the answer of reports; nil leaves it empty.
-	ScheduleVersion func(ctx context.Context, id specula.Identity) (string, error)
+	// Limits are the per-token budgets of hello, schedule and reports; zero values use the defaults.
+	Limits Limits
 }
 
 // Handler serves BasePath.
@@ -74,6 +73,10 @@ type Handler struct {
 	cache   *authCache
 	failIP  *auth.Limiter
 	lookups chan struct{}
+	// versions caches the schedule version of a Specula for a few seconds (schedule.go).
+	versions *ttlCache[string]
+	// Per-token budgets (limits.go).
+	reportsLimit, scheduleLimit, helloLimit *bucketSet
 }
 
 type ctxKey struct{}
@@ -92,15 +95,19 @@ func New(d Deps) http.Handler {
 	}
 	g := &Handler{
 		d: d, metrics: newMetrics(d.Registerer), cache: newAuthCache(authCacheTTL, authCacheMax),
-		failIP:  auth.NewLimiter(authFailLimit, authFailWindow, authFailKeys, d.Clock),
-		lookups: make(chan struct{}, authLookups),
+		failIP:        auth.NewLimiter(authFailLimit, authFailWindow, authFailKeys, d.Clock),
+		lookups:       make(chan struct{}, authLookups),
+		versions:      newTTLCache[string](versionCacheTTL, bucketKeys),
+		reportsLimit:  d.Limits.Reports.or(reportsRate, reportsBurst),
+		scheduleLimit: d.Limits.Schedule.or(scheduleRate, scheduleBurst),
+		helloLimit:    d.Limits.Hello.or(helloRate, helloBurst),
 	}
 	mux := http.NewServeMux()
-	mux.Handle("POST "+wire.BasePath+"/hello", g.auth(http.HandlerFunc(g.hello)))
+	mux.Handle("POST "+wire.BasePath+"/hello", g.auth(g.limited("hello", g.helloLimit, g.hello)))
 	mux.Handle("POST "+wire.BasePath+"/claim", g.auth(http.HandlerFunc(g.claim)))
 	mux.Handle("POST "+wire.BasePath+"/results", g.auth(http.HandlerFunc(g.results)))
-	mux.Handle("POST "+wire.BasePath+"/reports", g.auth(http.HandlerFunc(g.reports)))
-	mux.Handle("GET "+wire.BasePath+"/schedule", g.auth(http.HandlerFunc(g.schedule)))
+	mux.Handle("POST "+wire.BasePath+"/reports", g.auth(g.limited("reports", g.reportsLimit, g.reports)))
+	mux.Handle("GET "+wire.BasePath+"/schedule", g.auth(g.limited("schedule", g.scheduleLimit, g.schedule)))
 	var h http.Handler = mux
 	h = httpx.MaxBody(maxBody)(h)
 	h = httpx.Recover(d.Log)(h)
@@ -225,9 +232,8 @@ func (g *Handler) hello(w http.ResponseWriter, r *http.Request) {
 	if mode == wire.ModeSchedule {
 		// No version when the schedule is over the cap or cannot be built: the executor then
 		// finds out at its next schedule fetch.
-		if _, v, err := g.buildSchedule(r.Context(), id); err == nil {
-			resp.ScheduleVersion = v
-		} else if !errors.Is(err, errScheduleTooLarge) {
+		var err error
+		if resp.ScheduleVersion, err = g.scheduleVersion(r.Context(), id); err != nil {
 			g.d.Log.ErrorContext(r.Context(), "specula hello: building the schedule version failed", "error", err)
 		}
 	}

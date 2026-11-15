@@ -29,35 +29,43 @@ const (
 	authLookups = 8
 )
 
-// authCache remembers verified token hashes for a few seconds.
-type authCache struct {
+// ttlCache remembers values for a few seconds, in at most max entries: verified token hashes
+// (authCache) and the schedule version of a Specula (versionCache).
+type ttlCache[V any] struct {
 	mu  sync.Mutex
 	ttl time.Duration
 	max int
-	m   map[string]cached
+	m   map[string]cached[V]
 }
 
-type cached struct {
-	id    specula.Identity
+type cached[V any] struct {
+	v     V
 	until time.Time
 }
 
+type authCache = ttlCache[specula.Identity]
+
 func newAuthCache(ttl time.Duration, max int) *authCache {
-	return &authCache{ttl: ttl, max: max, m: map[string]cached{}}
+	return newTTLCache[specula.Identity](ttl, max)
 }
 
-func (c *authCache) get(key string, now time.Time) (specula.Identity, bool) {
+func newTTLCache[V any](ttl time.Duration, max int) *ttlCache[V] {
+	return &ttlCache[V]{ttl: ttl, max: max, m: map[string]cached[V]{}}
+}
+
+func (c *ttlCache[V]) get(key string, now time.Time) (V, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.m[key]
 	if !ok || !now.Before(e.until) {
 		delete(c.m, key)
-		return specula.Identity{}, false
+		var zero V
+		return zero, false
 	}
-	return e.id, true
+	return e.v, true
 }
 
-func (c *authCache) put(key string, id specula.Identity, now time.Time) {
+func (c *ttlCache[V]) put(key string, v V, now time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if _, ok := c.m[key]; !ok && len(c.m) >= c.max {
@@ -75,5 +83,5 @@ func (c *authCache) put(key string, id specula.Identity, now time.Time) {
 			delete(c.m, k)
 		}
 	}
-	c.m[key] = cached{id: id, until: now.Add(c.ttl)}
+	c.m[key] = cached[V]{v: v, until: now.Add(c.ttl)}
 }

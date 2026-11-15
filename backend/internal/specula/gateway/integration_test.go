@@ -97,7 +97,8 @@ func TestIntegrationGateway(t *testing.T) {
 
 	build := func(k *crypto.Keyring) *httptest.Server {
 		h := gateway.New(gateway.Deps{
-			Pool: worker, Scheduler: sched, Recorder: checkresult.Recorder{Scheduler: sched, Incidents: inc, Clock: clock.System{}},
+			Limits: openLimits,
+			Pool:   worker, Scheduler: sched, Recorder: checkresult.Recorder{Scheduler: sched, Incidents: inc, Clock: clock.System{}},
 			RequestKeys: k, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Registerer: prometheus.NewRegistry(),
 		})
 		srv := httptest.NewServer(h)
@@ -362,4 +363,9 @@ func TestIntegrationGateway(t *testing.T) {
 			time.Sleep(250 * time.Millisecond)
 		}
 	})
+}
+
+// openLimits lets a test call far faster than an executor does; the limit tests set their own.
+var openLimits = gateway.Limits{
+	Reports: gateway.Budget{Rate: 1e6, Burst: 1e6}, Schedule: gateway.Budget{Rate: 1e6, Burst: 1e6}, Hello: gateway.Budget{Rate: 1e6, Burst: 1e6},
 }

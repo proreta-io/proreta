@@ -75,9 +75,11 @@ func TestIntegrationReports(t *testing.T) {
 	// The epochs start 72 hours ago, so the 24 hour backlog is what limits old slots.
 	pgtest.MustExec(t, admin, `UPDATE monitor_schedule_epochs SET active_from = now() - interval '72 hours', anchor = floor(extract(epoch FROM now() - interval '72 hours'))::bigint + 7`)
 
+	reg := prometheus.NewRegistry()
 	srv := httptest.NewServer(gateway.New(gateway.Deps{
-		Pool: worker, Scheduler: sched, Recorder: checkresult.Recorder{Scheduler: sched, Incidents: inc, Clock: clock.System{}},
-		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Registerer: prometheus.NewRegistry(),
+		Limits: openLimits,
+		Pool:   worker, Scheduler: sched, Recorder: checkresult.Recorder{Scheduler: sched, Incidents: inc, Clock: clock.System{}},
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Registerer: reg,
 	}))
 	t.Cleanup(srv.Close)
 
@@ -256,6 +258,26 @@ func TestIntegrationReports(t *testing.T) {
 			report(m, 1, after, true),
 			report(m, 2, before, true), // epoch 2 did not exist then
 		), "recorded", "superseded", "superseded")
+	})
+
+	t.Run("metrics", func(t *testing.T) {
+		recorded := metricValue(t, reg, "proreta_specula_reports_total", "outcome", "recorded")
+		for _, o := range []string{"recorded", "duplicate", "superseded", "expired", "rejected"} {
+			if metricValue(t, reg, "proreta_specula_reports_total", "outcome", o) < 1 {
+				t.Errorf("reports_total{outcome=%q} was not counted", o)
+			}
+		}
+		if got := metricValue(t, reg, "proreta_specula_report_age_seconds"); got != recorded {
+			t.Errorf("report_age_seconds counted %v reports, %v were recorded", got, recorded)
+		}
+		// The replayed outage (3) and the five-hour-old row are older than ten minutes; a few more
+		// sit right at the threshold, so this is a lower bound.
+		if got := metricValue(t, reg, "proreta_specula_late_reports_total"); got < 4 || got >= recorded {
+			t.Errorf("late_reports_total = %v of %v recorded, want at least 4 and not all", got, recorded)
+		}
+		if metricValue(t, reg, "proreta_specula_results_total", "outcome", "recorded") != 0 {
+			t.Error("slot reports were counted as pull results")
+		}
 	})
 
 	t.Run("limits and errors", func(t *testing.T) {

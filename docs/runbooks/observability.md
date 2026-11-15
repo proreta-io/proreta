@@ -66,6 +66,23 @@ No metric is labelled per organization, monitor, incident, user, channel, URL, h
 | `proreta_status_page_domains` | gauge | `state` (`pending`, `verified`, `active`, `failed`) | Status page domains by state, all organizations, released ones excluded; refreshed by every run of `check_status_page_domains` (zero while the feature is off) |
 | `proreta_status_page_domains_checks_total` | counter | `result` (`ok`, `txt-missing`, `cname-missing`, `txt-mismatch`, `dns-error`) | DNS checks of status page domains. `dns-error` is a timeout, SERVFAIL or any other failed lookup: it never counts toward `failed`. `txt-mismatch` is a claim on a host another organization holds. No host names in labels |
 
+### speculagw
+The Specula gateway (`/specula/v1`, admin port of the `speculagw` process). Limits are per replica, so with N replicas a token may use up to N times its budget.
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `proreta_specula_unauthorized_total` | counter | | Requests with a missing, unknown or revoked token |
+| `proreta_specula_rate_limited_total` | counter | | Requests refused with 429 because the client address used up its budget of failed token checks, or the replica's concurrent token lookups were all busy |
+| `proreta_specula_token_limited_total` | counter | `endpoint` (`hello`, `schedule`, `reports`) | Requests of a valid token refused with 429 and `Retry-After`: `reports` 5 per second (burst 20), `schedule` one per 10 seconds (burst 3), `hello` 2 per minute (burst 2). An executor in normal operation never reaches them; a steady rate is a misbehaving or duplicated executor |
+| `proreta_specula_jobs_claimed_total` | counter | | Jobs handed to executors in pull mode |
+| `proreta_specula_results_total` | counter | `outcome` (`recorded`, `stale`, `rejected`) | Pull-mode results (`/results`) by outcome |
+| `proreta_specula_reports_total` | counter | `outcome` (`recorded`, `duplicate`, `superseded`, `expired`, `rejected`) | Slot-addressed results (`/reports`) by outcome. `duplicate` is a result resent after a lost answer; `superseded` is a result of a schedule epoch that has ended; `expired` is older than 24 hours; `rejected` is malformed, off the grid, in the future or not this Specula's monitor |
+| `proreta_specula_report_age_seconds` | histogram | | Age of a recorded report when it arrived (receive time minus slot): close to zero in normal operation, the depth of the backlog during a replay |
+| `proreta_specula_late_reports_total` | counter | | Recorded reports older than 10 minutes when they arrived; alerts they raise say they are late |
+| `proreta_specula_schedule_requests_total` | counter | `result` (`200`, `304`, `413`, `error`) | `GET /schedule` requests that passed the token budget; `413` is a location with more than 5000 monitors |
+| `proreta_specula_schedule_build_seconds` | histogram | | Time to read and decrypt a Specula's schedule: one sample per `GET /schedule`, and one per `hello` or `reports` call that finds no schedule version cached (the version is cached for 5 seconds) |
+| `proreta_specula_schedule_unreadable_monitors_total` | counter | | Monitors left out of a built schedule because their sealed request cannot be opened (wrong or missing request keys); counted at every build, so any increase means a monitor is not being checked, and the log names it |
+
 ### statuspage
 The public renderer also has `proreta_http_requests_total` and `proreta_http_request_duration_seconds` with route templates such as `/status/{slug:[a-z0-9-]+}` (never the slug itself).
 

@@ -17,6 +17,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/jobs"
 	"github.com/proreta-io/proreta/backend/internal/mail"
 	"github.com/proreta-io/proreta/backend/internal/platform/metrics"
+	"github.com/proreta-io/proreta/backend/internal/specula/gateway"
 	"github.com/proreta-io/proreta/backend/internal/worker"
 )
 
@@ -55,6 +56,7 @@ func allMetrics(t *testing.T) map[string][]string {
 	worker.NewMetrics(reg)
 	jobs.NewMetrics(reg)
 	api.NewPingMetrics(reg)
+	gateway.RegisterMetrics(reg)
 
 	descRe := regexp.MustCompile(`fqName: "([^"]+)".*constLabels: \{([^}]*)\}, variableLabels: \{([^}]*)\}`)
 	nameRe := regexp.MustCompile(`([a-zA-Z_][a-zA-Z0-9_]*)=`)

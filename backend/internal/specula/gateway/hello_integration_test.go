@@ -63,7 +63,8 @@ func TestIntegrationHelloCapabilities(t *testing.T) {
 	}
 
 	h := gateway.New(gateway.Deps{
-		Pool: worker, Scheduler: sched, Recorder: checkresult.Recorder{Scheduler: sched, Incidents: inc, Clock: clock.System{}},
+		Limits: openLimits,
+		Pool:   worker, Scheduler: sched, Recorder: checkresult.Recorder{Scheduler: sched, Incidents: inc, Clock: clock.System{}},
 		RequestKeys: keys, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Registerer: prometheus.NewRegistry(),
 	})
 	srv := httptest.NewServer(h)
