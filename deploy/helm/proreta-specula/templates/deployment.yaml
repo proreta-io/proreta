@@ -7,6 +7,8 @@ metadata:
     {{- include "proreta-specula.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicas }}
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "proreta-specula.selectorLabels" . | nindent 6 }}
@@ -52,6 +54,10 @@ spec:
               value: {{ .Values.specula.logLevel | quote }}
             - name: PRORETA_ADMIN_ADDR
               value: {{ printf ":%d" (int .Values.specula.adminPort) | quote }}
+            {{- if .Values.state.enabled }}
+            - name: PRORETA_SPECULA_STATE_DIR
+              value: {{ .Values.state.mountPath | quote }}
+            {{- end }}
             {{- with .Values.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -72,10 +78,19 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if .Values.state.enabled }}
+            - name: state
+              mountPath: {{ .Values.state.mountPath | quote }}
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir:
             sizeLimit: 16Mi
+        {{- if .Values.state.enabled }}
+        - name: state
+          emptyDir:
+            sizeLimit: {{ .Values.state.sizeLimit | quote }}
+        {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

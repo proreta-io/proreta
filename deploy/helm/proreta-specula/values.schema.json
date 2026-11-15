@@ -86,8 +86,33 @@
     "replicas": {
       "type": "integer",
       "minimum": 0,
-      "maximum": 20,
-      "description": "number of executor pods; they share the same token"
+      "maximum": 1,
+      "description": "number of executor pods: 1, or 0 to stop it; a second pod with the same token would run every check twice"
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "false: no state volume, the executor keeps its schedule and buffer in memory only"
+        },
+        "mountPath": {
+          "type": "string",
+          "pattern": "^/(var/lib|data|srv|opt|mnt)/[A-Za-z0-9._/-]+$",
+          "description": "PRORETA_SPECULA_STATE_DIR: an absolute path that is not /tmp"
+        },
+        "sizeLimit": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*(Mi|Gi)$",
+          "description": "size limit of the emptyDir that holds the state, at least the buffer limit plus room for the schedule"
+        }
+      },
+      "required": [
+        "enabled",
+        "mountPath",
+        "sizeLimit"
+      ]
     },
     "specula": {
       "type": "object",
@@ -228,6 +253,7 @@
     "proreta",
     "token",
     "replicas",
+    "state",
     "specula",
     "resources"
   ]

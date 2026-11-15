@@ -388,11 +388,12 @@ sp_chart=deploy/helm/proreta-specula
 sp_args=(--set image.tag=sha-0000000 --set proreta.url=https://proreta.example.com --set token.existingSecret=specula-token)
 helm lint --strict "$sp_chart" "${sp_args[@]}" >"$out/specula.lint" 2>&1 || { cat "$out/specula.lint"; exit 1; }
 helm template specula "$sp_chart" -n specula "${sp_args[@]}" >"$out/specula.yaml"
-helm template specula "$sp_chart" -n specula "${sp_args[@]}" --set replicas=1 --set specula.concurrency=100 --set 'env[0].name=HTTPS_PROXY' --set 'env[0].value=http://proxy:3128' >"$out/specula-custom.yaml"
+helm template specula "$sp_chart" -n specula "${sp_args[@]}" --set specula.concurrency=100 --set state.sizeLimit=1Gi --set 'env[0].name=HTTPS_PROXY' --set 'env[0].value=http://proxy:3128' >"$out/specula-custom.yaml"
+helm template specula "$sp_chart" -n specula "${sp_args[@]}" --set state.enabled=false >"$out/specula-nostate.yaml"
 helm package "$sp_chart" --version 1.2.3 --app-version 1.2.3 -d "$out/specula-pkg" >/dev/null
 helm template specula "$out/specula-pkg/proreta-specula-1.2.3.tgz" -n specula --set proreta.url=https://proreta.example.com --set token.existingSecret=specula-token >"$out/specula-packaged.yaml"
 grep -q 'image: "ghcr.io/proreta-io/proreta-backend:1.2.3"' "$out/specula-packaged.yaml" || { echo "FAIL: packaged Specula chart does not use appVersion 1.2.3" >&2; exit 1; }
-python3 - "$out/specula.yaml" "$out/specula-custom.yaml" <<'PY'
+python3 - "$out/specula.yaml" "$out/specula-custom.yaml" "$out/specula-nostate.yaml" <<'PY'
 import sys, yaml
 for path in sys.argv[1:]:
     docs = [d for d in yaml.safe_load_all(open(path)) if d]
@@ -411,6 +412,15 @@ for path in sys.argv[1:]:
     assert env["PRORETA_URL"]["value"] == "https://proreta.example.com"
     forbidden = [n for n in env if n.startswith(("PRORETA_DATABASE", "PRORETA_ENCRYPTION", "PRORETA_REQUEST", "PRORETA_ADMIN_LOGIN"))]
     assert not forbidden, f"the Specula pod has settings it must not have: {forbidden}"
+    assert dep["spec"]["replicas"] == 1 and dep["spec"]["strategy"]["type"] == "Recreate", "one pod, replaced only after the old one stopped"
+    vols = {v["name"]: v for v in spec["volumes"]}
+    mounts = {m["name"]: m["mountPath"] for m in c["volumeMounts"]}
+    if path.endswith("nostate.yaml"):
+        assert "PRORETA_SPECULA_STATE_DIR" not in env and "state" not in vols and "state" not in mounts, "state volume without state.enabled"
+    else:
+        assert env["PRORETA_SPECULA_STATE_DIR"]["value"] == mounts["state"] == "/var/lib/specula", (env.get("PRORETA_SPECULA_STATE_DIR"), mounts)
+        assert "emptyDir" in vols["state"] and vols["state"]["emptyDir"]["sizeLimit"], "state is not a bounded emptyDir"
+        assert not [m for m in c["volumeMounts"] if m["name"] == "state" and m.get("readOnly")], "state is read-only"
     assert not [d for d in docs if d["kind"] in ("Service", "Ingress", "HTTPRoute", "Role", "ClusterRole")], "the executor exposes or needs nothing inbound"
 print("ok")
 PY
@@ -431,7 +441,10 @@ sp_fail "http URL" "/proreta/url" --set image.tag=sha-0000000 --set proreta.url=
 sp_fail "trailing slash" "/proreta/url" --set image.tag=sha-0000000 --set proreta.url=https://p.example.com/ --set token.existingSecret=t
 sp_fail "unknown key" "additional properties 'replica' not allowed" "${sp_args[@]}" --set replica=2
 sp_fail "chart-owned variable" "/env/0/name" "${sp_args[@]}" --set 'env[0].name=PRORETA_SPECULA_TOKEN' --set 'env[0].value=x'
-renders+=("$out/specula.yaml" "$out/specula-custom.yaml")
+sp_fail "two pods" "/replicas" "${sp_args[@]}" --set replicas=2
+sp_fail "state in /tmp" "/state/mountPath" "${sp_args[@]}" --set state.mountPath=/tmp/state
+sp_fail "state size without unit" "/state/sizeLimit" "${sp_args[@]}" --set state.sizeLimit=512
+renders+=("$out/specula.yaml" "$out/specula-custom.yaml" "$out/specula-nostate.yaml")
 
 echo "== kubeconform"
 if ! command -v kubeconform >/dev/null 2>&1; then

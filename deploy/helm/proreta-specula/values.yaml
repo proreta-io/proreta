@@ -29,9 +29,22 @@ token:
   existingSecret: ""
   key: token
 
-# Two replicas with the same token keep checking during a restart; a check is leased to one of
-# them at a time.
-replicas: 2
+# One pod per Specula. The executor runs its checks from a schedule it keeps locally, so a second
+# pod with the same token would run every check twice (Proreta stores one result per slot and
+# warns about a duplicate instance). The Deployment uses the Recreate strategy so the old pod stops
+# before the new one starts. 0 stops the executor.
+replicas: 1
+
+# Where the executor keeps its cached schedule and the buffer of results it could not send yet.
+# The default is an emptyDir: it survives a container restart but not the replacement of the pod
+# (a rollout, an eviction, a node drain), and a pod replaced while the link to Proreta is down
+# loses what was buffered. enabled: false mounts nothing: the executor then keeps everything in
+# memory and reports itself degraded, and a restart while Proreta is unreachable stops its checks.
+state:
+  enabled: true
+  mountPath: /var/lib/specula       # PRORETA_SPECULA_STATE_DIR
+  # Room for the buffer (256 MiB by default) plus the schedule; the pod is evicted above it.
+  sizeLimit: 512Mi
 
 specula:
   concurrency: 20          # PRORETA_SPECULA_CONCURRENCY, checks in flight per pod
