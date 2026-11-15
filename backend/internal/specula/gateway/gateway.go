@@ -55,6 +55,8 @@ type Deps struct {
 	// without them, where a job that has one fails.
 	RequestKeys *crypto.Keyring
 	Clock       clock.Clock
+	// ScheduleTTL is how long a schedule answer lets the executor keep checking; zero means 24 hours.
+	ScheduleTTL time.Duration
 	Log         *slog.Logger
 	Registerer  prometheus.Registerer
 	// TrustedProxyHops is PRORETA_TRUSTED_PROXY_HOPS: how many proxies in front of the gateway
@@ -98,6 +100,7 @@ func New(d Deps) http.Handler {
 	mux.Handle("POST "+wire.BasePath+"/claim", g.auth(http.HandlerFunc(g.claim)))
 	mux.Handle("POST "+wire.BasePath+"/results", g.auth(http.HandlerFunc(g.results)))
 	mux.Handle("POST "+wire.BasePath+"/reports", g.auth(http.HandlerFunc(g.reports)))
+	mux.Handle("GET "+wire.BasePath+"/schedule", g.auth(http.HandlerFunc(g.schedule)))
 	var h http.Handler = mux
 	h = httpx.MaxBody(maxBody)(h)
 	h = httpx.Recover(d.Log)(h)
@@ -218,7 +221,17 @@ func (g *Handler) hello(w http.ResponseWriter, r *http.Request) {
 	if slices.Contains(caps, wire.CapSchedule) {
 		mode = wire.ModeSchedule
 	}
-	write(w, http.StatusOK, wire.HelloResponse{ServerTime: g.d.Clock.Now().UTC(), Modes: []string{mode}})
+	resp := wire.HelloResponse{ServerTime: g.d.Clock.Now().UTC(), Modes: []string{mode}}
+	if mode == wire.ModeSchedule {
+		// No version when the schedule is over the cap or cannot be built: the executor then
+		// finds out at its next schedule fetch.
+		if _, v, err := g.buildSchedule(r.Context(), id); err == nil {
+			resp.ScheduleVersion = v
+		} else if !errors.Is(err, errScheduleTooLarge) {
+			g.d.Log.ErrorContext(r.Context(), "specula hello: building the schedule version failed", "error", err)
+		}
+	}
+	write(w, http.StatusOK, resp)
 }
 
 func (g *Handler) claim(w http.ResponseWriter, r *http.Request) {

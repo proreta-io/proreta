@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"testing"
@@ -24,6 +25,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/specula"
 	"github.com/proreta-io/proreta/backend/internal/specula/executor"
 	"github.com/proreta-io/proreta/backend/internal/specula/gateway"
+	"github.com/proreta-io/proreta/backend/internal/specula/wire"
 	"github.com/proreta-io/proreta/backend/internal/testsupport/pgtest"
 )
 
@@ -75,10 +77,10 @@ func TestIntegrationSpeculaTCPFlow(t *testing.T) {
 	}
 	pgtest.MustExec(t, admin, `UPDATE monitor_location_state SET next_run_at = now() - interval '1 minute' WHERE monitor_id = '`+m.ID.String()+`'`)
 
-	gw := httptest.NewServer(gateway.New(gateway.Deps{
+	gw := httptest.NewServer(withoutSchedule(gateway.New(gateway.Deps{
 		Pool: worker, Scheduler: sched, Recorder: checkresult.Recorder{Scheduler: sched, Incidents: inc, Clock: clock.System{}},
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Registerer: prometheus.NewRegistry(),
-	}))
+	})))
 	defer gw.Close()
 	exec := executor.New(executor.Config{
 		BaseURL: gw.URL, Token: token, Version: "test", Hostname: "pod-1", Concurrency: 4, PollInterval: 100 * time.Millisecond,
@@ -173,4 +175,16 @@ func TestIntegrationClaimHandsOutTCPJobs(t *testing.T) {
 	if j := jobs[0]; !j.TCP() || j.Host != host || j.Port != port || j.URL != "" || j.Timeout != 10*time.Second || j.FailureThreshold != 2 {
 		t.Fatalf("job = %+v", j)
 	}
+}
+
+// withoutSchedule makes the gateway look like one that predates schedule mode: the executor gets
+// a 404 on /schedule and stays in pull mode, which these flow tests exercise.
+func withoutSchedule(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == wire.PathSchedule {
+			http.NotFound(w, r)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
 }

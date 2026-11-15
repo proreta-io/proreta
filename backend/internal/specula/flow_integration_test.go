@@ -81,10 +81,10 @@ func TestIntegrationSpeculaFlow(t *testing.T) {
 		`INSERT INTO monitor_locations (tenant_id, monitor_id, location_id) VALUES ('`+tenantA+`', '`+m.ID.String()+`', '`+s.LocationID.String()+`')`,
 		`INSERT INTO monitor_location_state (tenant_id, monitor_id, location_id, next_run_at) VALUES ('`+tenantA+`', '`+m.ID.String()+`', '`+s.LocationID.String()+`', now() - interval '1 minute')`)
 
-	gw := httptest.NewServer(gateway.New(gateway.Deps{
+	gw := httptest.NewServer(withoutSchedule(gateway.New(gateway.Deps{
 		Pool: worker, Scheduler: sched, Recorder: checkresult.Recorder{Scheduler: sched, Incidents: inc, Clock: clock.System{}},
 		RequestKeys: keys, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Registerer: prometheus.NewRegistry(),
-	}))
+	})))
 	defer gw.Close()
 	exec := executor.New(executor.Config{
 		BaseURL: gw.URL, Token: token, Version: "test", Hostname: "pod-1", Concurrency: 4, PollInterval: 100 * time.Millisecond,
