@@ -62,7 +62,7 @@ func TestIntegrationSpecula(t *testing.T) {
 		if err := admin.QueryRow(ctx, `SELECT kind FROM probe_locations WHERE id = $1`, s.LocationID).Scan(&kind); err != nil || kind != "agent" {
 			t.Fatalf("location kind %q %v", kind, err)
 		}
-		if err := specula.Hello(ctx, worker, s.ID, "0.1.0", "pod-1"); err != nil {
+		if err := specula.Hello(ctx, worker, s.ID, specula.HelloInput{Version: "0.1.0", Hostname: "pod-1"}); err != nil {
 			t.Fatal(err)
 		}
 		got, err := svc.Get(ctx, a.TenantID, s.ID)
@@ -143,7 +143,7 @@ func TestIntegrationSpecula(t *testing.T) {
 		if _, err := specula.Authenticate(ctx, worker, token); !errors.Is(err, specula.ErrUnauthorized) {
 			t.Fatalf("authenticate after revoke: %v", err)
 		}
-		if err := specula.Hello(ctx, worker, s.ID, "v", "h"); !errors.Is(err, specula.ErrUnauthorized) {
+		if err := specula.Hello(ctx, worker, s.ID, specula.HelloInput{Version: "v", Hostname: "h"}); !errors.Is(err, specula.ErrUnauthorized) {
 			t.Fatalf("hello after revoke: %v", err)
 		}
 		if err := svc.Revoke(ctx, a, s.ID); !errors.Is(err, specula.ErrNotFound) {

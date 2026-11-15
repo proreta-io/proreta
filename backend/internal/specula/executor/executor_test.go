@@ -24,6 +24,8 @@ type fakeGateway struct {
 	jobs     []wire.Job
 	results  []wire.Result
 	hellos   atomic.Int32
+	helloReq []wire.HelloRequest
+	oldHello bool         // answer 400 to a hello with fields it does not know, like an older gateway
 	failNext atomic.Int32 // answer /results with 503 this many times
 }
 
@@ -35,6 +37,15 @@ func (g *fakeGateway) handler() http.Handler {
 		}
 		switch r.URL.Path {
 		case wire.BasePath + "/hello":
+			var in wire.HelloRequest
+			_ = json.NewDecoder(r.Body).Decode(&in)
+			g.mu.Lock()
+			g.helloReq = append(g.helloReq, in)
+			g.mu.Unlock()
+			if g.oldHello && len(in.Capabilities) > 0 {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
 			g.hellos.Add(1)
 			_ = json.NewEncoder(w).Encode(wire.HelloResponse{ServerTime: time.Now().UTC()})
 		case wire.BasePath + "/claim":
@@ -208,5 +219,22 @@ func TestQueueIsBounded(t *testing.T) {
 	}
 	if e.queued() != maxQueued {
 		t.Fatalf("queued %d", e.queued())
+	}
+}
+
+func TestHelloAnnouncesTCPAndFallsBackOnAnOlderGateway(t *testing.T) {
+	for _, old := range []bool{false, true} {
+		g := &fakeGateway{t: t, token: "spc_t", oldHello: old}
+		start(t, g, proberFunc(func(context.Context, checks.Request) checks.Result { return checks.Result{} }))
+		eventually(t, "an accepted hello", func() bool { return g.hellos.Load() >= 1 })
+		g.mu.Lock()
+		first, last := g.helloReq[0], g.helloReq[len(g.helloReq)-1]
+		g.mu.Unlock()
+		if len(first.Capabilities) != 1 || first.Capabilities[0] != wire.CapTCP {
+			t.Fatalf("old=%t: first hello %+v must announce tcp", old, first)
+		}
+		if old && len(last.Capabilities) != 0 {
+			t.Fatalf("an older gateway must get a plain hello: %+v", last)
+		}
 	}
 }

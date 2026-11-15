@@ -60,6 +60,10 @@ type Executor struct {
 	slots   chan struct{}
 	running sync.WaitGroup
 
+	// plainHello is set when the gateway rejected a hello with capabilities (an older gateway,
+	// which hands out tcp jobs without them). Only the hello goroutine touches it.
+	plainHello bool
+
 	mu      sync.Mutex
 	pending []wire.Result
 }
@@ -196,7 +200,16 @@ func (e *Executor) helloUntilOK(ctx context.Context) error {
 
 func (e *Executor) hello(ctx context.Context) error {
 	var out wire.HelloResponse
-	if _, err := e.call(ctx, "/hello", wire.HelloRequest{Version: e.cfg.Version, Hostname: e.cfg.Hostname}, &out); err != nil {
+	req := wire.HelloRequest{Version: e.cfg.Version, Hostname: e.cfg.Hostname}
+	if !e.plainHello {
+		req.Capabilities = []string{wire.CapTCP}
+	}
+	code, err := e.call(ctx, "/hello", req, &out)
+	if code == http.StatusBadRequest && !e.plainHello {
+		e.plainHello = true
+		_, err = e.call(ctx, "/hello", wire.HelloRequest{Version: e.cfg.Version, Hostname: e.cfg.Hostname}, &out)
+	}
+	if err != nil {
 		return err
 	}
 	if skew := e.cfg.Now().Sub(out.ServerTime); skew > 30*time.Second || skew < -30*time.Second {

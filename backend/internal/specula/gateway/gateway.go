@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -189,7 +190,17 @@ func (g *Handler) hello(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := identity(r)
-	if err := specula.Hello(r.Context(), g.d.Pool, id.SpeculaID, clean(in.Version, 64), clean(in.Hostname, 253)); err != nil {
+	caps := cleanCapabilities(in.Capabilities)
+	hello := specula.HelloInput{
+		Version: clean(in.Version, 64), Hostname: clean(in.Hostname, 253), Capabilities: caps,
+		InstanceID: clean(in.InstanceID, 64), ScheduleIssuedAt: in.ScheduleIssuedAt, OldestUnsentAt: in.OldestUnsentAt,
+		BufferDepth: in.BufferDepth, BufferDegraded: in.BufferDegraded != nil && *in.BufferDegraded,
+	}
+	if hello.BufferDepth != nil && *hello.BufferDepth < 0 {
+		problem(w, r, http.StatusBadRequest, "bad-request", "bufferDepth must not be negative")
+		return
+	}
+	if err := specula.Hello(r.Context(), g.d.Pool, id.SpeculaID, hello); err != nil {
 		if errors.Is(err, specula.ErrUnauthorized) {
 			g.unauthorized(w, r)
 			return
@@ -197,7 +208,13 @@ func (g *Handler) hello(w http.ResponseWriter, r *http.Request) {
 		g.fail(w, r, "hello", err)
 		return
 	}
-	write(w, http.StatusOK, wire.HelloResponse{ServerTime: g.d.Clock.Now().UTC()})
+	// The mode of the location is what this hello announced; an executor that announces nothing
+	// stays in pull mode.
+	mode := wire.ModePull
+	if slices.Contains(caps, wire.CapSchedule) {
+		mode = wire.ModeSchedule
+	}
+	write(w, http.StatusOK, wire.HelloResponse{ServerTime: g.d.Clock.Now().UTC(), Modes: []string{mode}})
 }
 
 func (g *Handler) claim(w http.ResponseWriter, r *http.Request) {
@@ -416,6 +433,19 @@ func problem(w http.ResponseWriter, r *http.Request, status int, slug, title str
 	httpx.WriteProblem(w, httpx.Problem{
 		Type: "urn:proreta:problem:" + slug, Title: title, Status: status, Instance: r.URL.Path, RequestID: logging.RequestID(r.Context()),
 	})
+}
+
+// cleanCapabilities drops empty and repeated names; more than 16 or longer than 32 characters are
+// cut, the limits of the contract and of the column.
+func cleanCapabilities(in []string) []string {
+	var out []string
+	for _, c := range in {
+		c = clean(c, 32)
+		if c != "" && !slices.Contains(out, c) && len(out) < 16 {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func clean(s string, max int) string {

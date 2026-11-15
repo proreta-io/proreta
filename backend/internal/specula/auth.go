@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -39,11 +40,32 @@ func Authenticate(ctx context.Context, pool *db.Pool, token string) (Identity, e
 	return id, nil
 }
 
-// Hello records the version and host name a Specula reports about itself.
-func Hello(ctx context.Context, pool *db.Pool, id uuid.UUID, version, hostname string) error {
+// HelloInput is what a Specula reports about itself. Everything after Hostname is optional and
+// replaces what the previous hello said, so the latest hello decides the capabilities.
+type HelloInput struct {
+	Version, Hostname string
+	Capabilities      []string
+	InstanceID        string
+	ScheduleIssuedAt  *time.Time
+	BufferDepth       *int
+	OldestUnsentAt    *time.Time
+	BufferDegraded    bool
+}
+
+// Hello records what a Specula reports about itself.
+func Hello(ctx context.Context, pool *db.Pool, id uuid.UUID, in HelloInput) error {
+	var instance *string
+	if in.InstanceID != "" {
+		instance = &in.InstanceID
+	}
+	caps := in.Capabilities
+	if caps == nil {
+		caps = []string{}
+	}
 	err := db.WithTx(ctx, pool, func(tx pgx.Tx) error {
 		var ok bool
-		if err := tx.QueryRow(ctx, `SELECT specula_hello($1, $2, $3)`, id, version, hostname).Scan(&ok); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT specula_hello($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+			id, in.Version, in.Hostname, caps, instance, in.ScheduleIssuedAt, in.BufferDepth, in.OldestUnsentAt, in.BufferDegraded).Scan(&ok); err != nil {
 			return err
 		}
 		if !ok {

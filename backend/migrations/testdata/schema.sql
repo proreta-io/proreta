@@ -955,6 +955,7 @@ specula_delivery_context(uuid,uuid) owner=proreta_owner definer=true acl=proreta
 specula_epoch_close(uuid,uuid,uuid) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner
 specula_epoch_open(uuid,uuid,uuid) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner
 specula_hello(uuid,text,text) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+specula_hello(uuid,text,text,text[],text,timestamp with time zone,integer,timestamp with time zone,boolean) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_mark_unreachable(interval) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_revoke(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 specula_schedule(uuid,uuid) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
@@ -3230,6 +3231,28 @@ CREATE OR REPLACE FUNCTION public.specula_hello(p_specula_id uuid, p_version tex
 AS $function$
     WITH u AS (
         UPDATE specula_agents SET version = left(p_version, 64), hostname = left(p_hostname, 253), last_seen_at = now()
+        WHERE id = p_specula_id AND revoked_at IS NULL
+        RETURNING 1
+    )
+    SELECT EXISTS (SELECT 1 FROM u)
+$function$
+CREATE OR REPLACE FUNCTION public.specula_hello(p_specula_id uuid, p_version text, p_hostname text, p_capabilities text[], p_instance_id text, p_schedule_issued_at timestamp with time zone, p_buffer_depth integer, p_oldest_unsent_at timestamp with time zone, p_buffer_degraded boolean)
+ RETURNS boolean
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    WITH u AS (
+        UPDATE specula_agents SET
+            version = left(p_version, 64),
+            hostname = left(p_hostname, 253),
+            capabilities = coalesce(p_capabilities, '{}'),
+            instance_id = left(p_instance_id, 64),
+            schedule_issued_at = p_schedule_issued_at,
+            buffer_depth = p_buffer_depth,
+            oldest_unsent_at = p_oldest_unsent_at,
+            buffer_degraded = coalesce(p_buffer_degraded, false),
+            last_seen_at = now()
         WHERE id = p_specula_id AND revoked_at IS NULL
         RETURNING 1
     )
