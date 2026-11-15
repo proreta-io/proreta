@@ -1,19 +1,24 @@
-// Package executor is the Specula executor: it runs inside a customer's network, claims due
-// checks from the gateway over HTTPS, runs them with the shared prober and reports the results.
-// It only makes outbound calls and keeps nothing on disk.
+// Package executor is the Specula executor: it runs inside a customer's network, runs checks
+// with the shared prober and reports the results to the gateway over HTTPS. In schedule mode it
+// fetches the schedule and runs every check at its slot on its own clock; against a server that
+// does not offer that it claims due checks (pull mode). It only makes outbound calls.
 package executor
 
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/proreta-io/proreta/backend/internal/checks"
@@ -25,7 +30,7 @@ var ErrRejected = errors.New("executor: the token was rejected")
 
 // Defaults.
 const (
-	DefaultConcurrency  = 20
+	DefaultConcurrency  = 50
 	DefaultPollInterval = 5 * time.Second
 	helloInterval       = time.Minute
 	flushInterval       = time.Second
@@ -51,7 +56,15 @@ type Config struct {
 	HTTP   *http.Client
 	Prober checks.Prober
 	Log    *slog.Logger
-	Now    func() time.Time
+	// Clock defaults to the system clock.
+	Clock Clock
+	// StateDir keeps the cached schedule and the clock offset. Empty means memory only: a restart
+	// then needs the gateway before it can check anything.
+	StateDir string
+	// BufferMaxBytes and BufferMaxAge bound the result buffer; whichever is hit first drops the
+	// oldest segment. Zero takes the defaults (256 MiB, 24 hours).
+	BufferMaxBytes int64
+	BufferMaxAge   time.Duration
 }
 
 // Executor runs checks for one Specula.
@@ -60,12 +73,24 @@ type Executor struct {
 	slots   chan struct{}
 	running sync.WaitGroup
 
+	clk   *serverClock
+	store *store
+	sched *scheduler
+	// instanceID is random per process; two ids from one token mean two executors share it.
+	instanceID string
+
 	// plainHello is set when the gateway rejected a hello with capabilities (an older gateway,
-	// which hands out tcp jobs without them). Only the hello goroutine touches it.
+	// which hands out tcp jobs without them). Only the goroutine that says hello touches it.
 	plainHello bool
+	// pullOnly is set when the gateway does not serve a schedule: stop announcing schedule/1.
+	pullOnly atomic.Bool
+	modes    atomic.Pointer[[]string] // modes of the last hello answer
 
 	mu      sync.Mutex
 	pending []wire.Result
+	// buf holds the finished slots of schedule mode until they are reported.
+	buf *buffer
+	rep *reporter
 }
 
 // New returns an Executor.
@@ -76,8 +101,8 @@ func New(cfg Config) *Executor {
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = DefaultPollInterval
 	}
-	if cfg.Now == nil {
-		cfg.Now = func() time.Time { return time.Now().UTC() }
+	if cfg.Clock == nil {
+		cfg.Clock = realClock{}
 	}
 	if cfg.HTTP == nil {
 		cfg.HTTP = &http.Client{Timeout: callTimeout}
@@ -85,33 +110,124 @@ func New(cfg Config) *Executor {
 	if cfg.Log == nil {
 		cfg.Log = slog.New(slog.DiscardHandler)
 	}
-	return &Executor{cfg: cfg, slots: make(chan struct{}, cfg.Concurrency)}
+	id := make([]byte, 8)
+	_, _ = rand.Read(id)
+	e := &Executor{
+		cfg: cfg, slots: make(chan struct{}, cfg.Concurrency), instanceID: hex.EncodeToString(id),
+		clk: &serverClock{local: cfg.Clock}, store: newStore(cfg.StateDir),
+	}
+	e.sched = newScheduler(e)
+	e.rep = newReporter(e)
+	return e
 }
 
-// Run says hello, then claims and runs checks until ctx is cancelled. It then waits for checks in
-// flight and reports what it has. It returns ErrRejected when the token stops working.
+// now is the server's time as far as the executor knows it; slots are computed from it.
+func (e *Executor) now() time.Time { return e.clk.Now() }
+
+// Run says hello, then runs checks until ctx is cancelled: from the schedule when the gateway
+// offers it, otherwise by claiming jobs. It then waits for checks in flight and reports what it
+// has. It returns ErrRejected when the token stops working.
 func (e *Executor) Run(ctx context.Context) error {
-	if err := e.helloUntilOK(ctx); err != nil {
-		return err
+	if err := e.store.load(); err != nil {
+		e.cfg.Log.Warn("cannot read the saved state; starting without it", "error", err)
+	}
+	e.buf = openBuffer(bufferConfig{MaxBytes: e.cfg.BufferMaxBytes, MaxAge: e.cfg.BufferMaxAge}, e.store, e.cfg.Log, e.now)
+	defer e.buf.Close()
+	if off := e.store.snapshot().ClockOffsetNanos; off != 0 {
+		e.clk.Restore(time.Duration(off))
 	}
 	// Checks and reports outlive the stop signal until the drain ends.
 	workCtx, cancelWork := context.WithCancel(context.WithoutCancel(ctx))
 	defer cancelWork()
+	e.sched.start(ctx, workCtx)
+	// A cached schedule starts checking before the gateway has been reached: a restart without a
+	// connection must not leave a gap.
+	e.sched.loadCache()
+	defer e.sched.stop(cancelWork)
 
-	// The background calls stop when the main loop ends, for a signal or a rejected token alike.
-	bgCtx, stopBackground := context.WithCancel(ctx)
+	if err := e.helloUntilOK(ctx); err != nil {
+		return err
+	}
+	if ctx.Err() != nil {
+		return nil
+	}
+	if modes := e.modes.Load(); e.plainHello || modes == nil || !hasMode(*modes, wire.ModeSchedule) {
+		e.sched.stop(cancelWork) // an older gateway, or a downgrade: only pull mode works
+		return e.runPull(ctx, workCtx, cancelWork)
+	}
+	if err := e.sched.refresh(ctx); err != nil {
+		switch {
+		case errors.Is(err, ErrRejected):
+			return err
+		case errors.Is(err, errNoSchedule):
+			e.cfg.Log.Warn("the gateway does not serve a schedule; using pull mode")
+			e.sched.stop(cancelWork)
+			e.pullOnly.Store(true)
+			if err := e.hello(ctx); err != nil && errors.Is(err, ErrRejected) {
+				return err
+			}
+			return e.runPull(ctx, workCtx, cancelWork)
+		default:
+			e.cfg.Log.Warn("cannot fetch the schedule; trying again", "error", err)
+		}
+	}
+	return e.runSchedule(ctx, cancelWork)
+}
+
+func hasMode(modes []string, m string) bool {
+	for _, x := range modes {
+		if x == m {
+			return true
+		}
+	}
+	return false
+}
+
+// background runs the hello loop and the given loops until ctx ends or a token is rejected; the
+// returned function stops them and reports what ended them.
+func (e *Executor) background(ctx context.Context, loops ...func(ctx context.Context, rejected chan<- error)) (rejected <-chan error, stop func()) {
+	bgCtx, cancel := context.WithCancel(ctx)
+	rej := make(chan error, 1)
+	var wg sync.WaitGroup
+	all := append([]func(context.Context, chan<- error){func(c context.Context, r chan<- error) {
+		e.loop(c, helloInterval, func() error { return e.hello(c) }, r)
+	}}, loops...)
+	for _, fn := range all {
+		wg.Add(1)
+		go func() { defer wg.Done(); fn(bgCtx, rej) }()
+	}
+	return rej, func() { cancel(); wg.Wait() }
+}
+
+// runSchedule runs until ctx ends. The checks are the scheduler's runners; this keeps the
+// gateway side going: hello every minute and the schedule refresh.
+func (e *Executor) runSchedule(ctx context.Context, cancelWork context.CancelFunc) error {
+	rejected, stopBackground := e.background(ctx, e.sched.refreshLoop, e.rep.loop)
 	defer stopBackground()
-	rejected := make(chan error, 1)
-	var bg sync.WaitGroup
-	bg.Add(2)
-	go func() {
-		defer bg.Done()
-		e.loop(bgCtx, helloInterval, func() error { return e.hello(workCtx) }, rejected)
-	}()
-	go func() {
-		defer bg.Done()
-		e.loop(bgCtx, flushInterval, func() error { return e.flush(workCtx) }, rejected)
-	}()
+	var runErr error
+	select {
+	case <-ctx.Done():
+	case runErr = <-rejected:
+	}
+	stopBackground()
+	// Let the checks in flight finish, then send what there is once.
+	e.sched.stop(cancelWork)
+	if runErr == nil {
+		flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), callTimeout)
+		defer cancel()
+		if err := e.rep.drain(flushCtx, false); err != nil && !errors.Is(err, ErrRejected) {
+			e.cfg.Log.Warn("final report failed; the results stay buffered", "error", err, "results", e.buf.Depth())
+		}
+	}
+	return runErr
+}
+
+// runPull claims and runs jobs until ctx is cancelled or the token is rejected.
+func (e *Executor) runPull(ctx, workCtx context.Context, cancelWork context.CancelFunc) error {
+	rejected, stopBackground := e.background(ctx, func(c context.Context, r chan<- error) {
+		e.loop(c, flushInterval, func() error { return e.flush(workCtx) }, r)
+	})
+	defer stopBackground()
 
 	poll := time.NewTicker(e.cfg.PollInterval)
 	defer poll.Stop()
@@ -146,7 +262,6 @@ loop:
 		cancelWork()
 		<-drained
 	}
-	bg.Wait()
 	flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), callTimeout)
 	defer cancel()
 	if err := e.flush(flushCtx); err != nil && runErr == nil && !errors.Is(err, ErrRejected) {
@@ -157,13 +272,11 @@ loop:
 
 // loop runs fn every interval until ctx is done; a rejected token ends the executor.
 func (e *Executor) loop(ctx context.Context, interval time.Duration, fn func() error, rejected chan<- error) {
-	t := time.NewTicker(interval)
-	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-t.C:
+		case <-e.cfg.Clock.After(interval):
 			if err := fn(); err != nil {
 				if errors.Is(err, ErrRejected) {
 					select {
@@ -192,7 +305,7 @@ func (e *Executor) helloUntilOK(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-time.After(wait):
+		case <-e.cfg.Clock.After(wait):
 		}
 		wait = min(wait*2, 30*time.Second)
 	}
@@ -203,19 +316,51 @@ func (e *Executor) hello(ctx context.Context) error {
 	req := wire.HelloRequest{Version: e.cfg.Version, Hostname: e.cfg.Hostname}
 	if !e.plainHello {
 		req.Capabilities = []string{wire.CapTCP}
+		if !e.pullOnly.Load() {
+			req.Capabilities = append(req.Capabilities, wire.CapSchedule)
+			req.InstanceID = e.instanceID
+			req.ScheduleIssuedAt = e.sched.issuedAt()
+			if e.buf != nil {
+				depth, degraded := e.buf.Depth(), e.buf.Degraded()
+				req.BufferDepth, req.BufferDegraded = &depth, &degraded
+				if slot := e.buf.OldestSlot(); slot > 0 {
+					t := time.Unix(slot, 0).UTC()
+					req.OldestUnsentAt = &t
+				}
+			}
+		}
 	}
+	sent := e.cfg.Clock.Now()
 	code, err := e.call(ctx, "/hello", req, &out)
 	if code == http.StatusBadRequest && !e.plainHello {
 		e.plainHello = true
+		sent = e.cfg.Clock.Now()
 		_, err = e.call(ctx, "/hello", wire.HelloRequest{Version: e.cfg.Version, Hostname: e.cfg.Hostname}, &out)
 	}
 	if err != nil {
 		return err
 	}
-	if skew := e.cfg.Now().Sub(out.ServerTime); skew > 30*time.Second || skew < -30*time.Second {
+	received := e.cfg.Clock.Now()
+	if skew := received.Sub(out.ServerTime); skew > 30*time.Second || skew < -30*time.Second {
 		e.cfg.Log.Warn("the clock differs from Proreta's; results may be rejected", "skew", skew.Round(time.Second).String())
 	}
+	e.observeServerTime(out.ServerTime, sent, received)
+	e.modes.Store(&out.Modes)
+	e.sched.notifyVersion(out.ScheduleVersion)
+	e.rep.poke() // the link works: send what waits
 	return nil
+}
+
+// observeServerTime corrects the executor's clock and saves the offset for a restart without
+// a connection.
+func (e *Executor) observeServerTime(server, sent, received time.Time) {
+	e.clk.Observe(server, sent, received)
+	off := e.clk.Offset()
+	if d := off - time.Duration(e.store.snapshot().ClockOffsetNanos); d > time.Second || d < -time.Second {
+		if err := e.store.update(func(s *state) { s.ClockOffsetNanos = int64(off) }); err != nil {
+			e.cfg.Log.Warn("cannot save the clock offset", "error", err)
+		}
+	}
 }
 
 // claim asks for as many jobs as there are free slots and starts them.
@@ -246,24 +391,13 @@ func (e *Executor) run(ctx context.Context, j wire.Job) {
 			e.cfg.Log.Error("a check panicked; its lease will expire", "monitor_id", j.MonitorID, "panic_type", fmt.Sprintf("%T", r))
 		}
 	}()
-	if !j.LeaseUntil.After(e.cfg.Now()) {
+	if !j.LeaseUntil.After(e.cfg.Clock.Now()) {
 		return
 	}
 	if j.Type != "" && j.Type != wire.TypeHTTP && j.Type != wire.TypeTCP {
 		return // a type this executor does not know: the lease expires; an upgrade fixes it
 	}
-	req := checks.Request{
-		TCP: j.Type == wire.TypeTCP, Host: j.Host, Port: j.Port,
-		URL: j.URL, Method: j.Method, Body: []byte(j.Body), Timeout: time.Duration(j.TimeoutSeconds) * time.Second,
-		ExpectedStatus: j.ExpectedStatus,
-	}
-	if len(j.Headers) > 0 {
-		req.Header = make(http.Header, len(j.Headers))
-		for _, h := range j.Headers {
-			req.Header.Add(h.Name, h.Value)
-		}
-	}
-	res := e.cfg.Prober.Probe(ctx, req)
+	res := e.cfg.Prober.Probe(ctx, jobRequest(j))
 	if res.Cancelled {
 		return // shutdown cut the check short; the lease expires and it runs again
 	}
@@ -318,7 +452,7 @@ func (e *Executor) flush(ctx context.Context) error {
 func (e *Executor) takeBatch() []wire.Result {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	cutoff := e.cfg.Now().Add(-maxResultAge)
+	cutoff := e.cfg.Clock.Now().Add(-maxResultAge)
 	fresh := e.pending[:0]
 	for _, r := range e.pending {
 		if r.CheckedAt.After(cutoff) {
@@ -338,36 +472,95 @@ func (e *Executor) requeue(batch []wire.Result) {
 	e.pending = append(append([]wire.Result(nil), batch...), e.pending...)
 }
 
-// call posts in as JSON and decodes a 200 answer into out. It returns the HTTP status (0 when no
-// answer came). A 401 is ErrRejected.
-func (e *Executor) call(ctx context.Context, path string, in, out any) (int, error) {
-	raw, err := json.Marshal(in)
-	if err != nil {
-		return 0, err
+// statusError is an answer other than the one expected. RetryAfter is the server's wish, if any.
+type statusError struct {
+	Path       string
+	Status     int
+	RetryAfter time.Duration
+}
+
+func (e *statusError) Error() string { return fmt.Sprintf("%s: status %d", e.Path, e.Status) }
+
+// do sends one request and returns the status, headers and body of the answer. A 401 is
+// ErrRejected; every other status is for the caller to judge.
+func (e *Executor) do(ctx context.Context, method, path string, in any, header http.Header, limit int64) (int, http.Header, []byte, error) {
+	var rd io.Reader
+	if in != nil {
+		raw, err := json.Marshal(in)
+		if err != nil {
+			return 0, nil, nil, err
+		}
+		rd = bytes.NewReader(raw)
 	}
 	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(e.cfg.BaseURL, "/")+wire.BasePath+path, bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(e.cfg.BaseURL, "/")+wire.BasePath+path, rd)
 	if err != nil {
-		return 0, err
+		return 0, nil, nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	for k, v := range header {
+		req.Header[k] = v
+	}
+	if in != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	req.Header.Set("Authorization", "Bearer "+e.cfg.Token)
 	req.Header.Set("User-Agent", "proreta-specula/"+e.cfg.Version)
 	resp, err := e.cfg.HTTP.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("%s: %w", path, err)
+		return 0, nil, nil, fmt.Errorf("%s: %w", path, err)
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	switch {
-	case resp.StatusCode == http.StatusUnauthorized:
-		return resp.StatusCode, ErrRejected
-	case resp.StatusCode != http.StatusOK:
-		return resp.StatusCode, fmt.Errorf("%s: status %d", path, resp.StatusCode)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
+	if err != nil {
+		return resp.StatusCode, resp.Header, nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if int64(len(body)) > limit {
+		return resp.StatusCode, resp.Header, nil, fmt.Errorf("%s: answer larger than %d bytes", path, limit)
+	}
+	if resp.StatusCode == http.StatusUnauthorized {
+		return resp.StatusCode, resp.Header, body, ErrRejected
+	}
+	return resp.StatusCode, resp.Header, body, nil
+}
+
+// retryAfter reads a Retry-After header in seconds (the form the gateway sends), capped.
+func retryAfter(h http.Header) time.Duration {
+	n, err := strconv.Atoi(h.Get("Retry-After"))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return min(time.Duration(n)*time.Second, 5*time.Minute)
+}
+
+// call posts in as JSON and decodes a 200 answer into out. It returns the HTTP status (0 when no
+// answer came). A 401 is ErrRejected, any other status a *statusError.
+func (e *Executor) call(ctx context.Context, path string, in, out any) (int, error) {
+	status, h, body, err := e.do(ctx, http.MethodPost, path, in, nil, 4<<20)
+	if err != nil {
+		return status, err
+	}
+	if status != http.StatusOK {
+		return status, &statusError{Path: path, Status: status, RetryAfter: retryAfter(h)}
 	}
 	if err := json.Unmarshal(body, out); err != nil {
-		return resp.StatusCode, fmt.Errorf("%s: unreadable answer", path)
+		return status, fmt.Errorf("%s: unreadable answer", path)
 	}
-	return resp.StatusCode, nil
+	return status, nil
+}
+
+// jobRequest is the check a job describes.
+func jobRequest(j wire.Job) checks.Request {
+	req := checks.Request{
+		TCP: j.Type == wire.TypeTCP, Host: j.Host, Port: j.Port,
+		URL: j.URL, Method: j.Method, Body: []byte(j.Body), Timeout: time.Duration(j.TimeoutSeconds) * time.Second,
+		ExpectedStatus: j.ExpectedStatus,
+	}
+	if len(j.Headers) > 0 {
+		req.Header = make(http.Header, len(j.Headers))
+		for _, h := range j.Headers {
+			req.Header.Add(h.Name, h.Value)
+		}
+	}
+	return req
 }

@@ -1,6 +1,7 @@
-// Command specula is the executor that runs inside a customer's network. It claims due checks
-// from Proreta over HTTPS, runs them against services that are not reachable from outside and
-// reports the results. It has no database and makes outbound calls only.
+// Command specula is the executor that runs inside a customer's network. It runs checks against
+// services that are not reachable from outside, from a schedule it fetches from Proreta over
+// HTTPS (or, against an older server, by claiming due checks), and reports the results. It has
+// no database and makes outbound calls only.
 package main
 
 import (
@@ -54,7 +55,8 @@ func run() error {
 	}
 	exec := executor.New(executor.Config{
 		BaseURL: cfg.URL, Token: cfg.Token.Value(), Version: version, Hostname: hostname,
-		Concurrency: cfg.Concurrency, PollInterval: cfg.PollInterval,
+		Concurrency: cfg.Concurrency, PollInterval: cfg.PollInterval, StateDir: cfg.StateDir,
+		BufferMaxBytes: cfg.BufferMaxBytes, BufferMaxAge: cfg.BufferMaxAge,
 		// The gateway is reached through the environment's proxy settings, unlike the checks.
 		HTTP:   &http.Client{Timeout: 25 * time.Second},
 		Prober: prober, Log: log,

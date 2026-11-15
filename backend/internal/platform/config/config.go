@@ -191,8 +191,15 @@ type Specula struct {
 	URL string
 	// Token is PRORETA_SPECULA_TOKEN, created in the app when the Specula is registered.
 	Token Secret
-	// Concurrency caps checks in flight (PRORETA_SPECULA_CONCURRENCY, default 20).
+	// Concurrency caps checks in flight (PRORETA_SPECULA_CONCURRENCY, default 50).
 	Concurrency int
+	// StateDir is PRORETA_SPECULA_STATE_DIR: where the executor keeps the cached schedule (and,
+	// later, its result buffer). Empty means memory only.
+	StateDir string
+	// BufferMaxBytes and BufferMaxAge bound the result buffer on disk (PRORETA_SPECULA_BUFFER_MAX_MIB,
+	// default 256; PRORETA_SPECULA_BUFFER_MAX_AGE, default 24h).
+	BufferMaxBytes int64
+	BufferMaxAge   time.Duration
 	// PollInterval is how often it asks for work (PRORETA_SPECULA_POLL_INTERVAL, default 5s).
 	PollInterval time.Duration
 }
@@ -434,9 +441,12 @@ func LoadSpecula(lookup LookupFunc) (Specula, error) {
 		AdminAddr:    l.addr("PRORETA_ADMIN_ADDR", ":9090"),
 		URL:          l.publicURL("PRORETA_URL"),
 		Token:        Secret(l.required("PRORETA_SPECULA_TOKEN")),
-		Concurrency:  l.integer("PRORETA_SPECULA_CONCURRENCY", 20, 1, 500),
+		Concurrency:  l.integer("PRORETA_SPECULA_CONCURRENCY", 50, 1, 500),
+		StateDir:     l.optional("PRORETA_SPECULA_STATE_DIR"),
+		BufferMaxAge: l.duration("PRORETA_SPECULA_BUFFER_MAX_AGE", 24*time.Hour, time.Minute, 7*24*time.Hour),
 		PollInterval: l.duration("PRORETA_SPECULA_POLL_INTERVAL", 5*time.Second, time.Second, time.Minute),
 	}
+	cfg.BufferMaxBytes = int64(l.integer("PRORETA_SPECULA_BUFFER_MAX_MIB", 256, 1, 100_000)) << 20
 	if t := cfg.Token.Value(); t != "" && !strings.HasPrefix(t, "spc_") {
 		l.fail("PRORETA_SPECULA_TOKEN", "must be a Specula token (it starts with spc_)")
 	}

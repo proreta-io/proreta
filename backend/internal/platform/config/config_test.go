@@ -661,21 +661,23 @@ func TestRequestSeal(t *testing.T) {
 func TestLoadSpecula(t *testing.T) {
 	e := map[string]string{"PRORETA_URL": "https://proreta.example.com", "PRORETA_SPECULA_TOKEN": "spc_abc"}
 	cfg, err := LoadSpecula(env(e))
-	if err != nil || cfg.URL != "https://proreta.example.com" || cfg.Token.Value() != "spc_abc" || cfg.Concurrency != 20 || cfg.PollInterval != 5*time.Second {
+	if err != nil || cfg.URL != "https://proreta.example.com" || cfg.Token.Value() != "spc_abc" || cfg.Concurrency != 50 || cfg.StateDir != "" || cfg.BufferMaxBytes != 256<<20 || cfg.BufferMaxAge != 24*time.Hour || cfg.PollInterval != 5*time.Second {
 		t.Fatalf("defaults: %+v %v", cfg, err)
 	}
 	if fmt.Sprint(cfg.Token) != "[redacted]" {
 		t.Fatalf("token printed: %v", cfg.Token)
 	}
-	e["PRORETA_SPECULA_CONCURRENCY"], e["PRORETA_SPECULA_POLL_INTERVAL"] = "50", "2s"
-	if cfg, err := LoadSpecula(env(e)); err != nil || cfg.Concurrency != 50 || cfg.PollInterval != 2*time.Second {
+	e["PRORETA_SPECULA_CONCURRENCY"], e["PRORETA_SPECULA_POLL_INTERVAL"], e["PRORETA_SPECULA_STATE_DIR"] = "30", "2s", "/var/lib/specula"
+	e["PRORETA_SPECULA_BUFFER_MAX_MIB"], e["PRORETA_SPECULA_BUFFER_MAX_AGE"] = "64", "2h"
+	if cfg, err := LoadSpecula(env(e)); err != nil || cfg.Concurrency != 30 || cfg.StateDir != "/var/lib/specula" || cfg.BufferMaxBytes != 64<<20 || cfg.BufferMaxAge != 2*time.Hour || cfg.PollInterval != 2*time.Second {
 		t.Fatalf("custom: %+v %v", cfg, err)
 	}
 	for name, mutate := range map[string]func(){
-		"PRORETA_URL":                   func() { delete(e, "PRORETA_URL") },
-		"PRORETA_SPECULA_TOKEN":         func() { e["PRORETA_SPECULA_TOKEN"] = "plain" },
-		"PRORETA_SPECULA_CONCURRENCY":   func() { e["PRORETA_SPECULA_CONCURRENCY"] = "0" },
-		"PRORETA_SPECULA_POLL_INTERVAL": func() { e["PRORETA_SPECULA_POLL_INTERVAL"] = "1ms" },
+		"PRORETA_URL":                    func() { delete(e, "PRORETA_URL") },
+		"PRORETA_SPECULA_TOKEN":          func() { e["PRORETA_SPECULA_TOKEN"] = "plain" },
+		"PRORETA_SPECULA_CONCURRENCY":    func() { e["PRORETA_SPECULA_CONCURRENCY"] = "0" },
+		"PRORETA_SPECULA_POLL_INTERVAL":  func() { e["PRORETA_SPECULA_POLL_INTERVAL"] = "1ms" },
+		"PRORETA_SPECULA_BUFFER_MAX_MIB": func() { e["PRORETA_SPECULA_BUFFER_MAX_MIB"] = "0" },
 	} {
 		bad := map[string]string{}
 		for k, v := range e {
