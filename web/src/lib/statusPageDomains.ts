@@ -47,7 +47,7 @@ export function nextStep(d: StatusPageDomain, expires?: string): string {
     case "active":
       return "The page is served on this domain. It is checked every 6 hours; if both records are missing for 7 days, serving stops.";
     case "failed":
-      return "Not served: neither record was found for 7 days. Publish the records again; serving resumes as soon as one is found.";
+      return "Not served: neither record was found for 7 days. Publish the records again; serving resumes as soon as the TXT record is found.";
   }
 }
 

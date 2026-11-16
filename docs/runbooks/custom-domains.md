@@ -57,6 +57,30 @@ The proxy asks `http://<fullname>-statuspage.<namespace>:9091/internal/tls/allow
 
 **Your own Gateway.** Add a listener with its certificate for each customer host and list the hosts in `httpRoute.hostnames` (with `httpRoute.enabled: true` and `httpRoute.parentRef.name`); the chart renders the HTTPRoute `<fullname>-customer-hosts`, which sends every path of those hosts to the `statuspage` Service. Every new customer host is a values change, so this suits a handful of known hosts. The render fails when the list contains an installation host.
 
+## One status domain on a self-hosted installation
+The common self-hosted setup is one organization with several teams. Each team's page is served on the application's own host at `/status/<slug>`, and one general page is served at the root of the organization's own host, such as `https://status.example.com/`, and linked from its website. A page keeps its `/status/<slug>` address on the application host when it also has a custom host; on the custom host only that one page is served, at `/`. No on-demand TLS proxy is needed for one known host:
+
+1. **Plan.** The first organization (`default`) is on the `internal` plan, new ones on `free`; both allow 0 domains. In **Admin → Organizations** change the organization to `community` (or edit the plan) before adding the host.
+2. **Gateway.** Add a listener for `status.example.com` with its own certificate (with cert-manager: the `cert-manager.io/cluster-issuer` annotation on the Gateway and a `tls.certificateRefs` Secret name per listener), then let the chart route the host:
+
+   ```yaml
+   statuspage:
+     enabled: true
+     customDomains:
+       enabled: true
+       cnameTarget: proreta.example.com   # any name that resolves to this Gateway
+       abuseUrl: mailto:abuse@example.com
+       httpRoute:
+         enabled: true
+         hostnames: [status.example.com]
+         parentRef: {name: public-gateway, namespace: gateway-system, sectionName: https-status}
+   config:
+     trustedProxyHops: 1
+   ```
+3. **In the app.** An owner or maintainer of the organization opens the organization-level status page, publishes it and adds `status.example.com` under **Custom domain**. Create the TXT and CNAME records the app shows in your own DNS zone and press **Check now**; the host is served as soon as the TXT record is seen.
+
+The chart renders no Ingress objects. With an Ingress controller, create an Ingress for the host yourself (with your cert-manager certificate) that sends every path to the `statuspage` Service, and keep `customDomains.httpRoute.enabled` off; the original `Host` header must reach the Service.
+
 ## What the customer does
 Owners and maintainers of the page's project, or of the organization for an organization-level page, use the **Custom domain** section of the status page settings; people who can only read the page see the list.
 
@@ -77,9 +101,9 @@ States:
 | `pending` | The TXT record was not seen yet. Checked every 10 minutes in the first 24 hours, then hourly; removed after 7 days without the record | no | no |
 | `verified` | The TXT record was seen; the CNAME does not end at the target yet. Checked every 6 hours | yes | yes |
 | `active` | Verified and the CNAME ends at the target. Checked every 6 hours | yes | yes |
-| `failed` | Neither record was found in at least 3 consecutive checks and for 7 days. Returns to `verified` when a record is seen again. Checked every 6 hours | no | no |
+| `failed` | Neither record was found in at least 3 consecutive checks and for 7 days. Returns to `verified` only when the TXT record is seen again; the CNAME alone does not bring it back. Checked every 6 hours | no | no |
 
-Only the TXT record verifies a host: a CNAME alone never does, so a stale CNAME pointing at you cannot serve someone else's page. Once verified, either record keeps the host alive, so the TXT record may be removed after the CNAME is in place. A lookup that times out or fails counts as unknown, never as a missing record.
+Only the TXT record verifies a host: a CNAME alone never does, so a stale CNAME pointing at you cannot serve someone else's page. Once verified, either record keeps the host alive, so the TXT record may be removed after the CNAME is in place; if the host then fails, the TXT record has to be put back. A lookup that times out or fails counts as unknown, never as a missing record.
 
 Limits: 3 domains per page, 10 domains added per organization in 24 hours, and the plan limit for the organization as a whole. A page with several domains marks one as primary: it is listed first and replaced automatically when removed, and it does not change any link or redirect yet. Removing a domain stops serving it at once and frees its place in the plan.
 
