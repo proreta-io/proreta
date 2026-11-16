@@ -264,6 +264,30 @@ describe("status page settings", () => {
     },
   );
 
+  it("explains no-data days in the preview only when there are some", async () => {
+    const gappy = days.map((d, i) =>
+      i === 3 ? { ...d, status: "no_data" as const, uptime: null } : d,
+    );
+    let snap = snapshot({
+      components: [
+        { name: "API", group: "Core", status: "operational", uptime: 99.98, days: gappy },
+      ],
+    });
+    mockApi({
+      ...as("maintainer"),
+      "GET /api/v1/status-pages": () => json({ items: [page()] }),
+      "GET /api/v1/status-pages/sp/preview": () => json(snap),
+      "GET /api/v1/status-pages/sp/components": () => json({ items: [] }),
+      "GET /api/v1/monitors": () => json({ items: [] }),
+    });
+    renderApp("/status-page");
+    const preview = await screen.findByRole("complementary", { name: "Live preview" });
+    expect(
+      await within(preview).findByText(/A day without data is not downtime/),
+    ).toBeInTheDocument();
+    snap = snapshot();
+  });
+
   it(
     "applies unsaved branding to the preview and shows server field errors",
     { timeout: 20_000 },

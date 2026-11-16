@@ -907,6 +907,23 @@ describe("monitor details", () => {
     expect(screen.queryByText(/No checks yet/)).not.toBeInTheDocument();
   });
 
+  it("explains that a break in the ribbon is no data, not downtime", async () => {
+    mockApi({
+      ...signedIn,
+      "GET /api/v1/monitors/m1": () => json(detail()),
+      "GET /api/v1/monitors/m1/stats": () =>
+        json({
+          range: "24h",
+          avgMs: 100,
+          p95Ms: 120,
+          series: [{ t: "2026-10-20T10:00:00Z", avgMs: 100, okRatio: 1 }],
+        }),
+    });
+    renderApp("/monitors/m1");
+    expect(await screen.findByText("Break: no data, not downtime")).toBeInTheDocument();
+    expect(screen.getByText(/arrive late and fill the gap/)).toBeInTheDocument();
+  });
+
   it("keeps the labels of the shown range until the new range arrives", async () => {
     let release: (() => void) | undefined;
     const stats = (range: string) => ({

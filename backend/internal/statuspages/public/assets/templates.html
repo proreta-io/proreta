@@ -66,6 +66,7 @@
       {{end}}
     </div>
     {{end}}
+    {{if .HasNoData}}<p class="empty note">A day without data is not downtime. Results from a monitoring location that was offline arrive late and fill the gap.</p>{{end}}
   </section>
 
   <section aria-labelledby="past-h">
