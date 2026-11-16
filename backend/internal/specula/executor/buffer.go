@@ -34,6 +34,8 @@ const (
 	dropAge    = "age"
 	dropMemory = "memory"
 	dropBad    = "unreadable"
+	// dropRefused is a result the gateway refused as a whole; it is final.
+	dropRefused = "refused"
 )
 
 // bufferConfig are the limits of a buffer; zero values take the defaults.

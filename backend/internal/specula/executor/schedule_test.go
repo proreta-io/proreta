@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -245,6 +246,7 @@ type harness struct {
 	gw   *schedGateway
 	srv  *httptest.Server
 	prob *testProber
+	log  *slog.Logger
 	e    *Executor
 	stop func() error
 }
@@ -260,7 +262,7 @@ func newHarness(t *testing.T, gw *schedGateway, stateDir string) *harness {
 
 func (h *harness) start(stateDir string) {
 	h.e = New(Config{
-		BaseURL: h.srv.URL, Token: h.gw.token, Version: "test", Hostname: "pod", Prober: h.prob, Clock: h.clk, StateDir: stateDir,
+		BaseURL: h.srv.URL, Token: h.gw.token, Version: "test", Hostname: "pod", Prober: h.prob, Clock: h.clk, StateDir: stateDir, Log: h.log,
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)

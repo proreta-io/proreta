@@ -83,6 +83,24 @@ The Specula gateway (`/specula/v1`, admin port of the `speculagw` process). Limi
 | `proreta_specula_schedule_build_seconds` | histogram | | Time to read and decrypt a Specula's schedule: one sample per `GET /schedule`, and one per `hello` or `reports` call that finds no schedule version cached (the version is cached for 5 seconds) |
 | `proreta_specula_schedule_unreadable_monitors_total` | counter | | Monitors left out of a built schedule because their sealed request cannot be opened (wrong or missing request keys); counted at every build, so any increase means a monitor is not being checked, and the log names it |
 
+### specula (executor)
+The executor serves metrics on its own admin port (`PRORETA_ADMIN_ADDR`, default `:9090`) in the customer's network. Their names start with `specula_`, not `proreta_`. They carry no per-monitor or per-token label.
+
+| Metric | Type | Labels | Meaning |
+|---|---|---|---|
+| `specula_buffer_results` | gauge | | Results waiting to be reported |
+| `specula_buffer_bytes` | gauge | | Bytes the buffer holds on disk (0 in memory-only mode) |
+| `specula_buffer_oldest_age_seconds` | gauge | | Age of the oldest waiting result; 0 when none waits. Grows while the link is down and during a replay |
+| `specula_buffer_degraded` | gauge | | 1 when results are buffered in memory only (state directory missing or unusable) |
+| `specula_results_dropped_total` | counter | `reason` (`size`, `age`, `memory`, `unreadable`, `refused`) | Results given up on: a buffer limit, an unreadable segment, or refused by the gateway as a whole. Any increase is a gap |
+| `specula_buffer_corrupt_records_total` | counter | | Damaged buffer records skipped plus segments set aside |
+| `specula_schedule_age_seconds` | gauge | | Time since the schedule in use was issued; absent while there is none |
+| `specula_schedule_expired_monitors` | gauge | | Monitors not checked because the schedule expired; 0 normally |
+| `specula_missed_slots_total` | counter | `reason` (`busy`, `late`, `expired`) | Slots without a check: the previous check still ran, the executor was stalled for a whole interval, or the schedule had expired |
+| `specula_slot_lateness_seconds` | histogram | | How late a check started after its slot |
+| `specula_replay_inflight` | gauge | | Results in the batch being reported now; 0 when idle |
+| `specula_clock_offset_seconds` | gauge | | Proreta's time minus the local time at the last hello |
+
 ### statuspage
 The public renderer also has `proreta_http_requests_total` and `proreta_http_request_duration_seconds` with route templates such as `/status/{slug:[a-z0-9-]+}` (never the slug itself).
 

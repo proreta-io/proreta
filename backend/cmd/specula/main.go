@@ -63,6 +63,9 @@ func run() error {
 	})
 
 	reg := metrics.NewRegistry("specula", version, commit)
+	if err := exec.Register(reg); err != nil {
+		return err
+	}
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
 		return httpx.Serve(gctx, log, 25*time.Second, httpx.NewServer(cfg.AdminAddr, httpx.AdminHandler(log, func(context.Context) error { return nil }, reg), log))

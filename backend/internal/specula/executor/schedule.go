@@ -104,6 +104,19 @@ func (s *scheduler) issuedAt() *time.Time {
 	return &t
 }
 
+func (s *scheduler) validity() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.validUntil
+}
+
+// running is the number of monitors with a runner.
+func (s *scheduler) running() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.runners)
+}
+
 func (s *scheduler) version() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -288,7 +301,9 @@ func (s *scheduler) runLoop(ctx context.Context, m wire.ScheduledMonitor) {
 		if !s.waitUntil(ctx, slot) {
 			return
 		}
-		if late := e.now().Sub(slot); late >= interval {
+		late := e.now().Sub(slot)
+		e.met.lateness.Observe(max(late, 0).Seconds())
+		if late >= interval {
 			// Asleep or stalled for a whole interval: you cannot check the past, start at the next slot.
 			after := slotAtOrAfter(m.Anchor, m.IntervalSeconds, e.now())
 			s.n.missedLate.Add((after - next) / step)

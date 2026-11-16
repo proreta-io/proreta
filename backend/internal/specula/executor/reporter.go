@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/proreta-io/proreta/backend/internal/specula/wire"
@@ -34,6 +35,7 @@ type reporter struct {
 	retries  int64            // calls that failed as a whole
 	dropped  int64            // results given up on (bad requests, unusable answers)
 	stopped  bool             // the gateway has no /reports: an older server
+	inflight atomic.Int64     // results in the batch being sent now
 }
 
 func newReporter(e *Executor) *reporter {
@@ -199,6 +201,8 @@ func (r *reporter) sleep(ctx context.Context, d time.Duration) error {
 // send posts one batch. wait is the server's Retry-After.
 func (r *reporter) send(ctx context.Context, batch Batch, badAnswers *int) (sendResult, time.Duration, error) {
 	var out wire.ReportsResponse
+	r.inflight.Store(int64(len(batch.Reports)))
+	defer r.inflight.Store(0)
 	_, err := r.e.call(ctx, "/reports", wire.ReportsRequest{Results: batch.Reports}, &out)
 	if err != nil {
 		var se *statusError
