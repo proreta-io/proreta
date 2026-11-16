@@ -1141,6 +1141,12 @@ function Preview({
           </div>
         ))
       )}
+      {snapshot.components.some((c) => c.days.some((d) => d.status === "no_data")) && (
+        <p className="text-caption text-muted-foreground">
+          A day without data is not downtime. Results from a monitoring location that was offline
+          arrive late and fill the gap.
+        </p>
+      )}
       <p className="text-caption text-muted-foreground">
         {snapshot.pastIncidents.length === 0
           ? "No incidents in the last 90 days."

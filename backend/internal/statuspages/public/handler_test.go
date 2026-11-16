@@ -177,7 +177,7 @@ func TestPageRendersEscapedWithStrictPolicy(t *testing.T) {
 		t.Fatalf("page: %d %v", r.code, r.header)
 	}
 	for _, want := range []string{"Partial outage", "Core ", "API ", "Database is unavailable", "Outage", "No data", "Since <time", "resolved after 30 min",
-		"99.50 % uptime", `href="/status/acme/feed.rss"`, `href="/status/acme.json"`, `referrerpolicy="no-referrer"`, "Line one\n"} {
+		"99.50 % uptime", "A day without data is not downtime", `href="/status/acme/feed.rss"`, `href="/status/acme.json"`, `referrerpolicy="no-referrer"`, "Line one\n"} {
 		if !strings.Contains(r.body, want) {
 			t.Errorf("page lacks %q", want)
 		}

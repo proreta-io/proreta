@@ -822,7 +822,7 @@ type pageView struct {
 	AccentCSS                           template.CSS
 	CSSURL, RSSURL, JSONURL, UnlockURL  string
 	Canonical, AbuseURL                 string
-	Custom                              bool
+	Custom, HasNoData                   bool
 	Status                              statuspages.Status
 	StatusText, Generated, GeneratedISO string
 	Groups                              []groupView
@@ -894,6 +894,9 @@ func (h *handler) pageView(r *http.Request, slug string, s statuspages.Snapshot,
 				title = formatDate(d.Date) + ": " + formatPercent(*d.Uptime) + " uptime"
 			}
 			cv.Bars = append(cv.Bars, barView{Status: d.Status, Title: title})
+			if d.Status == statuspages.NoData {
+				v.HasNoData = true
+			}
 		}
 		cur.Components = append(cur.Components, cv)
 	}

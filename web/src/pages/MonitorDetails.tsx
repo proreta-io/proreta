@@ -552,7 +552,7 @@ function ResponseTime({
               <span className="h-2 w-1 bg-destructive" aria-hidden="true" />
               Red: failed checks
             </span>
-            <span>Break: no checks ran</span>
+            <span>Break: no data, not downtime</span>
             {spans.length > 0 && (
               <span className="flex items-center gap-1.5">
                 <span className="h-1 w-3 bg-destructive" aria-hidden="true" />
@@ -560,6 +560,10 @@ function ResponseTime({
                 range
               </span>
             )}
+          </p>
+          <p className="text-caption text-muted-foreground">
+            A break or a day without data is not downtime. Results from a Specula that was offline
+            arrive late and fill the gap.
           </p>
         </>
       )}
