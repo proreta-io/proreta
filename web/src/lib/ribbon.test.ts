@@ -93,6 +93,8 @@ describe("incidentSpans", () => {
     id,
     startedAt: at(from),
     resolvedAt: to === null ? null : at(to),
+    openedLate: false,
+    resolvedLate: false,
     reason: "timeout",
   });
 

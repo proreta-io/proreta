@@ -82,6 +82,7 @@ The Specula gateway (`/specula/v1`, admin port of the `speculagw` process). Limi
 | `proreta_specula_schedule_requests_total` | counter | `result` (`200`, `304`, `413`, `error`) | `GET /schedule` requests that passed the token budget; `413` is a location with more than 5000 monitors |
 | `proreta_specula_schedule_build_seconds` | histogram | | Time to read and decrypt a Specula's schedule: one sample per `GET /schedule`, and one per `hello` or `reports` call that finds no schedule version cached (the version is cached for 5 seconds) |
 | `proreta_specula_schedule_unreadable_monitors_total` | counter | | Monitors left out of a built schedule because their sealed request cannot be opened (wrong or missing request keys); counted at every build, so any increase means a monitor is not being checked, and the log names it |
+| `proreta_specula_duplicate_instance_total` | counter | | `hello` calls whose instance id differs from the stored one while the stored one said hello less than 3 minutes ago: two executors use one token (a misconfigured second replica). The Specula page shows a badge; a restart keeps its id and a replaced pod usually comes later, so neither counts. A steady increase means both executors are still running |
 
 ### specula (executor)
 The executor serves metrics on its own admin port (`PRORETA_ADMIN_ADDR`, default `:9090`) in the customer's network. Their names start with `specula_`, not `proreta_`. They carry no per-monitor or per-token label.

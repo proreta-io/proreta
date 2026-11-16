@@ -53,6 +53,7 @@ func toSpecula(sp specula.Specula, manager bool, now time.Time) gen.Specula {
 		Version: sp.Version, Hostname: sp.Hostname, LastSeenAt: sp.LastSeenAt, CreatedAt: sp.CreatedAt, RevokedAt: sp.RevokedAt,
 		Capabilities: sp.Capabilities, ScheduleIssuedAt: sp.ScheduleIssuedAt, BufferDepth: sp.BufferDepth,
 		OldestUnsentAt: sp.OldestUnsentAt, BufferDegraded: sp.BufferDegraded,
+		ClockOffsetMs: sp.ClockOffsetMs, DuplicateInstance: sp.Duplicate(now),
 	}
 }
 

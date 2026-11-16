@@ -89,6 +89,8 @@ const specula = (over: Partial<Specula> = {}): Specula => ({
   bufferDepth: null,
   oldestUnsentAt: null,
   bufferDegraded: false,
+  clockOffsetMs: null,
+  duplicateInstance: false,
   ...over,
 });
 

@@ -1,6 +1,7 @@
 import { ApiError } from "../api/client";
 import type { Project, Specula } from "../api/endpoints";
 import {
+  clockSkew,
   executorNotes,
   emptySpeculaForm,
   mapSpeculaErrors,
@@ -26,7 +27,23 @@ const specula = (over: Partial<Specula> = {}): Specula => ({
   bufferDepth: null,
   oldestUnsentAt: null,
   bufferDegraded: false,
+  clockOffsetMs: null,
+  duplicateInstance: false,
   ...over,
+});
+
+describe("clockSkew", () => {
+  it("names the direction once the error passes the gateway's 30 s", () => {
+    expect(clockSkew(specula({ clockOffsetMs: -45_000 }))).toBe("Clock 45 s ahead of Proreta's");
+    expect(clockSkew(specula({ clockOffsetMs: 130_000 }))).toBe("Clock 2 min behind Proreta's");
+  });
+
+  it("is null within 30 s, when unreported, and for pending or revoked ones", () => {
+    expect(clockSkew(specula({ clockOffsetMs: 30_000 }))).toBeNull();
+    expect(clockSkew(specula({ clockOffsetMs: null }))).toBeNull();
+    expect(clockSkew(specula({ clockOffsetMs: 99_000, status: "revoked" }))).toBeNull();
+    expect(clockSkew(specula({ clockOffsetMs: 99_000, status: "pending" }))).toBeNull();
+  });
 });
 
 describe("validateSpeculaForm", () => {

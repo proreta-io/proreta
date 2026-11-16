@@ -62,10 +62,11 @@ func TestIntegrationHelloCapabilities(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	reg := prometheus.NewRegistry()
 	h := gateway.New(gateway.Deps{
 		Limits: openLimits,
 		Pool:   worker, Scheduler: sched, Recorder: checkresult.Recorder{Scheduler: sched, Incidents: inc, Clock: clock.System{}},
-		RequestKeys: keys, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Registerer: prometheus.NewRegistry(),
+		RequestKeys: keys, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Registerer: reg,
 	})
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
@@ -151,6 +152,27 @@ func TestIntegrationHelloCapabilities(t *testing.T) {
 	want("downgrade without tcp", claimed(), "http")
 	if caps, instance, gotDepth, gotDegraded := stored(); len(caps) != 0 || instance != nil || gotDepth != nil || gotDegraded {
 		t.Errorf("an old hello must clear the previous fields: %v %v %v %v", caps, instance, gotDepth, gotDegraded)
+	}
+
+	// The clock offset is stored; two instance ids within three minutes count once, a restart not.
+	offset := int64(90_000)
+	hello(wire.HelloRequest{Version: "0.3.0", Hostname: "pod", InstanceID: "inst-a", ClockOffsetMs: &offset})
+	hello(wire.HelloRequest{Version: "0.3.0", Hostname: "pod", InstanceID: "inst-b"})
+	hello(wire.HelloRequest{Version: "0.3.0", Hostname: "pod", InstanceID: "inst-b"})
+	if n := metricValue(t, reg, "proreta_specula_duplicate_instance_total"); n != 1 {
+		t.Errorf("duplicate_instance_total = %v, want 1", n)
+	}
+	var stored64 *int64
+	if err := admin.QueryRow(ctx, `SELECT clock_offset_ms FROM specula_agents WHERE id = $1`, s.ID).Scan(&stored64); err != nil || stored64 != nil {
+		t.Errorf("the latest hello sent no offset: %v %v", stored64, err)
+	}
+	hello(wire.HelloRequest{Version: "0.3.0", Hostname: "pod", InstanceID: "inst-b", ClockOffsetMs: &offset})
+	if err := admin.QueryRow(ctx, `SELECT clock_offset_ms FROM specula_agents WHERE id = $1`, s.ID).Scan(&stored64); err != nil || stored64 == nil || *stored64 != 90_000 {
+		t.Errorf("clock offset %v %v", stored64, err)
+	}
+	wild := int64(wire.MaxClockOffsetMs + 1)
+	if code, _ := call(t, srv, token, "/hello", wire.HelloRequest{Version: "1", ClockOffsetMs: &wild}); code != http.StatusBadRequest {
+		t.Errorf("clock offset out of range: %d", code)
 	}
 
 	// Bad values answer 400 and change nothing.

@@ -1,6 +1,6 @@
 import { ApiError, errorMessage } from "../api/client";
 import type { Project, Specula, SpeculaCreate, SpeculaStatus } from "../api/endpoints";
-import { formatAgo } from "./format";
+import { formatAgo, formatDuration } from "./format";
 
 export const SPECULA_NAME_MAX = 80;
 
@@ -95,6 +95,23 @@ const REPLAY_AFTER_SECONDS = 120;
 
 const results = (n: number) => `${n} ${n === 1 ? "result" : "results"}`;
 
+/** The gateway rejects results more than 30 s in the future, so a clock off by more than that is a problem. */
+const CLOCK_SKEW_WARN_MS = 30_000;
+
+/** The executor's clock error when it is large enough to matter, else null (also for one that never said). */
+export function clockSkew(s: Specula): string | null {
+  const ms = s.clockOffsetMs;
+  if (
+    s.status === "revoked" ||
+    s.status === "pending" ||
+    ms == null ||
+    Math.abs(ms) <= CLOCK_SKEW_WARN_MS
+  ) {
+    return null;
+  }
+  return `Clock ${formatDuration(Math.abs(ms) / 1000)} ${ms < 0 ? "ahead of" : "behind"} Proreta's`;
+}
+
 /** What the executor said in its latest hello, as short lines; empty for one that never connected. */
 export function executorNotes(s: Specula, now: number): string[] {
   if (s.status === "revoked" || s.status === "pending") return [];
@@ -103,6 +120,8 @@ export function executorNotes(s: Specula, now: number): string[] {
     notes.push("Pull mode: it stops checking while Proreta cannot be reached.");
     return notes;
   }
+  const skew = clockSkew(s);
+  if (skew) notes.push(skew);
   if (s.scheduleIssuedAt) notes.push(`Schedule issued ${formatAgo(s.scheduleIssuedAt, now)}`);
   const depth = s.bufferDepth ?? 0;
   if (depth > 0) {

@@ -140,16 +140,17 @@ func (q *Queries) InsertDelivery(ctx context.Context, arg InsertDeliveryParams) 
 }
 
 const insertIncident = `-- name: InsertIncident :exec
-INSERT INTO incidents (id, tenant_id, monitor_id, started_at, reason)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO incidents (id, tenant_id, monitor_id, started_at, reason, opened_late)
+VALUES ($1, $2, $3, $4, $5, $6)
 `
 
 type InsertIncidentParams struct {
-	ID        uuid.UUID
-	TenantID  uuid.UUID
-	MonitorID *uuid.UUID
-	StartedAt time.Time
-	Reason    *string
+	ID         uuid.UUID
+	TenantID   uuid.UUID
+	MonitorID  *uuid.UUID
+	StartedAt  time.Time
+	Reason     *string
+	OpenedLate bool
 }
 
 // monitor_id carries the partial unique index that allows one open incident per monitor.
@@ -160,6 +161,7 @@ func (q *Queries) InsertIncident(ctx context.Context, arg InsertIncidentParams) 
 		arg.MonitorID,
 		arg.StartedAt,
 		arg.Reason,
+		arg.OpenedLate,
 	)
 	return err
 }
@@ -274,14 +276,16 @@ func (q *Queries) LockMonitorState(ctx context.Context, arg LockMonitorStatePara
 const resolveIncident = `-- name: ResolveIncident :one
 UPDATE incidents
 SET resolved_at = greatest(coalesce($1::timestamptz, now()), started_at),
-    resolve_reason = $2
-WHERE tenant_id = $3 AND id = $4 AND resolved_at IS NULL
+    resolve_reason = $2,
+    resolved_late = $3
+WHERE tenant_id = $4 AND id = $5 AND resolved_at IS NULL
 RETURNING started_at, resolved_at
 `
 
 type ResolveIncidentParams struct {
 	ResolvedAt    *time.Time
 	ResolveReason *string
+	ResolvedLate  bool
 	TenantID      uuid.UUID
 	ID            uuid.UUID
 }
@@ -297,6 +301,7 @@ func (q *Queries) ResolveIncident(ctx context.Context, arg ResolveIncidentParams
 	row := q.db.QueryRow(ctx, resolveIncident,
 		arg.ResolvedAt,
 		arg.ResolveReason,
+		arg.ResolvedLate,
 		arg.TenantID,
 		arg.ID,
 	)

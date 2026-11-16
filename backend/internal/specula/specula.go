@@ -101,6 +101,10 @@ type Specula struct {
 	BufferDepth      *int
 	OldestUnsentAt   *time.Time
 	BufferDegraded   bool
+	// ClockOffsetMs is the server's time minus the executor's clock (nil: not reported).
+	ClockOffsetMs *int64
+	// DuplicateInstanceAt is when two instance ids last said hello within 3 minutes of each other.
+	DuplicateInstanceAt *time.Time
 }
 
 // CreateInput is a new Specula. ProjectIDs is used only when AllProjects is false.
@@ -339,12 +343,12 @@ func (s *Service) checkProjects(ctx context.Context, tx pgx.Tx, tenantID uuid.UU
 
 const selectSpecula = `SELECT a.id, a.name, a.all_projects, a.location_id, COALESCE(a.version, ''), COALESCE(a.hostname, ''),
        a.last_seen_at, a.revoked_at, a.created_at, a.capabilities, a.schedule_issued_at, a.buffer_depth,
-       a.oldest_unsent_at, a.buffer_degraded FROM specula_agents AS a`
+       a.oldest_unsent_at, a.buffer_degraded, a.clock_offset_ms, a.duplicate_instance_at FROM specula_agents AS a`
 
 func scan(r pgx.CollectableRow) (Specula, error) {
 	var s Specula
 	err := r.Scan(&s.ID, &s.Name, &s.AllProjects, &s.LocationID, &s.Version, &s.Hostname, &s.LastSeenAt, &s.RevokedAt, &s.CreatedAt,
-		&s.Capabilities, &s.ScheduleIssuedAt, &s.BufferDepth, &s.OldestUnsentAt, &s.BufferDegraded)
+		&s.Capabilities, &s.ScheduleIssuedAt, &s.BufferDepth, &s.OldestUnsentAt, &s.BufferDegraded, &s.ClockOffsetMs, &s.DuplicateInstanceAt)
 	if s.Capabilities == nil {
 		s.Capabilities = []string{}
 	}
@@ -451,6 +455,16 @@ func (s Specula) Status(now time.Time) string {
 		return StatusOnline
 	}
 	return StatusOffline
+}
+
+// DuplicateWindow is how long a duplicateInstance warning lasts after the last hello that
+// showed two instance ids; the executor says hello every minute, so a pair that is still running
+// keeps it lit.
+const DuplicateWindow = 3 * time.Minute
+
+// Duplicate reports whether two executors shared the token within DuplicateWindow of now.
+func (s Specula) Duplicate(now time.Time) bool {
+	return s.DuplicateInstanceAt != nil && now.Sub(*s.DuplicateInstanceAt) < DuplicateWindow
 }
 
 // UsableBy reports whether a project may use the Specula (it is not revoked and is shared with

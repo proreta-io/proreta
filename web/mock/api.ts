@@ -37,6 +37,8 @@ const speculaItem = (name: string, status: string, over: Record<string, unknown>
   bufferDepth: null,
   oldestUnsentAt: null,
   bufferDegraded: false,
+  clockOffsetMs: null,
+  duplicateInstance: false,
   ...over,
 });
 const day = (n: number) => ago(n * 24 * 60);
@@ -881,6 +883,68 @@ const routes: Route[] = [
   // Monitoring.
   [
     "GET",
+    "/api/v1/monitors/:id",
+    ({ params }) => {
+      const { uptime24h: _u, ...m } = monitors.find((x) => x.id === params.id)!;
+      return ok({
+        ...m,
+        uptime: { h24: 99.5, d7: 99.9, d30: null },
+        channelIds: [],
+        createdAt: day(30),
+        updatedAt: day(2),
+      });
+    },
+  ],
+  [
+    "GET",
+    "/api/v1/monitors/:id/incidents",
+    () =>
+      ok({
+        items: [
+          // Replayed by a Specula after a gap: both ends reached Proreta late.
+          {
+            id: "inc-3",
+            startedAt: ago(300),
+            resolvedAt: ago(280),
+            reason: "timeout",
+            openedLate: true,
+            resolvedLate: true,
+          },
+          {
+            id: "inc-2",
+            startedAt: ago(900),
+            resolvedAt: ago(870),
+            reason: "http_status",
+            openedLate: false,
+            resolvedLate: true,
+          },
+          {
+            id: "inc-0",
+            startedAt: ago(2000),
+            resolvedAt: ago(1990),
+            reason: "dns",
+            openedLate: true,
+            resolvedLate: false,
+          },
+          {
+            id: "inc-1",
+            startedAt: ago(5000),
+            resolvedAt: ago(4990),
+            reason: "dns",
+            openedLate: false,
+            resolvedLate: false,
+          },
+        ],
+      }),
+  ],
+  ["GET", "/api/v1/monitors/:id/checks", () => ok({ items: [] })],
+  [
+    "GET",
+    "/api/v1/monitors/:id/stats",
+    ({ query }) => ok({ range: query.get("range") ?? "24h", avgMs: null, p95Ms: null, series: [] }),
+  ],
+  [
+    "GET",
     "/api/v1/monitors",
     ({ query }) => {
       const pid = query.get("projectId");
@@ -948,6 +1012,7 @@ const routes: Route[] = [
             bufferDepth: 340,
             oldestUnsentAt: ago(125),
             bufferDegraded: true,
+            clockOffsetMs: -95_000,
           }),
           speculaItem("Branch office", "offline", {
             hostname: "branch-3",
@@ -955,6 +1020,8 @@ const routes: Route[] = [
             scheduleIssuedAt: ago(30),
             bufferDepth: 12,
             oldestUnsentAt: ago(11),
+            duplicateInstance: true,
+            clockOffsetMs: 4_000,
           }),
           speculaItem("Lab (old executor)", "online", { hostname: "lab-1", capabilities: [] }),
         ],

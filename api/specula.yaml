@@ -175,6 +175,7 @@ components:
         bufferDepth: {type: integer, minimum: 0, description: "Results waiting to be sent"}
         oldestUnsentAt: {type: string, format: date-time, description: "Slot of the oldest result waiting to be sent"}
         bufferDegraded: {type: boolean, description: "The result buffer is in memory only (no usable state directory)"}
+        clockOffsetMs: {type: integer, format: int64, minimum: -1000000000000, maximum: 1000000000000, description: "The server's time minus the executor's corrected clock in milliseconds, as last measured (positive: the executor's clock is behind). Absent before the first measurement; an older server rejects it like the other fields."}
     HelloResponse:
       type: object
       required: [serverTime]

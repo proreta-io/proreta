@@ -78,6 +78,8 @@ const speculaOf = (over: Partial<Specula> = {}): Specula => ({
   bufferDepth: null,
   oldestUnsentAt: null,
   bufferDegraded: false,
+  clockOffsetMs: null,
+  duplicateInstance: false,
   ...over,
 });
 
@@ -841,6 +843,8 @@ describe("monitor details", () => {
               startedAt: "2026-10-20T10:00:00Z",
               resolvedAt: "2026-10-20T10:12:00Z",
               reason: "timeout",
+              openedLate: false,
+              resolvedLate: true,
             },
           ],
         }),
@@ -851,8 +855,9 @@ describe("monitor details", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Average 120 ms · p95 300 ms")).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "12 min" })).toBeInTheDocument();
-    expect(screen.getByRole("cell", { name: "Unexpected status" })).toBeInTheDocument();
     expect(screen.getByRole("cell", { name: "Failed" })).toBeInTheDocument();
+    expect(screen.getByText("Recovery reported late")).toBeInTheDocument();
+    expect(screen.queryByText("Start reported late")).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("radio", { name: "7d" }));
     expect(

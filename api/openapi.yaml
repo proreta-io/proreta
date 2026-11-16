@@ -5648,7 +5648,7 @@ components:
     Incident:
       type: object
       additionalProperties: false
-      required: [id, startedAt, resolvedAt, reason]
+      required: [id, startedAt, resolvedAt, reason, openedLate, resolvedLate]
       properties:
         id:
           type: string
@@ -5664,6 +5664,12 @@ components:
           allOf:
             - $ref: "#/components/schemas/ErrorKind"
           description: Why the monitor went down (the error kind of the failing checks)
+        openedLate:
+          type: boolean
+          description: The result that opened the incident reached Proreta long after it was checked (a Specula replayed it after a gap), so `startedAt` is the check time and Proreta learned of it later
+        resolvedLate:
+          type: boolean
+          description: The result that resolved the incident reached Proreta long after it was checked, so `resolvedAt` is the check time and Proreta learned of it later
     OngoingIncident:
       type: object
       nullable: true
@@ -6131,7 +6137,7 @@ components:
     Specula:
       type: object
       additionalProperties: false
-      required: [id, name, allProjects, projectIds, status, version, hostname, lastSeenAt, createdAt, revokedAt, capabilities, scheduleIssuedAt, bufferDepth, oldestUnsentAt, bufferDegraded]
+      required: [id, name, allProjects, projectIds, status, version, hostname, lastSeenAt, createdAt, revokedAt, capabilities, scheduleIssuedAt, bufferDepth, oldestUnsentAt, bufferDegraded, clockOffsetMs, duplicateInstance]
       properties:
         id:
           type: string
@@ -6190,6 +6196,14 @@ components:
         bufferDegraded:
           type: boolean
           description: The executor's buffer is memory-only or could not be written, so a restart loses what waits
+        clockOffsetMs:
+          type: integer
+          format: int64
+          nullable: true
+          description: The server's time minus the executor's corrected clock in milliseconds, as its latest hello reported it (positive means the executor's clock is behind); null before it reported one. Results from a clock more than 30 seconds off are rejected or arrive late.
+        duplicateInstance:
+          type: boolean
+          description: Two executors with different instance ids said hello within 3 minutes of each other, within the last 3 minutes; they share this Specula's token, which only one executor should hold
     SpeculaCreated:
       type: object
       additionalProperties: false

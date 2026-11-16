@@ -128,3 +128,10 @@ export function describeErrorKind(kind: string | null | undefined): string {
   if (!kind) return "—";
   return errorKinds[kind] ?? kind;
 }
+
+/** Says which end of an incident came from a report that reached Proreta late, or null when none did. */
+export function lateNote(i: { openedLate: boolean; resolvedLate: boolean }): string | null {
+  if (i.openedLate && i.resolvedLate) return "Reported late";
+  if (i.openedLate) return "Start reported late";
+  return i.resolvedLate ? "Recovery reported late" : null;
+}

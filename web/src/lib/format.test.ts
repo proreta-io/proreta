@@ -9,6 +9,7 @@ import {
   formatSince,
   formatTime,
   formatTlsExpiry,
+  lateNote,
 } from "./format";
 
 // vite.config.ts pins TZ=UTC for tests, so "local time" is UTC here.
@@ -120,5 +121,14 @@ describe("incident reason labels", () => {
     ["deleted", "Deleted"],
   ])("%s", (kind, expected) => {
     expect(describeErrorKind(kind)).toBe(expected);
+  });
+});
+
+describe("lateNote", () => {
+  it("says which end of the incident was reported late", () => {
+    expect(lateNote({ openedLate: false, resolvedLate: false })).toBeNull();
+    expect(lateNote({ openedLate: true, resolvedLate: false })).toBe("Start reported late");
+    expect(lateNote({ openedLate: false, resolvedLate: true })).toBe("Recovery reported late");
+    expect(lateNote({ openedLate: true, resolvedLate: true })).toBe("Reported late");
   });
 });

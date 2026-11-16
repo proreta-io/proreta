@@ -37,6 +37,7 @@ import { formatAgo } from "../lib/format";
 import { usePermissions } from "../lib/permissions";
 import { countOf, useUsage } from "../lib/usage";
 import {
+  clockSkew,
   emptySpeculaForm,
   executorNotes,
   mapSpeculaErrors,
@@ -259,6 +260,16 @@ export function SpeculaTable({
                   <span title={STATUS_HINTS[s.status]}>
                     <Badge tone={STATUS_TONES[s.status]}>{STATUS_LABELS[s.status]}</Badge>
                   </span>
+                  {s.duplicateInstance && s.status !== "revoked" && (
+                    <span title="Two executors with different instance IDs said hello within 3 minutes of each other. They share this token; run one executor per Specula.">
+                      <Badge tone="warning">Two executors</Badge>
+                    </span>
+                  )}
+                  {clockSkew(s) && (
+                    <span title="Results from a clock more than 30 s ahead are rejected, and from one behind they arrive late. Check the time on the executor's host.">
+                      <Badge tone="warning">Clock skew</Badge>
+                    </span>
+                  )}
                   {s.bufferDegraded && s.status !== "revoked" && (
                     <span title="Results waiting to be sent are not safely stored; a restart of the executor loses them.">
                       <Badge tone="warning">Buffer degraded</Badge>

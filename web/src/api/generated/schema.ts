@@ -3111,6 +3111,10 @@ export interface components {
       resolvedAt: string | null;
       /** @description Why the monitor went down (the error kind of the failing checks) */
       reason: components["schemas"]["ErrorKind"];
+      /** @description The result that opened the incident reached Proreta long after it was checked (a Specula replayed it after a gap), so `startedAt` is the check time and Proreta learned of it later */
+      openedLate: boolean;
+      /** @description The result that resolved the incident reached Proreta long after it was checked, so `resolvedAt` is the check time and Proreta learned of it later */
+      resolvedLate: boolean;
     };
     /** @description The open incident of a monitor; null when there is none */
     OngoingIncident: {
@@ -3453,6 +3457,13 @@ export interface components {
       oldestUnsentAt: string | null;
       /** @description The executor's buffer is memory-only or could not be written, so a restart loses what waits */
       bufferDegraded: boolean;
+      /**
+       * Format: int64
+       * @description The server's time minus the executor's corrected clock in milliseconds, as its latest hello reported it (positive means the executor's clock is behind); null before it reported one. Results from a clock more than 30 seconds off are rejected or arrive late.
+       */
+      clockOffsetMs: number | null;
+      /** @description Two executors with different instance ids said hello within 3 minutes of each other, within the last 3 minutes; they share this Specula's token, which only one executor should hold */
+      duplicateInstance: boolean;
     };
     /** @description A new Specula and its token, shown once */
     SpeculaCreated: {

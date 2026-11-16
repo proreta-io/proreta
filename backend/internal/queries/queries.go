@@ -62,6 +62,8 @@ type Incident struct {
 	StartedAt  time.Time
 	ResolvedAt *time.Time
 	Reason     string
+	// OpenedLate and ResolvedLate: the result that opened or resolved it was replayed.
+	OpenedLate, ResolvedLate bool
 }
 
 // Monitor is a monitor with its current state, as the list shows it.
@@ -501,7 +503,7 @@ func (s *Service) Incidents(ctx context.Context, tenantID uuid.UUID, sc authz.Sc
 			return err
 		}
 		rows, err := tx.Query(ctx, `
-			SELECT i.id, i.started_at, i.resolved_at, COALESCE(i.reason, '`+unknownReason+`')
+			SELECT i.id, i.started_at, i.resolved_at, COALESCE(i.reason, '`+unknownReason+`'), i.opened_late, i.resolved_late
 			FROM incident_monitors AS im
 			JOIN incidents AS i ON i.tenant_id = im.tenant_id AND i.id = im.incident_id
 			WHERE im.tenant_id = $1 AND im.monitor_id = $2
@@ -512,7 +514,7 @@ func (s *Service) Incidents(ctx context.Context, tenantID uuid.UUID, sc authz.Sc
 		}
 		out, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (Incident, error) {
 			var i Incident
-			err := r.Scan(&i.ID, &i.StartedAt, &i.ResolvedAt, &i.Reason)
+			err := r.Scan(&i.ID, &i.StartedAt, &i.ResolvedAt, &i.Reason, &i.OpenedLate, &i.ResolvedLate)
 			return i, err
 		})
 		return err
