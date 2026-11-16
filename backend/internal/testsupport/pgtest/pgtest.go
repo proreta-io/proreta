@@ -9,9 +9,15 @@ package pgtest
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -93,7 +99,11 @@ type Env struct {
 	admin         *pgx.ConnConfig
 }
 
-// New drops and recreates database name through dbbootstrap and applies all migrations.
+// New drops and recreates database name through dbbootstrap and applies all migrations. The
+// migrated schema is built once on a template database (shared by every test package, named after
+// a hash of the migrations and of dbbootstrap) and cloned for each call, which takes a fraction of
+// the bootstrap and migration time; dbbootstrap then runs on the clone, as it does on any existing
+// database, so roles and grants are the production ones.
 func New(t testing.TB, name string) *Env {
 	t.Helper()
 	admin := AdminConfig(t)
@@ -108,24 +118,30 @@ func New(t testing.TB, name string) *Env {
 	if _, err := lockConn.Exec(ctx, "SELECT pg_advisory_lock($1)", testLockKey); err != nil {
 		t.Fatalf("test lock: %v", err)
 	}
+	tpl := ensureTemplate(ctx, t, lockConn, admin)
 	if _, err := lockConn.Exec(ctx, "DROP DATABASE IF EXISTS "+pgx.Identifier{name}.Sanitize()+" WITH (FORCE)"); err != nil {
 		t.Fatalf("drop database %s: %v", name, err)
 	}
+	if _, err := lockConn.Exec(ctx, "CREATE DATABASE "+pgx.Identifier{name}.Sanitize()+" OWNER "+pgx.Identifier{dbbootstrap.OwnerRole}.Sanitize()+" TEMPLATE "+pgx.Identifier{tpl}.Sanitize()); err != nil {
+		t.Fatalf("clone database %s: %v", name, err)
+	}
+	env := bootstrap(ctx, t, admin, name)
+	return env
+}
 
+// bootstrap runs dbbootstrap on database name (created by it when missing) and returns its Env.
+func bootstrap(ctx context.Context, t testing.TB, admin *pgx.ConnConfig, name string) *Env {
+	t.Helper()
 	secrets := NewFakeSecrets()
-	host, port := admin.Host, int(admin.Port)
-	res, err := dbbootstrap.Run(ctx, dbbootstrap.Options{
-		Admin: admin, Host: host, Port: port, DBName: name, SSLMode: SSLMode(),
+	_, err := dbbootstrap.Run(ctx, dbbootstrap.Options{
+		Admin: admin, Host: admin.Host, Port: int(admin.Port), DBName: name, SSLMode: SSLMode(),
 		Namespace: "test", SecretName: "proreta-db", Secrets: secrets, GeneratePassword: Passwords(),
 	})
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
 	}
-	if !res.DatabaseCreated {
-		t.Fatalf("bootstrap did not create database %s", name)
-	}
 	data, _, _ := secrets.Get(ctx, "test", "proreta-db")
-	env := &Env{
+	return &Env{
 		DBName:        name,
 		OwnerURL:      string(data[dbbootstrap.KeyOwnerURL]),
 		APIURL:        string(data[dbbootstrap.KeyAPIURL]),
@@ -133,10 +149,58 @@ func New(t testing.TB, name string) *Env {
 		StatuspageURL: string(data[dbbootstrap.KeyStatuspageURL]),
 		admin:         admin,
 	}
+}
+
+// ensureTemplate returns the name of the migrated template database, building it when missing.
+// The caller holds the test lock, so two packages never build it at once.
+func ensureTemplate(ctx context.Context, t testing.TB, conn *pgx.Conn, admin *pgx.ConnConfig) string {
+	t.Helper()
+	tpl := "proreta_tpl_" + templateHash()
+	var exists bool
+	if err := conn.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM pg_database WHERE datname = $1)", tpl).Scan(&exists); err != nil {
+		t.Fatalf("look up template: %v", err)
+	}
+	if exists {
+		return tpl
+	}
+	// Built under a temporary name and renamed, so an interrupted build is never taken for a
+	// finished template.
+	tmp := tpl + "_build"
+	if _, err := conn.Exec(ctx, "DROP DATABASE IF EXISTS "+pgx.Identifier{tmp}.Sanitize()+" WITH (FORCE)"); err != nil {
+		t.Fatalf("drop database %s: %v", tmp, err)
+	}
+	env := bootstrap(ctx, t, admin, tmp)
 	if _, err := env.Migrate(ctx); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	return env
+	if _, err := conn.Exec(ctx, "ALTER DATABASE "+pgx.Identifier{tmp}.Sanitize()+" RENAME TO "+pgx.Identifier{tpl}.Sanitize()); err != nil {
+		t.Fatalf("rename template: %v", err)
+	}
+	return tpl
+}
+
+// templateHash identifies the schema and role setup a template holds: the embedded migrations
+// and the dbbootstrap sources (read from the source tree; a missing file only weakens the hash).
+func templateHash() string {
+	h := sha256.New()
+	entries, _ := fs.ReadDir(migrations.FS, ".")
+	for _, e := range entries {
+		b, _ := fs.ReadFile(migrations.FS, e.Name())
+		h.Write([]byte(e.Name()))
+		h.Write(b)
+	}
+	if _, file, _, ok := runtime.Caller(0); ok {
+		files, _ := filepath.Glob(filepath.Join(filepath.Dir(file), "..", "..", "dbbootstrap", "*.go"))
+		for _, f := range files {
+			if strings.HasSuffix(f, "_test.go") {
+				continue
+			}
+			b, _ := os.ReadFile(f)
+			h.Write([]byte(filepath.Base(f)))
+			h.Write(b)
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))[:12]
 }
 
 // SSLMode returns the sslmode of the admin URL (default "prefer").
