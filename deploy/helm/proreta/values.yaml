@@ -354,6 +354,9 @@ speculagw:
   enabled: false
   replicas: 2
   httpPort: 8080
+  # PRORETA_SPECULA_LATE_ALERT_AFTER: a result received this long after its slot raises alerts that
+  # say "reported late" (a Go duration, 1m to 24h).
+  lateAlertAfter: 10m
   resources:
     requests: {cpu: 25m, memory: 64Mi}
     limits: {cpu: 300m, memory: 192Mi}

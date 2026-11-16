@@ -22,8 +22,8 @@ import (
 // maxReportsBody bounds one reports call: 100 reports are about 30 KB.
 const maxReportsBody = 256 << 10
 
-// lateAlertAfter is how old a slot is, when it is received, for its alerts to say they are late.
-const lateAlertAfter = 10 * time.Minute
+// defaultLateAlertAfter is how old a slot is, when it is received, for its alerts to say they are late.
+const defaultLateAlertAfter = 10 * time.Minute
 
 func (g *Handler) reports(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxReportsBody)
@@ -84,7 +84,7 @@ func (g *Handler) reports(w http.ResponseWriter, r *http.Request) {
 		if o.Outcome == wire.OutcomeRecorded {
 			age := now.Sub(time.Unix(o.Slot, 0))
 			g.metrics.reportAge.Observe(age.Seconds())
-			if age > lateAlertAfter {
+			if age > g.d.LateAlertAfter {
 				g.metrics.lateReports.Inc()
 			}
 		}
@@ -123,7 +123,7 @@ func (g *Handler) recordReport(ctx context.Context, tx pgx.Tx, id specula.Identi
 		OK: x.OK, StatusCode: x.StatusCode, LatencyMs: x.LatencyMs, ErrorKind: x.ErrorKind,
 		TLSNotAfter: x.TLSNotAfter, CheckedAt: time.Unix(x.Slot, 0).UTC(),
 	}
-	permanent, err := g.d.Recorder.WriteSlot(ctx, sp, id.TenantID, x.MonitorID, id.LocationID, res, now.Sub(res.CheckedAt) > lateAlertAfter)
+	permanent, err := g.d.Recorder.WriteSlot(ctx, sp, id.TenantID, x.MonitorID, id.LocationID, res, now.Sub(res.CheckedAt) > g.d.LateAlertAfter)
 	switch {
 	case errors.Is(err, checkresult.ErrDuplicate):
 		return wire.OutcomeDuplicate, sp.Rollback(ctx)

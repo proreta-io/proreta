@@ -30,7 +30,11 @@ Write a placeholder as `{{name}}` (spaces inside the braces are ignored). A name
 | `specula.id`, `specula.name` | The Specula; `agent_offline` and `agent_online` only (`monitor.*` is empty for them and `link` opens the Specula page) |
 | `error.kind` | Why the monitor went down, for example `timeout` or `heartbeat_missed` |
 | `tls.expiresAt`, `tls.daysLeft` | `tls_expiring` only |
+| `late` | `true` when the alert is for a result that reached Proreta long after it was checked (a Specula replaying after an outage), else `false` |
+| `observedAt` | RFC 3339, UTC; when Proreta received that late result. Empty unless `late` is `true` |
 | `link` | The monitor in the dashboard, built from the public URL of the installation |
+
+A late alert is one raised by a result that a Specula reported long after its slot (see [Specula](specula.md)); its text says "reported late", `incident.startedAt` and `incident.resolvedAt` are the real times, and `observedAt` is when Proreta heard about it. For other alerts `late` is `false`.
 
 The default JSON template is:
 

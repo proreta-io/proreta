@@ -46,6 +46,7 @@ No metric is labelled per organization, monitor, incident, user, channel, URL, h
 | Metric | Type | Labels | Meaning |
 |---|---|---|---|
 | `proreta_jobs_deliveries_total` | counter | `channel_type` (`slack_webhook`, `webhook`, or `unknown` when the channel could not be read), `result` (`sent`, `retry`, `failed`) | Delivery outcomes recorded by `finish_delivery` |
+| `proreta_specula_late_alerts_total` | counter | `outcome` (`sent`, `skipped_resolved`, `failed`) | Deliveries written for replayed (late) results, by final outcome, served by `jobs` (the process that sends them). `skipped_resolved` is a late "down" not sent because its incident was already over, as its "recovered" tells the story; `failed` is any other delivery that gave up. Retries are not counted. No per-monitor or per-token label |
 | `proreta_jobs_delivery_duration_seconds` | histogram | `channel_type` | One send to a notification channel |
 | `proreta_jobs_outbox_pending` | gauge | | Outbox rows waiting (including retries), all organizations; refreshed every 15 s |
 | `proreta_jobs_claim_errors_total` | counter | | Failed `claim_deliveries` calls |
@@ -78,7 +79,7 @@ The Specula gateway (`/specula/v1`, admin port of the `speculagw` process). Limi
 | `proreta_specula_results_total` | counter | `outcome` (`recorded`, `stale`, `rejected`) | Pull-mode results (`/results`) by outcome |
 | `proreta_specula_reports_total` | counter | `outcome` (`recorded`, `duplicate`, `superseded`, `expired`, `rejected`) | Slot-addressed results (`/reports`) by outcome. `duplicate` is a result resent after a lost answer; `superseded` is a result of a schedule epoch that has ended; `expired` is older than 24 hours; `rejected` is malformed, off the grid, in the future or not this Specula's monitor |
 | `proreta_specula_report_age_seconds` | histogram | | Age of a recorded report when it arrived (receive time minus slot): close to zero in normal operation, the depth of the backlog during a replay |
-| `proreta_specula_late_reports_total` | counter | | Recorded reports older than 10 minutes when they arrived; alerts they raise say they are late |
+| `proreta_specula_late_reports_total` | counter | | Recorded reports older than `PRORETA_SPECULA_LATE_ALERT_AFTER` (default 10 minutes) when they arrived; alerts they raise say they are late |
 | `proreta_specula_schedule_requests_total` | counter | `result` (`200`, `304`, `413`, `error`) | `GET /schedule` requests that passed the token budget; `413` is a location with more than 5000 monitors |
 | `proreta_specula_schedule_build_seconds` | histogram | | Time to read and decrypt a Specula's schedule: one sample per `GET /schedule`, and one per `hello` or `reports` call that finds no schedule version cached (the version is cached for 5 seconds) |
 | `proreta_specula_schedule_unreadable_monitors_total` | counter | | Monitors left out of a built schedule because their sealed request cannot be opened (wrong or missing request keys); counted at every build, so any increase means a monitor is not being checked, and the log names it |

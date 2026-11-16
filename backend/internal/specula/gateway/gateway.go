@@ -62,6 +62,9 @@ type Deps struct {
 	// TrustedProxyHops is PRORETA_TRUSTED_PROXY_HOPS: how many proxies in front of the gateway
 	// append to X-Forwarded-For. 0 uses the TCP peer as the client address.
 	TrustedProxyHops int
+	// LateAlertAfter is how old a slot is, when it is received, for its alerts to say they are
+	// late (PRORETA_SPECULA_LATE_ALERT_AFTER); zero means 10 minutes.
+	LateAlertAfter time.Duration
 	// Limits are the per-token budgets of hello, schedule and reports; zero values use the defaults.
 	Limits Limits
 }
@@ -92,6 +95,9 @@ func New(d Deps) http.Handler {
 	}
 	if d.Recorder.Jitter == nil {
 		d.Recorder.Jitter = func() time.Duration { return 0 }
+	}
+	if d.LateAlertAfter <= 0 {
+		d.LateAlertAfter = defaultLateAlertAfter
 	}
 	g := &Handler{
 		d: d, metrics: newMetrics(d.Registerer), cache: newAuthCache(authCacheTTL, authCacheMax),

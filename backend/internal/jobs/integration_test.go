@@ -502,7 +502,9 @@ func TestIntegrationDeliveryMentionReminderDeleted(t *testing.T) {
 // incident is over (its late "recovered" says it all); a live "down" is sent either way.
 func TestIntegrationLateOpenedOfResolvedIncident(t *testing.T) {
 	e := newEnv(t, "jobslate")
-	d := e.deliverer(prometheus.NewRegistry(), nil)
+	reg := prometheus.NewRegistry()
+	// A clock past the grace of late alerts; the grace itself is tested below.
+	d := e.delivererWithClock(reg, nil, clock.NewFake(time.Now().Add(time.Hour)))
 	over, open, live := e.monitor(tenantA, "Over"), e.monitor(tenantA, "Open"), e.monitor(tenantA, "Live")
 	p := func(name string, late bool) map[string]any {
 		return map[string]any{"monitorName": name, "reason": "timeout", "late": late}
@@ -526,6 +528,49 @@ func TestIntegrationLateOpenedOfResolvedIncident(t *testing.T) {
 	}
 	posts := e.slack.sent()
 	if len(posts) != 2 || !strings.Contains(posts[0].text, "*Open* is down (reported late)") || !strings.Contains(posts[1].text, "*Live* is down\n") {
+		t.Fatalf("posts = %+v", posts)
+	}
+	for outcome, want := range map[string]float64{"sent": 1, "skipped_resolved": 1, "failed": 0} {
+		if got := metric(t, reg, "proreta_specula_late_alerts_total", outcome); got != want {
+			t.Errorf("late_alerts_total{%s} = %v, want %v", outcome, got, want)
+		}
+	}
+}
+
+// The "down" of a replayed result waits for the rest of the replay: a recovery that arrives
+// within the grace turns it into a dropped, stale "down"; without one it is sent afterwards.
+func TestIntegrationLateOpenedWaitsForRecovery(t *testing.T) {
+	e := newEnv(t, "jobsgrace")
+	reg := prometheus.NewRegistry()
+	d := e.deliverer(reg, nil)
+	a, b := e.monitor(tenantA, "A"), e.monitor(tenantA, "B")
+	p := func(name string) map[string]any {
+		return map[string]any{"monitorName": name, "reason": "timeout", "late": true}
+	}
+	recovers, stays := e.deliver(tenantA, a, notify.DeliveryOpened, p("A")), e.deliver(tenantA, b, notify.DeliveryOpened, p("B"))
+	for range 2 {
+		d.RunOnce(e.ctx)
+	}
+	for _, id := range []uuid.UUID{recovers, stays} {
+		if r := e.row(id); r.status != "pending" || r.attempts != 0 || r.retryIn <= 0 || r.retryIn > 31*time.Second {
+			t.Fatalf("a young late opened must wait without using an attempt: %+v", r)
+		}
+	}
+	if n := len(e.slack.sent()); n != 0 {
+		t.Fatalf("sent %d messages during the grace", n)
+	}
+	pgtest.MustExec(t, e.admin, `UPDATE incidents SET resolved_at = now(), resolve_reason = 'recovered' WHERE monitor_id = '`+a.String()+`'`,
+		`UPDATE notification_deliveries SET created_at = now() - interval '1 minute', next_attempt_at = now()`)
+	for range 3 {
+		d.RunOnce(e.ctx)
+	}
+	if r := e.row(recovers); r.status != "failed" || r.lastError == nil || *r.lastError != "late_incident_resolved" {
+		t.Fatalf("recovered during the grace: %+v", r)
+	}
+	if r := e.row(stays); r.status != "sent" {
+		t.Fatalf("still down after the grace: %+v", r)
+	}
+	if posts := e.slack.sent(); len(posts) != 1 || !strings.Contains(posts[0].text, "*B* is down (reported late)") {
 		t.Fatalf("posts = %+v", posts)
 	}
 }

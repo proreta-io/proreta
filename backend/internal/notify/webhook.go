@@ -112,6 +112,10 @@ func WebhookValues(kind string, raw []byte, publicURL string, c WebhookContext) 
 	default:
 		return nil, ErrBadPayload
 	}
+	v["late"] = strconv.FormatBool(p.Late)
+	if p.ObservedAt != nil {
+		v["observedAt"] = p.ObservedAt.UTC().Format(time.RFC3339)
+	}
 	if p.IncidentID != nil {
 		v["incident.id"] = p.IncidentID.String()
 	}

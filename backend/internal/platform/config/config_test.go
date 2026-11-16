@@ -658,6 +658,23 @@ func TestRequestSeal(t *testing.T) {
 	}
 }
 
+func TestLoadSpeculaGatewayLateAlertAfter(t *testing.T) {
+	base := map[string]string{"PRORETA_DATABASE_URL": "postgres://u:p@db/x"}
+	if cfg, err := LoadSpeculaGateway(env(base)); err != nil || cfg.LateAlertAfter != 10*time.Minute {
+		t.Fatalf("default: %v %v", cfg.LateAlertAfter, err)
+	}
+	base["PRORETA_SPECULA_LATE_ALERT_AFTER"] = "45m"
+	if cfg, err := LoadSpeculaGateway(env(base)); err != nil || cfg.LateAlertAfter != 45*time.Minute {
+		t.Fatalf("custom: %v %v", cfg.LateAlertAfter, err)
+	}
+	for _, bad := range []string{"0s", "30s", "25h", "soon"} {
+		base["PRORETA_SPECULA_LATE_ALERT_AFTER"] = bad
+		if _, err := LoadSpeculaGateway(env(base)); err == nil || !strings.Contains(err.Error(), "PRORETA_SPECULA_LATE_ALERT_AFTER") {
+			t.Errorf("%q: %v", bad, err)
+		}
+	}
+}
+
 func TestLoadSpecula(t *testing.T) {
 	e := map[string]string{"PRORETA_URL": "https://proreta.example.com", "PRORETA_SPECULA_TOKEN": "spc_abc"}
 	cfg, err := LoadSpecula(env(e))

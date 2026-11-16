@@ -379,6 +379,8 @@ installation hosts, abuse URL, ask endpoint). Args: dict ctx, process
   value: {{ printf ":%d" (int .Values.speculagw.httpPort) | quote }}
 - name: PRORETA_TRUSTED_PROXY_HOPS
   value: {{ .Values.config.trustedProxyHops | quote }}
+- name: PRORETA_SPECULA_LATE_ALERT_AFTER
+  value: {{ .Values.speculagw.lateAlertAfter | quote }}
 {{- end }}
 
 {{/* worker-only env (config.Worker). Arg: root context */}}

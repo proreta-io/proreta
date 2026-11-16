@@ -131,6 +131,13 @@ func TestWebhookValues(t *testing.T) {
 	if v["incident.resolvedAt"] != "" || v["tls.daysLeft"] != "" {
 		t.Errorf("absent values must stay empty: %v", v)
 	}
+	if v["late"] != "false" || v["observedAt"] != "" {
+		t.Errorf("a live alert is not late: %v", v)
+	}
+	lateRaw := []byte(`{"monitorId":"` + id.String() + `","monitorName":"API","late":true,"observedAt":"2026-01-02T05:06:07+01:00"}`)
+	if lv, err := WebhookValues(DeliveryOpened, lateRaw, "https://p.example", hc); err != nil || lv["late"] != "true" || lv["observedAt"] != "2026-01-02T04:06:07Z" {
+		t.Errorf("late alert: %v %v", lv, err)
+	}
 	v, _ = WebhookValues(DeliveryOpened, raw, "https://p.example", hc)
 	if v["event"] != "opened" || v["status"] != "down" || v["incident.duration"] != "" {
 		t.Errorf("opened: %v", v)
