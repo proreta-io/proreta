@@ -73,6 +73,11 @@ const speculaOf = (over: Partial<Specula> = {}): Specula => ({
   lastSeenAt: "2026-11-12T10:00:00Z",
   createdAt: "2026-11-01T00:00:00Z",
   revokedAt: null,
+  capabilities: ["schedule/1"],
+  scheduleIssuedAt: null,
+  bufferDepth: null,
+  oldestUnsentAt: null,
+  bufferDegraded: false,
   ...over,
 });
 

@@ -1,5 +1,6 @@
 import { ApiError, errorMessage } from "../api/client";
 import type { Project, Specula, SpeculaCreate, SpeculaStatus } from "../api/endpoints";
+import { formatAgo } from "./format";
 
 export const SPECULA_NAME_MAX = 80;
 
@@ -60,14 +61,15 @@ export function mapSpeculaErrors(err: unknown): { fields: SpeculaFormErrors; gen
 export const STATUS_LABELS: Record<SpeculaStatus, string> = {
   pending: "Waiting",
   online: "Online",
-  offline: "Offline",
+  offline: "Unreachable",
   revoked: "Revoked",
 };
 
 export const STATUS_HINTS: Record<SpeculaStatus, string> = {
   pending: "Registered but it has not connected yet.",
   online: "Connected in the last 90 seconds.",
-  offline: "Connected before, but silent for more than 90 seconds.",
+  offline:
+    "Connected before, but Proreta has not heard from it for more than 90 seconds. Its checks may still be running.",
   revoked: "Its token no longer works.",
 };
 
@@ -86,4 +88,34 @@ export function sharedWith(
 /** The command-line settings an executor needs, for the one-time panel. */
 export function runSettings(url: string, token: string): string {
   return `PRORETA_URL=${url}\nPRORETA_SPECULA_TOKEN=${token}`;
+}
+
+/** Results older than this while the link works are a backlog being replayed, not a send in flight. */
+const REPLAY_AFTER_SECONDS = 120;
+
+const results = (n: number) => `${n} ${n === 1 ? "result" : "results"}`;
+
+/** What the executor said in its latest hello, as short lines; empty for one that never connected. */
+export function executorNotes(s: Specula, now: number): string[] {
+  if (s.status === "revoked" || s.status === "pending") return [];
+  const notes: string[] = [];
+  if (!s.capabilities.includes("schedule/1")) {
+    notes.push("Pull mode: it stops checking while Proreta cannot be reached.");
+    return notes;
+  }
+  if (s.scheduleIssuedAt) notes.push(`Schedule issued ${formatAgo(s.scheduleIssuedAt, now)}`);
+  const depth = s.bufferDepth ?? 0;
+  if (depth > 0) {
+    const oldest = s.oldestUnsentAt ? `, oldest checked ${formatAgo(s.oldestUnsentAt, now)}` : "";
+    const backlog =
+      s.status === "online" &&
+      s.oldestUnsentAt &&
+      (now - new Date(s.oldestUnsentAt).getTime()) / 1000 >= REPLAY_AFTER_SECONDS;
+    notes.push(
+      backlog
+        ? `Replaying ${results(depth)}${oldest}`
+        : `${results(depth)} waiting to be sent${oldest}`,
+    );
+  }
+  return notes;
 }

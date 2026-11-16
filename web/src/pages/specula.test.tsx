@@ -14,6 +14,11 @@ const specula = (over: Partial<Specula> = {}): Specula => ({
   lastSeenAt: new Date().toISOString(),
   createdAt: "2026-11-01T00:00:00Z",
   revokedAt: null,
+  capabilities: ["schedule/1"],
+  scheduleIssuedAt: null,
+  bufferDepth: null,
+  oldestUnsentAt: null,
+  bufferDegraded: false,
   ...over,
 });
 
@@ -73,6 +78,35 @@ describe("Specula page", () => {
     expect(within(rows[2]!).getByText("Waiting")).toBeInTheDocument();
     expect(within(rows[2]!).getByText("Payments")).toBeInTheDocument();
     expect(within(rows[2]!).getByText("never")).toBeInTheDocument();
+  });
+
+  it("shows the schedule, the replay, a degraded buffer and the unreachable wording", async () => {
+    const ago = (seconds: number) => new Date(Date.now() - seconds * 1000).toISOString();
+    mockApi({
+      ...signedIn,
+      "GET /api/v1/projects": () => json(projects),
+      "GET /api/v1/specula": () =>
+        json({
+          items: [
+            specula({
+              scheduleIssuedAt: ago(300),
+              bufferDepth: 25,
+              oldestUnsentAt: ago(3600),
+              bufferDegraded: true,
+            }),
+            specula({ id: "s2", name: "Lab", status: "offline", lastSeenAt: ago(600) }),
+          ],
+        }),
+    });
+    renderApp("/specula");
+    const rows = within(await screen.findByRole("table")).getAllByRole("row");
+    expect(within(rows[1]!).getByText("Schedule issued 5 min ago")).toBeInTheDocument();
+    expect(
+      within(rows[1]!).getByText(/Replaying 25 results, oldest checked 1 h ago/),
+    ).toBeInTheDocument();
+    expect(within(rows[1]!).getByText("Buffer degraded")).toBeInTheDocument();
+    expect(within(rows[2]!).getByText("Unreachable")).toBeInTheDocument();
+    expect(within(rows[2]!).queryByText("Buffer degraded")).not.toBeInTheDocument();
   });
 
   it("registers a Specula and shows the token once", async () => {
