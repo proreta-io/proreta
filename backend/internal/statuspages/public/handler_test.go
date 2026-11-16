@@ -340,6 +340,9 @@ func TestPasswordFlow(t *testing.T) {
 		lock.header.Get("Cache-Control") != "private, no-store" || !strings.Contains(lock.body, `name="robots" content="noindex`) {
 		t.Fatalf("lock page: %d %v", lock.code, lock.header)
 	}
+	if strings.Contains(lock.body, "Acme") || !strings.Contains(lock.body, "<h1>Protected status page</h1>") {
+		t.Errorf("lock page shows the page title: %s", lock.body)
+	}
 	form := map[string]string{"Content-Type": "application/x-www-form-urlencoded", "Origin": publicURL}
 	wrong := h.do(http.MethodPost, "/status/acme/unlock", "password=wrong+password", form)
 	if wrong.code != http.StatusUnauthorized || !strings.Contains(wrong.body, "not correct") || wrong.header.Get("Set-Cookie") != "" {

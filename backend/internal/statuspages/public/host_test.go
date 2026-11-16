@@ -601,20 +601,73 @@ func TestHostModeLimits(t *testing.T) {
 	}
 }
 
-func TestHostModePerHostLimitIsSharedByAllClients(t *testing.T) {
+func TestHostModeVisitorsAreNotThrottledTogether(t *testing.T) {
 	h := newHostHarness(t, nil)
-	codes := map[int]int{}
-	for i := range hostViewBurst + 40 {
-		// Each request from its own client, so only the per-host limiter can refuse.
+	// A crowd of distinct clients on one host: nobody is refused, however many there are.
+	for i := range 600 {
 		r := h.at("status.acme.com", http.MethodGet, "/status.json", "", map[string]string{"X-Forwarded-For": fmt.Sprintf("10.%d.%d.1", i/250, i%250)})
-		codes[r.code]++
+		if r.code != http.StatusOK {
+			t.Fatalf("visitor %d: %d", i, r.code)
+		}
 	}
-	if codes[http.StatusOK] < hostViewBurst || codes[http.StatusTooManyRequests] == 0 {
+	// One client that hammers the host is still refused by its own bucket.
+	codes := map[int]int{}
+	for range viewBurst + 40 {
+		codes[h.at("status.acme.com", http.MethodGet, "/status.json", "", map[string]string{"X-Forwarded-For": "192.0.2.9"}).code]++
+	}
+	if codes[http.StatusTooManyRequests] == 0 {
 		t.Errorf("codes %v", codes)
 	}
-	// Another host has its own budget.
-	if r := h.at("status.other.org", http.MethodGet, "/status.json", "", map[string]string{"X-Forwarded-For": "10.250.1.1"}); r.code != http.StatusOK {
-		t.Errorf("other host: %d", r.code)
+}
+
+func TestHostModeLookupsAreLimitedPerClientAndStaleServed(t *testing.T) {
+	h := newHostHarness(t, nil)
+	abuser := map[string]string{"X-Forwarded-For": "203.0.113.5"}
+	if r := h.at("status.acme.com", http.MethodGet, "/", "", map[string]string{"X-Forwarded-For": "192.0.2.1"}); r.code != http.StatusOK {
+		t.Fatalf("known host: %d", r.code)
+	}
+	// One client asking for many unknown hosts is stopped by its own bucket, long before the shared one.
+	n429 := 0
+	for i := range hostMissBurst + 30 {
+		if h.at(fmt.Sprintf("x%d.acme.com", i), http.MethodGet, "/", "", abuser).code == http.StatusTooManyRequests {
+			n429++
+		}
+	}
+	if n429 == 0 || h.hosts.total.Load() > hostMissBurst+2 {
+		t.Errorf("429s %d, lookups %d", n429, h.hosts.total.Load())
+	}
+	// Another client is not affected.
+	if r := h.at("y.acme.com", http.MethodGet, "/", "", map[string]string{"X-Forwarded-For": "192.0.2.2"}); r.code != http.StatusNotFound {
+		t.Errorf("other client: %d", r.code)
+	}
+	// The cached entry of the customer host expires while the abuser is still limited: the stale
+	// answer is served to the abuser, and a host never seen is refused.
+	h.clk.Advance(HostCacheTTL + time.Second)
+	for i := range hostMissBurst + 5 {
+		h.at(fmt.Sprintf("z%d.acme.com", i), http.MethodGet, "/", "", abuser)
+	}
+	if r := h.at("status.acme.com", http.MethodGet, "/", "", abuser); r.code != http.StatusOK {
+		t.Errorf("stale entry during the flood: %d", r.code)
+	}
+	if r := h.at("never.acme.com", http.MethodGet, "/", "", abuser); r.code != http.StatusTooManyRequests {
+		t.Errorf("unseen host: %d", r.code)
+	}
+}
+
+func TestHostCacheEvictsUnknownHostsFirst(t *testing.T) {
+	src := &countingHosts{hosts: map[string]string{"status.acme.com": "acme"}}
+	c := NewHostCache(src, clock.NewFake(time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)))
+	ctx := context.Background()
+	if _, _, err := c.Fetch(ctx, "status.acme.com"); err != nil {
+		t.Fatal(err)
+	}
+	for i := range maxHostCacheEntries + 10 {
+		if _, _, err := c.Fetch(ctx, fmt.Sprintf("r%d.acme.com", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, found, ok := c.Cached("status.acme.com"); !ok || !found {
+		t.Error("a served host was evicted by a flood of unknown ones")
 	}
 }
 

@@ -65,10 +65,11 @@ const (
 	maxLimiterKeys    = 50_000
 	maxPasswordForm   = 4 << 10
 
-	// Host mode: all visitors of one customer host together, and lookups of hosts not in the cache.
-	hostViewRate     = 20.0 // per second on average
-	hostViewBurst    = 200
-	unknownHostRate  = 50.0 // per second
+	// Host mode: lookups of hosts not in the cache, per client and in total. There is no limit per
+	// host: the page is served from memory, and a flood is already bounded per client by viewRate.
+	hostMissRate     = 2.0 // per second on average, per client
+	hostMissBurst    = 20
+	unknownHostRate  = 50.0 // per second, all clients
 	unknownHostBurst = 100
 )
 
@@ -120,9 +121,9 @@ type handler struct {
 	// Host mode; all nil when it is off.
 	hostsOf HostClassifier
 	hosts   *HostCache
-	// hostViews limits all visitors of one customer host together; unknownHosts limits the
+	// hostMisses limits database lookups per client; unknownHosts limits the
 	// lookups of hosts not in the cache, so random Host values cannot flood the database.
-	hostViews    *Limiter
+	hostMisses   *Limiter
 	unknownHosts *Limiter
 	path, custom http.Handler
 }
@@ -226,7 +227,7 @@ func NewHandler(cfg Config, deps Deps) http.Handler {
 	}
 	h.hostsOf = NewHostClassifier(cfg.InstallationHosts)
 	h.hosts = NewHostCache(hosts, clk)
-	h.hostViews = NewLimiter(hostViewRate, hostViewBurst, maxLimiterKeys, clk)
+	h.hostMisses = NewLimiter(hostMissRate, hostMissBurst, maxLimiterKeys, clk)
 	h.unknownHosts = NewLimiter(unknownHostRate, unknownHostBurst, 1, clk)
 	// Customer hosts: the host is the page, so no slug in the path. The stylesheet is static and
 	// answers on every host without a lookup; every other route resolves the host first, and
@@ -301,7 +302,7 @@ func (h *handler) dispatch(w http.ResponseWriter, r *http.Request) {
 }
 
 // resolveHost maps the host to a slug (cached, with a limiter in front of every database lookup)
-// and applies the per-host limit. A host that is not served gets the one 404.
+// A host that is not served gets the one 404.
 func (h *handler) resolveHost(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ri := infoOf(r)
@@ -314,27 +315,34 @@ func (h *handler) resolveHost(next http.Handler) http.Handler {
 		if ok {
 			h.m.hostLookups.WithLabelValues("hit").Inc()
 		} else {
-			if allowed, wait := h.unknownHosts.Allow("lookup"); !allowed {
-				h.m.hostLookups.WithLabelValues("limited").Inc()
-				h.m.limited.WithLabelValues("host").Inc()
-				tooMany(w, wait)
-				return
+			// A client that asks for many hosts spends its own bucket first, so the shared one is
+			// not emptied by one address; when either is empty the last answer (even an expired
+			// one) is served, so a flood of random hosts cannot take a customer domain down.
+			allowed, wait := h.hostMisses.Allow(h.clientKey(r))
+			if allowed {
+				allowed, wait = h.unknownHosts.Allow("lookup")
 			}
-			var err error
-			if slug, found, err = h.hosts.Fetch(r.Context(), ri.host); err != nil {
-				h.log.ErrorContext(r.Context(), "status page host lookup failed", "error", err)
-				h.notFound(w, r)
-				return
+			if !allowed {
+				if slug, found, ok = h.hosts.Stale(ri.host); !ok {
+					h.m.hostLookups.WithLabelValues("limited").Inc()
+					h.m.limited.WithLabelValues("host").Inc()
+					tooMany(w, wait)
+					return
+				}
+				h.m.hostLookups.WithLabelValues("hit").Inc()
 			}
-			h.m.hostLookups.WithLabelValues("miss").Inc()
+			if allowed {
+				var err error
+				if slug, found, err = h.hosts.Fetch(r.Context(), ri.host); err != nil {
+					h.log.ErrorContext(r.Context(), "status page host lookup failed", "error", err)
+					h.notFound(w, r)
+					return
+				}
+				h.m.hostLookups.WithLabelValues("miss").Inc()
+			}
 		}
 		if !found {
 			h.notFound(w, r)
-			return
-		}
-		if allowed, wait := h.hostViews.Allow(ri.host); !allowed {
-			h.m.limited.WithLabelValues("host").Inc()
-			tooMany(w, wait)
 			return
 		}
 		ri.slug = slug
@@ -555,6 +563,8 @@ func (h *handler) renderLock(w http.ResponseWriter, r *http.Request, slug string
 	nonce := newNonce()
 	v := h.pageView(r, slug, e.Snapshot, nonce)
 	v.NoIndex, v.Error, v.Canonical = true, msg, ""
+	// Anyone with the address sees the lock page, so it names nothing the maintainers chose.
+	v.Title = "Protected status page"
 	var buf bytes.Buffer
 	if err := templates.ExecuteTemplate(&buf, "lock", v); err != nil {
 		h.log.ErrorContext(r.Context(), "render lock page", "error", err)
