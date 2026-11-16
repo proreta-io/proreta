@@ -21,6 +21,9 @@ type state struct {
 	ClockOffsetNanos int64 `json:"clockOffsetNanos"`
 	// ScheduleValidUntil extends the cached schedule's validUntil after a 304.
 	ScheduleValidUntil *time.Time `json:"scheduleValidUntil,omitempty"`
+	// InstanceID identifies this executor across restarts; the gateway counts distinct ids per
+	// token to notice two executors that share one.
+	InstanceID string `json:"instanceId,omitempty"`
 	// Cursor is the oldest result of the buffer that was not acknowledged.
 	Cursor *cursor `json:"cursor,omitempty"`
 }

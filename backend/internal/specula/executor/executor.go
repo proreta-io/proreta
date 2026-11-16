@@ -91,6 +91,7 @@ type Executor struct {
 	// buf holds the finished slots of schedule mode until they are reported.
 	buf *buffer
 	rep *reporter
+	met metrics
 }
 
 // New returns an Executor.
@@ -118,7 +119,39 @@ func New(cfg Config) *Executor {
 	}
 	e.sched = newScheduler(e)
 	e.rep = newReporter(e)
+	e.met = newMetrics()
 	return e
+}
+
+// loadInstanceID takes the id saved in the state directory, or saves a new one. Without a
+// state directory (or one that cannot be written) the id lasts one process.
+func (e *Executor) loadInstanceID() {
+	if id := e.store.snapshot().InstanceID; id != "" {
+		e.instanceID = id
+		return
+	}
+	if err := e.store.update(func(s *state) { s.InstanceID = e.instanceID }); err != nil {
+		e.cfg.Log.Warn("cannot save the instance id; it changes at the next start", "error", err)
+	}
+}
+
+// logStartup says what the executor starts with. No secrets: counts and times only.
+func (e *Executor) logStartup() {
+	st := e.buf.Stats()
+	attrs := []any{
+		"instance_id", e.instanceID, "state_dir", e.store.enabled(),
+		"buffer_results", st.Depth, "buffer_bytes", st.Bytes, "buffer_degraded", st.Degraded,
+		"clock_offset", e.clk.Offset().Round(time.Millisecond).String(),
+	}
+	if slot := e.buf.OldestSlot(); slot > 0 {
+		attrs = append(attrs, "oldest_unsent_at", time.Unix(slot, 0).UTC())
+	}
+	if issued := e.sched.issuedAt(); issued != nil {
+		attrs = append(attrs, "schedule_issued_at", *issued, "schedule_valid_until", e.sched.validity(), "schedule_monitors", e.sched.running())
+	} else {
+		attrs = append(attrs, "schedule", "none")
+	}
+	e.cfg.Log.Info("executor state at start", attrs...)
 }
 
 // now is the server's time as far as the executor knows it; slots are computed from it.
@@ -131,6 +164,7 @@ func (e *Executor) Run(ctx context.Context) error {
 	if err := e.store.load(); err != nil {
 		e.cfg.Log.Warn("cannot read the saved state; starting without it", "error", err)
 	}
+	e.loadInstanceID()
 	e.buf = openBuffer(bufferConfig{MaxBytes: e.cfg.BufferMaxBytes, MaxAge: e.cfg.BufferMaxAge}, e.store, e.cfg.Log, e.now)
 	defer e.buf.Close()
 	if off := e.store.snapshot().ClockOffsetNanos; off != 0 {
@@ -144,6 +178,7 @@ func (e *Executor) Run(ctx context.Context) error {
 	// connection must not leave a gap.
 	e.sched.loadCache()
 	defer e.sched.stop(cancelWork)
+	e.logStartup()
 
 	if err := e.helloUntilOK(ctx); err != nil {
 		return err
