@@ -90,10 +90,11 @@ The executor serves metrics on its own admin port (`PRORETA_ADMIN_ADDR`, default
 |---|---|---|---|
 | `specula_buffer_results` | gauge | | Results waiting to be reported |
 | `specula_buffer_bytes` | gauge | | Bytes the buffer holds on disk (0 in memory-only mode) |
-| `specula_buffer_oldest_age_seconds` | gauge | | Age of the oldest waiting result; 0 when none waits. Grows while the link is down and during a replay |
+| `specula_buffer_oldest_age_seconds` | gauge | | Age of the oldest waiting result; 0 when none waits. Grows while the link is down and during a replay; the oldest result is looked up at most every 15 s |
 | `specula_buffer_degraded` | gauge | | 1 when results are buffered in memory only (state directory missing or unusable) |
 | `specula_results_dropped_total` | counter | `reason` (`size`, `age`, `memory`, `unreadable`, `refused`) | Results given up on: a buffer limit, an unreadable segment, or refused by the gateway as a whole. Any increase is a gap |
 | `specula_buffer_corrupt_records_total` | counter | | Damaged buffer records skipped plus segments set aside |
+| `specula_schedule_loaded` | gauge | | 1 when a schedule is in use, 0 while none was fetched yet (alert on 0 for "never fetched") |
 | `specula_schedule_age_seconds` | gauge | | Time since the schedule in use was issued; absent while there is none |
 | `specula_schedule_expired_monitors` | gauge | | Monitors not checked because the schedule expired; 0 normally |
 | `specula_missed_slots_total` | counter | `reason` (`busy`, `late`, `expired`) | Slots without a check: the previous check still ran, the executor was stalled for a whole interval, or the schedule had expired |

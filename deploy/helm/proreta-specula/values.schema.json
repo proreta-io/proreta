@@ -152,6 +152,16 @@
         "adminPort"
       ]
     },
+    "serviceMonitor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean", "description": "a Service and a ServiceMonitor for the admin port; needs the Prometheus Operator CRDs"},
+        "interval": {"type": "string", "pattern": "^[0-9]+(s|m)$"},
+        "path": {"type": "string", "pattern": "^/"},
+        "labels": {"type": "object"}
+      }
+    },
     "resources": {
       "type": "object",
       "additionalProperties": false,

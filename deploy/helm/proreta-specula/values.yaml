@@ -52,6 +52,15 @@ specula:
   logLevel: info
   adminPort: 9090          # PRORETA_ADMIN_ADDR, health and metrics
 
+# A ServiceMonitor for the admin port /metrics (needs the Prometheus Operator CRDs). Also creates
+# a Service for that port. labels are added to the ServiceMonitor, for example the one your
+# Prometheus selects on ({release: prometheus}).
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  path: /metrics
+  labels: {}
+
 resources:
   requests: {cpu: 25m, memory: 48Mi}
   limits: {cpu: 500m, memory: 192Mi}
