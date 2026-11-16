@@ -2,7 +2,7 @@ module github.com/proreta-io/proreta/backend
 
 go 1.26.0
 
-// The standard library of 1.26.0 carries known vulnerabilities (govulncheck in CI); keep this in step with GO_VERSION in the Dockerfile.
+// The standard library of 1.26.0 carries known vulnerabilities (govulncheck in CI); keep this in step with the golang image tag in the Dockerfile.
 toolchain go1.26.11
 
 require (
