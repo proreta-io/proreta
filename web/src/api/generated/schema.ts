@@ -3437,6 +3437,22 @@ export interface components {
       createdAt: string;
       /** Format: date-time */
       revokedAt: string | null;
+      /** @description What the executor announced in its latest hello, for example `schedule/1` and `tcp`; empty before its first call or for an executor that announces nothing */
+      capabilities: string[];
+      /**
+       * Format: date-time
+       * @description When the schedule the executor holds was issued; null when it has none or did not say
+       */
+      scheduleIssuedAt: string | null;
+      /** @description Results the executor holds that Proreta has not acknowledged; null when it did not say */
+      bufferDepth: number | null;
+      /**
+       * Format: date-time
+       * @description The check time of the oldest result still waiting; null when nothing waits or the executor did not say
+       */
+      oldestUnsentAt: string | null;
+      /** @description The executor's buffer is memory-only or could not be written, so a restart loses what waits */
+      bufferDegraded: boolean;
     };
     /** @description A new Specula and its token, shown once */
     SpeculaCreated: {
