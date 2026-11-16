@@ -92,7 +92,8 @@ func PermanentKind(err error) string {
 var ErrDuplicate = errors.New("checkresult: slot already recorded")
 
 // rollupLookback is how many closed hours the regular rollup run recomputes; a row in an older
-// hour needs a dirty mark.
+// hour needs a dirty mark. The run that follows an hour change looks one hour less far back than
+// the one before it, so the oldest hour of the window is marked too.
 const rollupLookback = 3 * time.Hour
 
 // WriteSlot records the result of one slot of an autonomous executor in tx, a tenant transaction
@@ -112,7 +113,7 @@ func (r Recorder) WriteSlot(ctx context.Context, tx pgx.Tx, tenantID, monitorID,
 		return "", err
 	}
 	now := r.Clock.Now()
-	if res.CheckedAt.Before(now.UTC().Truncate(time.Hour).Add(-rollupLookback)) {
+	if res.CheckedAt.Before(now.UTC().Truncate(time.Hour).Add(-rollupLookback + time.Hour)) {
 		if _, err := tx.Exec(ctx, `SELECT rollup_mark_dirty($1)`, res.CheckedAt); err != nil {
 			return "", err
 		}
