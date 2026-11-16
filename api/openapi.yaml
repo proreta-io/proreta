@@ -6131,7 +6131,7 @@ components:
     Specula:
       type: object
       additionalProperties: false
-      required: [id, name, allProjects, projectIds, status, version, hostname, lastSeenAt, createdAt, revokedAt]
+      required: [id, name, allProjects, projectIds, status, version, hostname, lastSeenAt, createdAt, revokedAt, capabilities, scheduleIssuedAt, bufferDepth, oldestUnsentAt, bufferDegraded]
       properties:
         id:
           type: string
@@ -6167,6 +6167,29 @@ components:
           type: string
           format: date-time
           nullable: true
+        capabilities:
+          type: array
+          description: What the executor announced in its latest hello, for example `schedule/1` and `tcp`; empty before its first call or for an executor that announces nothing
+          items:
+            type: string
+        scheduleIssuedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the schedule the executor holds was issued; null when it has none or did not say
+        bufferDepth:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: Results the executor holds that Proreta has not acknowledged; null when it did not say
+        oldestUnsentAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: The check time of the oldest result still waiting; null when nothing waits or the executor did not say
+        bufferDegraded:
+          type: boolean
+          description: The executor's buffer is memory-only or could not be written, so a restart loses what waits
     SpeculaCreated:
       type: object
       additionalProperties: false

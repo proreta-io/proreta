@@ -95,6 +95,12 @@ type Specula struct {
 	LastSeenAt *time.Time
 	RevokedAt  *time.Time
 	CreatedAt  time.Time
+	// What the latest hello said; see HelloInput.
+	Capabilities     []string
+	ScheduleIssuedAt *time.Time
+	BufferDepth      *int
+	OldestUnsentAt   *time.Time
+	BufferDegraded   bool
 }
 
 // CreateInput is a new Specula. ProjectIDs is used only when AllProjects is false.
@@ -332,11 +338,16 @@ func (s *Service) checkProjects(ctx context.Context, tx pgx.Tx, tenantID uuid.UU
 }
 
 const selectSpecula = `SELECT a.id, a.name, a.all_projects, a.location_id, COALESCE(a.version, ''), COALESCE(a.hostname, ''),
-       a.last_seen_at, a.revoked_at, a.created_at FROM specula_agents AS a`
+       a.last_seen_at, a.revoked_at, a.created_at, a.capabilities, a.schedule_issued_at, a.buffer_depth,
+       a.oldest_unsent_at, a.buffer_degraded FROM specula_agents AS a`
 
 func scan(r pgx.CollectableRow) (Specula, error) {
 	var s Specula
-	err := r.Scan(&s.ID, &s.Name, &s.AllProjects, &s.LocationID, &s.Version, &s.Hostname, &s.LastSeenAt, &s.RevokedAt, &s.CreatedAt)
+	err := r.Scan(&s.ID, &s.Name, &s.AllProjects, &s.LocationID, &s.Version, &s.Hostname, &s.LastSeenAt, &s.RevokedAt, &s.CreatedAt,
+		&s.Capabilities, &s.ScheduleIssuedAt, &s.BufferDepth, &s.OldestUnsentAt, &s.BufferDegraded)
+	if s.Capabilities == nil {
+		s.Capabilities = []string{}
+	}
 	return s, err
 }
 

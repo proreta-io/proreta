@@ -21,6 +21,24 @@ const higher = (a: Role | null, b: Role | null): Role | null =>
 
 const now = Date.now();
 const ago = (minutes: number) => new Date(now - minutes * 60_000).toISOString();
+
+const speculaItem = (name: string, status: string, over: Record<string, unknown>) => ({
+  id: name.toLowerCase().replace(/\W+/g, "-"),
+  name,
+  allProjects: true,
+  projectIds: [],
+  status,
+  version: "0.4.0",
+  lastSeenAt: ago(0.2),
+  createdAt: ago(60 * 24 * 20),
+  revokedAt: null,
+  capabilities: ["schedule/1", "tcp"],
+  scheduleIssuedAt: null,
+  bufferDepth: null,
+  oldestUnsentAt: null,
+  bufferDegraded: false,
+  ...over,
+});
 const day = (n: number) => ago(n * 24 * 60);
 let seq = 1000;
 const id = (prefix: string) => `${prefix}-${++seq}`;
@@ -913,7 +931,35 @@ const routes: Route[] = [
       return noContent;
     },
   ],
-  ["GET", "/api/v1/specula", () => ok({ items: [] })],
+  [
+    "GET",
+    "/api/v1/specula",
+    () =>
+      ok({
+        items: [
+          speculaItem("Office network", "online", {
+            hostname: "office-gw-1",
+            scheduleIssuedAt: ago(7),
+            bufferDepth: 0,
+          }),
+          speculaItem("Warehouse", "online", {
+            hostname: "wh-probe-2",
+            scheduleIssuedAt: ago(190),
+            bufferDepth: 340,
+            oldestUnsentAt: ago(125),
+            bufferDegraded: true,
+          }),
+          speculaItem("Branch office", "offline", {
+            hostname: "branch-3",
+            lastSeenAt: ago(12),
+            scheduleIssuedAt: ago(30),
+            bufferDepth: 12,
+            oldestUnsentAt: ago(11),
+          }),
+          speculaItem("Lab (old executor)", "online", { hostname: "lab-1", capabilities: [] }),
+        ],
+      }),
+  ],
   ["GET", "/api/v1/status-pages", () => ok({ items: [statusPage] })],
   ["GET", "/api/v1/status-pages/:id/components", () => ok({ items: [] })],
   [

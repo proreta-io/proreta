@@ -38,6 +38,7 @@ import { usePermissions } from "../lib/permissions";
 import { countOf, useUsage } from "../lib/usage";
 import {
   emptySpeculaForm,
+  executorNotes,
   mapSpeculaErrors,
   runSettings,
   sharedWith,
@@ -247,11 +248,23 @@ export function SpeculaTable({
                     {s.hostname}
                   </span>
                 )}
+                {executorNotes(s, now).map((note) => (
+                  <span key={note} className="block text-caption text-muted-foreground">
+                    {note}
+                  </span>
+                ))}
               </Td>
               <Td>
-                <span title={STATUS_HINTS[s.status]}>
-                  <Badge tone={STATUS_TONES[s.status]}>{STATUS_LABELS[s.status]}</Badge>
-                </span>
+                <div className="flex flex-col items-start gap-1">
+                  <span title={STATUS_HINTS[s.status]}>
+                    <Badge tone={STATUS_TONES[s.status]}>{STATUS_LABELS[s.status]}</Badge>
+                  </span>
+                  {s.bufferDegraded && s.status !== "revoked" && (
+                    <span title="Results waiting to be sent are not safely stored; a restart of the executor loses them.">
+                      <Badge tone="warning">Buffer degraded</Badge>
+                    </span>
+                  )}
+                </div>
               </Td>
               <Td className="font-mono text-caption max-sm:hidden">{s.version || "-"}</Td>
               <Td className="text-caption max-sm:hidden">

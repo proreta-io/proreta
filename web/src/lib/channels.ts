@@ -16,7 +16,7 @@ export const channelEvents: { value: ChannelEvent; label: string }[] = [
   { value: "down", label: "Down" },
   { value: "recovered", label: "Recovered" },
   { value: "tls_expiring", label: "TLS certificate expiring" },
-  { value: "agent_offline", label: "Specula offline" },
+  { value: "agent_offline", label: "Specula unreachable" },
   { value: "agent_online", label: "Specula back online" },
 ];
 
