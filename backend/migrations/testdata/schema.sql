@@ -3605,7 +3605,7 @@ BEGIN
                 v_events := ARRAY['failed'];
             END IF;
         END IF;
-    ELSIF d.state = 'failed' AND v_any THEN
+    ELSIF d.state = 'failed' AND p_txt = 'present' THEN
         v_state := 'verified';
         v_proof := now();
         v_failures := 0;

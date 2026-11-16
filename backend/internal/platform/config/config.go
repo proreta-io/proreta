@@ -347,12 +347,25 @@ func (l *loader) statusPageDomains(cfg *API) {
 			cfg.StatusPageInstallationHosts = append(cfg.StatusPageInstallationHosts, h)
 		}
 	}
-	cfg.StatusPageForbiddenSuffixes = l.domains("PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES")
-	if l.optional("PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES") == "" && len(cfg.StatusPageInstallationHosts) > 0 {
-		if d, err := publicsuffix.EffectiveTLDPlusOne(cfg.StatusPageInstallationHosts[len(cfg.StatusPageInstallationHosts)-1]); err == nil {
-			cfg.StatusPageForbiddenSuffixes = []string{d}
+	cfg.StatusPageForbiddenSuffixes = l.forbiddenSuffixes(cfg.StatusPageInstallationHosts[max(len(cfg.StatusPageInstallationHosts)-1, 0):])
+}
+
+// forbiddenSuffixes reads PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES. Unset, it is the registrable domain
+// of the installation host; "none" turns the default off, for an installation whose own customers
+// use names beside the application's, such as status.example.com next to app.example.com.
+func (l *loader) forbiddenSuffixes(installation []string) []string {
+	switch l.optional("PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES") {
+	case "none":
+		return nil
+	case "":
+		if len(installation) > 0 {
+			if d, err := publicsuffix.EffectiveTLDPlusOne(installation[0]); err == nil {
+				return []string{d}
+			}
 		}
+		return nil
 	}
+	return l.domains("PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES")
 }
 
 // oauth reads the client credentials of each provider: both the id and the secret, or neither.
@@ -484,12 +497,7 @@ func LoadStatuspage(lookup LookupFunc) (Statuspage, error) {
 	cfg.CustomDomains = l.boolean("PRORETA_STATUS_PAGE_CUSTOM_DOMAINS", false)
 	cfg.InstallationHosts = l.installationHosts("PRORETA_STATUSPAGE_INSTALLATION_HOSTS", cfg.PublicURL)
 	cfg.AbuseURL = l.abuseURL("PRORETA_ABUSE_URL")
-	cfg.ForbiddenSuffixes = l.domains("PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES")
-	if l.optional("PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES") == "" && len(cfg.InstallationHosts) > 0 {
-		if d, err := publicsuffix.EffectiveTLDPlusOne(cfg.InstallationHosts[0]); err == nil {
-			cfg.ForbiddenSuffixes = []string{d}
-		}
-	}
+	cfg.ForbiddenSuffixes = l.forbiddenSuffixes(cfg.InstallationHosts[:min(1, len(cfg.InstallationHosts))])
 	return cfg, l.err()
 }
 

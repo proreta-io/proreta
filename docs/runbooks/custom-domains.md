@@ -24,7 +24,7 @@ statuspage:
 |---|---|---|
 | `enabled` | `PRORETA_STATUS_PAGE_CUSTOM_DOMAINS` (api, jobs, statuspage) | Turns the feature on for the api, jobs and the renderer together. Off, the domain operations answer 404 `custom-domains-disabled`, the app hides the section and the renderer ignores the `Host` header |
 | `cnameTarget` | `PRORETA_STATUSPAGE_CNAME_TARGET` (api, jobs) | Required. The host customers point their CNAME at: lowercase, no trailing dot. The render fails without it |
-| `forbiddenSuffixes` | `PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES` (api) | Domains no customer may claim a name under. Empty: the registrable domain of `config.publicUrl` |
+| `forbiddenSuffixes` | `PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES` (api, statuspage) | Domains no customer may claim a name under. Empty: the registrable domain of `config.publicUrl`, so `status.example.com` is refused when the app is at `app.example.com`. `[none]` (the variable `none`) turns the default off |
 | `installationHosts` | `PRORETA_STATUSPAGE_INSTALLATION_HOSTS` (api, statuspage) | Hosts that keep the `/status/<slug>` routes and that no customer may claim. Empty: `httpRoute.hostnames` without wildcards, plus the host of `config.publicUrl` |
 | `abuseUrl` | `PRORETA_ABUSE_URL` (statuspage) | An `https://` URL or `mailto:` address for the "Report abuse" link in the footer of customer-domain pages |
 | `dns.resolver`, `dns.timeout` | `PRORETA_DNS_RESOLVER`, `PRORETA_DNS_TIMEOUT` (jobs) | Resolver (`ip` or `ip:port`) and per-lookup timeout (500ms to 10s, default 3s) of the verification job. Empty resolver: the resolver of the pod |
@@ -69,6 +69,7 @@ The common self-hosted setup is one organization with several teams. Each team's
      customDomains:
        enabled: true
        cnameTarget: proreta.example.com   # any name that resolves to this Gateway
+       forbiddenSuffixes: [none]          # the status domain shares example.com with the app
        abuseUrl: mailto:abuse@example.com
        httpRoute:
          enabled: true
