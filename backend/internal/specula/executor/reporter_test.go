@@ -223,8 +223,9 @@ func TestBackoffGrowsWhileTheGatewayStaysDown(t *testing.T) {
 	gw.mu.Lock()
 	n := len(gw.reportTimes)
 	gw.mu.Unlock()
-	// Capped at a minute apart: at most about 1 + 6 + 30 calls in half an hour, never a hot loop.
-	if n < 20 || n > 45 {
+	// Waits are jittered between half and all of 2s..60s (ending at the cap), so the count is
+	// between 35 and 64 whatever the jitter draws; the mean sits near 45, hence no tighter bound.
+	if n < 35 || n > 64 {
 		t.Fatalf("%d calls in 30 minutes", n)
 	}
 	if env.e.buf.Depth() != 3 {

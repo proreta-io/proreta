@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -33,6 +34,7 @@ var (
 	descDropped   = prometheus.NewDesc("specula_results_dropped_total", "Results given up on: buffer limits (size, age, memory), an unreadable segment, or refused by the gateway.", []string{"reason"}, nil)
 	descCorrupt   = prometheus.NewDesc("specula_buffer_corrupt_records_total", "Damaged buffer records skipped or segments set aside.", nil, nil)
 	descSchedAge  = prometheus.NewDesc("specula_schedule_age_seconds", "Time since the schedule in use was issued; absent while there is none.", nil, nil)
+	descSchedLoad = prometheus.NewDesc("specula_schedule_loaded", "1 when a schedule is in use, 0 while none was fetched yet.", nil, nil)
 	descExpired   = prometheus.NewDesc("specula_schedule_expired_monitors", "Monitors that are not checked because the schedule expired.", nil, nil)
 	descMissed    = prometheus.NewDesc("specula_missed_slots_total", "Slots without a check.", []string{"reason"}, nil)
 	descInflight  = prometheus.NewDesc("specula_replay_inflight", "Results in the batch being reported now; 0 when idle.", nil, nil)
@@ -42,10 +44,34 @@ var (
 // dropReasons are always exported, so rate() works before the first drop.
 var dropReasons = []string{dropSize, dropAge, dropMemory, dropBad, dropRefused}
 
-type collector struct{ e *Executor }
+// oldestTTL bounds how often a scrape may read the buffer for the oldest slot; the age is then
+// computed from the cached slot, so it stays exact to within the slot moving on (at most this long).
+const oldestTTL = 15 * time.Second
+
+type collector struct {
+	e *Executor
+
+	mu         sync.Mutex
+	oldestSlot int64
+	oldestAt   time.Time
+}
+
+// oldest returns the slot of the oldest waiting result without reading the segment on every scrape.
+func (c *collector) oldest(now time.Time, depth int) int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if depth == 0 {
+		c.oldestSlot, c.oldestAt = 0, time.Time{}
+		return 0
+	}
+	if c.oldestSlot == 0 || now.Sub(c.oldestAt) >= oldestTTL || now.Before(c.oldestAt) {
+		c.oldestSlot, c.oldestAt = c.e.buf.OldestSlot(), now
+	}
+	return c.oldestSlot
+}
 
 func (c *collector) Describe(ch chan<- *prometheus.Desc) {
-	for _, d := range []*prometheus.Desc{descResults, descBytes, descOldest, descDegraded, descDropped, descCorrupt, descSchedAge, descExpired, descMissed, descInflight, descClockOffs} {
+	for _, d := range []*prometheus.Desc{descResults, descBytes, descOldest, descDegraded, descDropped, descCorrupt, descSchedAge, descSchedLoad, descExpired, descMissed, descInflight, descClockOffs} {
 		ch <- d
 	}
 	c.e.met.lateness.Describe(ch)
@@ -64,7 +90,7 @@ func (c *collector) Collect(ch chan<- prometheus.Metric) {
 	if e.buf != nil { // before Run opens the buffer
 		st = e.buf.Stats()
 		age := 0.0
-		if slot := e.buf.OldestSlot(); slot > 0 {
+		if slot := c.oldest(now, st.Depth); slot > 0 {
 			age = max(now.Sub(time.Unix(slot, 0)).Seconds(), 0)
 		}
 		g(descOldest, age)
@@ -81,7 +107,9 @@ func (c *collector) Collect(ch chan<- prometheus.Metric) {
 		ctr(descDropped, n, r)
 	}
 	ctr(descCorrupt, st.Corrupt+st.Quarantined)
-	if issued := e.sched.issuedAt(); issued != nil {
+	issued := e.sched.issuedAt()
+	g(descSchedLoad, b2f(issued != nil))
+	if issued != nil {
 		g(descSchedAge, max(now.Sub(*issued).Seconds(), 0))
 		expired := 0
 		if v := e.sched.validity(); !now.Before(v) {

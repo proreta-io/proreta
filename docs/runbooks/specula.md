@@ -88,16 +88,19 @@ If the state directory is unusable (full, read-only, removed, or not configured)
 You can choose this mode on purpose with `state.enabled: false` in the chart if you do not want monitor settings on disk. Otherwise treat a degraded executor as a fault to fix (check the logs for the reason and the disk space of the node).
 
 ## Metrics, logs and alerts
-The executor serves Prometheus metrics on `PRORETA_ADMIN_ADDR` (default `:9090`, `/metrics`); the list is in the `specula (executor)` section of the [observability runbook](observability.md). The page of the Specula in Proreta shows the same state as last reported by the executor's hello every minute (schedule age, results waiting, oldest waiting result, degraded buffer).
+The executor serves Prometheus metrics on `PRORETA_ADMIN_ADDR` (default `:9090`, `/metrics`). With the chart, `serviceMonitor.enabled=true` creates a Service for that port and a Prometheus Operator `ServiceMonitor` (add the label your Prometheus selects on under `serviceMonitor.labels`); without the Operator, scrape the pod's port 9090 yourself. The list is in the `specula (executor)` section of the [observability runbook](observability.md). The page of the Specula in Proreta shows the same state as last reported by the executor's hello every minute (schedule age, results waiting, oldest waiting result, degraded buffer).
 
 At start the executor logs one line, `executor state at start`, with its instance id, whether a state directory is used, the results waiting in the buffer, whether the buffer is degraded, the clock offset, and the issue and expiry time and monitor count of the cached schedule (or `schedule=none`). It never logs the token or monitor settings.
 
 The instance id is created once and kept in the state directory, so a restart keeps it. Without a state directory it changes at every start. Proreta counts distinct ids per token to notice two executors that share one token; do not copy a state directory to a second executor.
 
+`specula_schedule_age_seconds` is absent while no schedule is loaded, so alert on `specula_schedule_loaded == 0` for that case. `specula_buffer_oldest_age_seconds` is read from the buffer at most every 15 seconds, so a scrape never reads the disk under a large backlog.
+
 Suggested alerts (PromQL, thresholds are first guesses; the schedule lasts 24 hours unless your gateway is configured otherwise):
 
 | Alert | Expression | For |
 |---|---|---|
+| Never fetched a schedule | `specula_schedule_loaded == 0` | 10m |
 | Schedule getting old | `specula_schedule_age_seconds > 12 * 3600` | 5m |
 | Results lost | `increase(specula_results_dropped_total[15m]) > 0` | 0m |
 | Results stuck | `specula_buffer_oldest_age_seconds > 600` while the link works | 10m |

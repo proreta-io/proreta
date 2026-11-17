@@ -392,6 +392,7 @@ helm lint --strict "$sp_chart" "${sp_args[@]}" >"$out/specula.lint" 2>&1 || { ca
 helm template specula "$sp_chart" -n specula "${sp_args[@]}" >"$out/specula.yaml"
 helm template specula "$sp_chart" -n specula "${sp_args[@]}" --set specula.concurrency=100 --set state.sizeLimit=1Gi --set 'env[0].name=HTTPS_PROXY' --set 'env[0].value=http://proxy:3128' >"$out/specula-custom.yaml"
 helm template specula "$sp_chart" -n specula "${sp_args[@]}" --set state.enabled=false >"$out/specula-nostate.yaml"
+helm template specula "$sp_chart" -n specula "${sp_args[@]}" --set serviceMonitor.enabled=true --set serviceMonitor.labels.release=prometheus --set serviceMonitor.interval=15s >"$out/specula-monitor.yaml"
 helm package "$sp_chart" --version 1.2.3 --app-version 1.2.3 -d "$out/specula-pkg" >/dev/null
 tar -xzOf "$out/specula-pkg/proreta-specula-1.2.3.tgz" proreta-specula/LICENSE | cmp -s LICENSE - || { echo "FAIL: packaged Specula chart has no LICENSE equal to the repository LICENSE" >&2; exit 1; }
 helm template specula "$out/specula-pkg/proreta-specula-1.2.3.tgz" -n specula --set proreta.url=https://proreta.example.com --set token.existingSecret=specula-token >"$out/specula-packaged.yaml"
@@ -427,6 +428,20 @@ for path in sys.argv[1:]:
     assert not [d for d in docs if d["kind"] in ("Service", "Ingress", "HTTPRoute", "Role", "ClusterRole")], "the executor exposes or needs nothing inbound"
 print("ok")
 PY
+python3 - "$out/specula-monitor.yaml" <<'PY'
+import sys, yaml
+docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
+svc = next(d for d in docs if d["kind"] == "Service")
+sm = next(d for d in docs if d["kind"] == "ServiceMonitor")
+dep = next(d for d in docs if d["kind"] == "Deployment")
+assert svc["spec"]["ports"] == [{"name": "admin", "port": 9090, "targetPort": "admin", "protocol": "TCP"}], svc["spec"]["ports"]
+assert svc["spec"]["selector"].items() <= dep["spec"]["template"]["metadata"]["labels"].items(), "the Service does not select the pod"
+assert sm["spec"]["selector"]["matchLabels"].items() <= svc["metadata"]["labels"].items(), "the ServiceMonitor does not select the Service"
+assert sm["spec"]["endpoints"] == [{"port": "admin", "path": "/metrics", "interval": "15s"}], sm["spec"]["endpoints"]
+assert sm["metadata"]["labels"]["release"] == "prometheus", "serviceMonitor.labels not applied"
+assert {d["kind"] for d in docs} == {"Deployment", "ServiceAccount", "Service", "ServiceMonitor"}, [d["kind"] for d in docs]
+print("ok")
+PY
 sp_fail() {
   local label=$1 pattern=$2
   shift 2
@@ -446,6 +461,7 @@ sp_fail "unknown key" "additional properties 'replica' not allowed" "${sp_args[@
 sp_fail "chart-owned variable" "/env/0/name" "${sp_args[@]}" --set 'env[0].name=PRORETA_SPECULA_TOKEN' --set 'env[0].value=x'
 sp_fail "two pods" "/replicas" "${sp_args[@]}" --set replicas=2
 sp_fail "state in /tmp" "/state/mountPath" "${sp_args[@]}" --set state.mountPath=/tmp/state
+sp_fail "monitor interval without unit" "/serviceMonitor/interval" "${sp_args[@]}" --set serviceMonitor.interval=30
 sp_fail "state size without unit" "/state/sizeLimit" "${sp_args[@]}" --set state.sizeLimit=512
 renders+=("$out/specula.yaml" "$out/specula-custom.yaml" "$out/specula-nostate.yaml")
 

@@ -1,0 +1,41 @@
+{{- if .Values.serviceMonitor.enabled }}
+{{- /* Requires the Prometheus Operator CRDs. The Service exposes only the admin port. */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "proreta-specula.fullname" . }}-metrics
+  labels:
+    {{- include "proreta-specula.labels" . | nindent 4 }}
+    proreta/metrics: "true"
+spec:
+  type: ClusterIP
+  ports:
+    - name: admin
+      port: {{ .Values.specula.adminPort }}
+      targetPort: admin
+      protocol: TCP
+  selector:
+    {{- include "proreta-specula.selectorLabels" . | nindent 4 }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "proreta-specula.fullname" . }}
+  labels:
+    {{- include "proreta-specula.labels" . | nindent 4 }}
+    {{- with .Values.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  selector:
+    matchLabels:
+      {{- include "proreta-specula.selectorLabels" . | nindent 6 }}
+      proreta/metrics: "true"
+  endpoints:
+    - port: admin
+      path: {{ .Values.serviceMonitor.path }}
+      interval: {{ .Values.serviceMonitor.interval }}
+{{- end }}
