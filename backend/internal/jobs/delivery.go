@@ -47,7 +47,7 @@ const (
 	// dbTimeout bounds one claim or finish transaction.
 	dbTimeout = 10 * time.Second
 	// lateAlertGrace is how long the "down" of a replayed result waits, from the time it was
-	// queued, for the recovery that may follow in the next call of the replay (ADR-0123).
+	// queued, for the recovery that may follow in the next call of the replay.
 	lateAlertGrace = 30 * time.Second
 )
 
