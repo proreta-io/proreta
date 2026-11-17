@@ -49,6 +49,7 @@ import {
 import {
   daysUntil,
   describeErrorKind,
+  lateNote,
   formatAgo,
   formatClock,
   formatDate,
@@ -704,7 +705,17 @@ function IncidentTable({ items, now }: { items: Incident[]; now: number }) {
             <Td className="font-mono text-mono whitespace-nowrap">
               {formatDuration(secondsBetween(i.startedAt, i.resolvedAt ?? now))}
             </Td>
-            <Td>{describeErrorKind(i.reason)}</Td>
+            <Td>
+              {describeErrorKind(i.reason)}
+              {lateNote(i) && (
+                <span
+                  className="block text-caption text-muted-foreground"
+                  title="The result reached Proreta long after the check ran (an executor replayed it after a gap). The times shown are the check times."
+                >
+                  {lateNote(i)}
+                </span>
+              )}
+            </Td>
             <Td numeric>
               {i.resolvedAt ? <Badge>Resolved</Badge> : <Badge tone="danger">Ongoing</Badge>}
             </Td>

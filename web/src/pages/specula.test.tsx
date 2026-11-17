@@ -19,6 +19,8 @@ const specula = (over: Partial<Specula> = {}): Specula => ({
   bufferDepth: null,
   oldestUnsentAt: null,
   bufferDegraded: false,
+  clockOffsetMs: null,
+  duplicateInstance: false,
   ...over,
 });
 
@@ -107,6 +109,27 @@ describe("Specula page", () => {
     expect(within(rows[1]!).getByText("Buffer degraded")).toBeInTheDocument();
     expect(within(rows[2]!).getByText("Unreachable")).toBeInTheDocument();
     expect(within(rows[2]!).queryByText("Buffer degraded")).not.toBeInTheDocument();
+  });
+
+  it("warns about a skewed clock and two executors, and stays quiet within 30 s", async () => {
+    mockApi({
+      ...signedIn,
+      "GET /api/v1/projects": () => json(projects),
+      "GET /api/v1/specula": () =>
+        json({
+          items: [
+            specula({ clockOffsetMs: -95_000, duplicateInstance: true }),
+            specula({ id: "s2", name: "Lab", clockOffsetMs: 20_000 }),
+          ],
+        }),
+    });
+    renderApp("/specula");
+    const rows = within(await screen.findByRole("table")).getAllByRole("row");
+    expect(within(rows[1]!).getByText("Clock 1 min ahead of Proreta's")).toBeInTheDocument();
+    expect(within(rows[1]!).getByText("Clock skew")).toBeInTheDocument();
+    expect(within(rows[1]!).getByText("Two executors")).toBeInTheDocument();
+    expect(within(rows[2]!).queryByText("Clock skew")).not.toBeInTheDocument();
+    expect(within(rows[2]!).queryByText("Two executors")).not.toBeInTheDocument();
   });
 
   it("registers a Specula and shows the token once", async () => {

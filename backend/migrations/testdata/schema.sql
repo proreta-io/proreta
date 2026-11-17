@@ -122,6 +122,8 @@ incidents.6 reason text
 incidents.7 created_at timestamp with time zone not null default now()
 incidents.8 monitor_id uuid
 incidents.9 specula_id uuid
+incidents.10 opened_late boolean not null default false
+incidents.11 resolved_late boolean not null default false
 invitations.1 id uuid not null
 invitations.2 tenant_id uuid not null
 invitations.3 role text not null
@@ -324,6 +326,9 @@ specula_agents.16 schedule_issued_at timestamp with time zone
 specula_agents.17 buffer_depth integer
 specula_agents.18 oldest_unsent_at timestamp with time zone
 specula_agents.19 buffer_degraded boolean not null default false
+specula_agents.20 clock_offset_ms bigint
+specula_agents.21 last_hello_at timestamp with time zone
+specula_agents.22 duplicate_instance_at timestamp with time zone
 specula_projects.1 tenant_id uuid not null
 specula_projects.2 specula_id uuid not null
 specula_projects.3 project_id uuid not null
@@ -957,6 +962,7 @@ specula_epoch_close(uuid,uuid,uuid) owner=proreta_owner definer=true acl=proreta
 specula_epoch_open(uuid,uuid,uuid) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner
 specula_hello(uuid,text,text) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_hello(uuid,text,text,text[],text,timestamp with time zone,integer,timestamp with time zone,boolean) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+specula_hello(uuid,text,text,text[],text,timestamp with time zone,integer,timestamp with time zone,boolean,bigint) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_mark_unreachable(interval) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_revoke(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 specula_schedule(uuid,uuid) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
@@ -3284,6 +3290,40 @@ AS $function$
         RETURNING 1
     )
     SELECT EXISTS (SELECT 1 FROM u)
+$function$
+CREATE OR REPLACE FUNCTION public.specula_hello(p_specula_id uuid, p_version text, p_hostname text, p_capabilities text[], p_instance_id text, p_schedule_issued_at timestamp with time zone, p_buffer_depth integer, p_oldest_unsent_at timestamp with time zone, p_buffer_degraded boolean, p_clock_offset_ms bigint)
+ RETURNS TABLE(found boolean, duplicate boolean)
+ LANGUAGE sql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+    WITH old AS (
+        SELECT id,
+               (instance_id IS NOT NULL AND left(p_instance_id, 64) IS NOT NULL
+                AND instance_id <> left(p_instance_id, 64)
+                AND last_hello_at > now() - interval '3 minutes') AS dup
+        FROM specula_agents
+        WHERE id = p_specula_id AND revoked_at IS NULL
+        FOR UPDATE
+    ), u AS (
+        UPDATE specula_agents AS a SET
+            version = left(p_version, 64),
+            hostname = left(p_hostname, 253),
+            capabilities = coalesce(p_capabilities, '{}'),
+            instance_id = left(p_instance_id, 64),
+            schedule_issued_at = p_schedule_issued_at,
+            buffer_depth = p_buffer_depth,
+            oldest_unsent_at = p_oldest_unsent_at,
+            buffer_degraded = coalesce(p_buffer_degraded, false),
+            clock_offset_ms = p_clock_offset_ms,
+            last_hello_at = now(),
+            duplicate_instance_at = CASE WHEN old.dup THEN now() ELSE a.duplicate_instance_at END,
+            last_seen_at = now()
+        FROM old
+        WHERE a.id = old.id
+        RETURNING old.dup
+    )
+    SELECT EXISTS (SELECT 1 FROM u), coalesce((SELECT bool_or(dup) FROM u), false)
 $function$
 CREATE OR REPLACE FUNCTION public.specula_mark_unreachable(p_after interval DEFAULT '00:03:00'::interval)
  RETURNS integer

@@ -266,7 +266,7 @@ func (s *server) ListMonitorIncidents(ctx context.Context, req gen.ListMonitorIn
 	}
 	items := make([]gen.Incident, len(list))
 	for i, in := range list {
-		items[i] = gen.Incident{Id: in.ID, StartedAt: in.StartedAt, ResolvedAt: in.ResolvedAt, Reason: in.Reason}
+		items[i] = gen.Incident{Id: in.ID, StartedAt: in.StartedAt, ResolvedAt: in.ResolvedAt, Reason: in.Reason, OpenedLate: in.OpenedLate, ResolvedLate: in.ResolvedLate}
 	}
 	return gen.ListMonitorIncidents200JSONResponse{Items: items}, nil
 }

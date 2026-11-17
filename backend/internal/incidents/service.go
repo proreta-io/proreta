@@ -68,8 +68,9 @@ type ResultInput struct {
 	// Now is the current time (TLS expiry is measured from it).
 	Now time.Time
 	// Late marks a result that reached Proreta long after it was checked (a replayed slot). The
-	// state machine treats it like any other result, oldest first; only the outbox rows of an
-	// incident change or end carry late and observedAt, so a message can say it is late.
+	// state machine treats it like any other result, oldest first; an incident it opens or
+	// resolves is marked (opened_late, resolved_late) and the outbox rows of the change carry late
+	// and observedAt, so a message can say it is late.
 	Late bool
 }
 
@@ -144,7 +145,7 @@ func (s *Service) ApplyResult(ctx context.Context, tx pgx.Tx, in ResultInput) (m
 		id := uuidv7.New()
 		incidentID, startedAt = &id, in.Result.CheckedAt.UTC()
 		if err := q.InsertIncident(ctx, incidentsdb.InsertIncidentParams{
-			ID: id, TenantID: in.TenantID, MonitorID: &in.MonitorID, StartedAt: startedAt, Reason: nonEmpty(in.Result.ErrorKind),
+			ID: id, TenantID: in.TenantID, MonitorID: &in.MonitorID, StartedAt: startedAt, Reason: nonEmpty(in.Result.ErrorKind), OpenedLate: in.Late,
 		}); err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23505" /* unique_violation */ && pgErr.ConstraintName == openIncidentIndex {
@@ -158,7 +159,7 @@ func (s *Service) ApplyResult(ctx context.Context, tx pgx.Tx, in ResultInput) (m
 	case machine.Resolved:
 		if incidentID != nil {
 			res, err := q.ResolveIncident(ctx, incidentsdb.ResolveIncidentParams{
-				TenantID: in.TenantID, ID: *incidentID, ResolvedAt: &in.Result.CheckedAt, ResolveReason: nonEmpty(ReasonRecovered),
+				TenantID: in.TenantID, ID: *incidentID, ResolvedAt: &in.Result.CheckedAt, ResolveReason: nonEmpty(ReasonRecovered), ResolvedLate: in.Late,
 			})
 			if errors.Is(err, pgx.ErrNoRows) {
 				return machine.Output{}, fmt.Errorf("%w: current incident is not open", ErrInconsistentState)

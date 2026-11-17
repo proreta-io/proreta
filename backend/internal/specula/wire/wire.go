@@ -53,7 +53,13 @@ type HelloRequest struct {
 	BufferDepth      *int       `json:"bufferDepth,omitempty"`
 	OldestUnsentAt   *time.Time `json:"oldestUnsentAt,omitempty"`
 	BufferDegraded   *bool      `json:"bufferDegraded,omitempty"`
+	// ClockOffsetMs is the server's time minus the executor's corrected clock, as last measured;
+	// absent before the first measurement.
+	ClockOffsetMs *int64 `json:"clockOffsetMs,omitempty"`
 }
+
+// MaxClockOffsetMs bounds ClockOffsetMs (about 31 years); a hello beyond it is a 400.
+const MaxClockOffsetMs = 1_000_000_000_000
 
 // HelloResponse tells the executor the server's clock, to notice a large skew, and (a server that
 // knows schedule mode) the modes it offers and the current schedule version.

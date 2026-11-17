@@ -355,6 +355,10 @@ func (e *Executor) hello(ctx context.Context) error {
 			req.Capabilities = append(req.Capabilities, wire.CapSchedule)
 			req.InstanceID = e.instanceID
 			req.ScheduleIssuedAt = e.sched.issuedAt()
+			if off, ok := e.clk.Measured(); ok {
+				ms := off.Milliseconds()
+				req.ClockOffsetMs = &ms
+			}
 			if e.buf != nil {
 				depth, degraded := e.buf.Depth(), e.buf.Degraded()
 				req.BufferDepth, req.BufferDegraded = &depth, &degraded

@@ -51,6 +51,14 @@ func (s *serverClock) Restore(offset time.Duration) {
 	s.base, s.set = s.at.Add(offset), true
 }
 
+// Measured is Offset and whether one is known (observed or restored).
+func (s *serverClock) Measured() (time.Duration, bool) {
+	s.mu.Lock()
+	set := s.set
+	s.mu.Unlock()
+	return s.Offset(), set
+}
+
 // Offset is the server's time minus the local time.
 func (s *serverClock) Offset() time.Duration {
 	s.mu.Lock()

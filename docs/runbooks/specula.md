@@ -57,6 +57,7 @@ What you see:
 - While Proreta hears nothing from the Specula, its status becomes **Unreachable** and, after 3 minutes, its monitors show **unknown** and the *Specula unreachable* incident opens, as described under [Status](#status). The checks are being made; the results are simply not here yet.
 - When the link returns, the buffered results are stored with their original times. The history of the outage fills in, the *unknown* is replaced by the real states, and incidents and rollups are corrected.
 - An incident that began and ended during the outage is created with its real start and end. If the service was already healthy again by the time Proreta hears about a failure, you get one late "recovered" message and no "down" message (the late notification rules are still being finished: see the notes for the release you run).
+- An incident opened or resolved by a result that reached Proreta long after its check (more than 10 minutes) is marked **reported late** in the monitor's incident list; `openedLate` and `resolvedLate` on the incident in the API say which end. Its times are the check times, not the time Proreta heard.
 - A **gap** means expected slots with no stored result. The buffer closes gaps as long as the outage is shorter than the schedule's validity and the buffer limits (24 hours and 256 MiB by default), the executor keeps running, and its state directory survives. Beyond that the missing part stays missing: a day or an hour without results is shown as **no data**, never as downtime, and uptime is computed over the results that exist.
 - A failing check is not a gap: it is a result. If your network is gone and the checks fail, those failures are recorded and reported when possible.
 - A restart of the executor loses the few seconds in which it was down. Checks are not run for the past.
@@ -106,6 +107,10 @@ Suggested alerts (PromQL, thresholds are first guesses; the schedule lasts 24 ho
 | Results stuck | `specula_buffer_oldest_age_seconds > 600` while the link works | 10m |
 | Not checking | `specula_schedule_expired_monitors > 0` | 5m |
 | Buffer in memory | `specula_buffer_degraded == 1` | 10m |
+
+## Warnings on the Specula page
+- **Clock skew** appears when the executor's clock differs from Proreta's by more than 30 seconds (the executor measures it at every `hello`; the API field is `clockOffsetMs`). Results more than 30 seconds in the future are rejected, and results from a clock that is behind arrive late. Fix the time on the executor's host (NTP).
+- **Two executors** (`duplicateInstance`) appears when two executors with different instance ids said hello with the same token within 3 minutes of each other, and lasts 3 minutes after the last such hello. Run one executor per Specula (the chart does: one replica, strategy `Recreate`). A restart keeps its instance id, and a replaced pod that comes up more than 3 minutes after the old one stopped does not trigger it. The gateway counts the event in `proreta_specula_duplicate_instance_total`.
 
 ## Upgrade and downgrade
 **Upgrade.** Upgrade the executor chart or image. No setting is needed in Proreta. When it starts, the executor tells Proreta what it supports, fetches its schedule and takes over from the next slot. From then on Proreta hands that Specula no more checks to claim, so no check runs twice. A check that was already claimed by the old executor finishes within 30 seconds. The gateway must be upgraded first or at the same time: a new executor that finds an older gateway (no schedule endpoint) stays in the previous mode, in which it claims one check at a time as before.

@@ -29,8 +29,8 @@ WHERE tenant_id = @tenant_id AND monitor_id = @monitor_id;
 
 -- name: InsertIncident :exec
 -- monitor_id carries the partial unique index that allows one open incident per monitor.
-INSERT INTO incidents (id, tenant_id, monitor_id, started_at, reason)
-VALUES (@id, @tenant_id, @monitor_id, @started_at, @reason);
+INSERT INTO incidents (id, tenant_id, monitor_id, started_at, reason, opened_late)
+VALUES (@id, @tenant_id, @monitor_id, @started_at, @reason, @opened_late);
 
 -- name: InsertIncidentMonitor :exec
 INSERT INTO incident_monitors (tenant_id, incident_id, monitor_id)
@@ -41,7 +41,8 @@ VALUES (@tenant_id, @incident_id, @monitor_id);
 -- which comes from the worker's clock.
 UPDATE incidents
 SET resolved_at = greatest(coalesce(sqlc.narg('resolved_at')::timestamptz, now()), started_at),
-    resolve_reason = @resolve_reason
+    resolve_reason = @resolve_reason,
+    resolved_late = @resolved_late
 WHERE tenant_id = @tenant_id AND id = @id AND resolved_at IS NULL
 RETURNING started_at, resolved_at;
 

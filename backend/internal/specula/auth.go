@@ -50,10 +50,14 @@ type HelloInput struct {
 	BufferDepth       *int
 	OldestUnsentAt    *time.Time
 	BufferDegraded    bool
+	// ClockOffsetMs is the server's time minus the executor's corrected clock; nil when unmeasured.
+	ClockOffsetMs *int64
 }
 
-// Hello records what a Specula reports about itself.
-func Hello(ctx context.Context, pool *db.Pool, id uuid.UUID, in HelloInput) error {
+// Hello records what a Specula reports about itself. duplicate is true when this hello carried a
+// different instance id than the one stored, and the stored one said hello less than three
+// minutes ago: two executors share the token.
+func Hello(ctx context.Context, pool *db.Pool, id uuid.UUID, in HelloInput) (duplicate bool, err error) {
 	var instance *string
 	if in.InstanceID != "" {
 		instance = &in.InstanceID
@@ -62,10 +66,10 @@ func Hello(ctx context.Context, pool *db.Pool, id uuid.UUID, in HelloInput) erro
 	if caps == nil {
 		caps = []string{}
 	}
-	err := db.WithTx(ctx, pool, func(tx pgx.Tx) error {
+	err = db.WithTx(ctx, pool, func(tx pgx.Tx) error {
 		var ok bool
-		if err := tx.QueryRow(ctx, `SELECT specula_hello($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-			id, in.Version, in.Hostname, caps, instance, in.ScheduleIssuedAt, in.BufferDepth, in.OldestUnsentAt, in.BufferDegraded).Scan(&ok); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT found, duplicate FROM specula_hello($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+			id, in.Version, in.Hostname, caps, instance, in.ScheduleIssuedAt, in.BufferDepth, in.OldestUnsentAt, in.BufferDegraded, in.ClockOffsetMs).Scan(&ok, &duplicate); err != nil {
 			return err
 		}
 		if !ok {
@@ -74,10 +78,10 @@ func Hello(ctx context.Context, pool *db.Pool, id uuid.UUID, in HelloInput) erro
 		return nil
 	})
 	if errors.Is(err, ErrUnauthorized) {
-		return err
+		return false, err
 	}
 	if err != nil {
-		return fmt.Errorf("specula: hello: %w", err)
+		return false, fmt.Errorf("specula: hello: %w", err)
 	}
-	return nil
+	return duplicate, nil
 }

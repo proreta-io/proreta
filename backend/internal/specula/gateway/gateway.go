@@ -209,18 +209,27 @@ func (g *Handler) hello(w http.ResponseWriter, r *http.Request) {
 		Version: clean(in.Version, 64), Hostname: clean(in.Hostname, 253), Capabilities: caps,
 		InstanceID: clean(in.InstanceID, 64), ScheduleIssuedAt: in.ScheduleIssuedAt, OldestUnsentAt: in.OldestUnsentAt,
 		BufferDepth: in.BufferDepth, BufferDegraded: in.BufferDegraded != nil && *in.BufferDegraded,
+		ClockOffsetMs: in.ClockOffsetMs,
 	}
 	if hello.BufferDepth != nil && *hello.BufferDepth < 0 {
 		problem(w, r, http.StatusBadRequest, "bad-request", "bufferDepth must not be negative")
 		return
 	}
-	if err := specula.Hello(r.Context(), g.d.Pool, id.SpeculaID, hello); err != nil {
+	if o := hello.ClockOffsetMs; o != nil && (*o < -wire.MaxClockOffsetMs || *o > wire.MaxClockOffsetMs) {
+		problem(w, r, http.StatusBadRequest, "bad-request", "clockOffsetMs is out of range")
+		return
+	}
+	duplicate, err := specula.Hello(r.Context(), g.d.Pool, id.SpeculaID, hello)
+	if err != nil {
 		if errors.Is(err, specula.ErrUnauthorized) {
 			g.unauthorized(w, r)
 			return
 		}
 		g.fail(w, r, "hello", err)
 		return
+	}
+	if duplicate {
+		g.metrics.duplicateInstance.Inc()
 	}
 	// The mode of the location is what this hello announced; an executor that announces nothing
 	// stays in pull mode.

@@ -36,6 +36,7 @@ type fixture struct {
 	monitors *monitors.Service
 	actor    monitors.Actor
 	clock    time.Time
+	late     bool // the next results are replayed ones
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -87,7 +88,7 @@ func (f *fixture) applyErr(tenant string, monitor uuid.UUID, res machine.Result)
 	err := db.WithTenantTx(f.ctx, f.worker, uuid.MustParse(tenant), func(tx pgx.Tx) error {
 		var err error
 		out, err = f.svc.ApplyResult(f.ctx, tx, incidents.ResultInput{
-			TenantID: uuid.MustParse(tenant), MonitorID: monitor, LocationID: uuid.MustParse(defaultLocation), Result: res, Now: res.CheckedAt,
+			TenantID: uuid.MustParse(tenant), MonitorID: monitor, LocationID: uuid.MustParse(defaultLocation), Result: res, Now: res.CheckedAt, Late: f.late,
 		})
 		return err
 	})
@@ -234,6 +235,34 @@ func TestIntegrationIncidentLifecycle(t *testing.T) {
 	// Another tenant's transaction cannot see the monitor.
 	if _, err := f.applyErr(tenantB, m, failed("dns")); !errors.Is(err, incidents.ErrMonitorNotFound) {
 		t.Fatalf("other tenant: err = %v, want ErrMonitorNotFound", err)
+	}
+}
+
+// A late result marks the incident it opens or resolves, also for a monitor without a channel
+// (the outbox carries the marker only when a channel exists); a live result does not.
+func TestIntegrationLateMarkerOnIncident(t *testing.T) {
+	f := newFixture(t)
+	m := f.createMonitor(1, false)
+	marks := func(id uuid.UUID) (opened, resolved bool) {
+		f.t.Helper()
+		if err := f.admin.QueryRow(f.ctx, `SELECT opened_late, resolved_late FROM incidents WHERE id = $1`, id).Scan(&opened, &resolved); err != nil {
+			f.t.Fatal(err)
+		}
+		return
+	}
+	f.apply(m, failed("dns"))
+	live := *f.state(m).current
+	f.late = true
+	f.apply(m, machine.Result{OK: true})
+	if o, r := marks(live); o || !r {
+		t.Fatalf("opened live, resolved late: opened_late=%v resolved_late=%v", o, r)
+	}
+	f.apply(m, failed("timeout"))
+	late := *f.state(m).current
+	f.late = false
+	f.apply(m, machine.Result{OK: true})
+	if o, r := marks(late); !o || r {
+		t.Fatalf("opened late, resolved live: opened_late=%v resolved_late=%v", o, r)
 	}
 }
 

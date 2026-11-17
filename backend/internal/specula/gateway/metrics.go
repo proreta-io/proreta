@@ -15,6 +15,7 @@ type metrics struct {
 	scheduleRequests   *prometheus.CounterVec
 	scheduleBuild      prometheus.Histogram
 	scheduleUnreadable prometheus.Counter
+	duplicateInstance  prometheus.Counter
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -54,10 +55,13 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 		scheduleUnreadable: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "proreta_specula_schedule_unreadable_monitors_total", Help: "Monitors left out of a built schedule because their sealed request cannot be opened; counted at every build, so any increase means a monitor is not being checked.",
 		}),
+		duplicateInstance: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "proreta_specula_duplicate_instance_total", Help: "Hellos whose instance id differs from the stored one, sent less than 3 minutes after the stored one's hello: two executors share a token.",
+		}),
 	}
 	if reg != nil {
 		reg.MustRegister(m.unauthorized, m.limited, m.jobs, m.results, m.tokenLimited,
-			m.reports, m.reportAge, m.lateReports, m.scheduleRequests, m.scheduleBuild, m.scheduleUnreadable)
+			m.reports, m.reportAge, m.lateReports, m.scheduleRequests, m.scheduleBuild, m.scheduleUnreadable, m.duplicateInstance)
 	}
 	return m
 }

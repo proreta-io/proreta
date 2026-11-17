@@ -229,8 +229,14 @@ func TestIntegrationReports(t *testing.T) {
 			AND ((kind = 'opened') OR (kind = 'resolved')) `, replay.ID); n != 2 {
 			t.Fatalf("late deliveries %d, want one opened and one resolved", n)
 		}
+		if n := count(`SELECT count(*) FROM incidents WHERE monitor_id = $1 AND opened_late AND resolved_late`, replay.ID); n != 1 {
+			t.Fatalf("incidents marked late on both ends: %d, want 1", n)
+		}
 		// A result of the current slot is live: no late marker.
 		want("live", send(report(replay, 1, slot(replay, 0), false)), "recorded")
+		if n := count(`SELECT count(*) FROM incidents WHERE monitor_id = $1 AND NOT opened_late AND NOT resolved_late AND resolved_at IS NULL`, replay.ID); n != 1 {
+			t.Fatalf("a live incident must not be marked late: %d", n)
+		}
 		if n := count(`SELECT count(*) FROM notification_deliveries WHERE monitor_id = $1 AND kind = 'opened' AND NOT payload ? 'late'`, replay.ID); n != 1 {
 			t.Fatalf("live opened deliveries %d, want 1", n)
 		}
