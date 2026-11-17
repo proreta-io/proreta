@@ -164,6 +164,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth(): AuthValue {
   const value = useContext(AuthContext);
+  const queryClient = useQueryClient();
   if (!value) throw new Error("useAuth must be used inside AuthProvider");
-  return value;
+  // The context follows the cache one task later (query observers are notified asynchronously),
+  // but a navigation right after a sign-in or sign-out is synchronous: the guard or the login page
+  // would still see the old session and bounce through /login or /. Read the cache when rendering.
+  const session = queryClient.getQueryData<SessionInfo | null>(queryKeys.me) ?? null;
+  return session === value.session ? value : { ...value, session };
 }
