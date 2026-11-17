@@ -784,6 +784,10 @@ func TestStatusPageDomainRules(t *testing.T) {
 	if cfg, err = LoadAPI(env(e)); err != nil || strings.Join(cfg.StatusPageForbiddenSuffixes, ",") != "corp.example.com" {
 		t.Fatalf("explicit suffixes: %v, %v", cfg.StatusPageForbiddenSuffixes, err)
 	}
+	e["PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES"] = "none"
+	if cfg, err = LoadAPI(env(e)); err != nil || len(cfg.StatusPageForbiddenSuffixes) != 0 {
+		t.Fatalf("none: %v, %v", cfg.StatusPageForbiddenSuffixes, err)
+	}
 	e["PRORETA_STATUSPAGE_CNAME_TARGET"] = "Not A Host"
 	if _, err = LoadAPI(env(e)); err == nil || !strings.Contains(err.Error(), "PRORETA_STATUSPAGE_CNAME_TARGET") {
 		t.Fatalf("bad target accepted: %v", err)
@@ -803,5 +807,9 @@ func TestLoadStatuspageForbiddenSuffixes(t *testing.T) {
 	e["PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES"] = "corp.example.com"
 	if cfg, err = LoadStatuspage(env(e)); err != nil || strings.Join(cfg.ForbiddenSuffixes, ",") != "corp.example.com" {
 		t.Fatalf("explicit: %v %v", cfg.ForbiddenSuffixes, err)
+	}
+	e["PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES"] = "none"
+	if cfg, err = LoadStatuspage(env(e)); err != nil || len(cfg.ForbiddenSuffixes) != 0 {
+		t.Fatalf("none: %v %v", cfg.ForbiddenSuffixes, err)
 	}
 }

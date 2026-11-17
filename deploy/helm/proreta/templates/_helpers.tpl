@@ -341,7 +341,7 @@ installation hosts, abuse URL, ask endpoint). Args: dict ctx, process
 - name: PRORETA_STATUSPAGE_INSTALLATION_HOSTS
   value: {{ include "proreta.statusDomains.installationHosts" .ctx | quote }}
 {{- end }}
-{{- if and (eq $p "api") $cd.forbiddenSuffixes }}
+{{- if and (has $p (list "api" "statuspage")) $cd.forbiddenSuffixes }}
 - name: PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES
   value: {{ join "," $cd.forbiddenSuffixes | quote }}
 {{- end }}

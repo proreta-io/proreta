@@ -71,7 +71,7 @@ With host mode on:
 - The unlock cookie of a customer host is `__Host-proreta_status_unlock` (`Path=/`, `Secure`, no `Domain`) and is bound to that host: it does not unlock the page on another host.
 - The footer reads "Status page by Proreta" with the abuse link, and the password form carries a notice not to enter an account password. They cannot be changed from the page settings.
 - `Strict-Transport-Security: max-age=31536000` (no `includeSubDomains`, no `preload`) is sent on successful answers when the request arrived over TLS: the proxy in front must set `X-Forwarded-Proto` and `PRORETA_TRUSTED_PROXY_HOPS` must count it.
-- Limits, per replica: all visitors of one host share 20 requests per second (burst 200), and lookups of hosts not in the cache are limited to 50 per second in total (a refused one answers `429`). Answers are cached for 15 seconds per host, so a removed domain stops serving within about 15 seconds plus the 30 second browser cache.
+- Limits, per replica: visitors are limited per client as in path mode, never together per host. Lookups of hosts not in the cache are limited per client (2 per second, burst 20) and to 50 per second in total; a refused lookup of a host seen before is answered from its last cached answer, of a host never seen with `429`. Answers are cached for 15 seconds per host, so a removed domain stops serving within about 15 seconds plus the 30 second browser cache.
 - Metrics: `proreta_statuspage_requests_total{mode="path|host"}` and `proreta_statuspage_host_lookups_total{result="hit|miss|unknown|limited"}`.
 
 Not done yet: `<link rel="canonical">` on `/status/<slug>` pointing at the page's own domain (the renderer role cannot read a page's domain; a customer-domain page already names itself as canonical).

@@ -61,7 +61,7 @@ func TestStep(t *testing.T) {
 		{"failed, nothing", Domain{State: Failed, LastProofAt: t0.Add(-days(9)), CheckFailures: 30}, none, time.Time{}, Failed, nil, 30, t0.Add(-days(9))},
 		{"failed, DNS error", Domain{State: Failed, LastProofAt: t0.Add(-days(9)), CheckFailures: 30}, dnsDown, time.Time{}, Failed, nil, 30, t0.Add(-days(9))},
 		{"failed, TXT returns", Domain{State: Failed, LastProofAt: t0.Add(-days(9)), CheckFailures: 30}, txtOnly, time.Time{}, Verified, []Event{EventRecovered}, 0, t0},
-		{"failed, CNAME returns", Domain{State: Failed, LastProofAt: t0.Add(-days(9)), CheckFailures: 30}, cnameOnly, time.Time{}, Verified, []Event{EventRecovered}, 0, t0},
+		{"failed, CNAME alone does not recover it", Domain{State: Failed, LastProofAt: t0.Add(-days(9)), CheckFailures: 30}, cnameOnly, time.Time{}, Failed, nil, 30, t0.Add(-days(9))},
 		{"failed, both return goes to verified first", Domain{State: Failed, LastProofAt: t0.Add(-days(9))}, both, time.Time{}, Verified, []Event{EventRecovered}, 0, t0},
 	}
 	for _, tc := range tests {

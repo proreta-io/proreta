@@ -24,7 +24,7 @@ statuspage:
 |---|---|---|
 | `enabled` | `PRORETA_STATUS_PAGE_CUSTOM_DOMAINS` (api, jobs, statuspage) | Turns the feature on for the api, jobs and the renderer together. Off, the domain operations answer 404 `custom-domains-disabled`, the app hides the section and the renderer ignores the `Host` header |
 | `cnameTarget` | `PRORETA_STATUSPAGE_CNAME_TARGET` (api, jobs) | Required. The host customers point their CNAME at: lowercase, no trailing dot. The render fails without it |
-| `forbiddenSuffixes` | `PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES` (api) | Domains no customer may claim a name under. Empty: the registrable domain of `config.publicUrl` |
+| `forbiddenSuffixes` | `PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES` (api, statuspage) | Domains no customer may claim a name under. Empty: the registrable domain of `config.publicUrl`, so `status.example.com` is refused when the app is at `app.example.com`. `[none]` (the variable `none`) turns the default off |
 | `installationHosts` | `PRORETA_STATUSPAGE_INSTALLATION_HOSTS` (api, statuspage) | Hosts that keep the `/status/<slug>` routes and that no customer may claim. Empty: `httpRoute.hostnames` without wildcards, plus the host of `config.publicUrl` |
 | `abuseUrl` | `PRORETA_ABUSE_URL` (statuspage) | An `https://` URL or `mailto:` address for the "Report abuse" link in the footer of customer-domain pages |
 | `dns.resolver`, `dns.timeout` | `PRORETA_DNS_RESOLVER`, `PRORETA_DNS_TIMEOUT` (jobs) | Resolver (`ip` or `ip:port`) and per-lookup timeout (500ms to 10s, default 3s) of the verification job. Empty resolver: the resolver of the pod |
@@ -57,6 +57,31 @@ The proxy asks `http://<fullname>-statuspage.<namespace>:9091/internal/tls/allow
 
 **Your own Gateway.** Add a listener with its certificate for each customer host and list the hosts in `httpRoute.hostnames` (with `httpRoute.enabled: true` and `httpRoute.parentRef.name`); the chart renders the HTTPRoute `<fullname>-customer-hosts`, which sends every path of those hosts to the `statuspage` Service. Every new customer host is a values change, so this suits a handful of known hosts. The render fails when the list contains an installation host.
 
+## One status domain on a self-hosted installation
+The common self-hosted setup is one organization with several teams. Each team's page is served on the application's own host at `/status/<slug>`, and one general page is served at the root of the organization's own host, such as `https://status.example.com/`, and linked from its website. A page keeps its `/status/<slug>` address on the application host when it also has a custom host; on the custom host only that one page is served, at `/`. No on-demand TLS proxy is needed for one known host:
+
+1. **Plan.** The first organization (`default`) is on the `internal` plan, new ones on `free`; both allow 0 domains. In **Admin → Organizations** change the organization to `community` (or edit the plan) before adding the host.
+2. **Gateway.** Add a listener for `status.example.com` with its own certificate (with cert-manager: the `cert-manager.io/cluster-issuer` annotation on the Gateway and a `tls.certificateRefs` Secret name per listener), then let the chart route the host:
+
+   ```yaml
+   statuspage:
+     enabled: true
+     customDomains:
+       enabled: true
+       cnameTarget: proreta.example.com   # any name that resolves to this Gateway
+       forbiddenSuffixes: [none]          # the status domain shares example.com with the app
+       abuseUrl: mailto:abuse@example.com
+       httpRoute:
+         enabled: true
+         hostnames: [status.example.com]
+         parentRef: {name: public-gateway, namespace: gateway-system, sectionName: https-status}
+   config:
+     trustedProxyHops: 1
+   ```
+3. **In the app.** An owner or maintainer of the organization opens the organization-level status page, publishes it and adds `status.example.com` under **Custom domain**. Create the TXT and CNAME records the app shows in your own DNS zone and press **Check now**; the host is served as soon as the TXT record is seen.
+
+The chart renders no Ingress objects. With an Ingress controller, create an Ingress for the host yourself (with your cert-manager certificate) that sends every path to the `statuspage` Service, and keep `customDomains.httpRoute.enabled` off; the original `Host` header must reach the Service.
+
 ## What the customer does
 Owners and maintainers of the page's project, or of the organization for an organization-level page, use the **Custom domain** section of the status page settings; people who can only read the page see the list.
 
@@ -77,16 +102,16 @@ States:
 | `pending` | The TXT record was not seen yet. Checked every 10 minutes in the first 24 hours, then hourly; removed after 7 days without the record | no | no |
 | `verified` | The TXT record was seen; the CNAME does not end at the target yet. Checked every 6 hours | yes | yes |
 | `active` | Verified and the CNAME ends at the target. Checked every 6 hours | yes | yes |
-| `failed` | Neither record was found in at least 3 consecutive checks and for 7 days. Returns to `verified` when a record is seen again. Checked every 6 hours | no | no |
+| `failed` | Neither record was found in at least 3 consecutive checks and for 7 days. Returns to `verified` only when the TXT record is seen again; the CNAME alone does not bring it back. Checked every 6 hours | no | no |
 
-Only the TXT record verifies a host: a CNAME alone never does, so a stale CNAME pointing at you cannot serve someone else's page. Once verified, either record keeps the host alive, so the TXT record may be removed after the CNAME is in place. A lookup that times out or fails counts as unknown, never as a missing record.
+Only the TXT record verifies a host: a CNAME alone never does, so a stale CNAME pointing at you cannot serve someone else's page. Once verified, either record keeps the host alive, so the TXT record may be removed after the CNAME is in place; if the host then fails, the TXT record has to be put back. A lookup that times out or fails counts as unknown, never as a missing record.
 
 Limits: 3 domains per page, 10 domains added per organization in 24 hours, and the plan limit for the organization as a whole. A page with several domains marks one as primary: it is listed first and replaced automatically when removed, and it does not change any link or redirect yet. Removing a domain stops serving it at once and frees its place in the plan.
 
 Changes are audited in the organization: `status_page.domain_added`, `status_page.domain_verified`, `status_page.domain_activated`, `status_page.domain_failed`, `status_page.domain_primary_changed` and `status_page.domain_removed`. A domain that fails is also logged by `jobs` at warn level. There is no in-app notice or email about a failure; the state shows in the settings.
 
 ## The verification job
-The `jobs` process checks due domains every minute (`check_status_page_domains`): up to 500 per run in batches of 25, the rest at the next run. Metrics and suggested alerts (`DomainChecksStale`, `DomainChecksDNSErrors`, `DomainsFailedJump`) are in [observability](observability.md): `proreta_status_page_domains{state}` and `proreta_status_page_domains_checks_total{result}` with `ok`, `txt-missing`, `cname-missing`, `txt-mismatch` and `dns-error`. The renderer adds `proreta_statuspage_requests_total{mode}` (`path`, `host`) and `proreta_statuspage_host_lookups_total{result}` (`hit`, `miss`, `unknown`, `limited`); its limits in host mode are per replica: 20 requests per second per host (burst 200) and 50 lookups per second for hosts not in its 15 second cache.
+The `jobs` process checks due domains every minute (`check_status_page_domains`): up to 500 per run in batches of 25, the rest at the next run. Metrics and suggested alerts (`DomainChecksStale`, `DomainChecksDNSErrors`, `DomainsFailedJump`) are in [observability](observability.md): `proreta_status_page_domains{state}` and `proreta_status_page_domains_checks_total{result}` with `ok`, `txt-missing`, `cname-missing`, `txt-mismatch` and `dns-error`. The renderer adds `proreta_statuspage_requests_total{mode}` (`path`, `host`) and `proreta_statuspage_host_lookups_total{result}` (`hit`, `miss`, `unknown`, `limited`); its limits in host mode are per replica and never shared by all visitors of a host: each client has the page-view limit of path mode (2 per second, burst 60), and lookups of hosts not in its 15 second cache are limited to 2 per second (burst 20) per client and 50 per second in total. When a lookup is refused and the host was seen before, its last answer is served instead of a 429.
 
 ## Troubleshooting
 - **The section is missing in the app, or the API answers 404 `custom-domains-disabled`.** `statuspage.customDomains.enabled` is off, or the api pods were not restarted with it.

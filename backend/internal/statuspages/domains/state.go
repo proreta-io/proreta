@@ -13,7 +13,7 @@ const (
 	Verified State = "verified"
 	// Active: verified and the CNAME ends at the configured target.
 	Active State = "active"
-	// Failed: no proof for the grace period. Not served; recovers to Verified when a proof returns.
+	// Failed: no proof for the grace period. Not served; recovers to Verified when the TXT proof returns.
 	Failed State = "failed"
 )
 
@@ -92,7 +92,8 @@ type Outcome struct {
 //     gone; the host is served either way.
 //   - verified or active with both records missing: counts a failure; after MinFailedChecks in a
 //     row and FailureGrace since the last proof it fails.
-//   - failed: any proof returns it to verified.
+//   - failed: only the TXT proof returns it to verified; a CNAME alone proves no control, since
+//     its target is the same for every organization.
 //   - a lookup that failed (Unknown) never counts as a missing record.
 func Step(d Domain, f Facts, now time.Time) Outcome {
 	out := Outcome{Domain: d}
@@ -129,7 +130,7 @@ func Step(d Domain, f Facts, now time.Time) Outcome {
 			}
 		}
 	case Failed:
-		if f.anyPresent() {
+		if f.TXT == Present {
 			out.Domain.State, out.Domain.LastProofAt, out.Domain.CheckFailures = Verified, now, 0
 			out.Events = append(out.Events, EventRecovered)
 		}

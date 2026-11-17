@@ -130,6 +130,14 @@ func (c *HostCache) Cached(host string) (slug string, found, ok bool) {
 	return it.slug, it.found, true
 }
 
+// Stale returns the last answer for host even when it expired, for when a lookup is not allowed.
+func (c *HostCache) Stale(host string) (slug string, found, ok bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	it, ok := c.items[host]
+	return it.slug, it.found, ok
+}
+
 // Fetch asks the source (concurrent calls for one host make one lookup) and caches the answer.
 // An error is not cached.
 func (c *HostCache) Fetch(ctx context.Context, host string) (string, bool, error) {
@@ -147,12 +155,17 @@ func (c *HostCache) Fetch(ctx context.Context, host string) (string, bool, error
 					delete(c.items, k)
 				}
 			}
-			// Still full: drop arbitrary entries down to half (bounded memory over accuracy).
-			for k := range c.items {
-				if len(c.items) < maxHostCacheEntries/2 {
-					break
+			// Still full: drop unknown hosts (what a flood fills the cache with), then arbitrary
+			// entries, down to half (bounded memory over accuracy).
+			for _, keepFound := range []bool{false, true} {
+				for k, v := range c.items {
+					if len(c.items) < maxHostCacheEntries/2 {
+						break
+					}
+					if v.found == keepFound {
+						delete(c.items, k)
+					}
 				}
-				delete(c.items, k)
 			}
 		}
 		it := hostItem{slug: slug, found: found, expires: now.Add(HostCacheTTL)}
