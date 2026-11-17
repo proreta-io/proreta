@@ -64,6 +64,10 @@ func TestIntegrationReports(t *testing.T) {
 	}
 	pgtest.MustExec(t, admin, `INSERT INTO notification_channels (id, tenant_id, type, config_encrypted, project_id)
 		VALUES (gen_random_uuid(), '`+tenantA+`', 'slack_webhook', '\x01', (SELECT id FROM projects WHERE tenant_id = '`+tenantA+`' AND is_default))`)
+	tolerant, err := mon.Create(ctx, macts(tenantA), monitors.CreateInput{Name: "Tolerant", SpeculaID: &s.ID, HTTP: &monitors.HTTPSettings{URL: &url, FailureThreshold: &one}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	cloud, err := mon.Create(ctx, macts(tenantA), monitors.CreateInput{Name: "Cloud", HTTP: &monitors.HTTPSettings{URL: &url}})
 	if err != nil {
 		t.Fatal(err)
@@ -239,6 +243,27 @@ func TestIntegrationReports(t *testing.T) {
 		}
 		if n := count(`SELECT count(*) FROM notification_deliveries WHERE monitor_id = $1 AND kind = 'opened' AND NOT payload ? 'late'`, replay.ID); n != 1 {
 			t.Fatalf("live opened deliveries %d, want 1", n)
+		}
+	})
+
+	t.Run("late alerts: the threshold is the gateway's setting", func(t *testing.T) {
+		// Two days is never reached by a slot the gateway accepts, so nothing is late.
+		patient := httptest.NewServer(gateway.New(gateway.Deps{
+			Limits: openLimits, LateAlertAfter: 48 * time.Hour,
+			Pool: worker, Scheduler: sched, Recorder: checkresult.Recorder{Scheduler: sched, Incidents: inc, Clock: clock.System{}},
+			Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		}))
+		t.Cleanup(patient.Close)
+		sl := slot(tolerant, 60)
+		code, b := call(t, patient, token, "/reports", wire.ReportsRequest{Results: []wire.Report{report(tolerant, 1, sl, false)}})
+		if code != http.StatusOK {
+			t.Fatalf("reports: %d %s", code, b)
+		}
+		if n := count(`SELECT count(*) FROM notification_deliveries WHERE monitor_id = $1 AND kind = 'opened'`, tolerant.ID); n != 1 {
+			t.Fatalf("opened deliveries %d, want 1", n)
+		}
+		if n := count(`SELECT count(*) FROM notification_deliveries WHERE monitor_id = $1 AND payload ? 'late'`, tolerant.ID); n != 0 {
+			t.Fatalf("a result younger than the threshold was marked late (%d)", n)
 		}
 	})
 

@@ -27,6 +27,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/jobs"
 	"github.com/proreta-io/proreta/backend/internal/monitors"
 	"github.com/proreta-io/proreta/backend/internal/notify"
+	"github.com/proreta-io/proreta/backend/internal/platform/clock"
 	"github.com/proreta-io/proreta/backend/internal/platform/crypto"
 	"github.com/proreta-io/proreta/backend/internal/platform/db"
 	"github.com/proreta-io/proreta/backend/internal/scheduler"
@@ -277,6 +278,8 @@ func newEnv(t *testing.T, name string, back time.Duration, specs []monSpec) *env
 	e.deliver = jobs.NewDeliverer(jobs.DeliveryConfig{PublicURL: "https://proreta.example.com", ChannelInterval: time.Millisecond}, jobs.DeliveryDeps{
 		Pool: workerPool, Channels: notify.NewService(workerPool, e.keys, nil, ""), Notifier: e.sent,
 		Metrics: jobs.NewMetrics(prometheus.NewRegistry()), Log: slog.New(slog.DiscardHandler),
+		// Past the grace a late "down" waits for its recovery (the test is about what follows it).
+		Clock: clock.NewFake(time.Now().Add(time.Hour)),
 	})
 
 	for i, s := range specs {

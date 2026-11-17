@@ -43,7 +43,7 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 			Buckets: []float64{5, 15, 30, 60, 300, 900, 3600, 6 * 3600, 24 * 3600},
 		}),
 		lateReports: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "proreta_specula_late_reports_total", Help: "Recorded reports older than the late-alert threshold (10 minutes) when they arrived; their alerts say they are late.",
+			Name: "proreta_specula_late_reports_total", Help: "Recorded reports older than the late-alert threshold (PRORETA_SPECULA_LATE_ALERT_AFTER) when they arrived; their alerts say they are late.",
 		}),
 		scheduleRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "proreta_specula_schedule_requests_total", Help: "GET /schedule requests that passed the token budget, by result.",

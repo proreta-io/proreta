@@ -25,6 +25,8 @@ export const placeholders: { name: string; help: string }[] = [
   { name: "error.kind", help: "Why the monitor went down" },
   { name: "tls.expiresAt", help: "TLS expiry events only" },
   { name: "tls.daysLeft", help: "TLS expiry events only" },
+  { name: "late", help: "true when the result was replayed late, else false" },
+  { name: "observedAt", help: "RFC 3339, UTC; when Proreta received a late result" },
   { name: "link", help: "The monitor in the dashboard" },
 ];
 

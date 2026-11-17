@@ -46,6 +46,9 @@ const (
 	DefaultGaugeInterval       = 15 * time.Second
 	// dbTimeout bounds one claim or finish transaction.
 	dbTimeout = 10 * time.Second
+	// lateAlertGrace is how long the "down" of a replayed result waits, from the time it was
+	// queued, for the recovery that may follow in the next call of the replay.
+	lateAlertGrace = 30 * time.Second
 )
 
 // DeliveryConfig tunes the Deliverer; zero values take the defaults.
@@ -98,6 +101,7 @@ type delivery struct {
 	ChannelID  uuid.UUID
 	Payload    []byte
 	Attempts   int
+	CreatedAt  time.Time
 	// Token fences finish_delivery: only the holder of this claim can record its outcome.
 	Token uuid.UUID
 }
@@ -195,14 +199,14 @@ func (r *Deliverer) claim(ctx context.Context, n int) ([]delivery, error) {
 	defer cancel()
 	var out []delivery
 	err := db.WithTx(ctx, r.d.Pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT id, tenant_id, kind, monitor_id, incident_id, channel_id, payload, attempts, claim_token, specula_id FROM claim_deliveries($1)`, n)
+		rows, err := tx.Query(ctx, `SELECT id, tenant_id, kind, monitor_id, incident_id, channel_id, payload, attempts, claim_token, specula_id, created_at FROM claim_deliveries($1)`, n)
 		if err != nil {
 			return err
 		}
 		out, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (delivery, error) {
 			var dl delivery
 			var attempts int32
-			err := row.Scan(&dl.ID, &dl.TenantID, &dl.Kind, &dl.MonitorID, &dl.IncidentID, &dl.ChannelID, &dl.Payload, &attempts, &dl.Token, &dl.SpeculaID)
+			err := row.Scan(&dl.ID, &dl.TenantID, &dl.Kind, &dl.MonitorID, &dl.IncidentID, &dl.ChannelID, &dl.Payload, &attempts, &dl.Token, &dl.SpeculaID, &dl.CreatedAt)
 			dl.Attempts = int(attempts)
 			return dl, err
 		})
@@ -280,6 +284,16 @@ func (r *Deliverer) deliver(ctx context.Context, dl delivery) {
 	channelType := target.Type
 	if channelType == "" {
 		channelType = channelTypeUnknown
+	}
+	if reason == "" && dl.Kind == notify.DeliveryOpened && lateAlert(dl.Payload) {
+		// The rest of a replay may still be on its way in another call, and its "recovered" would
+		// make this "down" stale. Wait once, then the check above runs again.
+		// shortcut: a replay that outlasts lateAlertGrace can still send a "down" before its
+		// recovery; raise the grace or hold alerts until the Specula's replay is over.
+		if due := dl.CreatedAt.Add(lateAlertGrace); r.d.Clock.Now().Before(due) {
+			r.finish(ctx, log, dl, channelType, outcome{status: statusThrottled, errKind: "late_grace", retryAt: due})
+			return
+		}
 	}
 	if reason != "" {
 		r.finish(ctx, log, dl, channelType, outcome{status: statusFailed, errKind: reason})
@@ -363,6 +377,17 @@ func (r *Deliverer) finish(ctx context.Context, log *slog.Logger, dl delivery, c
 		label = "retry"
 	}
 	r.d.Metrics.deliveries.WithLabelValues(channelType, label).Inc()
+	if label != "retry" && lateAlert(dl.Payload) {
+		switch {
+		case o.status == statusSent:
+			label = lateSent
+		case o.errKind == "late_incident_resolved":
+			label = lateSkippedResolved
+		default:
+			label = lateFailed
+		}
+		r.d.Metrics.lateAlerts.WithLabelValues(label).Inc()
+	}
 	if o.status != statusSent {
 		log.WarnContext(ctx, "delivery not sent", "status", o.status, "error_kind", o.errKind, "attempt", dl.Attempts+1)
 	}

@@ -180,6 +180,9 @@ type SpeculaGateway struct {
 	TrustedProxyHops int
 	// Request opens the sealed headers and bodies of monitor requests handed to an executor.
 	Request RequestSeal
+	// LateAlertAfter is PRORETA_SPECULA_LATE_ALERT_AFTER (default 10m, 1m to 24h): how old a
+	// reported slot is, on arrival, for the alerts it raises to say they are late.
+	LateAlertAfter time.Duration
 }
 
 // Specula is the configuration of cmd/specula, the executor that runs inside a customer's network.
@@ -439,6 +442,7 @@ func LoadSpeculaGateway(lookup LookupFunc) (SpeculaGateway, error) {
 		HTTPAddr:         l.addr("PRORETA_HTTP_ADDR", ":8080"),
 		TrustedProxyHops: l.integer("PRORETA_TRUSTED_PROXY_HOPS", 0, 0, 10),
 		Request:          l.requestSeal(),
+		LateAlertAfter:   l.duration("PRORETA_SPECULA_LATE_ALERT_AFTER", 10*time.Minute, time.Minute, 24*time.Hour),
 	}
 	if cfg.HTTPAddr != "" && cfg.HTTPAddr == cfg.AdminAddr {
 		l.fail("PRORETA_HTTP_ADDR", "must differ from PRORETA_ADMIN_ADDR")

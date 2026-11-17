@@ -6106,8 +6106,9 @@ components:
         `project.name`, `organization.name`, `incident.id`, `incident.startedAt` and
         `incident.resolvedAt` (RFC 3339, UTC), `incident.duration` (for example `5m`),
         `specula.id` and `specula.name` (the Specula events only; `monitor.*` is empty for them),
-        `error.kind`, `tls.expiresAt`, `tls.daysLeft` and `link` (the monitor in the dashboard, the
-        Specula page for the Specula events). A
+        `error.kind`, `tls.expiresAt`, `tls.daysLeft`, `late` (`true` or `false`: the result was replayed late),
+        `observedAt` (RFC 3339, UTC: when Proreta received a late result, empty otherwise) and `link`
+        (the monitor in the dashboard, the Specula page for the Specula events). A
         value that does not exist for the event is empty. An unknown name is 422. With `json` the
         template rendered with sample data must be one valid JSON document.
       maxLength: 8192

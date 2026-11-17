@@ -11,13 +11,22 @@ import (
 // undecryptable); every other value is a channel type (notification_channels.type).
 const channelTypeUnknown = "unknown"
 
+// Outcomes of a late alert (proreta_specula_late_alerts_total).
+const (
+	lateSent            = "sent"
+	lateSkippedResolved = "skipped_resolved"
+	lateFailed          = "failed"
+)
+
 var speculaStatuses = []string{"pending", "online", "offline", "revoked"}
 
 // Metrics are the jobs metrics, served on the admin port.
 type Metrics struct {
-	deliveries   *prometheus.CounterVec
-	duration     *prometheus.HistogramVec
-	pending      prometheus.Gauge
+	deliveries *prometheus.CounterVec
+	duration   *prometheus.HistogramVec
+	pending    prometheus.Gauge
+	// lateAlerts counts the final outcome of deliveries written for replayed results.
+	lateAlerts   *prometheus.CounterVec
 	claimErrors  prometheus.Counter
 	housekeeping *prometheus.CounterVec
 	lastSuccess  *prometheus.GaugeVec
@@ -57,6 +66,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "proreta_jobs_delivery_duration_seconds", Help: "Duration of one send to a notification channel, by channel type.",
 			Buckets: []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
 		}, []string{"channel_type"}),
+		lateAlerts: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "proreta_specula_late_alerts_total", Help: "Deliveries written for replayed (late) results, by final outcome (sent, skipped_resolved, failed).",
+		}, []string{"outcome"}),
 		pending: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "proreta_jobs_outbox_pending", Help: "Outbox rows waiting to be delivered (including retries), all tenants.",
 		}),
@@ -118,6 +130,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			m.deliveries.WithLabelValues(t, s)
 		}
 	}
+	for _, o := range []string{lateSent, lateSkippedResolved, lateFailed} {
+		m.lateAlerts.WithLabelValues(o)
+	}
 	for _, s := range speculaStatuses {
 		m.speculaAgents.WithLabelValues(s)
 	}
@@ -130,7 +145,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 	for _, r := range []string{keptRollupsIncomplete, keptError} {
 		m.partitionsKept.WithLabelValues(r)
 	}
-	reg.MustRegister(m.deliveries, m.duration, m.pending, m.claimErrors, m.housekeeping, m.lastSuccess, m.partitionsKept, m.purgedRows, m.heartbeatsMissed, m.dirtyHours, m.dirtyHoursProcessed, m.statusSnapshots,
+	reg.MustRegister(m.deliveries, m.duration, m.lateAlerts, m.pending, m.claimErrors, m.housekeeping, m.lastSuccess, m.partitionsKept, m.purgedRows, m.heartbeatsMissed, m.dirtyHours, m.dirtyHoursProcessed, m.statusSnapshots,
 		m.speculaAgents, m.speculaIncidents, m.domains, m.domainChecks, m.mail, m.mailDuration, m.mailPending, m.mailClaimErrors)
 	return m
 }
