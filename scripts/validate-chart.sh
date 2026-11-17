@@ -34,6 +34,8 @@ packaged=$out/packaged
 mkdir -p "$packaged"
 helm package "$chart" --version 1.2.3 --app-version 1.2.3 -d "$packaged" >/dev/null
 tar -xzf "$packaged/proreta-1.2.3.tgz" -C "$packaged"
+# The tarball must carry the repository LICENSE unchanged (the chart directories hold copies).
+cmp -s LICENSE "$packaged/proreta/LICENSE" || { echo "FAIL: packaged chart has no LICENSE equal to the repository LICENSE" >&2; exit 1; }
 
 # name|helm args (chart path first when it is not $chart)
 combos=(
@@ -391,6 +393,7 @@ helm template specula "$sp_chart" -n specula "${sp_args[@]}" >"$out/specula.yaml
 helm template specula "$sp_chart" -n specula "${sp_args[@]}" --set specula.concurrency=100 --set state.sizeLimit=1Gi --set 'env[0].name=HTTPS_PROXY' --set 'env[0].value=http://proxy:3128' >"$out/specula-custom.yaml"
 helm template specula "$sp_chart" -n specula "${sp_args[@]}" --set state.enabled=false >"$out/specula-nostate.yaml"
 helm package "$sp_chart" --version 1.2.3 --app-version 1.2.3 -d "$out/specula-pkg" >/dev/null
+tar -xzOf "$out/specula-pkg/proreta-specula-1.2.3.tgz" proreta-specula/LICENSE | cmp -s LICENSE - || { echo "FAIL: packaged Specula chart has no LICENSE equal to the repository LICENSE" >&2; exit 1; }
 helm template specula "$out/specula-pkg/proreta-specula-1.2.3.tgz" -n specula --set proreta.url=https://proreta.example.com --set token.existingSecret=specula-token >"$out/specula-packaged.yaml"
 grep -q 'image: "ghcr.io/proreta-io/proreta-backend:1.2.3"' "$out/specula-packaged.yaml" || { echo "FAIL: packaged Specula chart does not use appVersion 1.2.3" >&2; exit 1; }
 python3 - "$out/specula.yaml" "$out/specula-custom.yaml" "$out/specula-nostate.yaml" <<'PY'
