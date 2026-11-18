@@ -1823,6 +1823,9 @@ BEGIN
         WHERE d.tenant_id = p_tenant_id AND d.status = 'pending' AND d.created_at < now() - interval '15 minutes';
         GET DIAGNOSTICS v_expired = ROW_COUNT;
         v_meta := v_meta || jsonb_build_object('deliveriesExpired', v_expired);
+        -- Pings of a suspended tenant were not recorded, so every heartbeat deadline has passed:
+        -- restart the wait instead of opening incidents the moment the tenant is back.
+        UPDATE heartbeat_tokens SET waiting_since = now() WHERE tenant_id = p_tenant_id;
     END IF;
     PERFORM admin_audit(p_tenant_id, p_actor, p_audit_id,
                         CASE WHEN p_status = 'suspended' THEN 'admin.organization.suspended' ELSE 'admin.organization.unsuspended' END,
@@ -2544,11 +2547,11 @@ AS $function$
                                 AND (c2.project_id IS NULL OR c2.project_id = m.project_id))
                   AND c.project_id = m.project_id)
           )
-          AND coalesce(
-              (SELECT max(d.created_at) FROM notification_deliveries AS d
-               WHERE d.incident_id = i.id AND d.channel_id = c.id AND d.kind IN ('opened', 'reminder')),
-              i.started_at
-          ) <= now() - make_interval(mins => c.reminder_minutes)
+          AND EXISTS (SELECT 1 FROM notification_deliveries AS d
+                      WHERE d.incident_id = i.id AND d.channel_id = c.id AND d.kind = 'opened' AND d.status <> 'failed')
+          AND (SELECT max(d.created_at) FROM notification_deliveries AS d
+               WHERE d.incident_id = i.id AND d.channel_id = c.id AND d.kind IN ('opened', 'reminder'))
+              <= now() - make_interval(mins => c.reminder_minutes)
         ORDER BY i.started_at, i.id, c.id
         LIMIT least(greatest(p_limit, 0), 1000)
     ),

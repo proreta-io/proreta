@@ -222,6 +222,7 @@ func TestIntegrationNotificationChannels(t *testing.T) {
 		// Tenant B's monitor selects nothing, its tenant is suspended.
 		monB := seedMonitor(t, admin, tenantB, "now()", false, false)
 		incB := incident(monB, tenantB, "1 hour")
+		delivery(tenantB, monB, otherTenant, "opened", incB, "1 hour", "sent")
 		pgtest.MustExec(t, admin, `UPDATE tenants SET status = 'suspended' WHERE id = '`+tenantB+`'`)
 
 		got := reminders()
@@ -262,7 +263,7 @@ func TestIntegrationNotificationChannels(t *testing.T) {
 			t.Fatalf("channel selected: %v", got)
 		}
 
-		// An active tenant B gets its reminder on its own channel, from the incident start.
+		// An active tenant B gets its reminder on its own channel, counted from its opened.
 		pgtest.MustExec(t, admin, `UPDATE tenants SET status = 'active' WHERE id = '`+tenantB+`'`)
 		if got := reminders(); got[otherTenant+"/"+incB] != 1 {
 			t.Fatalf("tenant b: %v", got)

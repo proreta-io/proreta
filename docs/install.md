@@ -72,7 +72,7 @@ Edit every line marked `CHANGE`:
 | `config.publicUrl` | `https://proreta.example.com` | Required. https, no trailing slash. Its host is the host name of the HTTPRoute (set `httpRoute.hostnames` only to serve more names). |
 | `httpRoute.parentRef` | `gateway` / `gateway-system` / `https` | Name (required), namespace (empty: the Proreta namespace) and listener (`sectionName`) of your Gateway. There is no built-in Gateway name. |
 | `database.host` | `postgres.example.internal` | `port` (5432) and `sslmode` (`require`) next to it. |
-| `config.trustedProxyHops` | `1` | The default and the value in the example: one Gateway in front. `0` only without a proxy. |
+| `config.trustedProxyHops` | `1` | The default and the value in the example: one Gateway in front. `0` only without a proxy. The Gateway must set `X-Forwarded-Proto`: the API sends `Strict-Transport-Security` only for requests it believes arrived over TLS (the web container sends it always; browsers ignore it over plain HTTP). |
 | `statuspage.customDomains.cnameTarget` | `customers.example.net` | Optional. Only with `statuspage.customDomains.enabled: true` (off by default): the host customers point their CNAME at; required when enabled. `abuseUrl`, `tlsAsk` and the other keys are in the chart README. |
 
 Leave `database.bootstrap.adminSecret.existingSecret: proreta-db-admin-login` (the Secret from step 2), `config.registrationEnabled: false` and `secrets.*.source: generate`. The chart validates the file against `values.schema.json` and fails with a message naming the key when something is missing, malformed or unknown (a typo such as `database.hots` is rejected, not ignored).

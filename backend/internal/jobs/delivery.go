@@ -275,8 +275,9 @@ func (r *Deliverer) deliver(ctx context.Context, dl delivery) {
 		return
 	case target.Deleted:
 		reason = "channel_deleted"
-	case !routed:
-		// The monitor or the channel moved to another project after the row was queued.
+	case !routed && dl.Kind != notify.DeliveryResolved:
+		// The monitor or the channel moved to another project after the row was queued. A
+		// resolved still goes to a channel that got the opened.
 		reason = "route_changed"
 	case target.Status != notify.StatusActive:
 		reason = "channel_failed"

@@ -92,3 +92,15 @@ SELECT EXISTS (
     WHERE m.tenant_id = @tenant_id AND m.id = @monitor_id
       AND (c.project_id IS NULL OR c.project_id IS NOT DISTINCT FROM m.project_id)
 )::boolean;
+
+-- name: ListResolvedChannels :many
+-- The channels a resolved goes to: every live channel that was sent (or is about to be sent) the
+-- opened of this incident, wherever the monitor and the channels have moved since, so an alert
+-- is never left open and a channel that never saw the opened gets no resolved either.
+SELECT c.id, c.events
+FROM notification_channels AS c
+WHERE c.tenant_id = @tenant_id AND c.deleted_at IS NULL AND c.status = 'active'
+  AND EXISTS (SELECT 1 FROM notification_deliveries AS d
+              WHERE d.tenant_id = c.tenant_id AND d.incident_id = @incident_id AND d.channel_id = c.id
+                AND d.kind = 'opened' AND d.status <> 'failed')
+ORDER BY c.created_at, c.id;

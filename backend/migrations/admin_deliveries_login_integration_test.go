@@ -74,6 +74,10 @@ func TestIntegrationAdminDeliveriesAndLoginTenant(t *testing.T) {
 		fresh := delivery(tenantA, monA, chA, "5 minutes", "pending")
 		otherTenant := delivery(tenantB, monB, chB, "1 hour", "pending")
 		pgtest.MustExec(t, admin, `UPDATE tenants SET status = 'suspended' WHERE id IN ('`+tenantA+`', '`+tenantB+`')`)
+		for tenant, mon := range map[string]string{tenantA: monA, tenantB: monB} {
+			pgtest.MustExec(t, admin, `INSERT INTO heartbeat_tokens (tenant_id, monitor_id, token_hash, waiting_since)
+				VALUES ('`+tenant+`', '`+mon+`', sha256(gen_random_uuid()::text::bytea), now() - interval '2 hours')`)
+		}
 
 		var changed bool
 		if err := api.QueryRow(ctx, `SELECT admin_set_tenant_status($1, $2, 'active', gen_random_uuid(), NULL)`, userPlatform, tenantA).Scan(&changed); err != nil || !changed {
@@ -85,6 +89,13 @@ func TestIntegrationAdminDeliveriesAndLoginTenant(t *testing.T) {
 		} {
 			if got := state(id); got != want {
 				t.Errorf("delivery %s = %s, want %s", id, got, want)
+			}
+		}
+		// The unsuspended tenant's heartbeats wait again from now; the suspended one's do not move.
+		for tenant, wantRestarted := range map[string]bool{tenantA: true, tenantB: false} {
+			var restarted bool
+			if err := admin.QueryRow(ctx, `SELECT waiting_since > now() - interval '1 minute' FROM heartbeat_tokens WHERE tenant_id = $1`, tenant).Scan(&restarted); err != nil || restarted != wantRestarted {
+				t.Errorf("tenant %s heartbeat restarted = %v (err %v), want %v", tenant, restarted, err, wantRestarted)
 			}
 		}
 		var meta string
@@ -102,7 +113,7 @@ func TestIntegrationAdminDeliveriesAndLoginTenant(t *testing.T) {
 			t.Fatalf("suspended tenant's delivery = %s, want pending", got)
 		}
 		pgtest.MustExec(t, admin, `UPDATE tenants SET status = 'active' WHERE id = '`+tenantB+`'`,
-			`DELETE FROM notification_deliveries`)
+			`DELETE FROM notification_deliveries`, `DELETE FROM heartbeat_tokens`)
 	})
 
 	t.Run("the claim fails pending deliveries of deleted tenants once", func(t *testing.T) {

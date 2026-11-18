@@ -205,6 +205,36 @@ func eventOf(kind machine.Kind) string {
 	return "tls_expiring"
 }
 
+// channelEvents is a channel id with the events it receives, whichever query found it.
+type channelEvents struct {
+	ID     uuid.UUID
+	Events []string
+}
+
+// resolvedChannels are the channels a resolved goes to: the ones that were sent the incident's
+// opened, wherever the monitor and the channels have moved since, so an alert is never left open;
+// plus the channels of the current route that never receive an opened (no down event). A channel
+// of the route that missed the opened (created, selected or given the down event during the
+// incident) gets no resolved either.
+func (s *Service) resolvedChannels(ctx context.Context, q *incidentsdb.Queries, tenantID, incidentID uuid.UUID, route []incidentsdb.ListDeliveryChannelsRow) ([]channelEvents, error) {
+	opened, err := q.ListResolvedChannels(ctx, incidentsdb.ListResolvedChannelsParams{TenantID: tenantID, IncidentID: &incidentID})
+	if err != nil {
+		return nil, fmt.Errorf("incidents: resolved channels: %w", err)
+	}
+	out := make([]channelEvents, 0, len(opened))
+	got := make(map[uuid.UUID]bool, len(opened))
+	for _, ch := range opened {
+		got[ch.ID] = true
+		out = append(out, channelEvents(ch))
+	}
+	for _, ch := range route {
+		if !got[ch.ID] && !slices.Contains(ch.Events, eventOf(machine.KindOpened)) {
+			out = append(out, channelEvents(ch))
+		}
+	}
+	return out, nil
+}
+
 // enqueue writes one outbox row per emitted kind and per active channel of the monitor that
 // receives the kind's event: the channels the monitor selected, or every active
 // channel of the tenant when it selected none. Without such a channel nothing is queued.
@@ -214,7 +244,13 @@ func (s *Service) enqueue(ctx context.Context, q *incidentsdb.Queries, in Result
 	if err != nil {
 		return fmt.Errorf("incidents: delivery channels: %w", err)
 	}
-	if len(channels) == 0 {
+	var resolvedTo []channelEvents
+	if slices.Contains(out.Emit, machine.KindResolved) && incidentID != nil {
+		if resolvedTo, err = s.resolvedChannels(ctx, q, in.TenantID, *incidentID, channels); err != nil {
+			return err
+		}
+	}
+	if len(channels) == 0 && len(resolvedTo) == 0 {
 		return nil
 	}
 	for _, kind := range out.Emit {
@@ -240,7 +276,15 @@ func (s *Service) enqueue(ctx context.Context, q *incidentsdb.Queries, in Result
 		if err != nil {
 			return fmt.Errorf("incidents: payload: %w", err)
 		}
-		for _, ch := range channels {
+		targets := make([]channelEvents, 0, len(channels))
+		if kind == machine.KindResolved {
+			targets = append(targets, resolvedTo...)
+		} else {
+			for _, ch := range channels {
+				targets = append(targets, channelEvents(ch))
+			}
+		}
+		for _, ch := range targets {
 			if !slices.Contains(ch.Events, eventOf(kind)) {
 				continue
 			}

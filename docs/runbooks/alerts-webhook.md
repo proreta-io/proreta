@@ -76,6 +76,7 @@ Webhook deliveries use the same queue as Slack (`notification_deliveries`), writ
 - `429` is retried after the `Retry-After` delay (at most one hour).
 - `404` or `410` marks the channel `failed`: nothing more is sent until you store a new URL (which makes it `active` again).
 - A delivery is not sent, and ends `failed`, when the channel was deleted (`channel_deleted`), when the monitor or the channel moved to another project so that the channel no longer serves the monitor (`route_changed`), when the incident was resolved before a reminder was due, or when the template no longer renders (`bad_template`). Alerts of a suspended organization wait as described in the [admin panel runbook](admin-panel.md).
+- Only channels that were sent the `down` message of an incident get its reminders and its `recovered` message: a channel created, selected or moved into the monitor's route while the incident is open gets neither, and a channel that moved out of the route still gets the `recovered`.
 - Delivery is at least once: after a crash an alert can arrive twice. Use `incident.id` and `event` to deduplicate.
 - The metric `proreta_jobs_deliveries_total` has `channel_type="webhook"` for these channels ([Observability](observability.md)).
 

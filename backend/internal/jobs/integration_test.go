@@ -771,17 +771,31 @@ func TestIntegrationHousekeeping(t *testing.T) {
 		}
 	})
 
-	t.Run("enqueue_incident_reminders queues due reminders once", func(t *testing.T) {
+	t.Run("enqueue_incident_reminders queues due reminders once, only after an opened", func(t *testing.T) {
 		mon := e.monitor(tenantA, "Down")
+		ch := e.channels[tenantA]
 		pgtest.MustExec(t, e.admin,
 			`UPDATE notification_channels SET reminder_minutes = 5 WHERE tenant_id = '`+tenantA+`'`,
 			`INSERT INTO incidents (id, tenant_id, monitor_id, started_at) VALUES (gen_random_uuid(), '`+tenantA+`', '`+mon.String()+`', now() - interval '6 minutes')`)
+		// A channel that was never sent the down message gets no reminder.
 		for range 2 {
 			if got := h.RunTask(e.ctx, task("enqueue_incident_reminders")); got != "ok" {
 				t.Fatal(got)
 			}
 		}
-		if n := count(`SELECT count(*) FROM notification_deliveries WHERE kind = 'reminder' AND monitor_id = $1 AND channel_id = $2`, mon, e.channels[tenantA]); n != 1 {
+		if n := count(`SELECT count(*) FROM notification_deliveries WHERE kind = 'reminder' AND monitor_id = $1 AND channel_id = $2`, mon, ch); n != 0 {
+			t.Fatalf("reminders without an opened = %d, want 0", n)
+		}
+		pgtest.MustExec(t, e.admin,
+			`INSERT INTO notification_deliveries (id, tenant_id, kind, monitor_id, incident_id, channel_id, payload, status, sent_at, created_at)
+			 SELECT gen_random_uuid(), tenant_id, 'opened', monitor_id, id, '`+ch.String()+`', '{}', 'sent', now(), started_at
+			 FROM incidents WHERE monitor_id = '`+mon.String()+`'`)
+		for range 2 {
+			if got := h.RunTask(e.ctx, task("enqueue_incident_reminders")); got != "ok" {
+				t.Fatal(got)
+			}
+		}
+		if n := count(`SELECT count(*) FROM notification_deliveries WHERE kind = 'reminder' AND monitor_id = $1 AND channel_id = $2`, mon, ch); n != 1 {
 			t.Fatalf("reminders = %d, want 1", n)
 		}
 	})
@@ -1015,13 +1029,19 @@ func TestIntegrationDeliveryRouteChanged(t *testing.T) {
 		t.Fatalf("delivery to an organization-wide channel: %+v, posts %d", r, len(e.slack.sent()))
 	}
 
-	// A channel moved away from the monitor's project after queueing.
+	// A channel moved away from the monitor's project after queueing: an opened is failed, a
+	// resolved is still sent (it was queued because the channel got the opened).
 	stay := e.monitor(tenantA, "Stay")
-	late := e.deliver(tenantA, stay, notify.DeliveryResolved, map[string]any{"monitorName": "Stay", "durationSeconds": 60})
+	late := e.deliver(tenantA, stay, notify.DeliveryOpened, map[string]any{"monitorName": "Stay", "reason": "timeout"})
+	recovered := e.deliver(tenantA, stay, notify.DeliveryResolved, map[string]any{"monitorName": "Stay", "durationSeconds": 60})
 	pgtest.MustExec(t, e.admin, `UPDATE notification_channels SET project_id = '`+other.String()+`' WHERE id = '`+e.channels[tenantA].String()+`'`)
 	d.RunOnce(e.ctx)
-	if r := e.row(late); r.status != "failed" || r.lastError == nil || *r.lastError != "route_changed" || len(e.slack.sent()) != 1 {
-		t.Fatalf("delivery after the channel moved: %+v, posts %d", r, len(e.slack.sent()))
+	d.RunOnce(e.ctx) // the resolved waits for the older row of its monitor
+	if r := e.row(late); r.status != "failed" || r.lastError == nil || *r.lastError != "route_changed" {
+		t.Fatalf("opened after the channel moved: %+v", r)
+	}
+	if r := e.row(recovered); r.status != "sent" || len(e.slack.sent()) != 2 {
+		t.Fatalf("resolved after the channel moved: %+v, posts %d", r, len(e.slack.sent()))
 	}
 }
 
