@@ -334,6 +334,10 @@ export const listAdminOrganizations = (query: string, offset: number, includeDel
 
 const organizationPath = (organizationId: string) => ({ params: { path: { organizationId } } });
 
+/** A new organization with its first owner; an invitation link, when there is one, is in this answer only. */
+export const createAdminOrganization = (body: Schemas["AdminOrganizationCreate"]) =>
+  unwrap(client.POST("/api/v1/admin/organizations", { body }));
+
 export const getAdminOrganization = (organizationId: string) =>
   unwrap(
     client.GET("/api/v1/admin/organizations/{organizationId}", organizationPath(organizationId)),

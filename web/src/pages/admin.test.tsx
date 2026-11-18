@@ -454,3 +454,94 @@ describe("login of a suspended account", () => {
     );
   });
 });
+
+describe("admin new organization", () => {
+  const plansAnswer = {
+    items: [
+      { key: "free", name: "Free" },
+      { key: "internal", name: "Internal" },
+    ],
+  };
+  const list = { items: [organization()], total: 1, limit: 25, offset: 0 };
+
+  it("creates with an existing account as owner", async () => {
+    const fetchMock = mockApi({
+      ...asAdmin,
+      "GET /api/v1/admin/organizations": () => json(list),
+      "GET /api/v1/admin/plans": () => json(plansAnswer),
+      "POST /api/v1/admin/organizations": () =>
+        json(
+          {
+            organization: organization({ id: "t-9", name: "Platform team" }),
+            member: member({ login: "alice@alpha.example" }),
+            invitation: null,
+            inviteUrl: null,
+          },
+          201,
+        ),
+    });
+    renderApp("/admin/organizations");
+    await userEvent.click(await screen.findByRole("button", { name: "New organization" }));
+    const dialog = await screen.findByRole("dialog", { name: "New organization" });
+    await userEvent.type(within(dialog).getByLabelText("Name"), " Platform team");
+    await userEvent.type(within(dialog).getByLabelText("Slug (optional)"), "platform");
+    await userEvent.selectOptions(within(dialog).getByLabelText("Plan"), "internal");
+    await userEvent.type(within(dialog).getByLabelText("Owner's email"), "alice@alpha.example");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Create organization" }));
+    expect(await screen.findByText(/is its owner/)).toHaveTextContent("alice@alpha.example");
+    expect(screen.getByRole("link", { name: "Open organization" })).toHaveAttribute(
+      "href",
+      "/admin/organizations/t-9",
+    );
+    expect(await requests(fetchMock, "POST", "/api/v1/admin/organizations")[0]!.json()).toEqual({
+      name: "Platform team",
+      slug: "platform",
+      planKey: "internal",
+      ownerEmail: "alice@alpha.example",
+    });
+  });
+
+  it("shows the invitation link once when there is no account and field errors in the dialog", async () => {
+    let attempt = 0;
+    mockApi({
+      ...asAdmin,
+      "GET /api/v1/admin/organizations": () => json(list),
+      "GET /api/v1/admin/plans": () => json(plansAnswer),
+      "POST /api/v1/admin/organizations": () =>
+        attempt++ === 0
+          ? problem(422, "Validation failed", {
+              type: "urn:proreta:problem:validation",
+              fieldErrors: [{ field: "slug", message: "may contain lowercase letters" }],
+            })
+          : json(
+              {
+                organization: organization({ id: "t-9", name: "Ops" }),
+                member: null,
+                invitation: {
+                  id: "i-9",
+                  role: "maintainer",
+                  label: "bob@beta.example",
+                  status: "open",
+                },
+                inviteUrl: "https://proreta.example.com/invite#SECRET-TOKEN",
+              },
+              201,
+            ),
+    });
+    renderApp("/admin/organizations");
+    await userEvent.click(await screen.findByRole("button", { name: "New organization" }));
+    const dialog = await screen.findByRole("dialog", { name: "New organization" });
+    await userEvent.type(within(dialog).getByLabelText("Name"), "Ops");
+    await userEvent.type(within(dialog).getByLabelText("Slug (optional)"), "Bad Slug");
+    await userEvent.type(within(dialog).getByLabelText("Owner's email"), "bob@beta.example");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Create organization" }));
+    expect(await within(dialog).findByText("may contain lowercase letters")).toBeInTheDocument();
+    await userEvent.clear(within(dialog).getByLabelText("Slug (optional)"));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Create organization" }));
+    expect(await screen.findByLabelText("Invitation link")).toHaveValue(
+      "https://proreta.example.com/invite#SECRET-TOKEN",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "I sent it, hide the link" }));
+    expect(screen.queryByLabelText("Invitation link")).toBeNull();
+  });
+});
