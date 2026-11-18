@@ -19,6 +19,7 @@ import (
 
 	"github.com/proreta-io/proreta/backend/internal/platform/clock"
 	"github.com/proreta-io/proreta/backend/internal/platform/crypto"
+	"github.com/proreta-io/proreta/backend/internal/platform/httpx"
 )
 
 func TestClassifyHost(t *testing.T) {
@@ -177,10 +178,10 @@ func TestForwardedHTTPS(t *testing.T) {
 		{"client lies, one hop", req("https, http"), 1, false},
 		{"client says http, proxy https", req("http, https"), 1, true},
 		{"two hops use the outermost proxy", req("https, http"), 2, true},
-		{"more hops than values", req("https"), 3, true},
+		{"more hops than values", req("https"), 3, false},
 		{"case", req("HTTPS"), 1, true},
 	} {
-		if got := forwardedHTTPS(tc.r, tc.hops); got != tc.want {
+		if got := httpx.ForwardedHTTPS(tc.r, tc.hops); got != tc.want {
 			t.Errorf("%s: %v, want %v", tc.name, got, tc.want)
 		}
 	}

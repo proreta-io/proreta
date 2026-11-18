@@ -105,6 +105,31 @@ func ForwardedClientIP(r *http.Request, trustedHops int) (netip.Addr, bool) {
 	return peerIP(r), trustedHops <= 0
 }
 
+// ForwardedHTTPS reports whether the request reached the edge over TLS: the connection itself, or
+// the X-Forwarded-Proto the outermost trusted proxy set (counted from the right, like ClientIP). With no trusted proxy the header is
+// ignored, so a client cannot make us send HSTS over plain HTTP by sending it.
+func ForwardedHTTPS(r *http.Request, trustedHops int) bool {
+	if r.TLS != nil {
+		return true
+	}
+	if trustedHops <= 0 {
+		return false
+	}
+	var vals []string
+	for _, v := range r.Header.Values("X-Forwarded-Proto") {
+		for _, p := range strings.Split(v, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				vals = append(vals, p)
+			}
+		}
+	}
+	// Fewer values than trusted hops: the leftmost one would be client-supplied.
+	if len(vals) < trustedHops {
+		return false
+	}
+	return strings.EqualFold(vals[len(vals)-trustedHops], "https")
+}
+
 func peerIP(r *http.Request) netip.Addr {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {

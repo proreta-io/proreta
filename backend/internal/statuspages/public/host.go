@@ -179,30 +179,6 @@ func (c *HostCache) Fetch(ctx context.Context, host string) (string, bool, error
 	return it.slug, it.found, nil
 }
 
-// forwardedHTTPS reports whether the request reached the edge over TLS: the connection itself, or
-// the X-Forwarded-Proto the outermost trusted proxy set. With no trusted proxy the header is
-// ignored, so a client cannot make us send HSTS over plain HTTP by sending it.
-func forwardedHTTPS(r *http.Request, trustedHops int) bool {
-	if r.TLS != nil {
-		return true
-	}
-	if trustedHops <= 0 {
-		return false
-	}
-	var vals []string
-	for _, v := range r.Header.Values("X-Forwarded-Proto") {
-		for _, p := range strings.Split(v, ",") {
-			if p = strings.TrimSpace(p); p != "" {
-				vals = append(vals, p)
-			}
-		}
-	}
-	if len(vals) == 0 {
-		return false
-	}
-	return strings.EqualFold(vals[max(len(vals)-trustedHops, 0)], "https")
-}
-
 // hstsWriter adds Strict-Transport-Security to successful answers only, so every 404 stays
 // identical whatever host and path it was for. No includeSubDomains and no preload: the customer
 // owns the rest of their name.

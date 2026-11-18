@@ -376,10 +376,13 @@ func slackFailureDetail(e *notify.SendError) string {
 }
 
 // pageOf reads the limit and cursor parameters of a cursor-paged list; a cursor this API did not
-// issue is 400. The limit's range is checked by the request validator.
+// issue is 400. The request validator checks the limit's range too; this stays as a backstop.
 func pageOf(limit *int, cursor *string) (pagecursor.Page, error) {
 	var page pagecursor.Page
 	if limit != nil {
+		if *limit < 1 {
+			return page, &badRequestError{detail: "limit: must be at least 1"}
+		}
 		page.Limit = *limit
 	}
 	if cursor != nil {
