@@ -76,6 +76,12 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (LoginResult, 
 		s.registrations.WithLabelValues("invalid").Inc()
 		return LoginResult{}, err
 	}
+	// The configured admin login is never registrable, so nobody can hold it before the admin
+	// claims it (BootstrapAdmin would refuse to start). Same answer as any taken address.
+	if normalizeLogin(email) == s.adminLogin {
+		s.registrations.WithLabelValues("email_taken").Inc()
+		return LoginResult{}, ErrEmailTaken
+	}
 	ipKey := limiterIPKey(in.IP)
 	if ok, wait := s.ipLimit.Reserve(ipKey); !ok {
 		return LoginResult{}, s.registrationRateLimited(ctx, &RateLimitedError{RetryAfter: wait})
