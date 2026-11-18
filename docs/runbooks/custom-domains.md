@@ -6,7 +6,7 @@ A customer can serve a status page at the root of its own host, such as `https:/
 - `statuspage.enabled: true` and a working [status page](status-page.md) on the installation host.
 - A host name of your own for customers to point at (`cnameTarget`, for example `customers.example.net`) that resolves to the proxy or Gateway terminating TLS for customer hosts.
 - A way to get certificates for hosts you do not know in advance: a proxy with on-demand TLS that asks the [permission endpoint](#the-tls-permission-endpoint), or your own Gateway with one listener and certificate per customer host.
-- A plan that allows domains: the limit `Status page domains` is 0 on `free` and `internal` and unlimited on `community` ([platform admin panel](admin-panel.md)). An organization on a plan with 0 sees the section but cannot add a host.
+- A plan that allows domains: the limit `Status page domains` is 0 on `free` and unlimited on `internal` and `community` ([platform admin panel](admin-panel.md)). An organization on a plan with 0 sees the section but cannot add a host.
 
 ## Turning it on
 Chart values (all under `statuspage.customDomains`; the full list is in the [chart README](../../deploy/helm/proreta/README.md)):
@@ -60,7 +60,7 @@ The proxy asks `http://<fullname>-statuspage.<namespace>:9091/internal/tls/allow
 ## One status domain on a self-hosted installation
 The common self-hosted setup is one organization with several teams. Each team's page is served on the application's own host at `/status/<slug>`, and one general page is served at the root of the organization's own host, such as `https://status.example.com/`, and linked from its website. A page keeps its `/status/<slug>` address on the application host when it also has a custom host; on the custom host only that one page is served, at `/`. No on-demand TLS proxy is needed for one known host:
 
-1. **Plan.** The first organization (`default`) is on the `internal` plan, new ones on `free`; both allow 0 domains. In **Admin → Organizations** change the organization to `community` (or edit the plan) before adding the host.
+1. **Plan.** The first organization (`default`) is on the `internal` plan, which allows domains; new organizations are on `free`, which allows none. For another organization, change it to `community` (or edit the plan) in **Admin → Organizations** before adding the host.
 2. **Gateway.** Add a listener for `status.example.com` with its own certificate (with cert-manager: the `cert-manager.io/cluster-issuer` annotation on the Gateway and a `tls.certificateRefs` Secret name per listener), then let the chart route the host:
 
    ```yaml
