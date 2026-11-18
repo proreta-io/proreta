@@ -49,6 +49,7 @@ Operations marked `public` need no session. Operations marked `platform admin` a
 | `AdminUpdateEmailFeatures` | `PUT /api/v1/admin/email/features` | `platform admin` |
 | `AdminSendTestEmail` | `POST /api/v1/admin/email/test` | `platform admin` |
 | `AdminListOrganizations` | `GET /api/v1/admin/organizations` | `platform admin` |
+| `AdminCreateOrganization` | `POST /api/v1/admin/organizations` | `platform admin` |
 | `AdminDeleteOrganization` | `DELETE /api/v1/admin/organizations/{organizationId}` | `platform admin` |
 | `AdminGetOrganization` | `GET /api/v1/admin/organizations/{organizationId}` | `platform admin` |
 | `AdminUpdateOrganization` | `PATCH /api/v1/admin/organizations/{organizationId}` | `platform admin` |

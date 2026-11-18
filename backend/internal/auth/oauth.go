@@ -375,7 +375,7 @@ func (s *Service) oauthJoinDomain(ctx context.Context, in OAuthLoginInput, tenan
 // password registration, when registration is open.
 func (s *Service) oauthRegister(ctx context.Context, in OAuthLoginInput) (LoginResult, error) {
 	for attempt := 1; ; attempt++ {
-		slug, err := tenantSlug()
+		slug, err := RandomTenantSlug()
 		if err != nil {
 			return LoginResult{}, err
 		}

@@ -84,7 +84,7 @@ func concretePath(p string) string {
 // adminOperations are the platform admin operations. Every path under /api/v1/admin/ must be
 // one of them, tagged admin, marked x-experimental and need a session; the integration test
 // TestIntegrationAdminOperationsRefuseNonAdmins checks each answers 403 to a normal user.
-var adminOperations = []string{"adminGetStats", "adminListOrganizations", "adminGetOrganization", "adminUpdateOrganization",
+var adminOperations = []string{"adminGetStats", "adminListOrganizations", "adminCreateOrganization", "adminGetOrganization", "adminUpdateOrganization",
 	"adminDeleteOrganization", "adminListOrganizationUsers", "adminResetUserPassword", "adminGetEmailSettings", "adminUpdateEmailSettings",
 	"adminDeleteEmailSettings", "adminUpdateEmailFeatures", "adminSendTestEmail",
 	"adminGetRegistration", "adminUpdateRegistration", "adminGetRetentionSettings", "adminUpdateRetentionSettings",

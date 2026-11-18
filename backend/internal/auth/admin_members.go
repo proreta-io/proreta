@@ -179,3 +179,8 @@ func wrapAdminMemberErr(op string, err error) error {
 	}
 	return wrapMemberErr(op, err)
 }
+
+// ValidateEmail normalizes an address by the registration rules; msg is empty when it is valid.
+func ValidateEmail(raw string) (addr, msg string) {
+	return normalizeEmail(raw)
+}

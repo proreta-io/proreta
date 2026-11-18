@@ -179,6 +179,7 @@ func TestIntegrationAdminFunctions(t *testing.T) {
 			`SELECT * FROM admin_list_tenants($1, '', true, 25, 0)`,
 			`SELECT * FROM admin_get_tenant($1, '` + tenantA + `')`,
 			`SELECT admin_set_tenant_plan($1, '` + tenantA + `', 'internal', gen_random_uuid(), NULL)`,
+			`SELECT admin_create_tenant($1, gen_random_uuid(), 'nope', 'Nope', 'free', gen_random_uuid(), NULL)`,
 			`SELECT admin_set_tenant_status($1, '` + tenantB + `', 'suspended', gen_random_uuid(), NULL)`,
 			`SELECT admin_delete_tenant($1, '` + tenantB + `', gen_random_uuid(), NULL)`,
 			`SELECT * FROM admin_list_users($1, '` + tenantA + `', '', 25, 0)`,

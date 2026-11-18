@@ -187,3 +187,25 @@ func toAdminOrganization(t admin.Tenant) gen.AdminOrganization {
 		Status: gen.OrganizationStatus(t.Status), CreatedAt: t.CreatedAt, DeletedAt: t.DeletedAt,
 		Users: t.Users, Monitors: t.Monitors, Heartbeats: t.Heartbeats}
 }
+
+func (s *server) AdminCreateOrganization(ctx context.Context, req gen.AdminCreateOrganizationRequestObject) (gen.AdminCreateOrganizationResponseObject, error) {
+	a, err := s.adminActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	c, err := s.admin.CreateTenant(ctx, a, admin.TenantCreate{Name: req.Body.Name, Slug: req.Body.Slug, PlanKey: req.Body.PlanKey, OwnerEmail: req.Body.OwnerEmail})
+	if err != nil {
+		return nil, err
+	}
+	out := gen.AdminCreateOrganization201JSONResponse{Organization: toAdminOrganization(c.Tenant)}
+	if c.Member != nil {
+		m := toAdminMember(*c.Member)
+		out.Member = &m
+	}
+	if c.Invitation != nil {
+		inv := toInvitation(*c.Invitation)
+		url := s.cfg.PublicURL + "/invite#" + c.Token
+		out.Invitation, out.InviteUrl = &inv, &url
+	}
+	return out, nil
+}

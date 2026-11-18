@@ -122,7 +122,7 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (LoginResult, 
 }
 
 func (s *Service) createAccount(ctx context.Context, email, passwordHash string, in RegisterInput) (LoginResult, error) {
-	slug, err := tenantSlug()
+	slug, err := RandomTenantSlug()
 	if err != nil {
 		return LoginResult{}, err
 	}
@@ -467,10 +467,10 @@ func normalizeEmail(raw string) (string, string) {
 	return s, ""
 }
 
-// tenantSlug returns a random slug ("t-" and 10 base32 characters, 50 random bits). It never
+// RandomTenantSlug returns a random slug ("t-" and 10 base32 characters, 50 random bits). It never
 // carries any part of the email: the slug shows up in URLs and logs, and it can never
 // be the default tenant's slug.
-func tenantSlug() (string, error) {
+func RandomTenantSlug() (string, error) {
 	raw := make([]byte, 7)
 	if _, err := rand.Read(raw); err != nil {
 		return "", fmt.Errorf("random slug: %w", err)
