@@ -221,7 +221,7 @@ kubectl -n proreta delete secret proreta-db-admin-login
 ```
 The Secret `proreta-db` (the role passwords) stays; it is not managed by Helm. If a later run needs the login again (a new or empty database, a missing or outdated `proreta-db`), the Job fails with `the database is not ready and no database admin login is available`: create the admin Secret again (step 2) and rerun the upgrade. To rotate the role passwords or add a role on a working installation, set `database.bootstrap.force: true` together with the admin Secret, upgrade, then set it back to `false` ([database bootstrap](runbooks/database-bootstrap.md)). You can still set `database.bootstrap.enabled: false` after the first install if you prefer not to run the Job at all.
 
-**Back up the encryption key.** Do this now, once. The Secret `proreta-crypto` holds the keys that encrypt the Slack and webhook URLs stored in the database. Without it the webhook URLs in the database (and in any backup of it) cannot be decrypted: they are lost and each channel must be entered again. The Secret `proreta-statuspage` (the cookie signing key of the status page) is less critical: losing it only signs visitors of password-protected pages out, but it is cheap to keep with the other one. [Back up the secrets](#back-up-the-secrets) shows how.
+**Back up the encryption keys.** Do this now, once. The Secret `proreta-crypto` holds the keys that encrypt the Slack and webhook URLs stored in the database, and `proreta-request` the keys for the header values and bodies of monitor requests. Without them those values in the database (and in any backup of it) cannot be decrypted: they are lost and must be entered again. The Secret `proreta-statuspage` (the cookie signing key of the status page) is less critical: losing it only signs visitors of password-protected pages out, but it is cheap to keep with the others. [Back up the secrets](#back-up-the-secrets) shows how.
 
 **Optional next steps:** Slack and [webhook](runbooks/alerts-webhook.md) channels in the app, [outgoing email](runbooks/email.md) (configured after your first sign-in under **Admin → Email**: an SMTP server, a test message and three switches; everything is off by default, and nothing is emailed until you turn it on), [sign-in with Google or GitHub](runbooks/oauth.md), [status pages](runbooks/status-page.md), [status pages on your customers' own domains](runbooks/custom-domains.md) (off by default; you terminate TLS for those hosts), [Alertmanager watchdog](runbooks/heartbeat-alertmanager.md), [metrics and alerts](runbooks/observability.md). Add the CIDRs of your cluster and VPC to `config.blockedCIDRs` so monitors cannot probe internal addresses ([chart README](../deploy/helm/proreta/README.md)).
 
@@ -243,7 +243,7 @@ kubectl -n proreta get secret proreta-request -o yaml \
 kubectl -n proreta get secret proreta-statuspage -o yaml \
   | yq 'del(.metadata) | .metadata.name = "proreta-statuspage"'
 ```
-Without `yq`, copy the two `data` entries: `kubectl -n proreta get secret proreta-crypto -o jsonpath='{.data}'`. The values are base64 encoded once by Kubernetes; the `keys` value decodes to the JSON above. Repeat the export after every key rotation (see below).
+Without `yq`, copy the `data` entries of each Secret: `kubectl -n proreta get secret proreta-crypto -o jsonpath='{.data}'`. The values are base64 encoded once by Kubernetes; the `keys` value decodes to the JSON above. Repeat the export after every key rotation (see below).
 
 **Restore.** On a new cluster or after `kubectl delete namespace`, create the Secrets before the first `helm upgrade --install` (the secrets bootstrap Job creates a Secret only when it is absent and never overwrites it):
 ```sh
@@ -262,8 +262,15 @@ kubectl -n proreta rollout restart deploy/proreta-api deploy/proreta-jobs
 ```
 Rotating also ends OAuth sign-ins that are in progress ([OAuth runbook](runbooks/oauth.md)). Export the Secret again afterwards. The cookie key of the status page is rotated by deleting `proreta-statuspage` ([status page runbook](runbooks/status-page.md)); that only signs visitors out.
 
+## Back up the database
+The Secrets above are half of a backup; the database is the other half. Take a backup on a schedule and always right before an upgrade that contains a migration.
+- **Preferred: your provider's snapshot or point-in-time recovery** (RDS, Cloud SQL, Azure, or your own base backups). It captures roles, ownership and grants exactly.
+- **`pg_dump`** works too, as `proreta_owner` or the admin login, in custom format (`-Fc`) of the database `proreta`. It does not contain the four roles or their passwords; those live in the Secret `proreta-db` and in the server.
+- **Restore.** From a provider snapshot, restore it as a new instance and point `database.host` at it; the roles and passwords come with it and match the Secret `proreta-db`. From a `pg_dump`, the four roles must exist first with the passwords in `proreta-db` (the bootstrap creates them), and the dump must be restored into an empty database owned by `proreta_owner`. Then restore the Secrets ([restore](#back-up-the-secrets)), install a chart version that matches the backup's schema or newer, check a channel with a test message and open the dashboard.
+- **Rehearse a restore once** on a scratch server before you rely on it. The `pg_dump` path is described from the design, not from a rehearsal for this guide.
+
 ## Upgrade
-1. Read the release notes. **Back up the database** (snapshot or `pg_dump`) right before the upgrade: migrations are forward-only and the backup is the only way back ([migrations runbook](runbooks/migrations.md)).
+1. Read the release notes. **Back up the database** right before the upgrade ([above](#back-up-the-database)): migrations are forward-only and the backup is the only way back ([migrations runbook](runbooks/migrations.md)). Keep your `my-values.yaml` in version control and compare it with the new chart's `values.yaml` and README for renamed or new values.
 2. Check out the new version of the chart and use the new image tag in `--set image.tag=...`. With the OCI chart pass the new `--version` only:
    ```sh
    helm upgrade --install proreta oci://ghcr.io/proreta-io/charts/proreta --version "$NEW_VERSION" -n proreta -f my-values.yaml --wait --timeout 10m
@@ -277,7 +284,7 @@ Rotating also ends OAuth sign-ins that are in progress ([OAuth runbook](runbooks
 helm uninstall proreta -n proreta
 ```
 This removes the Deployments, Services, HTTPRoute and ServiceAccounts. It leaves:
-- the Secrets created by the bootstrap Jobs: `proreta-db`, `proreta-admin`, `proreta-crypto`, `proreta-statuspage` (and `proreta-admin-initial` if you did not delete it). Keep them to reinstall later with the same data: `proreta-crypto` holds the key that encrypts the Slack webhook URLs and the SMTP password stored in the database (and the emails waiting in the queue), so [export it](#back-up-the-secrets) before deleting anything;
+- the Secrets created by the bootstrap Jobs: `proreta-db`, `proreta-admin`, `proreta-crypto`, `proreta-request`, `proreta-statuspage` (and `proreta-admin-initial` if you did not delete it). Keep them to reinstall later with the same data: `proreta-crypto` holds the key that encrypts the Slack webhook URLs and the SMTP password stored in the database (and the emails waiting in the queue), so [export it](#back-up-the-secrets) before deleting anything;
 - the finished Jobs, until `ttlSecondsAfterFinished` removes them (10 minutes for the bootstrap Jobs, 1 hour for the migration);
 - the database and the four roles on your PostgreSQL server. There are no PersistentVolumeClaims.
 
