@@ -169,7 +169,7 @@ func NewHandler(cfg Config, deps Deps) (http.Handler, error) {
 	if deps.Metrics != nil {
 		r.Use(deps.Metrics.Middleware)
 	}
-	r.Use(apiHeaders, httpx.MaxBody(maxBodyBytes), withSessionSlot, withAccessSlot)
+	r.Use(apiHeaders(cfg.TrustedProxyHops), httpx.MaxBody(maxBodyBytes), withSessionSlot, withAccessSlot)
 	r.Use(middleware.OapiRequestValidatorWithOptions(spec, &middleware.Options{
 		// Host matching against `servers` is pointless behind the gateway.
 		DoNotValidateServers: true,
@@ -198,13 +198,19 @@ func NewHandler(cfg Config, deps Deps) (http.Handler, error) {
 }
 
 // apiHeaders keeps API responses (sessions, CSRF tokens, tenant data) out of shared caches and
-// stops browsers from sniffing a JSON or problem+json body into something executable.
-func apiHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		next.ServeHTTP(w, r)
-	})
+// stops browsers from sniffing a JSON or problem+json body into something executable. HSTS only
+// when the request came over TLS (directly or from a trusted proxy), so plain-HTTP installs are untouched.
+func apiHeaders(trustedHops int) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			if httpx.ForwardedHTTPS(r, trustedHops) {
+				w.Header().Set("Strict-Transport-Security", "max-age=31536000")
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 type httpRequestKey struct{}

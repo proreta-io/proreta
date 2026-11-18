@@ -337,6 +337,17 @@ func TestIntegrationLoginLockoutIsPerAddress(t *testing.T) {
 	}
 }
 
+// An address configured as the admin login cannot be registered, whatever its case.
+func TestIntegrationRegisterRefusesAdminLogin(t *testing.T) {
+	env := pgtest.New(t, pgtest.DBName("auth_reg_adminlogin"))
+	hash, _ := crypto.HashPassword("pw", cheap)
+	svc := newBootstrapped(t, env, "boss@example.com", hash)
+	_, err := svc.Register(context.Background(), auth.RegisterInput{Email: "Boss@Example.com", Password: "registered user password", IP: testIP})
+	if !errors.Is(err, auth.ErrEmailTaken) {
+		t.Fatalf("err = %v, want ErrEmailTaken", err)
+	}
+}
+
 // A registered user logs in to their own tenant; a suspended or deleted tenant refuses the login
 // with the generic error, and a user without any membership cannot log in.
 func TestIntegrationRegisteredLoginBindsToOwnTenant(t *testing.T) {

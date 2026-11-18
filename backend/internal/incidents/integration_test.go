@@ -191,22 +191,17 @@ func TestIntegrationIncidentLifecycle(t *testing.T) {
 	if resolved, reason, _ := f.incident(opened); !resolved || reason == nil || *reason != incidents.ReasonRecovered {
 		t.Fatalf("incident resolved=%t reason=%v", resolved, reason)
 	}
-	d := f.deliveries(m)
-	if len(d) != 1 || d[0].kind != "resolved" || d[0].incident == nil || *d[0].incident != opened ||
-		d[0].payload["url"] != "https://shop.example.com/health" || d[0].payload["monitorName"] != "Shop" ||
-		d[0].payload["durationSeconds"] != 60.0 || d[0].payload["startedAt"] != "2026-10-20T12:03:00Z" {
-		t.Fatalf("resolved delivery: %+v", d)
-	}
-	raw, _ := json.Marshal(d[0].payload)
-	if strings.Contains(string(raw), "s3cr3t") {
-		t.Fatalf("payload leaks the query string: %s", raw)
+	// The channel was added during the incident and never got the opened: no resolved either.
+	if d := f.deliveries(m); len(d) != 0 {
+		t.Fatalf("resolved to a channel that missed the opened: %+v", d)
 	}
 
 	// Down again: "opened" is queued in the same transaction as the incident.
 	f.apply(m, failed("timeout"))
 	f.apply(m, failed("timeout"))
-	d = f.deliveries(m)
-	if len(d) != 2 || d[1].kind != "opened" || d[1].payload["reason"] != "timeout" || d[1].incident == nil || *d[1].incident != *f.state(m).current {
+	d := f.deliveries(m)
+	second := *f.state(m).current
+	if len(d) != 1 || d[0].kind != "opened" || d[0].payload["reason"] != "timeout" || d[0].incident == nil || *d[0].incident != second {
 		t.Fatalf("opened delivery: %+v", d)
 	}
 
@@ -225,8 +220,17 @@ func TestIntegrationIncidentLifecycle(t *testing.T) {
 	for _, x := range d {
 		kinds = append(kinds, x.kind)
 	}
-	if fmt.Sprint(kinds) != "[resolved opened resolved tls_expiring]" || d[3].payload["daysLeft"] == nil || d[3].incident != nil {
+	if fmt.Sprint(kinds) != "[opened resolved tls_expiring]" || d[2].payload["daysLeft"] == nil || d[2].incident != nil {
 		t.Fatalf("deliveries %v, last %+v", kinds, d[len(d)-1])
+	}
+	// The resolved payload is free of secrets and names the incident.
+	if d[1].incident == nil || *d[1].incident != second || d[1].payload["url"] != "https://shop.example.com/health" ||
+		d[1].payload["monitorName"] != "Shop" || d[1].payload["durationSeconds"] == nil {
+		t.Fatalf("resolved delivery: %+v", d[1])
+	}
+	raw, _ := json.Marshal(d[1].payload)
+	if strings.Contains(string(raw), "s3cr3t") {
+		t.Fatalf("payload leaks the query string: %s", raw)
 	}
 	if w := f.state(m).warned; w == nil || !w.Equal(notAfter) {
 		t.Fatalf("tls_warned_not_after = %v", w)
@@ -401,6 +405,24 @@ func TestIntegrationDeliveryPerChannel(t *testing.T) {
 	cycle(m.ID)
 	if got := sent(m.ID); got != "opened:down resolved:recovered opened:all opened:down resolved:all resolved:recovered" {
 		t.Fatalf("cleared selection: %s", got)
+	}
+
+	// A resolved follows the opened, not the route: after the selection moved to a channel created
+	// during the incident, the channels that saw the opened still get the resolved and the new one gets none.
+	moved, err := f.monitors.Create(f.ctx, f.actor, monitors.CreateInput{Name: "Moved", HTTP: &monitors.HTTPSettings{URL: &url, FailureThreshold: ptr(1)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.apply(moved.ID, failed("timeout"))
+	midway := channel(tenantA, "midway", "", "")
+	names[midway] = "midway"
+	away := []uuid.UUID{midway}
+	if _, err := f.monitors.Update(f.ctx, f.actor, moved.ID, monitors.UpdateInput{ChannelIDs: &away}); err != nil {
+		t.Fatal(err)
+	}
+	f.apply(moved.ID, machine.Result{OK: true})
+	if got := sent(moved.ID); got != "opened:all opened:down resolved:all" {
+		t.Fatalf("moved during an incident: %s", got)
 	}
 }
 

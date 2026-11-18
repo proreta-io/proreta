@@ -297,7 +297,7 @@ func (h *handler) dispatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.m.requests.WithLabelValues("host").Inc()
-	ri := reqInfo{custom: true, host: host, https: forwardedHTTPS(r, h.cfg.TrustedProxyHops)}
+	ri := reqInfo{custom: true, host: host, https: httpx.ForwardedHTTPS(r, h.cfg.TrustedProxyHops)}
 	h.custom.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), infoKey{}, ri)))
 }
 

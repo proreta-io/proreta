@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/google/uuid"
@@ -32,5 +34,28 @@ func TestRequireFeature(t *testing.T) {
 	boom := errors.New("db down")
 	if err := requireFeature(ctx, fakeEntitlements{err: boom}, tenant, "sso"); !errors.Is(err, boom) {
 		t.Fatalf("lookup error: %v", err)
+	}
+}
+
+func TestAPIHeadersHSTS(t *testing.T) {
+	h := apiHeaders(1)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	for proto, want := range map[string]bool{"https": true, "http": false, "": false} {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		if proto != "" {
+			r.Header.Set("X-Forwarded-Proto", proto)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if got := w.Header().Get("Strict-Transport-Security") != ""; got != want {
+			t.Errorf("proto %q: HSTS %v, want %v", proto, got, want)
+		}
+	}
+}
+
+func TestPageOfRejectsNonPositiveLimit(t *testing.T) {
+	for _, n := range []int{-1, 0} {
+		if _, err := pageOf(&n, nil); err == nil {
+			t.Errorf("limit %d accepted", n)
+		}
 	}
 }

@@ -234,6 +234,49 @@ func (q *Queries) ListDeliveryChannels(ctx context.Context, arg ListDeliveryChan
 	return items, nil
 }
 
+const listResolvedChannels = `-- name: ListResolvedChannels :many
+SELECT c.id, c.events
+FROM notification_channels AS c
+WHERE c.tenant_id = $1 AND c.deleted_at IS NULL AND c.status = 'active'
+  AND EXISTS (SELECT 1 FROM notification_deliveries AS d
+              WHERE d.tenant_id = c.tenant_id AND d.incident_id = $2 AND d.channel_id = c.id
+                AND d.kind = 'opened' AND d.status <> 'failed')
+ORDER BY c.created_at, c.id
+`
+
+type ListResolvedChannelsParams struct {
+	TenantID   uuid.UUID
+	IncidentID *uuid.UUID
+}
+
+type ListResolvedChannelsRow struct {
+	ID     uuid.UUID
+	Events []string
+}
+
+// The channels a resolved goes to: every live channel that was sent (or is about to be sent) the
+// opened of this incident, wherever the monitor and the channels have moved since, so an alert
+// is never left open and a channel that never saw the opened gets no resolved either.
+func (q *Queries) ListResolvedChannels(ctx context.Context, arg ListResolvedChannelsParams) ([]ListResolvedChannelsRow, error) {
+	rows, err := q.db.Query(ctx, listResolvedChannels, arg.TenantID, arg.IncidentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListResolvedChannelsRow
+	for rows.Next() {
+		var i ListResolvedChannelsRow
+		if err := rows.Scan(&i.ID, &i.Events); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockMonitorState = `-- name: LockMonitorState :one
 SELECT status, status_changed_at, last_error_kind, last_checked_at, tls_expires_at, tls_warned_not_after,
        current_incident_id

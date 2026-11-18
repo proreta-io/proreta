@@ -206,6 +206,11 @@ func TestIntegrationProjects(t *testing.T) {
 			incidents[m] = id
 			pgtest.MustExec(t, admin, `INSERT INTO incidents (id, tenant_id, monitor_id, started_at, reason) VALUES ('`+id+`', '`+tenantA+`', '`+m+`', now() - interval '1 hour', 'timeout')`)
 		}
+		// Each expected channel was sent the opened an hour ago; reminders follow the opened.
+		for m, ch := range map[string]string{fallback: inDefault, selecting: orgWide, stray: inDefault} {
+			pgtest.MustExec(t, admin, `INSERT INTO notification_deliveries (id, tenant_id, kind, monitor_id, incident_id, channel_id, payload, status, sent_at, created_at)
+				VALUES (gen_random_uuid(), '`+tenantA+`', 'opened', '`+m+`', '`+incidents[m]+`', '`+ch+`', '{}', 'sent', now(), now() - interval '1 hour')`)
+		}
 		if _, err := worker.Exec(ctx, `SELECT enqueue_incident_reminders(100)`); err != nil {
 			t.Fatal(err)
 		}
