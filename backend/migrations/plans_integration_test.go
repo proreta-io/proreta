@@ -24,7 +24,7 @@ func TestIntegrationSeeds(t *testing.T) {
 	}
 	want := `community=Community {"max_agents": 2147483647, "max_members": 2147483647, "max_channels": 2147483647, "max_monitors": 2147483647, "max_projects": 2147483647, "max_heartbeats": 2147483647, "max_status_pages": 2147483647, "max_status_page_domains": 2147483647} {}; ` +
 		`free=Free {"max_agents": 1, "max_members": 3, "max_channels": 1, "max_monitors": 3, "max_projects": 50, "max_heartbeats": 1, "max_status_pages": 1, "max_status_page_domains": 0} {}; ` +
-		`internal=Internal {"max_agents": 20, "max_members": 50, "max_channels": 10, "max_monitors": 1000, "max_projects": 50, "max_heartbeats": 100, "max_status_pages": 1, "max_status_page_domains": 0} {}`
+		`internal=Internal {"max_agents": 20, "max_members": 50, "max_channels": 10, "max_monitors": 1000, "max_projects": 50, "max_heartbeats": 100, "max_status_pages": 1, "max_status_page_domains": 2147483647} {}`
 	if seeded != want {
 		t.Fatalf("plans = %s\nwant    %s", seeded, want)
 	}

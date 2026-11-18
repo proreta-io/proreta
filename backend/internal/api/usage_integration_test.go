@@ -26,7 +26,7 @@ func TestIntegrationUsage(t *testing.T) {
 		}
 		return r.raw
 	}
-	if got, want := usage(cookie), `{"limits":{"channels":10,"heartbeats":100,"members":50,"monitors":1000,"projects":50,"specula":20,"statusPageDomains":0,"statusPages":1},"plan":{"key":"internal","name":"Internal"},"usage":{"channels":0,"heartbeats":0,"members":1,"monitors":0,"projects":1,"specula":0,"statusPageDomains":0,"statusPages":0}}`+"\n"; got != want {
+	if got, want := usage(cookie), `{"limits":{"channels":10,"heartbeats":100,"members":50,"monitors":1000,"projects":50,"specula":20,"statusPageDomains":2147483647,"statusPages":1},"plan":{"key":"internal","name":"Internal"},"usage":{"channels":0,"heartbeats":0,"members":1,"monitors":0,"projects":1,"specula":0,"statusPageDomains":0,"statusPages":0}}`+"\n"; got != want {
 		t.Fatalf("usage of the default tenant:\n got %s\nwant %s", got, want)
 	}
 
