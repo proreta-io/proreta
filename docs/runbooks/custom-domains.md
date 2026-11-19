@@ -22,7 +22,7 @@ statuspage:
 
 | Value | Variable (processes) | Meaning |
 |---|---|---|
-| `enabled` | `PRORETA_STATUS_PAGE_CUSTOM_DOMAINS` (api, jobs, statuspage) | Turns the feature on for the api, jobs and the renderer together. Off, the domain operations answer 404 `custom-domains-disabled`, the app hides the section and the renderer ignores the `Host` header |
+| `enabled` | `PRORETA_STATUS_PAGE_CUSTOM_DOMAINS` (api, jobs, statuspage) | Turns the feature on for the api, jobs and the renderer together. Off, the domain operations answer 404 `custom-domains-disabled`, the app shows a "not turned on" note in place of the section and the renderer ignores the `Host` header |
 | `cnameTarget` | `PRORETA_STATUSPAGE_CNAME_TARGET` (api, jobs) | Required. The host customers point their CNAME at: lowercase, no trailing dot. The render fails without it |
 | `installationHosts` | `PRORETA_STATUSPAGE_INSTALLATION_HOSTS` (api, statuspage) | Hosts that keep the `/status/<slug>` routes and that no customer may claim. Empty: `httpRoute.hostnames` without wildcards, plus the host of `config.publicUrl` |
 | `abuseUrl` | `PRORETA_ABUSE_URL` (statuspage) | An `https://` URL or `mailto:` address for the "Report abuse" link in the footer of customer-domain pages |

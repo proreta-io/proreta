@@ -290,7 +290,7 @@ func TestHostModeServesThePageAtTheRoot(t *testing.T) {
 	for _, want := range []string{
 		`<link rel="canonical" href="https://status.acme.com/">`,
 		`href="/feed.rss"`, `href="/status.json"`, `href="/_assets/status.css?v=`,
-		"Status page by Proreta", `<a href="` + abuse + `" rel="noopener noreferrer">Report abuse</a>`, "Partial outage",
+		`<a href="https://github.com/proreta-io/proreta" rel="noopener noreferrer">Status page by Proreta</a>`, `<a href="` + abuse + `" rel="noopener noreferrer">Report abuse</a>`, "Partial outage",
 	} {
 		if !strings.Contains(r.body, want) {
 			t.Errorf("page lacks %q", want)
@@ -409,7 +409,7 @@ func TestHostModeNotFoundIsIdentical(t *testing.T) {
 func TestHostModeKeepsTheInstallationHost(t *testing.T) {
 	h := newHostHarness(t, nil)
 	r := h.getAt("proreta.example.com", "/status/acme")
-	if r.code != http.StatusOK || !strings.Contains(r.body, "Powered by Proreta") || strings.Contains(r.body, "Status page by Proreta") ||
+	if r.code != http.StatusOK || !strings.Contains(r.body, `<a href="https://github.com/proreta-io/proreta" rel="noopener noreferrer">Powered by Proreta</a>`) || strings.Contains(r.body, "Status page by Proreta") ||
 		!strings.Contains(r.body, `href="/status/acme/feed.rss"`) || strings.Contains(r.body, "canonical") || r.header.Get("Cross-Origin-Resource-Policy") != "" {
 		t.Errorf("installation page: %d", r.code)
 	}

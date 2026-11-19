@@ -85,7 +85,7 @@
   <span class="grow">Times are UTC. Automatic checks; updates within a minute.</span>
   <a href="{{.RSSURL}}">RSS</a>
   <a href="{{.JSONURL}}">JSON</a>
-  {{if .Custom}}<span>Status page by Proreta</span>{{if .AbuseURL}}<a href="{{.AbuseURL}}" rel="noopener noreferrer">Report abuse</a>{{end}}{{else}}<span>Powered by Proreta</span>{{end}}
+  {{if .Custom}}<a href="https://github.com/proreta-io/proreta" rel="noopener noreferrer">Status page by Proreta</a>{{if .AbuseURL}}<a href="{{.AbuseURL}}" rel="noopener noreferrer">Report abuse</a>{{end}}{{else}}<a href="https://github.com/proreta-io/proreta" rel="noopener noreferrer">Powered by Proreta</a>{{end}}
 </footer>
 </div>
 </body>
@@ -105,7 +105,7 @@
     {{if .Error}}<p id="lock-error" class="error" role="alert">{{.Error}}</p>{{end}}
     <button type="submit">Open status page</button>
   </form>{{if .Custom}}
-  <p>Status page by Proreta{{if .AbuseURL}} · <a href="{{.AbuseURL}}" rel="noopener noreferrer">Report abuse</a>{{end}}</p>{{end}}
+  <p><a href="https://github.com/proreta-io/proreta" rel="noopener noreferrer">Status page by Proreta</a>{{if .AbuseURL}} · <a href="{{.AbuseURL}}" rel="noopener noreferrer">Report abuse</a>{{end}}</p>{{end}}
 </main>
 </body>
 </html>
