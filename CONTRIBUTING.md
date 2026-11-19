@@ -1,6 +1,6 @@
 # Contributing to Proreta
 
-Thank you for your interest. Proreta is in early development; before larger changes, please open an issue to discuss the approach.
+Thank you for your interest. Before larger changes, please open an issue to discuss the approach.
 
 **License of contributions:** Proreta is licensed under the [Apache License 2.0](LICENSE). By submitting a contribution you agree that it is licensed under the same terms (section 5 of the license). There is no CLA and no sign-off requirement.
 

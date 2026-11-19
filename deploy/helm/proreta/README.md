@@ -3,7 +3,7 @@
 Deploys Proreta (multi-tenant uptime monitoring): `api`, `worker`, `jobs` and `statuspage` (all from the single
 `proreta-backend` image, one binary each), the `web` frontend, a database bootstrap Job, a secrets bootstrap Job, a
 migration Job and a Gateway API `HTTPRoute`. Optionally ExternalSecrets, a NetworkPolicy, a PodDisruptionBudget and
-ServiceMonitors. Gateway API only for now: no Ingress objects are created (Ingress is not supported yet).
+ServiceMonitors. Gateway API only: no Ingress objects are created (Ingress is not supported).
 
 **Installing:** follow [docs/install.md](../../../docs/install.md) (prerequisites, step-by-step commands, upgrade,
 uninstall, troubleshooting). This page is the reference for the chart's values and behaviour.
@@ -18,11 +18,11 @@ uninstall, troubleshooting). This page is the reference for the chart's values a
 - No External Secrets Operator, cert-manager, metrics-server or StorageClass is needed (no PersistentVolumeClaims).
 
 ## Install
-From a git checkout (no chart repository yet); the image tag is required there:
+From a git checkout; the image tag is required there:
 ```sh
 helm upgrade --install proreta deploy/helm/proreta -n proreta -f my-values.yaml --set image.tag=<tag> --wait --timeout 10m
 ```
-Once a release is published, from the OCI registry. Start from that chart's own defaults, not from a checkout's
+From the OCI registry. Start from that chart's own defaults, not from a checkout's
 `values.example.yaml`, and leave `image.tag` unset: the packaged chart's `appVersion` is the release and is used as the
 image tag (a tag in your values file would override it):
 ```sh

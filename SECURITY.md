@@ -10,7 +10,7 @@ We will acknowledge the report, keep you informed while we investigate, and cred
 
 ## Supported versions
 
-Proreta has no stable release yet. Fixes go into the `main` branch and the next release.
+Fixes go into the `main` branch and the next release. The latest release is the supported one.
 
 ## Scope
 
