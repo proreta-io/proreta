@@ -85,8 +85,8 @@ const section = async () =>
 const stubClipboard = (writeText: (text: string) => Promise<void>) =>
   Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
 
-describe("custom domain section: hidden states", () => {
-  it("is left out when the installation has custom domains off", async () => {
+describe("custom domain section: unavailable states", () => {
+  it("says custom domains are off on this installation instead of vanishing", async () => {
     setup([], {
       extra: {
         [`GET ${base}/domains`]: () =>
@@ -96,9 +96,11 @@ describe("custom domain section: hidden states", () => {
       },
     });
     await screen.findByRole("heading", { name: "Embed and feeds" });
-    await waitFor(() =>
-      expect(screen.queryByRole("heading", { name: "Custom domain" })).not.toBeInTheDocument(),
-    );
+    const s = await section();
+    expect(
+      await s.findByText(/Custom domains are not turned on for this installation/),
+    ).toBeInTheDocument();
+    expect(s.queryByLabelText("Domain")).not.toBeInTheDocument();
   });
 
   it("says the plan does not include domains instead of showing the form", async () => {

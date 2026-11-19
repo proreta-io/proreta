@@ -72,8 +72,8 @@ function StateBadge({ d }: { d: Domain }) {
 }
 
 /**
- * The "Custom domain" section of a status page: hidden when the installation has custom domains
- * off. Everybody who reads the page sees the list; `canManage` adds the actions and the form.
+ * The "Custom domain" section of a status page: with custom domains off on the installation it
+ * says so instead of vanishing. Everybody who reads the page sees the list; `canManage` adds the actions and the form.
  */
 export function DomainsSection({ page, canManage }: { page: Page; canManage: boolean }) {
   const usage = useUsage().data;
@@ -87,7 +87,7 @@ export function DomainsSection({ page, canManage }: { page: Page; canManage: boo
         ? POLL_MS
         : false,
   });
-  if (list.isError && isDomainsDisabled(list.error)) return null;
+  const off = list.isError && isDomainsDisabled(list.error);
 
   const items = list.data?.items ?? [];
   const limit = usage?.limits.statusPageDomains;
@@ -103,7 +103,12 @@ export function DomainsSection({ page, canManage }: { page: Page; canManage: boo
         yours with a DNS record, and point it at us with another. The page stays available at its
         Proreta address too.
       </p>
-      {list.isPending ? (
+      {off ? (
+        <p className="text-caption text-muted-foreground">
+          Custom domains are not turned on for this installation. Ask the administrator to enable
+          them.
+        </p>
+      ) : list.isPending ? (
         <Loading label="Loading domains…" />
       ) : list.isError ? (
         <ErrorState
