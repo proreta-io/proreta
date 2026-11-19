@@ -2372,7 +2372,7 @@ CREATE TABLE invitations (
     CONSTRAINT invitations_accepted_pair CHECK (((accepted_at IS NULL) = (accepted_by IS NULL))),
     CONSTRAINT invitations_expiry CHECK ((expires_at > created_at)),
     CONSTRAINT invitations_label_check CHECK ((length(label) <= 80)),
-    CONSTRAINT invitations_role_check CHECK ((((project_id IS NULL) AND (role = ANY (ARRAY['maintainer'::text, 'member'::text, 'viewer'::text]))) OR ((project_id IS NOT NULL) AND (role = ANY (ARRAY['owner'::text, 'maintainer'::text, 'member'::text, 'viewer'::text]))))),
+    CONSTRAINT invitations_role_check CHECK ((role = ANY (ARRAY['owner'::text, 'maintainer'::text, 'member'::text, 'viewer'::text]))),
     CONSTRAINT invitations_single_outcome CHECK (((accepted_at IS NULL) OR (revoked_at IS NULL))),
     CONSTRAINT invitations_token_hash_check CHECK ((length(token_hash) = 32)),
     CONSTRAINT invitations_pkey PRIMARY KEY (id),

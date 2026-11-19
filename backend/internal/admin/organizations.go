@@ -32,7 +32,7 @@ type TenantCreate struct {
 	// PlanKey is optional: "free" when nil.
 	PlanKey *string
 	// OwnerEmail is the first owner: an existing account becomes the owner, otherwise a
-	// maintainer invitation is created (a link never grants the owner role).
+	// owner invitation is created.
 	OwnerEmail string
 }
 
@@ -120,8 +120,8 @@ func (s *Service) insertTenant(ctx context.Context, actor Actor, slug *string, n
 	}
 }
 
-// addFirstOwner makes the account with the address the owner, or creates a maintainer invitation
-// (link only, no email) when there is no such account: authz.CanInvite never allows an owner link.
+// addFirstOwner makes the account with the address the owner, or creates an owner invitation
+// (link only, no email) when there is no such account: the platform admin is the only actor allowed an owner link.
 func (s *Service) addFirstOwner(ctx context.Context, actor Actor, id uuid.UUID, email string, out *TenantCreated) error {
 	userID, err := s.auth.FindUserByEmail(ctx, email)
 	switch {
@@ -130,7 +130,7 @@ func (s *Service) addFirstOwner(ctx context.Context, actor Actor, id uuid.UUID, 
 		out.Member = &m
 		return err
 	case errors.Is(err, auth.ErrUserNotFound):
-		inv, token, _, err := s.CreateInvitation(ctx, actor, id, auth.InvitationInput{Role: string(authz.Maintainer), Label: email, SendEmail: new(bool)})
+		inv, token, _, err := s.CreateInvitation(ctx, actor, id, auth.InvitationInput{Role: string(authz.Owner), Label: email, SendEmail: new(bool)})
 		out.Invitation, out.Token = &inv, token
 		return err
 	}
