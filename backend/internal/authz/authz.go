@@ -416,6 +416,7 @@ var operations = map[string]Permission{
 	// Platform admin panel.
 	"admingetstats":                        PlatformAdmin,
 	"adminlistorganizations":               PlatformAdmin,
+	"admincreateorganization":              PlatformAdmin,
 	"admingetorganization":                 PlatformAdmin,
 	"adminupdateorganization":              PlatformAdmin,
 	"admindeleteorganization":              PlatformAdmin,

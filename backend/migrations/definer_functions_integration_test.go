@@ -70,6 +70,7 @@ var definerCalls = map[string]string{
 	"admin_list_tenants":          `SELECT * FROM admin_list_tenants(gen_random_uuid(), '', false, 1, 0)`,
 	"admin_get_tenant":            `SELECT * FROM admin_get_tenant(gen_random_uuid(), gen_random_uuid())`,
 	"admin_set_tenant_plan":       `SELECT admin_set_tenant_plan(gen_random_uuid(), gen_random_uuid(), 'free', gen_random_uuid(), NULL)`,
+	"admin_create_tenant":         `SELECT admin_create_tenant(gen_random_uuid(), gen_random_uuid(), 'x', 'X', 'free', gen_random_uuid(), NULL)`,
 	"admin_set_tenant_status":     `SELECT admin_set_tenant_status(gen_random_uuid(), gen_random_uuid(), 'active', gen_random_uuid(), NULL)`,
 	"admin_delete_tenant":         `SELECT admin_delete_tenant(gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), NULL)`,
 	"admin_list_users":            `SELECT * FROM admin_list_users(gen_random_uuid(), gen_random_uuid(), '', 1, 0)`,

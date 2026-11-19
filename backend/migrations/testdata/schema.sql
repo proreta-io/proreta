@@ -876,6 +876,7 @@ CREATE TRIGGER tenants_create_default_project AFTER INSERT ON public.tenants FOR
 
 -- function privileges
 admin_audit(uuid,uuid,uuid,text,text,text,jsonb,inet) owner=proreta_owner definer=false acl=proreta_owner=X/proreta_owner
+admin_create_tenant(uuid,uuid,text,text,text,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_delete_tenant(uuid,uuid,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_email_settings_clear(uuid,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_email_settings_get(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
@@ -1002,6 +1003,34 @@ BEGIN
     INSERT INTO audit_log (id, tenant_id, actor_user_id, action, entity_type, entity_id, metadata, ip)
     VALUES (p_audit_id, p_tenant_id, p_actor, p_action, p_entity_type, p_entity_id, p_metadata, p_ip);
     PERFORM set_config('app.tenant_id', COALESCE(caller, ''), true);
+END
+$function$
+CREATE OR REPLACE FUNCTION public.admin_create_tenant(p_actor uuid, p_id uuid, p_slug text, p_name text, p_plan_key text, p_audit_id uuid, p_ip inet)
+ RETURNS boolean
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_id uuid;
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    IF p_slug = 'default' THEN
+        RAISE EXCEPTION 'admin: the default slug is reserved' USING ERRCODE = 'PRA05';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM plans AS p WHERE p.key = p_plan_key) THEN
+        RAISE EXCEPTION 'admin: unknown plan' USING ERRCODE = 'PRA03';
+    END IF;
+    INSERT INTO tenants (id, slug, name, plan_key)
+    VALUES (p_id, p_slug, p_name, p_plan_key)
+    ON CONFLICT (slug) DO NOTHING
+    RETURNING id INTO v_id;
+    IF v_id IS NULL THEN
+        RETURN false;
+    END IF;
+    PERFORM admin_audit(p_id, p_actor, p_audit_id, 'admin.organization.created', 'organization', p_id::text,
+                        jsonb_build_object('slug', p_slug, 'planKey', p_plan_key), p_ip);
+    RETURN true;
 END
 $function$
 CREATE OR REPLACE FUNCTION public.admin_delete_tenant(p_actor uuid, p_tenant_id uuid, p_audit_id uuid, p_ip inet)

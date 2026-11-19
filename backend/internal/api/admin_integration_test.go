@@ -134,6 +134,8 @@ func adminCalls(t *testing.T, tenantID, userID string) []struct{ method, path, b
 				body = `{"role":"member"}`
 			case method == http.MethodPost && strings.HasSuffix(path, "/members"):
 				body = `{"email":"someone@example.com","role":"member"}`
+			case method == http.MethodPost && strings.HasSuffix(path, "/admin/organizations"):
+				body = `{"name":"New","ownerEmail":"someone@example.com"}`
 			case method == http.MethodPost && strings.HasSuffix(path, "/invitations"):
 				body = `{"role":"member"}`
 			}
@@ -141,8 +143,8 @@ func adminCalls(t *testing.T, tenantID, userID string) []struct{ method, path, b
 				strings.NewReplacer("{tenantId}", tenantID, "{organizationId}", tenantID, "{userId}", userID, "{invitationId}", userID, "{projectId}", userID, "{domainId}", userID, "{speculaId}", userID, "{key}", "free").Replace(path), body})
 		}
 	}
-	if len(out) != 54 {
-		t.Fatalf("%d admin operations in the spec, want 54", len(out))
+	if len(out) != 55 {
+		t.Fatalf("%d admin operations in the spec, want 55", len(out))
 	}
 	return out
 }

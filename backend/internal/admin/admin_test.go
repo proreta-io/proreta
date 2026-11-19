@@ -76,3 +76,25 @@ func TestListAccountsRejectsUnknownStatus(t *testing.T) {
 		t.Fatalf("err = %v, want a validation error on status", err)
 	}
 }
+
+func TestCreateTenantValidatesBeforeTouchingTheDatabase(t *testing.T) {
+	bad, empty := "-x", ""
+	long := strings.Repeat("n", maxTenantName+1)
+	for name, c := range map[string]struct {
+		in    TenantCreate
+		field string
+	}{
+		"empty name":  {TenantCreate{Name: "  ", OwnerEmail: "a@b.example"}, "name"},
+		"long name":   {TenantCreate{Name: long, OwnerEmail: "a@b.example"}, "name"},
+		"bad slug":    {TenantCreate{Name: "X", Slug: &bad, OwnerEmail: "a@b.example"}, "slug"},
+		"empty plan":  {TenantCreate{Name: "X", PlanKey: &empty, OwnerEmail: "a@b.example"}, "planKey"},
+		"bad email":   {TenantCreate{Name: "X", OwnerEmail: "nope"}, "ownerEmail"},
+		"empty email": {TenantCreate{Name: "X"}, "ownerEmail"},
+	} {
+		var verr *validation.Error
+		_, err := (&Service{}).CreateTenant(context.Background(), Actor{}, c.in)
+		if !errors.As(err, &verr) || verr.Fields[0].Field != c.field {
+			t.Errorf("%s: %v, want a validation error on %s", name, err, c.field)
+		}
+	}
+}

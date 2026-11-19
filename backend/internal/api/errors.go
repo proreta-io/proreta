@@ -146,6 +146,8 @@ func writeError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 		p.Detail = "Your role in this project does not allow this change."
 	case errors.Is(err, projects.ErrSlugTaken):
 		p.Type, p.Title, p.Status = problemSlugTaken, "This slug is already used by another project", http.StatusConflict
+	case errors.Is(err, admin.ErrSlugTaken):
+		p.Type, p.Title, p.Status = problemSlugTaken, "This slug is already used by another organization", http.StatusConflict
 	case errors.Is(err, statuspages.ErrSlugTaken):
 		// One answer for every reason (a live page anywhere, or an address another organization freed
 		// recently), so it reveals nothing about other organizations' pages.

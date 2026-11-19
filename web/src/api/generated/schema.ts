@@ -1847,7 +1847,23 @@ export interface paths {
      */
     get: operations["adminListOrganizations"];
     put?: never;
-    post?: never;
+    /**
+     * Create an organization
+     * @description Creates an organization with its Default project and its first owner, so it is never left
+     *     without one. `ownerEmail` names the owner: an existing account becomes the owner at once
+     *     (`member` in the answer; the platform administrator's own account cannot). Without such an
+     *     account a `maintainer` invitation is created instead, because a link never grants the owner
+     *     role: its link is in the answer only (`invitation`, `inviteUrl`; shown once, never emailed,
+     *     logged or audited) and the platform admin promotes the person to owner after they joined. `slug` is optional (1 to 63 lowercase
+     *     letters, digits and hyphens, not starting with a hyphen; `default` is reserved) and random
+     *     when omitted; a slug in use, a deleted organization's included, is 409
+     *     `urn:proreta:problem:slug-taken`. `planKey` is optional (`free` when omitted) and may be
+     *     any existing plan (422 when unknown). The plan's member limit applies to the owner (409
+     *     `urn:proreta:problem:plan-limit-reached`); when the owner cannot be added, nothing is left
+     *     behind. Audited in the new organization as `admin.organization.created` (slug and plan),
+     *     plus the member or invitation row. Platform admins only.
+     */
+    post: operations["adminCreateOrganization"];
     delete?: never;
     options?: never;
     head?: never;
@@ -3629,6 +3645,24 @@ export interface components {
      * @enum {string}
      */
     OrganizationStatus: "active" | "suspended";
+    AdminOrganizationCreate: {
+      name: string;
+      /** @description Optional; random when omitted */
+      slug?: string;
+      /** @description Optional; `free` when omitted */
+      planKey?: string;
+      /** @description The first owner. An existing account becomes the owner, otherwise a maintainer invitation link is returned. */
+      ownerEmail: string;
+    };
+    AdminOrganizationCreated: {
+      organization: components["schemas"]["AdminOrganization"];
+      /** @description The owner, when `ownerEmail` was an existing account */
+      member: components["schemas"]["AdminMember"] | null;
+      /** @description The maintainer invitation, when there was no such account */
+      invitation: components["schemas"]["Invitation"] | null;
+      /** @description The secret invitation link; shown once, hand it over like a password */
+      inviteUrl: string | null;
+    };
     AdminOrganization: {
       /** Format: uuid */
       id: string;
@@ -7394,6 +7428,40 @@ export interface operations {
       400: components["responses"]["BadRequest"];
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminCreateOrganization: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AdminOrganizationCreate"];
+      };
+    };
+    responses: {
+      /** @description The organization and its first owner */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminOrganizationCreated"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      409: components["responses"]["Conflict"];
+      422: components["responses"]["UnprocessableEntity"];
+      429: components["responses"]["TooManyRequests"];
       default: components["responses"]["Error"];
     };
   };

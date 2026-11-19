@@ -18,6 +18,7 @@ import {
   EmptyNote,
 } from "../../components/ui";
 import { formatDate } from "../../lib/format";
+import AdminOrganizationCreate from "./AdminOrganizationCreate";
 import { adminTitle } from "./AdminOverview";
 import { OrganizationStatusBadge, organizationTone } from "./OrganizationStatusBadge";
 
@@ -58,7 +59,10 @@ export default function AdminOrganizations() {
 
   return (
     <section className="flex flex-col">
-      <h1 className={adminTitle}>Organizations</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className={adminTitle}>Organizations</h1>
+        <AdminOrganizationCreate />
+      </div>
       <form
         role="search"
         onSubmit={onSearch}

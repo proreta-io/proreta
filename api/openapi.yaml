@@ -3228,6 +3228,57 @@ paths:
           $ref: "#/components/responses/Forbidden"
         default:
           $ref: "#/components/responses/Error"
+    post:
+      operationId: adminCreateOrganization
+      x-experimental: true
+      summary: Create an organization
+      description: |
+        Creates an organization with its Default project and its first owner, so it is never left
+        without one. `ownerEmail` names the owner: an existing account becomes the owner at once
+        (`member` in the answer; the platform administrator's own account cannot). Without such an
+        account a `maintainer` invitation is created instead, because a link never grants the owner
+        role: its link is in the answer only (`invitation`, `inviteUrl`; shown once, never emailed,
+        logged or audited) and the platform admin promotes the person to owner after they joined. `slug` is optional (1 to 63 lowercase
+        letters, digits and hyphens, not starting with a hyphen; `default` is reserved) and random
+        when omitted; a slug in use, a deleted organization's included, is 409
+        `urn:proreta:problem:slug-taken`. `planKey` is optional (`free` when omitted) and may be
+        any existing plan (422 when unknown). The plan's member limit applies to the owner (409
+        `urn:proreta:problem:plan-limit-reached`); when the owner cannot be added, nothing is left
+        behind. Audited in the new organization as `admin.organization.created` (slug and plan),
+        plus the member or invitation row. Platform admins only.
+      tags: [admin]
+      security:
+        - cookieAuth: []
+          csrfToken: []
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminOrganizationCreate"
+      responses:
+        "201":
+          description: The organization and its first owner
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminOrganizationCreated"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/admin/organizations/{organizationId}:
     parameters:
       - $ref: "#/components/parameters/OrganizationId"
@@ -6495,6 +6546,47 @@ components:
       type: string
       description: "`suspended`: the organization's users cannot log in and nothing of it is checked. A deleted organization is also `suspended` and has `deletedAt`."
       enum: [active, suspended]
+    AdminOrganizationCreate:
+      type: object
+      additionalProperties: false
+      required: [name, ownerEmail]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        slug:
+          type: string
+          maxLength: 63
+          description: Optional; random when omitted
+        planKey:
+          type: string
+          description: Optional; `free` when omitted
+        ownerEmail:
+          type: string
+          maxLength: 254
+          description: The first owner. An existing account becomes the owner, otherwise a maintainer invitation link is returned.
+    AdminOrganizationCreated:
+      type: object
+      additionalProperties: false
+      required: [organization, member, invitation, inviteUrl]
+      properties:
+        organization:
+          $ref: "#/components/schemas/AdminOrganization"
+        member:
+          allOf:
+            - $ref: "#/components/schemas/AdminMember"
+          nullable: true
+          description: The owner, when `ownerEmail` was an existing account
+        invitation:
+          allOf:
+            - $ref: "#/components/schemas/Invitation"
+          nullable: true
+          description: The maintainer invitation, when there was no such account
+        inviteUrl:
+          type: string
+          nullable: true
+          description: The secret invitation link; shown once, hand it over like a password
     AdminOrganization:
       type: object
       additionalProperties: false

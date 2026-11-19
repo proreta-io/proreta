@@ -103,7 +103,7 @@ func TestTenantSlugAndName(t *testing.T) {
 	slugRE := regexp.MustCompile(`^t-[a-z2-7]{10}$`)
 	seen := map[string]bool{}
 	for range 1000 {
-		slug, err := tenantSlug()
+		slug, err := RandomTenantSlug()
 		if err != nil {
 			t.Fatal(err)
 		}
