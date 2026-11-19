@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Proreta API
-  version: 0.1.0
+  version: 1.0.0
   description: |
     REST API of Proreta, an uptime-monitoring service shared by many organizations. This file is
     the source of truth: the Go server and the TypeScript client are generated from it
@@ -28,8 +28,8 @@ info:
 
     ## Stability
 
-    - The paths under `/api/v1` are stable. While Proreta is in 0.x, a breaking change is still
-      possible; every one is listed in the release notes of the version that makes it.
+    - The paths under `/api/v1` are stable from 1.0: a breaking change is not made inside `/api/v1`
+      (see `docs/api.md` for what counts as breaking and how an operation is deprecated).
     - Responses may gain new fields and enums may gain new values in any release. Clients must
       ignore fields they do not know and tolerate unknown enum values (for example a new
       `MonitorType`, `ErrorKind` or `ChannelType`).

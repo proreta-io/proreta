@@ -163,6 +163,7 @@ jobs:
             api:
               - 'api/**'
               - '.github/spectral.yaml'
+              - 'scripts/strip-experimental.py'
               - '.github/workflows/ci.yml'
             helm:
               - 'deploy/helm/**'
@@ -274,10 +275,14 @@ jobs:
             echo "No ${OPENAPI_SPEC} on base branch; skipping breaking-change check."
             exit 0
           fi
-          git show "origin/${BASE_REF}:${OPENAPI_SPEC}" > "${RUNNER_TEMP}/base-openapi.yaml"
+          git show "origin/${BASE_REF}:${OPENAPI_SPEC}" > "${RUNNER_TEMP}/base-full.yaml"
+          # Operations marked x-experimental: true may change freely, so both specs are compared without them
+          # (an operation that is stable on the base and experimental on the head shows up as removed).
+          python3 scripts/strip-experimental.py "${RUNNER_TEMP}/base-full.yaml" > "${RUNNER_TEMP}/base-openapi.yaml"
+          python3 scripts/strip-experimental.py "$OPENAPI_SPEC" > "${RUNNER_TEMP}/head-openapi.yaml"
           go install github.com/oasdiff/oasdiff@v1.37.0
-          # Accepted breaking changes, each backed by an ADR (api/oasdiff-err-ignore.txt).
-          "$(go env GOPATH)/bin/oasdiff" breaking "${RUNNER_TEMP}/base-openapi.yaml" "$OPENAPI_SPEC" --fail-on ERR \
+          # Exceptions need an ADR and go into api/oasdiff-err-ignore.txt (empty from 1.0).
+          "$(go env GOPATH)/bin/oasdiff" breaking "${RUNNER_TEMP}/base-openapi.yaml" "${RUNNER_TEMP}/head-openapi.yaml" --fail-on ERR \
             --err-ignore api/oasdiff-err-ignore.txt
 
   web:
