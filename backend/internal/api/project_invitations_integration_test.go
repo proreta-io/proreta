@@ -430,7 +430,8 @@ func TestIntegrationProjectInvitationQuota(t *testing.T) {
 }
 
 // TestIntegrationProjectOnlyPeopleList: a person without an organization role sees only the people
-// of their own projects, by name; organization roles see everybody as before.
+// added directly to their own projects (never organization-level ones), by name; organization roles
+// see everybody as before.
 func TestIntegrationProjectOnlyPeopleList(t *testing.T) {
 	w := newProjectWorld(t, "projonlylist")
 	c := w.c
@@ -448,14 +449,13 @@ func TestIntegrationProjectOnlyPeopleList(t *testing.T) {
 		sort.Strings(out)
 		return strings.Join(out, ",")
 	}
-	orgPeople := []string{"owner", "maintainer", "member", "viewer", "raised", "mixOwner"}
-	inAlpha := append([]string{"aOwner", "aMaint", "aMember", "aViewer", "pmix"}, orgPeople...)
+	inAlpha := []string{"aOwner", "aMaint", "aMember", "aViewer", "pmix"}
 	for who, expected := range map[string][]string{
 		"aMember": inAlpha,
 		"aViewer": inAlpha,
 		"aMaint":  inAlpha,
-		"bMember": append([]string{"bMember", "pmix"}, orgPeople...),
-		"pmix":    append([]string{"bMember", "aOwner", "aMaint", "aMember", "aViewer", "pmix"}, orgPeople...),
+		"bMember": {"bMember", "pmix"},
+		"pmix":    {"bMember", "aOwner", "aMaint", "aMember", "aViewer", "pmix"},
 	} {
 		got, r := memberIDs(t, c, "/api/v1/members", w.hdr(who))
 		if r.code != http.StatusOK || strings.Join(got, ",") != sorted(expected) {

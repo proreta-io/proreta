@@ -457,7 +457,12 @@ func (s *Service) Delete(ctx context.Context, a Actor, id uuid.UUID) error {
 	})
 }
 
-// Members lists the people with a role in a project the actor sees.
+// projectOnly reports whether the actor holds no organization role and is no platform admin: such a
+// person manages only the people added to a project directly, never organization-level ones.
+func projectOnly(a Actor) bool { return !a.Admin && !authz.Valid(a.Access.Role) }
+
+// Members lists the people with a role in a project the actor sees. A project-only actor sees
+// only people with a direct role and no organization role.
 func (s *Service) Members(ctx context.Context, a Actor, id uuid.UUID) ([]Member, error) {
 	if err := need(a, id, "project.members.read"); err != nil {
 		return nil, err
@@ -473,6 +478,9 @@ func (s *Service) Members(ctx context.Context, a Actor, id uuid.UUID) ([]Member,
 			return fmt.Errorf("projects: members: %w", err)
 		}
 		for _, r := range rows {
+			if projectOnly(a) && (authz.Valid(authz.Role(r.OrganizationRole)) || r.ProjectRole == nil) {
+				continue
+			}
 			out = append(out, newMember(r.UserID, r.Login, r.DisplayName, r.OrganizationRole, r.ProjectRole))
 		}
 		return nil
@@ -534,6 +542,9 @@ func (s *Service) PutMember(ctx context.Context, a Actor, id, userID uuid.UUID, 
 			return fmt.Errorf("projects: membership: %w", err)
 		}
 		before := newMember(userID, "", "", cur.OrganizationRole, cur.ProjectRole)
+		if projectOnly(a) && authz.Valid(authz.Role(cur.OrganizationRole)) {
+			return ErrMemberNotFound
+		}
 		if !authz.CanManageIn(a.Access, id, before.EffectiveRole, role) {
 			return authz.ErrForbidden
 		}
@@ -588,6 +599,9 @@ func (s *Service) RemoveMember(ctx context.Context, a Actor, id, userID uuid.UUI
 			return ErrMemberNotFound
 		} else if err != nil {
 			return fmt.Errorf("projects: membership: %w", err)
+		}
+		if projectOnly(a) && authz.Valid(authz.Role(cur.OrganizationRole)) {
+			return ErrMemberNotFound
 		}
 		if !authz.CanManageIn(a.Access, id, newMember(userID, "", "", cur.OrganizationRole, cur.ProjectRole).EffectiveRole, "") {
 			return authz.ErrForbidden
