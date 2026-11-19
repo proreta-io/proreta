@@ -74,9 +74,8 @@ func (s *Service) ListMembers(ctx context.Context, tenantID uuid.UUID, page page
 	return s.listMembers(ctx, tenantID, nil, page)
 }
 
-// ListMembersInProjects returns the people a person without an organization role may see: those
-// with an organization role (they are in every project) and those with a direct role in one of the
-// projects.
+// ListMembersInProjects returns the people a person without an organization role may see: only those
+// with a direct role in one of the projects and no organization role.
 func (s *Service) ListMembersInProjects(ctx context.Context, tenantID uuid.UUID, projectIDs []uuid.UUID, page pagecursor.Page) ([]Member, string, error) {
 	if projectIDs == nil {
 		projectIDs = []uuid.UUID{}

@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"net/http"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -289,7 +290,7 @@ func TestIntegrationProjectRoleRules(t *testing.T) {
 	if r := c.do(http.MethodDelete, "/api/v1/projects/"+w.alpha+"/members/"+w.people["aOwner"].id, "", aMaint); r.code != http.StatusForbidden {
 		t.Fatalf("maintainer removes the project owner: %d %s", r.code, r.raw)
 	}
-	if r := put(aMaint, w.alpha, w.userIDs[authz.Owner], "viewer"); r.code != http.StatusForbidden {
+	if r := put(aMaint, w.alpha, w.userIDs[authz.Owner], "viewer"); r.code != http.StatusNotFound {
 		t.Fatalf("project maintainer touches the organization owner: %d %s", r.code, r.raw)
 	}
 	// The new maintainer works at once; the owner grants owner.
@@ -446,5 +447,83 @@ func TestIntegrationProjectOnlyCountsAgainstMembers(t *testing.T) {
 	}
 	if r := c.do(http.MethodPost, "/api/v1/invitations", `{"role":"viewer"}`, owner); r.code != http.StatusCreated {
 		t.Fatalf("after the removal: %d %s", r.code, r.raw)
+	}
+}
+
+// TestIntegrationProjectOnlyDoesNotSeeOrganizationPeople: a person with only a project role sees
+// and manages only the people added to the project directly; whoever has an organization role is
+// managed at the organization level, even with a direct row too. Organization roles and platform
+// admins keep the full list.
+func TestIntegrationProjectOnlyDoesNotSeeOrganizationPeople(t *testing.T) {
+	w := newProjectWorld(t, "projectonlyscope")
+	c := w.c
+	aOwner := w.hdr("aOwner")
+	url := "/api/v1/projects/" + w.alpha + "/members"
+
+	ids := map[string]string{}
+	for name, p := range w.people {
+		ids[p.id] = name
+	}
+	who := func(hdr map[string]string, path string) string {
+		r := c.do(http.MethodGet, path, "", hdr)
+		if r.code != http.StatusOK {
+			t.Fatalf("GET %s: %d %s", path, r.code, r.raw)
+		}
+		var out []string
+		for _, it := range r.body["items"].([]any) {
+			id := it.(map[string]any)["userId"].(string)
+			if n, ok := ids[id]; ok {
+				out = append(out, n)
+			} else {
+				out = append(out, "org:"+id[:4])
+			}
+		}
+		sort.Strings(out)
+		return strings.Join(out, ",")
+	}
+	// Direct rows without an organization role in alpha; "raised" has both and is hidden.
+	if got := who(aOwner, url); got != "aMaint,aMember,aOwner,aViewer,pmix" {
+		t.Fatalf("project-only owner sees %s", got)
+	}
+	if got := who(w.hdr("aViewer"), url); got != "aMaint,aMember,aOwner,aViewer,pmix" {
+		t.Fatalf("project-only viewer sees %s", got)
+	}
+	// The organization maintainer and the platform-less owner see every row.
+	for _, name := range []string{"owner", "maintainer"} {
+		if got := who(w.hdr(name), url); !strings.Contains(got, "raised") || !strings.Contains(got, "org:") {
+			t.Fatalf("%s sees %s", name, got)
+		}
+	}
+	// The organization directory of a project-only person holds only people with a direct role.
+	if got := who(aOwner, "/api/v1/members"); got != "aMaint,aMember,aOwner,aViewer,pmix" {
+		t.Fatalf("project-only directory shows %s", got)
+	}
+
+	// Organization-level people cannot be changed or removed by a project-only owner (404, as if
+	// absent); a person with only a direct row can.
+	for _, name := range []string{"raised", "mixOwner"} {
+		id := w.people[name].id
+		if r := c.do(http.MethodPut, "/api/v1/projects/"+w.alpha+"/members/"+id, `{"role":"owner"}`, aOwner); r.code != http.StatusNotFound {
+			t.Errorf("put %s: %d %s", name, r.code, r.raw)
+		}
+		if r := c.do(http.MethodDelete, "/api/v1/projects/"+w.alpha+"/members/"+id, "", aOwner); r.code != http.StatusNotFound {
+			t.Errorf("delete %s: %d %s", name, r.code, r.raw)
+		}
+	}
+	if r := c.do(http.MethodPut, "/api/v1/projects/"+w.alpha+"/members/"+w.userIDs[authz.Viewer], `{"role":"owner"}`, aOwner); r.code != http.StatusNotFound {
+		t.Errorf("put organization viewer: %d %s", r.code, r.raw)
+	}
+	if n := countRows(t, w.env, `SELECT count(*) FROM project_members WHERE user_id = $1`, w.people["raised"].id); n != 1 {
+		t.Errorf("raised row changed: %d rows", n)
+	}
+	if r := c.do(http.MethodPut, "/api/v1/projects/"+w.alpha+"/members/"+w.people["aViewer"].id, `{"role":"member"}`, aOwner); r.code != http.StatusOK {
+		t.Errorf("put direct person: %d %s", r.code, r.raw)
+	}
+	if r := c.do(http.MethodDelete, "/api/v1/projects/"+w.alpha+"/members/"+w.people["aViewer"].id, "", aOwner); r.code != http.StatusNoContent {
+		t.Errorf("delete direct person: %d %s", r.code, r.raw)
+	}
+	// An organization maintainer still manages organization-level people in the project.
+	if r := c.do(http.MethodPut, "/api/v1/projects/"+w.alpha+"/members/"+w.people["raised"].id, `{"role":"maintainer"}`, w.hdr("maintainer")); r.code != http.StatusOK {
+		t.Errorf("maintainer puts raised: %d %s", r.code, r.raw)
 	}
 }

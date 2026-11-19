@@ -1773,7 +1773,9 @@ paths:
       description: |
         The people with a role in the project: everyone with an organization role (`allProjects`
         true, the role applies here) and everyone with a direct role (`explicit` true), with the
-        higher of the two as `effectiveRole`. 404 when the caller has no role in the project.
+        higher of the two as `effectiveRole`. A caller with only a project role (no organization
+        role, not a platform admin) sees only the people with a direct role and no organization
+        role. 404 when the caller has no role in the project.
       tags: [projects]
       responses:
         "200":

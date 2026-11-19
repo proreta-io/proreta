@@ -230,9 +230,9 @@ SELECT m.user_id, u.email, u.display_name, u.status, u.is_platform_admin, u.is_s
 FROM memberships AS m
 JOIN users AS u ON u.id = m.user_id
 WHERE m.tenant_id = $1
-  AND (m.role IS NOT NULL
-       OR EXISTS (SELECT 1 FROM project_members AS pm
-                  WHERE pm.tenant_id = m.tenant_id AND pm.user_id = m.user_id AND pm.project_id = ANY($2::uuid[])))
+  AND m.role IS NULL
+  AND EXISTS (SELECT 1 FROM project_members AS pm
+              WHERE pm.tenant_id = m.tenant_id AND pm.user_id = m.user_id AND pm.project_id = ANY($2::uuid[]))
   AND ($3::timestamptz IS NULL OR (m.created_at, m.user_id) > ($3::timestamptz, $4::uuid))
 ORDER BY m.created_at, m.user_id
 LIMIT $5::int
@@ -257,8 +257,8 @@ type ListMembersInProjectsRow struct {
 	CreatedAt       time.Time
 }
 
-// The people a project-only person may see: everyone with an organization role (it covers every
-// project) and everyone with a direct role in one of the projects. Reads project_members, owned by
+// The people a project-only person may see: only those with a direct role in one of the projects
+// and no organization role (whoever has one is managed at the organization level). Reads project_members, owned by
 // internal/projects, read-only.
 func (q *Queries) ListMembersInProjects(ctx context.Context, arg ListMembersInProjectsParams) ([]ListMembersInProjectsRow, error) {
 	rows, err := q.db.Query(ctx, listMembersInProjects,

@@ -35,16 +35,16 @@ DELETE FROM memberships
 WHERE tenant_id = @tenant_id AND user_id = @user_id;
 
 -- name: ListMembersInProjects :many
--- The people a project-only person may see: everyone with an organization role (it covers every
--- project) and everyone with a direct role in one of the projects. Reads project_members, owned by
+-- The people a project-only person may see: only those with a direct role in one of the projects
+-- and no organization role (whoever has one is managed at the organization level). Reads project_members, owned by
 -- internal/projects, read-only.
 SELECT m.user_id, u.email, u.display_name, u.status, u.is_platform_admin, u.is_system_admin, coalesce(m.role, '')::text AS role, m.created_at
 FROM memberships AS m
 JOIN users AS u ON u.id = m.user_id
 WHERE m.tenant_id = @tenant_id
-  AND (m.role IS NOT NULL
-       OR EXISTS (SELECT 1 FROM project_members AS pm
-                  WHERE pm.tenant_id = m.tenant_id AND pm.user_id = m.user_id AND pm.project_id = ANY(@project_ids::uuid[])))
+  AND m.role IS NULL
+  AND EXISTS (SELECT 1 FROM project_members AS pm
+              WHERE pm.tenant_id = m.tenant_id AND pm.user_id = m.user_id AND pm.project_id = ANY(@project_ids::uuid[]))
   AND (sqlc.narg(after_at)::timestamptz IS NULL OR (m.created_at, m.user_id) > (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
 ORDER BY m.created_at, m.user_id
 LIMIT sqlc.narg(max_rows)::int;
