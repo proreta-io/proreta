@@ -38,7 +38,7 @@ type HostClassifier struct {
 // NewHostClassifier returns a classifier for the installation hosts (PRORETA_PUBLIC_URL's host and
 // PRORETA_STATUSPAGE_INSTALLATION_HOSTS).
 func NewHostClassifier(installationHosts []string) HostClassifier {
-	c := HostClassifier{installation: map[string]struct{}{}, rules: domains.NewRules(installationHosts, nil)}
+	c := HostClassifier{installation: map[string]struct{}{}, rules: domains.NewRules(installationHosts)}
 	for _, h := range installationHosts {
 		if h = domains.Normalize(h); h != "" {
 			c.installation[h] = struct{}{}

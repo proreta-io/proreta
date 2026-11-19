@@ -7,7 +7,7 @@ import (
 )
 
 func TestValidate(t *testing.T) {
-	rules := NewRules([]string{"Proreta.Example.Net."}, []string{"corp.example.org", ""})
+	rules := NewRules([]string{"Proreta.Example.Net.", ""})
 	long63 := strings.Repeat("a", 63)
 	tests := []struct {
 		name   string
@@ -90,10 +90,9 @@ func TestValidate(t *testing.T) {
 		{"installation host", "proreta.example.net", "", ReasonInstallation},
 		{"installation host uppercase", "PRORETA.example.net", "", ReasonInstallation},
 		{"below the installation host", "status.proreta.example.net", "", ReasonInstallation},
-		{"operator suffix itself", "corp.example.org", "", ReasonInstallation},
-		{"below the operator suffix", "status.corp.example.org", "", ReasonInstallation},
+		{"sibling of the installation host", "status.example.net", "status.example.net", ""},
 		{"sibling of the operator suffix", "status.other.example.org", "status.other.example.org", ""},
-		{"suffix as a string suffix only", "status.mycorp.example.org", "status.mycorp.example.org", ""},
+		{"installation host as a string suffix only", "status.myproreta.example.net", "status.myproreta.example.net", ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

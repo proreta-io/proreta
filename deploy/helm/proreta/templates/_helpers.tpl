@@ -325,7 +325,7 @@ true
 
 {{/*
 Custom domain env, each variable only in the processes that read it: api (flag, CNAME target,
-installation hosts, forbidden suffixes), jobs (flag, CNAME target, DNS), statuspage (flag,
+installation hosts), jobs (flag, CNAME target, DNS), statuspage (flag,
 installation hosts, abuse URL, ask endpoint). Args: dict ctx, process
 */}}
 {{- define "proreta.env.statusDomains" -}}
@@ -340,10 +340,6 @@ installation hosts, abuse URL, ask endpoint). Args: dict ctx, process
 {{- if has $p (list "api" "statuspage") }}
 - name: PRORETA_STATUSPAGE_INSTALLATION_HOSTS
   value: {{ include "proreta.statusDomains.installationHosts" .ctx | quote }}
-{{- end }}
-{{- if and (has $p (list "api" "statuspage")) $cd.forbiddenSuffixes }}
-- name: PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES
-  value: {{ join "," $cd.forbiddenSuffixes | quote }}
 {{- end }}
 {{- if and (eq $p "jobs") $cd.dns.resolver }}
 - name: PRORETA_DNS_RESOLVER

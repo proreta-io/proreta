@@ -136,7 +136,7 @@ func run() error {
 		return err
 	}
 	pagesSvc := statuspages.NewService(pool, statuspages.Options{Logger: log, Domains: statuspages.DomainOptions{
-		Resolver: dnsResolver, Rules: domains.NewRules(cfg.StatusPageInstallationHosts, cfg.StatusPageForbiddenSuffixes), CNAMETarget: cfg.StatusPageCNAMETarget}})
+		Resolver: dnsResolver, Rules: domains.NewRules(cfg.StatusPageInstallationHosts), CNAMETarget: cfg.StatusPageCNAMETarget}})
 	adminSvc, err := admin.NewService(pool, authSvc, admin.Options{Logger: log, Registerer: reg, Mail: mailQueue, Settings: mailSettings, Registration: registration, Projects: projectsSvc,
 		Plans: plansSvc, Channels: channelsSvc, Specula: speculaSvc, StatusPages: pagesSvc})
 	if err != nil {

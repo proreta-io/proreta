@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"golang.org/x/net/publicsuffix"
 
 	"github.com/proreta-io/proreta/backend/internal/platform/crypto"
 	"github.com/proreta-io/proreta/backend/internal/platform/logging"
@@ -126,9 +125,6 @@ type API struct {
 	// StatusPageInstallationHosts are the host names of this installation, which no customer may
 	// claim: the host of PRORETA_PUBLIC_URL and PRORETA_STATUSPAGE_INSTALLATION_HOSTS.
 	StatusPageInstallationHosts []string
-	// StatusPageForbiddenSuffixes are domains no customer may claim a name under
-	// (PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES); the registrable domain of PRORETA_PUBLIC_URL when unset.
-	StatusPageForbiddenSuffixes []string
 	OAuth                       OAuth
 }
 
@@ -245,9 +241,6 @@ type Statuspage struct {
 	// InstallationHosts are the host names that keep the /status/<slug> routes: the host of
 	// PublicURL plus PRORETA_STATUSPAGE_INSTALLATION_HOSTS (comma separated).
 	InstallationHosts []string
-	// ForbiddenSuffixes is PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES (the api's variable): names under
-	// them are never a customer's host. Default: the registrable domain of PublicURL.
-	ForbiddenSuffixes []string
 	// AbuseURL is PRORETA_ABUSE_URL, the "Report abuse" link on customer domains: an https URL or a
 	// mailto: address; empty means no link.
 	AbuseURL string
@@ -339,8 +332,7 @@ func (l *loader) cnameTarget() string {
 }
 
 // statusPageDomains reads the installation's side of the custom domain rules. The public URL's own
-// host is always forbidden, and so is everything under the operator's list, which defaults to the
-// registrable domain of the public URL.
+// host is always forbidden.
 func (l *loader) statusPageDomains(cfg *API) {
 	cfg.StatusPageCNAMETarget = l.cnameTarget()
 	cfg.DNS = l.dns()
@@ -350,25 +342,6 @@ func (l *loader) statusPageDomains(cfg *API) {
 			cfg.StatusPageInstallationHosts = append(cfg.StatusPageInstallationHosts, h)
 		}
 	}
-	cfg.StatusPageForbiddenSuffixes = l.forbiddenSuffixes(cfg.StatusPageInstallationHosts[max(len(cfg.StatusPageInstallationHosts)-1, 0):])
-}
-
-// forbiddenSuffixes reads PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES. Unset, it is the registrable domain
-// of the installation host; "none" turns the default off, for an installation whose own customers
-// use names beside the application's, such as status.example.com next to app.example.com.
-func (l *loader) forbiddenSuffixes(installation []string) []string {
-	switch l.optional("PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES") {
-	case "none":
-		return nil
-	case "":
-		if len(installation) > 0 {
-			if d, err := publicsuffix.EffectiveTLDPlusOne(installation[0]); err == nil {
-				return []string{d}
-			}
-		}
-		return nil
-	}
-	return l.domains("PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES")
 }
 
 // oauth reads the client credentials of each provider: both the id and the secret, or neither.
@@ -501,7 +474,6 @@ func LoadStatuspage(lookup LookupFunc) (Statuspage, error) {
 	cfg.CustomDomains = l.boolean("PRORETA_STATUS_PAGE_CUSTOM_DOMAINS", false)
 	cfg.InstallationHosts = l.installationHosts("PRORETA_STATUSPAGE_INSTALLATION_HOSTS", cfg.PublicURL)
 	cfg.AbuseURL = l.abuseURL("PRORETA_ABUSE_URL")
-	cfg.ForbiddenSuffixes = l.forbiddenSuffixes(cfg.InstallationHosts[:min(1, len(cfg.InstallationHosts))])
 	return cfg, l.err()
 }
 

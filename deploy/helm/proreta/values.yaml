@@ -300,11 +300,6 @@ statuspage:
     # their CNAME at, a lowercase DNS name such as customers.example.net, without a trailing dot. It
     # must resolve to your TLS proxy.
     cnameTarget: ""
-    # PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES (api and statuspage): domains no customer may claim a name
-    # under, lowercase, no wildcard, e.g. [example.com]. Empty: the app's default, the registrable
-    # domain of config.publicUrl. [none]: no such domain; needed when the organization's own status
-    # domain shares the registrable domain of the application (status.example.com, app.example.com).
-    forbiddenSuffixes: []
     # PRORETA_STATUSPAGE_INSTALLATION_HOSTS (api and statuspage): host names that keep the
     # /status/<slug> routes and that no customer may claim. Empty: httpRoute.hostnames (wildcard
     # entries left out) plus the host of config.publicUrl. The host of config.publicUrl is always

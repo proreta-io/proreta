@@ -33,7 +33,7 @@ const (
 	ReasonPublicSuffix Reason = "public-suffix"
 	// ReasonRegistrable: the registrable domain itself (acme.com); a label above it is required.
 	ReasonRegistrable Reason = "registrable-domain"
-	// ReasonInstallation: a name of this installation or under an operator-forbidden suffix.
+	// ReasonInstallation: a name of this installation.
 	ReasonInstallation Reason = "installation"
 )
 
@@ -78,13 +78,11 @@ var reservedSuffixes = []string{"localhost", "local", "localdomain", "internal",
 // Rules are the installation-specific refusals on top of the fixed ones.
 type Rules struct {
 	installationHosts []string
-	forbiddenSuffixes []string
 }
 
-// NewRules returns Rules that also refuse each of installationHosts and every name below one, and
-// each of forbiddenSuffixes (PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES) and every name below one. Entries are
-// lowercased and stripped of a trailing dot; empty entries are ignored.
-func NewRules(installationHosts, forbiddenSuffixes []string) Rules {
+// NewRules returns Rules that also refuse each of installationHosts and every name below one. Entries
+// are lowercased and stripped of a trailing dot; empty entries are ignored.
+func NewRules(installationHosts []string) Rules {
 	clean := func(in []string) []string {
 		var out []string
 		for _, s := range in {
@@ -94,7 +92,7 @@ func NewRules(installationHosts, forbiddenSuffixes []string) Rules {
 		}
 		return out
 	}
-	return Rules{installationHosts: clean(installationHosts), forbiddenSuffixes: clean(forbiddenSuffixes)}
+	return Rules{installationHosts: clean(installationHosts)}
 }
 
 // Normalize lowercases raw and strips one trailing dot. It does not judge the name; use Validate.
@@ -128,11 +126,6 @@ func (r Rules) Validate(raw string) (string, error) {
 		}
 	}
 	for _, s := range r.installationHosts {
-		if below(host, s) {
-			return "", &HostError{ReasonInstallation}
-		}
-	}
-	for _, s := range r.forbiddenSuffixes {
 		if below(host, s) {
 			return "", &HostError{ReasonInstallation}
 		}

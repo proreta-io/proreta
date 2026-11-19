@@ -1190,16 +1190,6 @@
               "maxLength": 253,
               "pattern": "^$|^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
             },
-            "forbiddenSuffixes": {
-              "type": "array",
-              "title": "forbidden suffixes",
-              "description": "PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES (api and statuspage): domains no customer may claim a name under, lowercase, no wildcard; empty: the registrable domain of config.publicUrl; [none]: no such domain",
-              "items": {
-                "type": "string",
-                "maxLength": 253,
-                "pattern": "^none$|^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$"
-              }
-            },
             "installationHosts": {
               "type": "array",
               "title": "installation hosts",
@@ -1350,7 +1340,6 @@
           "required": [
             "enabled",
             "cnameTarget",
-            "forbiddenSuffixes",
             "installationHosts",
             "abuseUrl",
             "dns",
