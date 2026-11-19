@@ -54,7 +54,7 @@ func newDomainWorld(t *testing.T, name string, domainLimit int) *domainWorld {
 	domainsHook = func(cfg *api.Config, o *statuspages.Options) {
 		cfg.StatusPageCustomDomains = true
 		o.Clock = dw.clk
-		o.Domains = statuspages.DomainOptions{Resolver: dw.dns, Rules: domains.NewRules([]string{"proreta.example.com"}, []string{"example.org"}), CNAMETarget: domainCNAMETarget}
+		o.Domains = statuspages.DomainOptions{Resolver: dw.dns, Rules: domains.NewRules([]string{"proreta.example.com"}), CNAMETarget: domainCNAMETarget}
 	}
 	t.Cleanup(func() { domainsHook = nil })
 	dw.projectWorld = newProjectWorld(t, name)
@@ -157,7 +157,7 @@ func TestIntegrationStatusPageDomainsLifecycle(t *testing.T) {
 	owner := w.hdrO
 
 	// Forbidden hosts are 422 domain-forbidden with the reason in fieldErrors.
-	for _, host := range []string{"acme.com", "10.0.0.1", "proreta.example.com", "x.example.org", "https://status.acme.com", "status.acme.com:443", "*.acme.com", "localhost", "com", "stätus.acme.com"} {
+	for _, host := range []string{"acme.com", "10.0.0.1", "proreta.example.com", "x.proreta.example.com", "https://status.acme.com", "status.acme.com:443", "*.acme.com", "localhost", "com", "stätus.acme.com"} {
 		r := w.add(t, page, host, owner)
 		if r.code != http.StatusUnprocessableEntity || r.body["type"] != "urn:proreta:problem:domain-forbidden" || !strings.Contains(r.raw, `"host"`) {
 			t.Fatalf("add %q: %d %s", host, r.code, r.raw)

@@ -100,7 +100,7 @@ not contain `proreta` (`fullnameOverride` replaces it).
 | `statuspage.enabled`, `.replicas`, `.httpPort`, `.resources`, `.env`, `.service.port` | `true`, `1`, `8080`, 10m/48Mi, `[]`, `8080` | Public status page renderer at `/status`. |
 | `statuspage.customDomains.enabled` | `false` | Status pages on a customer's own domain. Off: nothing below is rendered and the chart is unchanged. Needs `statuspage.enabled` and `cnameTarget`. |
 | `statuspage.customDomains.cnameTarget` | `""` | **Required when enabled.** The host customers point their CNAME at (lowercase, no trailing dot). |
-| `statuspage.customDomains.forbiddenSuffixes`, `.installationHosts` | `[]`, `[]` | Domains no customer may claim a name under (empty: the registrable domain of `config.publicUrl`; `[none]`: no such domain); host names that keep `/status/<slug>` (empty: `httpRoute.hostnames` without wildcards, then the host of `config.publicUrl`). |
+| `statuspage.customDomains.installationHosts` | `[]` | Host names that keep `/status/<slug>` (empty: `httpRoute.hostnames` without wildcards, then the host of `config.publicUrl`). |
 | `statuspage.customDomains.abuseUrl` | `""` | https URL or `mailto:` of the "Report abuse" link on customer domains. Optional; empty prints a warning at install. |
 | `statuspage.customDomains.dns.resolver`, `.timeout` | `""`, `3s` | Resolver (`ip` or `ip:port`) and per-lookup timeout (500ms to 10s) of the verification job. |
 | `statuspage.customDomains.tlsAsk.enabled`, `.port` | `false`, `9091` | Internal endpoint a TLS proxy asks before it requests a certificate: its own listener, container and Service port `tls-ask` of the statuspage pods, never in an HTTPRoute. Needs `secrets.tlsAsk`. |
@@ -191,7 +191,6 @@ With `statuspage.customDomains.enabled` each process gets only the variables it 
 | `PRORETA_STATUS_PAGE_CUSTOM_DOMAINS` | `true` | x | x | x |
 | `PRORETA_STATUSPAGE_CNAME_TARGET` | `cnameTarget` | x | x | |
 | `PRORETA_STATUSPAGE_INSTALLATION_HOSTS` | `installationHosts` or the default | x | | x |
-| `PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES` | `forbiddenSuffixes`, only when set | x | | x |
 | `PRORETA_DNS_RESOLVER` (only when set), `PRORETA_DNS_TIMEOUT` | `dns.*` | | x | |
 | `PRORETA_ABUSE_URL` | `abuseUrl`, only when set | | | x |
 | `PRORETA_STATUSPAGE_TLS_ASK_ADDR`, `PRORETA_STATUSPAGE_TLS_ASK_TOKEN` | `:<tlsAsk.port>`, Secret `secrets.tlsAsk` key `token`; only with `tlsAsk.enabled` | | | x |

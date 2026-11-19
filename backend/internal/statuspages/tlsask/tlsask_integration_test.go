@@ -49,7 +49,7 @@ func TestIntegrationAskThroughTheStatuspageRole(t *testing.T) {
 	add(tenant, pageLive, "released.acme.com", "active", "released_at = now()")
 	add(tenantS, pageS, "suspended.acme.com", "active", "")
 
-	h, err := tlsask.New(tlsask.DBAllower{Pool: env.Pool(t, env.StatuspageURL, 2)}, tlsask.Options{Token: token, Rules: domains.NewRules(nil, nil), CacheTTL: time.Nanosecond})
+	h, err := tlsask.New(tlsask.DBAllower{Pool: env.Pool(t, env.StatuspageURL, 2)}, tlsask.Options{Token: token, Rules: domains.NewRules(nil), CacheTTL: time.Nanosecond})
 	if err != nil {
 		t.Fatal(err)
 	}

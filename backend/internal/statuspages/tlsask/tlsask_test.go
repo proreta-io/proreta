@@ -39,7 +39,7 @@ func (c *clock) now() time.Time { return c.t }
 
 func newHandler(t *testing.T, f *fakeAllower, c *clock, mod func(*Options)) *Handler {
 	t.Helper()
-	o := Options{Token: testToken, Now: c.now, Rules: domains.NewRules([]string{"proreta.example.com"}, nil), Registerer: prometheus.NewRegistry()}
+	o := Options{Token: testToken, Now: c.now, Rules: domains.NewRules([]string{"proreta.example.com"}), Registerer: prometheus.NewRegistry()}
 	if mod != nil {
 		mod(&o)
 	}

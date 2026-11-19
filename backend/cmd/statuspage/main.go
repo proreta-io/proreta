@@ -78,7 +78,7 @@ func run() error {
 	if cfg.TLSAskAddr != "" {
 		// Its own listener, so a NetworkPolicy can let only the front proxy reach it while
 		// Prometheus and the probes keep the admin port.
-		ask, err := tlsask.New(tlsask.DBAllower{Pool: pool}, tlsask.Options{Token: cfg.TLSAskToken.Value(), Rules: domains.NewRules(cfg.InstallationHosts, cfg.ForbiddenSuffixes), Logger: log, Registerer: reg})
+		ask, err := tlsask.New(tlsask.DBAllower{Pool: pool}, tlsask.Options{Token: cfg.TLSAskToken.Value(), Rules: domains.NewRules(cfg.InstallationHosts), Logger: log, Registerer: reg})
 		if err != nil {
 			return err
 		}

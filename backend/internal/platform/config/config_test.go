@@ -793,40 +793,11 @@ func TestStatusPageDomainRules(t *testing.T) {
 	e["PRORETA_STATUSPAGE_INSTALLATION_HOSTS"] = "app.example.net"
 	cfg, err := LoadAPI(env(e))
 	if err != nil || cfg.StatusPageCNAMETarget != "customers.example.net" ||
-		strings.Join(cfg.StatusPageInstallationHosts, ",") != "app.example.net,proreta.ops-example.net" ||
-		strings.Join(cfg.StatusPageForbiddenSuffixes, ",") != "ops-example.net" {
+		strings.Join(cfg.StatusPageInstallationHosts, ",") != "app.example.net,proreta.ops-example.net" {
 		t.Fatalf("%+v, %v", cfg, err)
-	}
-	e["PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES"] = "corp.example.com"
-	if cfg, err = LoadAPI(env(e)); err != nil || strings.Join(cfg.StatusPageForbiddenSuffixes, ",") != "corp.example.com" {
-		t.Fatalf("explicit suffixes: %v, %v", cfg.StatusPageForbiddenSuffixes, err)
-	}
-	e["PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES"] = "none"
-	if cfg, err = LoadAPI(env(e)); err != nil || len(cfg.StatusPageForbiddenSuffixes) != 0 {
-		t.Fatalf("none: %v, %v", cfg.StatusPageForbiddenSuffixes, err)
 	}
 	e["PRORETA_STATUSPAGE_CNAME_TARGET"] = "Not A Host"
 	if _, err = LoadAPI(env(e)); err == nil || !strings.Contains(err.Error(), "PRORETA_STATUSPAGE_CNAME_TARGET") {
 		t.Fatalf("bad target accepted: %v", err)
-	}
-}
-
-func TestLoadStatuspageForbiddenSuffixes(t *testing.T) {
-	e := map[string]string{
-		"PRORETA_DATABASE_URL":          "postgres://proreta_statuspage:pw@db:5432/proreta?sslmode=require",
-		"PRORETA_PUBLIC_URL":            "https://proreta.ops-example.net",
-		"PRORETA_STATUSPAGE_COOKIE_KEY": base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")),
-	}
-	cfg, err := LoadStatuspage(env(e))
-	if err != nil || strings.Join(cfg.ForbiddenSuffixes, ",") != "ops-example.net" {
-		t.Fatalf("default: %v %v", cfg.ForbiddenSuffixes, err)
-	}
-	e["PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES"] = "corp.example.com"
-	if cfg, err = LoadStatuspage(env(e)); err != nil || strings.Join(cfg.ForbiddenSuffixes, ",") != "corp.example.com" {
-		t.Fatalf("explicit: %v %v", cfg.ForbiddenSuffixes, err)
-	}
-	e["PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES"] = "none"
-	if cfg, err = LoadStatuspage(env(e)); err != nil || len(cfg.ForbiddenSuffixes) != 0 {
-		t.Fatalf("none: %v %v", cfg.ForbiddenSuffixes, err)
 	}
 }

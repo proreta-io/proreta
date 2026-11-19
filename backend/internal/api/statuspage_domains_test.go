@@ -11,7 +11,7 @@ import (
 )
 
 func TestDomainErrorsBecomeProblems(t *testing.T) {
-	_, hostErr := domains.NewRules(nil, nil).Validate("localhost.internal")
+	_, hostErr := domains.NewRules(nil).Validate("localhost.internal")
 	tests := []struct {
 		name   string
 		err    error

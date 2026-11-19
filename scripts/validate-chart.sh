@@ -77,7 +77,7 @@ combos=(
   "example-domains-ask-netpol|-f $example $tag ${cd_on[*]} ${cd_ask[*]} --set networkPolicy.enabled=true --set statuspage.customDomains.tlsAsk.proxy.podSelector.app=caddy --set statuspage.customDomains.tlsAsk.port=9443"
   "example-domains-ask-eso|-f $example $tag $eso ${cd_on[*]} --set statuspage.customDomains.tlsAsk.enabled=true"
   "example-domains-route|-f $example $tag ${cd_on[*]} ${cd_route[*]}"
-  "example-domains-all|-f $example $tag $eso ${cd_on[*]} ${cd_route[*]} --set statuspage.customDomains.tlsAsk.enabled=true --set networkPolicy.enabled=true --set statuspage.customDomains.tlsAsk.proxy.podSelector.app=caddy --set statuspage.customDomains.abuseUrl=https://example.com/abuse --set statuspage.customDomains.forbiddenSuffixes[0]=example.com --set statuspage.customDomains.forbiddenSuffixes[1]=example.org --set statuspage.customDomains.installationHosts[0]=proreta.example.com --set statuspage.customDomains.dns.resolver=10.0.0.2:53 --set statuspage.customDomains.dns.timeout=1500ms --set httpRoute.hostnames[0]=proreta.example.com --set httpRoute.hostnames[1]=*.example.com"
+  "example-domains-all|-f $example $tag $eso ${cd_on[*]} ${cd_route[*]} --set statuspage.customDomains.tlsAsk.enabled=true --set networkPolicy.enabled=true --set statuspage.customDomains.tlsAsk.proxy.podSelector.app=caddy --set statuspage.customDomains.abuseUrl=https://example.com/abuse --set statuspage.customDomains.installationHosts[0]=proreta.example.com --set statuspage.customDomains.dns.resolver=10.0.0.2:53 --set statuspage.customDomains.dns.timeout=1500ms --set httpRoute.hostnames[0]=proreta.example.com --set httpRoute.hostnames[1]=*.example.com"
   "packaged-no-tag|chart=$packaged/proreta -f $example"
 )
 
@@ -213,8 +213,6 @@ expect_fail "customer hosts route with a wildcard" --msg "hostnames" "${cd_on[@]
 expect_fail "abuse URL over http" --msg "abuseUrl" "${cd_on[@]}" --set statuspage.customDomains.abuseUrl=http://example.com/abuse
 expect_fail "abuse URL with another scheme" --msg "abuseUrl" "${cd_on[@]}" --set statuspage.customDomains.abuseUrl=javascript:alert
 expect_fail "abuse mailto without an address" --msg "abuseUrl" "${cd_on[@]}" --set statuspage.customDomains.abuseUrl=mailto:abuse
-expect_fail "forbidden suffix in upper case" --msg "forbiddenSuffixes" "${cd_on[@]}" --set statuspage.customDomains.forbiddenSuffixes[0]=Example.com
-expect_fail "forbidden suffix with a wildcard" --msg "forbiddenSuffixes" "${cd_on[@]}" --set "statuspage.customDomains.forbiddenSuffixes[0]=*.example.com"
 expect_fail "installation host with a port" --msg "installationHosts" "${cd_on[@]}" --set statuspage.customDomains.installationHosts[0]=proreta.example.com:443
 expect_fail "DNS resolver that is not an address" --msg "resolver" "${cd_on[@]}" --set statuspage.customDomains.dns.resolver=dns.example.com
 expect_fail "DNS timeout that is not a duration" --msg "timeout" "${cd_on[@]}" --set statuspage.customDomains.dns.timeout=fast
@@ -324,7 +322,7 @@ def env(docs, comp):
 def val(docs, comp, name):
     return env(docs, comp)[name]["value"]
 DOM = ("PRORETA_STATUS_PAGE_CUSTOM_DOMAINS", "PRORETA_STATUSPAGE_CNAME_TARGET", "PRORETA_STATUSPAGE_INSTALLATION_HOSTS",
-       "PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES", "PRORETA_ABUSE_URL", "PRORETA_DNS_RESOLVER", "PRORETA_DNS_TIMEOUT",
+       "PRORETA_ABUSE_URL", "PRORETA_DNS_RESOLVER", "PRORETA_DNS_TIMEOUT",
        "PRORETA_STATUSPAGE_TLS_ASK_ADDR", "PRORETA_STATUSPAGE_TLS_ASK_TOKEN")
 for name in ("defaults", "example", "example-no-statuspage"):
     docs = load(name)
@@ -339,7 +337,6 @@ assert val(docs, "jobs", "PRORETA_STATUSPAGE_CNAME_TARGET") == "customers.exampl
 assert val(docs, "jobs", "PRORETA_DNS_TIMEOUT") == "3s" and "PRORETA_DNS_RESOLVER" not in env(docs, "jobs")
 assert val(docs, "api", "PRORETA_STATUSPAGE_INSTALLATION_HOSTS") == "proreta.example.com"
 assert val(docs, "statuspage", "PRORETA_STATUSPAGE_INSTALLATION_HOSTS") == "proreta.example.com"
-assert "PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES" not in env(docs, "api"), "forbidden suffixes rendered while empty"
 assert "PRORETA_ABUSE_URL" not in env(docs, "statuspage"), "abuse URL rendered while empty"
 assert not any(n.startswith("PRORETA_STATUSPAGE_TLS_ASK") for n in env(docs, "statuspage")), "ask endpoint without tlsAsk.enabled"
 assert not any(d["kind"] in ("NetworkPolicy", "HTTPRoute") and d["metadata"]["name"].endswith(("-tls-ask", "-customer-hosts")) for d in docs)
@@ -372,7 +369,6 @@ assert route["spec"]["parentRefs"][0]["sectionName"] == "https-customers"
 assert next(d for d in docs if d["kind"] == "HTTPRoute" and d["metadata"]["name"] == "proreta")["spec"]["hostnames"] == ["proreta.example.com"]
 
 docs = load("example-domains-all")
-assert val(docs, "api", "PRORETA_STATUSPAGE_FORBIDDEN_SUFFIXES") == "example.com,example.org"
 assert val(docs, "api", "PRORETA_STATUSPAGE_INSTALLATION_HOSTS") == "proreta.example.com"
 assert val(docs, "jobs", "PRORETA_DNS_RESOLVER") == "10.0.0.2:53" and val(docs, "jobs", "PRORETA_DNS_TIMEOUT") == "1500ms"
 assert val(docs, "statuspage", "PRORETA_ABUSE_URL") == "https://example.com/abuse"
