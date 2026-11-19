@@ -9,7 +9,7 @@ Contents: [Prerequisites](#prerequisites) · [Install](#install) · [After insta
 ### Kubernetes
 - **Kubernetes 1.29 or newer** (the chart's `kubeVersion`), nodes `amd64` or `arm64` (the images are multi-arch).
 - **`kubectl` and Helm 3** (tested with Helm 3.18; other Helm 3 versions should work but were not tested, and Helm 4 was not tested at all). Always point both at the right cluster (`--context` / `--kube-context`); the commands below leave that out for readability.
-- **Gateway API, not Ingress.** The chart creates one `HTTPRoute` (`gateway.networking.k8s.io/v1`) and no Ingress objects; Ingress is not supported yet. You need:
+- **Gateway API, not Ingress.** The chart creates one `HTTPRoute` (`gateway.networking.k8s.io/v1`) and no Ingress objects; Ingress is not supported. You need:
   - the Gateway API CRDs, standard channel, v1.2 or newer (the route sets request `timeouts`);
   - a Gateway controller that implements them (tested with Envoy Gateway; Istio, Cilium, NGINX Gateway Fabric and others implement the same API);
   - a `Gateway` with an **HTTPS listener** for your host name, whose `allowedRoutes` admits routes from the Proreta namespace (for example `namespaces: {from: All}` or a selector).
@@ -19,7 +19,7 @@ Contents: [Prerequisites](#prerequisites) · [Install](#install) · [After insta
 - The pods satisfy the Pod Security Standard **restricted** profile, so the namespace can enforce it.
 
 ### PostgreSQL
-- **PostgreSQL 15 or newer** (CI tests 15; the install below was tested on 16), reachable from the cluster. A bundled database is not part of the chart (not supported yet): bring your own server, managed or self-hosted.
+- **PostgreSQL 15 or newer** (CI tests 15; the install below was tested on 16), reachable from the cluster. A bundled database is not part of the chart (not part of the chart): bring your own server, managed or self-hosted.
 - **An admin login** for the one-time bootstrap. It needs `LOGIN`, `CREATEROLE` and `CREATEDB`; it does not need to be a superuser. It must be able to connect to the database `postgres`. On Amazon RDS and Aurora use the master user (member of `rds_superuser`), on Google Cloud SQL the default `postgres` user (`cloudsqlsuperuser`), on Azure Database for PostgreSQL the server admin.
 - **What the bootstrap does with it** (`proretactl db bootstrap`, idempotent, under an advisory lock):
   - creates the roles `proreta_owner` (migrations), `proreta_api`, `proreta_worker` and `proreta_statuspage`, all `LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`, with connection limits 3, 20, 20 and 10 and per-role statement timeouts. Passwords are random, sent as SCRAM verifiers, and stored only in the Secret `proreta-db` in your namespace;
@@ -32,7 +32,7 @@ Contents: [Prerequisites](#prerequisites) · [Install](#install) · [After insta
 - TLS: the default `database.sslmode` is `require` (encrypted, certificate not verified). Use `disable` only for a server without TLS, for example a throwaway test database.
 
 ### Images
-`ghcr.io/proreta-io/proreta-backend` (api, worker, jobs, status pages, migrations, bootstrap) and `ghcr.io/proreta-io/proreta-web` (the web app, nginx), both `amd64` and `arm64`. Release tags are `X.Y.Z` (no `v`); builds of `main` are `sha-<7 hex>`. If you build them from a fork, GitHub creates the packages as private: make them public or set `imagePullSecrets`.
+`ghcr.io/proreta-io/proreta-backend` (api, worker, jobs, status pages, migrations, bootstrap) and `ghcr.io/proreta-io/proreta-web` (the web app, nginx), both `amd64` and `arm64`. Release tags are `X.Y.Z` (no `v`), plus `X.Y` (and `X` from major version 1 on); builds of `main` are `sha-<7 hex>`. If you build them from a fork, GitHub creates the packages as private: make them public or set `imagePullSecrets`.
 
 ## Install
 
@@ -145,7 +145,7 @@ httpRoute:
 ```
 Then install:
 ```sh
-VERSION=0.1.0
+VERSION=X.Y.Z   # the release you install, without a leading v
 helm upgrade --install proreta oci://ghcr.io/proreta-io/charts/proreta --version "$VERSION" -n proreta -f my-values.yaml --wait --timeout 10m
 ```
 `helm show values oci://ghcr.io/proreta-io/charts/proreta --version "$VERSION"` prints every default with its comment, as a reference. For later upgrades pass the new `--version`.
@@ -163,13 +163,13 @@ spec:
   project: default
   source:
     repoURL: https://github.com/proreta-io/proreta.git
-    targetRevision: v0.1.0            # the release tag; chart and image tag come from the same version
+    targetRevision: vX.Y.Z            # the release tag; chart and image tag come from the same version
     path: deploy/helm/proreta
     helm:
       releaseName: proreta            # Argo CD otherwise uses the Application name, which changes every resource name
       parameters:
         - name: image.tag
-          value: "0.1.0"              # required from a git checkout; image tags have no leading v
+          value: "X.Y.Z"              # required from a git checkout; image tags have no leading v
       valuesObject:                   # the minimal values from "Installing from the OCI registry"
         config:
           publicUrl: https://proreta.example.com

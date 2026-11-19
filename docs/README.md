@@ -29,6 +29,9 @@ Operator and contributor documentation for Proreta.
 | [Heartbeats with Alertmanager](runbooks/heartbeat-alertmanager.md) | Watchdog heartbeats for Prometheus Alertmanager |
 | [Observability](runbooks/observability.md) | Metrics, logs and suggested alert rules |
 
+## Releases
+- [Release notes](release-notes/): what is new, breaking changes and known limitations (one file per release, named by its version)
+
 ## API
 - [API compatibility](api.md): what is frozen from 1.0, what counts as breaking, alpha operations, deprecation
 
