@@ -386,6 +386,7 @@ func TestIntegrationProjectInvitationQuota(t *testing.T) {
 	env := pgtest.New(t, pgtest.DBName("projinvquota"))
 	c := newRegistrationServer(t, env, membersOpts(), true, &lockedBuffer{})
 	oCookie, oCSRF, _ := c.register("owner@example.com")
+	useFreePlan(t, env)
 	owner := withCSRF(oCookie, oCSRF)
 	pr := c.do(http.MethodPost, "/api/v1/projects", `{"name":"P"}`, owner)
 	project := pr.body["id"].(string)

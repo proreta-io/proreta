@@ -26,11 +26,11 @@ func TestIntegrationUsage(t *testing.T) {
 		}
 		return r.raw
 	}
-	if got, want := usage(cookie), `{"limits":{"channels":10,"heartbeats":100,"members":50,"monitors":1000,"projects":50,"specula":20,"statusPageDomains":2147483647,"statusPages":1},"plan":{"key":"internal","name":"Internal"},"usage":{"channels":0,"heartbeats":0,"members":1,"monitors":0,"projects":1,"specula":0,"statusPageDomains":0,"statusPages":0}}`+"\n"; got != want {
+	if got, want := usage(cookie), `{"limits":{"channels":2147483647,"heartbeats":2147483647,"members":2147483647,"monitors":2147483647,"projects":2147483647,"specula":2147483647,"statusPageDomains":2147483647,"statusPages":2147483647},"plan":{"key":"internal","name":"Internal"},"usage":{"channels":0,"heartbeats":0,"members":1,"monitors":0,"projects":1,"specula":0,"statusPageDomains":0,"statusPages":0}}`+"\n"; got != want {
 		t.Fatalf("usage of the default tenant:\n got %s\nwant %s", got, want)
 	}
 
-	pgtest.MustExec(t, admin, `UPDATE tenants SET plan_key = 'free' WHERE slug = 'default'`)
+	pgtest.MustExec(t, admin, pgtest.FreePlanSQL, `UPDATE tenants SET plan_key = 'free' WHERE slug = 'default'`)
 	create := func(name string) response {
 		return c.do(http.MethodPost, "/api/v1/monitors", `{"type":"http","name":"`+name+`","http":{"url":"https://example.com/`+name+`"}}`, unsafe)
 	}
@@ -76,6 +76,7 @@ func TestIntegrationUsage(t *testing.T) {
 
 	// Another tenant sees only its own plan and usage, and its quota is its own.
 	other, otherCSRF := otherTenantSession(t, env)
+	useFreePlan(t, env)
 	if got, want := usage(other), `{"limits":{"channels":1,"heartbeats":1,"members":3,"monitors":3,"projects":50,"specula":1,"statusPageDomains":0,"statusPages":1},"plan":{"key":"free","name":"Free"},"usage":{"channels":0,"heartbeats":0,"members":1,"monitors":0,"projects":1,"specula":0,"statusPageDomains":0,"statusPages":0}}`+"\n"; got != want {
 		t.Fatalf("usage of the other tenant:\n got %s\nwant %s", got, want)
 	}
@@ -91,4 +92,11 @@ func TestIntegrationUsage(t *testing.T) {
 	if r := c.do(http.MethodGet, "/api/v1/usage", "", nil); r.code != http.StatusUnauthorized {
 		t.Fatalf("usage without session: %d", r.code)
 	}
+}
+
+// useFreePlan moves every organization to a small plan: the installation seeds only the unlimited
+// `internal` one, so the tests of the quotas need a plan that has some.
+func useFreePlan(t *testing.T, env *pgtest.Env) {
+	t.Helper()
+	pgtest.MustExec(t, env.AdminConn(t), pgtest.FreePlanSQL, `UPDATE tenants SET plan_key = 'free'`)
 }

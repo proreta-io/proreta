@@ -71,7 +71,7 @@ func TestIntegrationChannels(t *testing.T) {
 	env := pgtest.New(t, pgtest.DBName("notify"))
 	ctx := context.Background()
 	admin := env.AdminConn(t)
-	pgtest.MustExec(t, admin,
+	pgtest.MustExec(t, admin, pgtest.FreePlanSQL,
 		`INSERT INTO tenants (id, slug, name, plan_key) VALUES ('`+tenantA+`', 'a', 'A', 'internal'), ('`+tenantB+`', 'b', 'B', 'free')`,
 		`INSERT INTO users (id, email) VALUES ('`+userA+`', 'a@example.com')`,
 		`INSERT INTO monitors (id, tenant_id, project_id, name, config) VALUES

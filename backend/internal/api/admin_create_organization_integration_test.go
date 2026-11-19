@@ -10,6 +10,7 @@ import (
 
 func TestIntegrationAdminCreateOrganization(t *testing.T) {
 	env := pgtest.New(t, pgtest.DBName("apiadmincreateorg"))
+	pgtest.MustExec(t, env.AdminConn(t), pgtest.FreePlanSQL)
 	logs := &lockedBuffer{}
 	c := newAdminServer(t, env, logs)
 	adminCookie, adminCSRF := c.login()
@@ -25,10 +26,10 @@ func TestIntegrationAdminCreateOrganization(t *testing.T) {
 	orgOf := func(r response) string { return r.body["organization"].(map[string]any)["id"].(string) }
 
 	t.Run("an existing account becomes the owner", func(t *testing.T) {
-		r := c.do(http.MethodPost, path, `{"name":"  Platform team ","slug":"platform","planKey":"community","ownerEmail":"alice@alpha.example"}`, ah)
+		r := c.do(http.MethodPost, path, `{"name":"  Platform team ","slug":"platform","planKey":"free","ownerEmail":"alice@alpha.example"}`, ah)
 		org, _ := r.body["organization"].(map[string]any)
 		m, _ := r.body["member"].(map[string]any)
-		if r.code != http.StatusCreated || org["slug"] != "platform" || org["name"] != "Platform team" || org["planKey"] != "community" || org["status"] != "active" ||
+		if r.code != http.StatusCreated || org["slug"] != "platform" || org["name"] != "Platform team" || org["planKey"] != "free" || org["status"] != "active" ||
 			m["userId"] != aliceID || m["role"] != "owner" || r.body["invitation"] != nil || r.body["inviteUrl"] != nil {
 			t.Fatalf("create: %d %s", r.code, r.raw)
 		}
@@ -37,7 +38,7 @@ func TestIntegrationAdminCreateOrganization(t *testing.T) {
 			t.Fatalf("default projects: %d", n)
 		}
 		if n := countRows(t, env, `SELECT count(*) FROM audit_log WHERE action = 'admin.organization.created' AND tenant_id = $1 AND entity_type = 'organization'
-			AND entity_id = $1::text AND actor_user_id = $2 AND ip IS NOT NULL AND metadata = '{"slug":"platform","planKey":"community"}'`, id, adminID); n != 1 {
+			AND entity_id = $1::text AND actor_user_id = $2 AND ip IS NOT NULL AND metadata = '{"slug":"platform","planKey":"free"}'`, id, adminID); n != 1 {
 			t.Fatalf("created audit rows: %d", n)
 		}
 		if n := countRows(t, env, `SELECT count(*) FROM audit_log WHERE action = 'admin.member.added' AND tenant_id = $1`, id); n != 1 {
@@ -56,7 +57,7 @@ func TestIntegrationAdminCreateOrganization(t *testing.T) {
 		inv, _ := r.body["invitation"].(map[string]any)
 		link, _ := r.body["inviteUrl"].(string)
 		_, token, ok := strings.Cut(link, "#")
-		if r.code != http.StatusCreated || !strings.HasPrefix(org["slug"].(string), "t-") || org["planKey"] != "free" || r.body["member"] != nil ||
+		if r.code != http.StatusCreated || !strings.HasPrefix(org["slug"].(string), "t-") || org["planKey"] != "internal" || r.body["member"] != nil ||
 			inv["role"] != "maintainer" || inv["status"] != "open" || !ok || len(token) != 43 {
 			t.Fatalf("create: %d %s", r.code, r.raw)
 		}
@@ -94,10 +95,11 @@ func TestIntegrationAdminCreateOrganization(t *testing.T) {
 	})
 
 	t.Run("an owner that cannot be added removes the organization again", func(t *testing.T) {
+		pgtest.MustExec(t, env.AdminConn(t), pgtest.FreePlanSQL)
 		if _, err := env.AdminConn(t).Exec(t.Context(), `UPDATE plans SET limits = limits || '{"max_members":0}' WHERE key = 'free'`); err != nil {
 			t.Fatal(err)
 		}
-		r := c.do(http.MethodPost, path, `{"name":"Full","slug":"full","ownerEmail":"alice@alpha.example"}`, ah)
+		r := c.do(http.MethodPost, path, `{"name":"Full","slug":"full","planKey":"free","ownerEmail":"alice@alpha.example"}`, ah)
 		if r.code != http.StatusConflict || !strings.Contains(r.raw, "plan-limit-reached") {
 			t.Fatalf("over the limit: %d %s", r.code, r.raw)
 		}

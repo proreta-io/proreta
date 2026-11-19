@@ -55,7 +55,7 @@ export function Metric({
 
 /** Usage against a limit: quiet until 80 %, then it says how much is left. */
 export function Meter({ label, used, limit }: { label: string; used: number; limit: number }) {
-  // No quota (the `community` plan): the count without a bar or a warning.
+  // No quota (the `internal` plan): the count without a bar or a warning.
   if (isUnlimited(limit)) {
     return (
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4 gap-y-2.5 py-3.5">

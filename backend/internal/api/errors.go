@@ -224,7 +224,7 @@ func writeError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 		p.Detail = "Wait for its result, up to three minutes."
 	case errors.Is(err, admin.ErrSystemPlan):
 		p.Type, p.Title, p.Status = problemSystemPlan, "A system plan cannot be deleted", http.StatusConflict
-		p.Detail = "Free, Internal and Community are part of the platform. Edit them instead."
+		p.Detail = "The Internal plan is part of the platform. Edit them instead."
 	case errors.Is(err, admin.ErrPlanInUse):
 		p.Type, p.Title, p.Status = problemPlanInUse, "The plan is in use", http.StatusConflict
 		p.Detail = "Move every organization (deleted ones included) to another plan first."

@@ -19,9 +19,9 @@ func TestIntegrationFeatures(t *testing.T) {
 	admin := env.AdminConn(t)
 	svc := entitlements.NewService(env.Pool(t, env.APIURL, 2))
 	free, community := uuid.New(), uuid.New()
-	pgtest.MustExec(t, admin,
-		`INSERT INTO tenants (id, slug, name) VALUES ('`+free.String()+`', 'free-org', 'Free')`,
-		`INSERT INTO tenants (id, slug, name, plan_key) VALUES ('`+community.String()+`', 'community-org', 'Community', 'community')`)
+	pgtest.MustExec(t, admin, pgtest.FreePlanSQL,
+		`INSERT INTO tenants (id, slug, name, plan_key) VALUES ('`+free.String()+`', 'free-org', 'Free', 'free')`,
+		`INSERT INTO tenants (id, slug, name, plan_key) VALUES ('`+community.String()+`', 'community-org', 'Community', 'internal')`)
 
 	for _, id := range []uuid.UUID{free, community} {
 		got, err := svc.Features(ctx, id)
@@ -30,7 +30,7 @@ func TestIntegrationFeatures(t *testing.T) {
 		}
 	}
 
-	pgtest.MustExec(t, admin, `UPDATE plans SET features = '{sso,audit-export,sso}' WHERE key = 'free'`)
+	pgtest.MustExec(t, admin, pgtest.FreePlanSQL, `UPDATE plans SET features = '{sso,audit-export,sso}' WHERE key = 'free'`)
 	got, err := svc.Features(ctx, free)
 	if err != nil || !slices.Equal(got, []string{"audit-export", "sso"}) {
 		t.Fatalf("features = %v (%v), want [audit-export sso]", got, err)

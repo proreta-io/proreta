@@ -98,6 +98,7 @@ func TestIntegrationBootstrapAdminIdempotent(t *testing.T) {
 	if _, err := admin.Exec(ctx, `UPDATE memberships SET role = 'viewer'`); err != nil {
 		t.Fatal(err)
 	}
+	pgtest.MustExec(t, admin, pgtest.FreePlanSQL)
 	if _, err := admin.Exec(ctx, `UPDATE tenants SET plan_key = 'free'`); err != nil {
 		t.Fatal(err)
 	}

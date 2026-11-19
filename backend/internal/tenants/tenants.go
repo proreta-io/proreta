@@ -32,8 +32,7 @@ const StatusActive = "active"
 var ErrNotFound = errors.New("tenants: not found")
 
 // Ensure returns the tenant with slug, creating it with name if it does not exist. The plan of a
-// new tenant is decided by the database (auth_create_tenant: internal for the default tenant,
-// free otherwise); an existing tenant keeps its plan. Safe to run concurrently from several
+// new tenant is decided by the database (auth_create_tenant: always internal); an existing tenant keeps its plan. Safe to run concurrently from several
 // replicas.
 func Ensure(ctx context.Context, tx pgx.Tx, slug, name string) (Tenant, error) {
 	if _, err := insert(ctx, tx, uuidv7.New(), slug, name); err != nil {
@@ -49,8 +48,7 @@ func Ensure(ctx context.Context, tx pgx.Tx, slug, name string) (Tenant, error) {
 // ErrSlugTaken means another tenant already has the slug; nothing was written.
 var ErrSlugTaken = errors.New("tenants: slug taken")
 
-// Create inserts a new tenant with id (registration). It is on the free plan unless the
-// slug is the default one.
+// Create inserts a new tenant with id (registration). It is on the internal plan.
 func Create(ctx context.Context, tx pgx.Tx, id uuid.UUID, slug, name string) (Tenant, error) {
 	created, err := insert(ctx, tx, id, slug, name)
 	if err != nil {

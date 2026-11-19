@@ -579,6 +579,7 @@ func TestIntegrationMemberQuota(t *testing.T) {
 	env := pgtest.New(t, pgtest.DBName("memberquota"))
 	c := newRegistrationServer(t, env, membersOpts(), true, &lockedBuffer{})
 	oCookie, oCSRF, _ := c.register("owner@example.com")
+	useFreePlan(t, env)
 	owner := withCSRF(oCookie, oCSRF)
 
 	t1, _ := invite(t, c, owner, "member")

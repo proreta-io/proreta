@@ -413,6 +413,7 @@ func TestIntegrationChannelSecretsFollowTheOrganization(t *testing.T) {
 // be filtered by project, and raising max_status_pages is all that allows a second page in a project.
 func TestIntegrationStatusPageLimitIsPerProject(t *testing.T) {
 	w := newProjectWorld(t, "statuspageperproject")
+	useFreePlan(t, w.env)
 	owner := w.hdr("owner")
 	create := func(project string) response {
 		body := `{"slug":"` + nextSlug() + `","title":"t"`

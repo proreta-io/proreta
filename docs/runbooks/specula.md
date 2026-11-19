@@ -161,5 +161,5 @@ Under **Settings → Notification channels** a Slack or webhook channel can subs
 - Going offline opens an incident and notifies; revoking does not (it is deliberate): the incident of a revoked Specula ends and no *back online* message follows. The silence threshold is fixed at 3 minutes and the check runs every minute, so the message comes 3 to 4 minutes after the last call. The incident is not reminded while it stays open.
 - HTTP, HTTPS and TCP checks only.
 - Proreta shows no coverage percentage yet: a partly covered day is computed over the results that exist.
-- The plan limits how many Specula an organization may have (`max_agents`: `free` 1, `internal` 20, `community` unlimited). Revoked ones do not count; at the limit, registering another fails with "plan limit reached" until you revoke one. The operator can override it per organization in `tenants.limits`.
+- The plan limits how many Specula an organization may have (`max_agents`, unlimited on the `internal` plan). Revoked ones do not count; at the limit, registering another fails with "plan limit reached" until you revoke one. The operator can override it per organization in `tenants.limits`.
 - A token has no expiry; rotate by registering a new Specula and revoking the old one.

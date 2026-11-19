@@ -388,7 +388,7 @@ tenants.5 limits jsonb not null default '{}'::jsonb
 tenants.6 created_at timestamp with time zone not null default now()
 tenants.7 updated_at timestamp with time zone not null default now() acl=proreta_api=w/proreta_owner
 tenants.8 deleted_at timestamp with time zone
-tenants.9 plan_key text not null default 'free'::text
+tenants.9 plan_key text not null default 'internal'::text
 users.1 id uuid not null acl=proreta_api=a/proreta_owner
 users.2 email citext not null acl=proreta_api=aw/proreta_owner
 users.3 password_hash text acl=proreta_api=aw/proreta_owner
@@ -2028,7 +2028,7 @@ CREATE OR REPLACE FUNCTION public.auth_create_tenant(p_id uuid, p_slug text, p_n
  SET search_path TO 'public', 'pg_temp'
 AS $function$
     INSERT INTO tenants (id, slug, name, plan_key)
-    VALUES (p_id, p_slug, p_name, CASE WHEN p_slug = 'default' THEN 'internal' ELSE 'free' END)
+    VALUES (p_id, p_slug, p_name, 'internal')
     ON CONFLICT (slug) DO NOTHING
     RETURNING id
 $function$

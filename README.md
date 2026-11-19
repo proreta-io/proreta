@@ -9,7 +9,7 @@ Proreta is a multi-tenant uptime-monitoring service you can run yourself.
 - **Status pages:** public, optionally password-protected pages per organization, with an RSS feed, optionally on the customer's own domain ([docs](docs/runbooks/custom-domains.md)).
 - **Organizations, projects and roles:** owners, maintainers, members and viewers on the organization and on each project (a project role raises an organization role inside that project); people can belong to an organization only through projects; projects scope monitors and channels; invitations by link. See [docs/roles.md](docs/roles.md).
 - **Sign-in:** password, Google and GitHub (OAuth), with optional Google Workspace domain auto-join.
-- **Platform admin panel:** organizations, plans and limits, suspension, users, Specula executors, email settings, password resets ([docs](docs/runbooks/admin-panel.md)).
+- **Platform admin panel:** organizations, plans and limits, suspension, users, Specula executors, email settings, password resets ([docs](docs/runbooks/admin-panel.md)). A self-hosted installation has one plan, `internal`, with no limits and every feature.
 
 ## Releases
 

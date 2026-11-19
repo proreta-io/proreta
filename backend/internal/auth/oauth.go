@@ -371,7 +371,7 @@ func (s *Service) oauthJoinDomain(ctx context.Context, in OAuthLoginInput, tenan
 	return res, oauthTxErr(tenantID, nil, err)
 }
 
-// oauthRegister creates a new organization on the free plan with the user as its owner, like
+// oauthRegister creates a new organization on the internal plan with the user as its owner, like
 // password registration, when registration is open.
 func (s *Service) oauthRegister(ctx context.Context, in OAuthLoginInput) (LoginResult, error) {
 	for attempt := 1; ; attempt++ {

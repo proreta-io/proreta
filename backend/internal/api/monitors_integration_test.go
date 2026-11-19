@@ -206,7 +206,7 @@ func TestIntegrationMonitorPlanLimitUnderConcurrency(t *testing.T) {
 	c := newServer(t, env, auth.Options{})
 	cookie, csrf := c.login()
 	// The free plan allows 3 monitors (the default tenant is on internal).
-	pgtest.MustExec(t, env.AdminConn(t), `UPDATE tenants SET plan_key = 'free' WHERE slug = 'default'`)
+	pgtest.MustExec(t, env.AdminConn(t), pgtest.FreePlanSQL, `UPDATE tenants SET plan_key = 'free' WHERE slug = 'default'`)
 	const limit = 3
 
 	const n = 20

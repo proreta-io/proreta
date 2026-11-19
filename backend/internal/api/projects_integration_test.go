@@ -181,6 +181,7 @@ func (w *projectWorld) names(t *testing.T, path string, hdr map[string]string, f
 func TestIntegrationProjectsLifecycle(t *testing.T) {
 	w := newProjectWorld(t, "projectlife")
 	c := w.c
+	pgtest.MustExec(t, w.env.AdminConn(t), `UPDATE tenants SET limits = '{"max_projects": 50}'`)
 	owner := w.sessions[authz.Owner]
 	admin := w.sessions[authz.Maintainer]
 

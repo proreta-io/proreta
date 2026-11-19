@@ -421,6 +421,7 @@ func TestIntegrationProjectOnlyCountsAgainstMembers(t *testing.T) {
 	env := pgtest.New(t, pgtest.DBName("projectonlyquota"))
 	c := newRegistrationServer(t, env, membersOpts(), true, &lockedBuffer{})
 	oCookie, oCSRF, _ := c.register("owner@example.com")
+	useFreePlan(t, env)
 	owner := withCSRF(oCookie, oCSRF)
 
 	tok, _ := invite(t, c, owner, "viewer")

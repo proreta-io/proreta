@@ -335,7 +335,7 @@ func TestIntegrationHeartbeatTenantsAndQuota(t *testing.T) {
 
 	// The free plan: one heartbeat, separate from the three monitors; concurrent creates cannot
 	// overshoot it.
-	pgtest.MustExec(t, f.admin, `UPDATE tenants SET plan_key = 'free' WHERE id = '`+tenantB+`'`)
+	pgtest.MustExec(t, f.admin, pgtest.FreePlanSQL, `UPDATE tenants SET plan_key = 'free' WHERE id = '`+tenantB+`'`)
 	f.actor.TenantID = uuid.MustParse(tenantB)
 	if _, err := f.api.Create(f.ctx, f.actor, monitors.CreateInput{Type: monitors.TypeHeartbeat, Name: "second", Heartbeat: &monitors.HeartbeatSettings{}}); !isLimit(err, plans.ResourceHeartbeat, 1) {
 		t.Fatalf("second heartbeat on free: %v", err)

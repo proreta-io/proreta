@@ -242,7 +242,7 @@ function OrganizationInfo({ organization }: { organization: AdminOrganization })
         <form onSubmit={onSavePlan} className="flex max-w-[560px] flex-col gap-2">
           <Field
             label="Plan"
-            hint="Existing monitors are kept when the new plan allows fewer; only new ones are refused. Community removes all quotas."
+            hint="Existing monitors are kept when the new plan allows fewer; only new ones are refused. The Internal plan has no quotas."
             error={planError}
           >
             {(c) => (

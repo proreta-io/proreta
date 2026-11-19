@@ -112,6 +112,7 @@ func TestIntegrationAdminOrganizationSettings(t *testing.T) {
 	})
 
 	t.Run("specula", func(t *testing.T) {
+		useFreePlan(t, env)
 		r := c.do(http.MethodPost, base+"/specula", `{"name":"Prod cluster"}`, ah)
 		token, _ := r.body["token"].(string)
 		sp, _ := r.body["specula"].(map[string]any)

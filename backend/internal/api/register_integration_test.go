@@ -156,14 +156,14 @@ func TestIntegrationRegister(t *testing.T) {
 	tenantID, _ := tenant["id"].(string)
 	userID, _ := user["id"].(string)
 
-	// Rows: the tenant on free, the user with an argon2id hash, the owner membership, one session.
+	// Rows: the tenant on internal, the user with an argon2id hash, the owner membership, one session.
 	var plan, email, hash, role string
 	if err := admin.QueryRow(ctx, `SELECT t.plan_key, u.email::text, u.password_hash, m.role FROM tenants t
 		JOIN memberships m ON m.tenant_id = t.id JOIN users u ON u.id = m.user_id WHERE t.id = $1 AND u.id = $2`, tenantID, userID).
 		Scan(&plan, &email, &hash, &role); err != nil {
 		t.Fatal(err)
 	}
-	if plan != "free" || email != "owner+ops@example.com" || !strings.HasPrefix(hash, "$argon2id$") || role != "owner" {
+	if plan != "internal" || email != "owner+ops@example.com" || !strings.HasPrefix(hash, "$argon2id$") || role != "owner" {
 		t.Fatalf("rows: plan=%s email=%s hash=%.10s role=%s", plan, email, hash, role)
 	}
 	if n := countRows(t, env, `SELECT count(*) FROM sessions WHERE tenant_id = $1 AND user_id = $2`, tenantID, userID); n != 1 {
@@ -179,13 +179,13 @@ func TestIntegrationRegister(t *testing.T) {
 		t.Fatalf("audit: %s %s %s %s %s", action, actor, entity, meta, ip)
 	}
 
-	// The session works: me, usage on the free plan, an empty monitor list, a monitor create.
+	// The session works: me, usage on the internal plan, an empty monitor list, a monitor create.
 	if me := c.do(http.MethodGet, "/api/v1/auth/me", "", cookie); me.code != http.StatusOK || me.body["csrfToken"] != csrf ||
 		!strings.Contains(me.raw, `"login":"owner+ops@example.com"`) {
 		t.Fatalf("me: %d %s", me.code, me.raw)
 	}
 	if u := c.do(http.MethodGet, "/api/v1/usage", "", cookie); u.code != http.StatusOK ||
-		u.raw != `{"limits":{"channels":1,"heartbeats":1,"members":3,"monitors":3,"projects":50,"specula":1,"statusPageDomains":0,"statusPages":1},"plan":{"key":"free","name":"Free"},"usage":{"channels":0,"heartbeats":0,"members":1,"monitors":0,"projects":1,"specula":0,"statusPageDomains":0,"statusPages":0}}`+"\n" {
+		u.raw != `{"limits":{"channels":2147483647,"heartbeats":2147483647,"members":2147483647,"monitors":2147483647,"projects":2147483647,"specula":2147483647,"statusPageDomains":2147483647,"statusPages":2147483647},"plan":{"key":"internal","name":"Internal"},"usage":{"channels":0,"heartbeats":0,"members":1,"monitors":0,"projects":1,"specula":0,"statusPageDomains":0,"statusPages":0}}`+"\n" {
 		t.Fatalf("usage: %d %s", u.code, u.raw)
 	}
 	if l := c.do(http.MethodGet, "/api/v1/monitors", "", cookie); l.code != http.StatusOK || !strings.Contains(l.raw, `"items":[]`) {
@@ -301,8 +301,8 @@ func TestIntegrationRegisterPolicy(t *testing.T) {
 			t.Errorf("edge case %d: %d %s", i, r.code, r.raw)
 		}
 	}
-	if n := countRows(t, env, `SELECT count(*) FROM tenants WHERE plan_key = 'free'`); n != 3 {
-		t.Fatalf("free tenants = %d, want 3", n)
+	if n := countRows(t, env, `SELECT count(*) FROM tenants WHERE plan_key = 'internal' AND slug <> 'default'`); n != 3 {
+		t.Fatalf("internal tenants = %d, want 3", n)
 	}
 }
 

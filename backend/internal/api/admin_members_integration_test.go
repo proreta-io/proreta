@@ -33,6 +33,7 @@ func TestIntegrationAdminMembers(t *testing.T) {
 	_, _, regC := c.register("carol@gamma.example")
 	carolID := regC.body["user"].(map[string]any)["id"].(string)
 	_, _, regD := c.register("dave@delta.example")
+	useFreePlan(t, env)
 	daveID := regD.body["user"].(map[string]any)["id"].(string)
 
 	var adminID, defaultOrg string

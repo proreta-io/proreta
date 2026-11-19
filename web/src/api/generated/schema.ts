@@ -81,7 +81,7 @@ export interface paths {
     put?: never;
     /**
      * Register a new account and workspace
-     * @description Self-service registration. Creates an organization on the `free` plan, the user as its
+     * @description Self-service registration. Creates an organization on the `internal` plan, the user as its
      *     `owner` and a session, sets the session cookie and answers like login (the user is
      *     logged in). When the platform admin turned address verification on
      *     (`emailVerificationEnabled`), a verification email for the address is queued in the same
@@ -1499,7 +1499,7 @@ export interface paths {
      *     project may show only monitors of that project; an organization-level page may show
      *     monitors of every project. A project the caller does not see is 422 on `projectId`. The page starts unpublished and without components. `slug` is global
      *     (shared by every organization) and public; a slug in use is 409
-     *     `urn:proreta:problem:slug-taken`, a reserved word is 422. The plan limit (1 on Free) counts
+     *     `urn:proreta:problem:slug-taken`, a reserved word is 422. The plan limit counts
      *     the pages of one project, and separately the organization-level pages (no `projectId`), so
      *     every project can have its own page; a scope that is full answers 409
      *     `urn:proreta:problem:plan-limit-reached` (`limit` is `statusPages`, `detail` names the scope).
@@ -1857,7 +1857,7 @@ export interface paths {
      *     logged or audited) and the platform admin promotes the person to owner after they joined. `slug` is optional (1 to 63 lowercase
      *     letters, digits and hyphens, not starting with a hyphen; `default` is reserved) and random
      *     when omitted; a slug in use, a deleted organization's included, is 409
-     *     `urn:proreta:problem:slug-taken`. `planKey` is optional (`free` when omitted) and may be
+     *     `urn:proreta:problem:slug-taken`. `planKey` is optional (`internal` when omitted) and may be
      *     any existing plan (422 when unknown). The plan's member limit applies to the owner (409
      *     `urn:proreta:problem:plan-limit-reached`); when the owner cannot be added, nothing is left
      *     behind. Audited in the new organization as `admin.organization.created` (slug and plan),
@@ -2164,7 +2164,7 @@ export interface paths {
      * Plans with their limits
      * @description Every plan: key, name, the limits every organization on it gets (`2147483647` is
      *     unlimited), the number of organizations on it that are not deleted, whether it is a system
-     *     plan (`free`, `internal`, `community`: seeded, never deleted) and whether it can be deleted
+     *     plan (`internal`: seeded, never deleted) and whether it can be deleted
      *     now. System plans come first, then custom plans oldest first. Platform admins only.
      */
     get: operations["adminListPlans"];
@@ -3649,7 +3649,7 @@ export interface components {
       name: string;
       /** @description Optional; random when omitted */
       slug?: string;
-      /** @description Optional; `free` when omitted */
+      /** @description Optional; `internal` when omitted */
       planKey?: string;
       /** @description The first owner. An existing account becomes the owner, otherwise a maintainer invitation link is returned. */
       ownerEmail: string;
@@ -3780,7 +3780,7 @@ export interface components {
       key: string;
       name: string;
       limits: components["schemas"]["ResourceCounts"];
-      /** @description A seeded plan (`free`, `internal`, `community`); it can be edited, never deleted */
+      /** @description The seeded plan (`internal`); it can be edited, never deleted */
       system: boolean;
       /** @description Organizations on the plan that are not deleted */
       organizations: number;
@@ -4564,7 +4564,7 @@ export interface components {
      *     | `urn:proreta:problem:email-taken` | 409 | The email is already registered |
      *     | `urn:proreta:problem:email-settings-conflict` | 409 | The email settings do not allow this now: no server configured, no successful test of the current settings, or a test already pending |
      *     | `urn:proreta:problem:plan-limit-reached` | 409 | The plan allows no more of a resource; carries `limit` and `max` |
-     *     | `urn:proreta:problem:system-plan` | 409 | A seeded plan (Free, Internal, Community) cannot be deleted |
+     *     | `urn:proreta:problem:system-plan` | 409 | The seeded plan (Internal) cannot be deleted |
      *     | `urn:proreta:problem:plan-in-use` | 409 | An organization, a deleted one too, is still on the plan |
      *     | `urn:proreta:problem:protected-organization` | 409 | The default organization, or the admin's own, cannot be suspended or deleted |
      *     | `urn:proreta:problem:organization-deleted` | 409 | A deleted organization cannot be changed |

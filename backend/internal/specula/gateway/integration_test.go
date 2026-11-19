@@ -208,8 +208,7 @@ func TestIntegrationGateway(t *testing.T) {
 		// latency 7 stands in for any permanent database error (here a check violation).
 		pgtest.MustExec(t, admin, `CREATE FUNCTION refuse_seven() RETURNS trigger LANGUAGE plpgsql AS $$
 			BEGIN IF NEW.latency_ms = 7 THEN RAISE EXCEPTION 'refused' USING ERRCODE = '23514'; END IF; RETURN NEW; END $$`,
-			`CREATE TRIGGER refuse_seven BEFORE INSERT ON check_results FOR EACH ROW EXECUTE FUNCTION refuse_seven()`,
-			`UPDATE tenants SET plan_key = 'community' WHERE id = '`+tenantA+`'`)
+			`CREATE TRIGGER refuse_seven BEFORE INSERT ON check_results FOR EACH ROW EXECUTE FUNCTION refuse_seven()`)
 		now := time.Now().UTC()
 		var batch []wire.Result
 		var ids []uuid.UUID

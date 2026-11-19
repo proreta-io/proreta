@@ -20,13 +20,9 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/tenants"
 )
 
-// Seeded plan keys. New tenants get KeyFree (the tenants.plan_key default); KeyCommunity has no
-// quotas and is the self-hosted default of the later packaging task.
-const (
-	KeyFree      = "free"
-	KeyInternal  = "internal"
-	KeyCommunity = "community"
-)
+// KeyInternal is the only seeded plan: no quotas. Every new tenant starts on it (the
+// tenants.plan_key default).
+const KeyInternal = "internal"
 
 // Unlimited is the limit of a resource without a quota: the largest value a limit may hold.
 const Unlimited = math.MaxInt32
@@ -83,7 +79,7 @@ type Limits struct {
 	MaxProjects    int
 	MaxStatusPages int
 	MaxAgents      int
-	// MaxStatusPageDomains is the limit of custom domains of status pages (0 on Free).
+	// MaxStatusPageDomains is the limit of custom domains of status pages (0 forbids custom domains).
 	MaxStatusPageDomains int
 }
 

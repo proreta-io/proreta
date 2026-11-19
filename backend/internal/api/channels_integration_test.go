@@ -328,7 +328,7 @@ func TestIntegrationChannelQuota(t *testing.T) {
 		return c.do(http.MethodPost, "/api/v1/channels", `{"name":"ops","webhookUrl":"`+slackURL+`"}`, unsafe)
 	}
 
-	pgtest.MustExec(t, admin, `UPDATE tenants SET plan_key = 'free', limits = '{"max_channels": 0}' WHERE slug = 'default'`)
+	pgtest.MustExec(t, admin, pgtest.FreePlanSQL, `UPDATE tenants SET plan_key = 'free', limits = '{"max_channels": 0}' WHERE slug = 'default'`)
 	r := create()
 	if r.code != http.StatusConflict || r.body["type"] != "urn:proreta:problem:plan-limit-reached" ||
 		r.body["limit"] != "channels" || r.body["max"] != float64(0) || r.body["detail"] != "The Free plan allows at most 0 channels." {

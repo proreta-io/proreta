@@ -38,7 +38,7 @@ func TestIntegrationLastUsedOrganization(t *testing.T) {
 	if me := meOf(t, c, a); me.code != http.StatusOK || me.raw == "" || len(me.body["features"].([]any)) != 0 {
 		t.Fatalf("features of a free organization: %d %s", me.code, me.raw)
 	}
-	pgtest.MustExec(t, env.AdminConn(t), `UPDATE plans SET features = '{sso,audit-export}' WHERE key = 'free'`)
+	pgtest.MustExec(t, env.AdminConn(t), `UPDATE plans SET features = '{sso,audit-export}' WHERE key = 'internal'`)
 	if me := meOf(t, c, a); len(me.body["features"].([]any)) != 2 || me.body["features"].([]any)[0] != "audit-export" {
 		t.Fatalf("features: %s", me.raw)
 	}

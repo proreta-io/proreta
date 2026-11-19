@@ -1,6 +1,6 @@
 /**
  * A limit without a quota: the largest value a limit may hold (plans.Unlimited in the backend,
- * the `community` plan). Never shown as a number.
+ * the seeded `internal` plan). Never shown as a number.
  */
 export const UNLIMITED = 2147483647;
 
