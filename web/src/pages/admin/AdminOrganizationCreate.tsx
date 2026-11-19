@@ -37,7 +37,7 @@ export default function AdminOrganizationCreate() {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
-  const [planKey, setPlanKey] = useState("free");
+  const [planKey, setPlanKey] = useState("internal");
   const [ownerEmail, setOwnerEmail] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | undefined>();
@@ -62,7 +62,7 @@ export default function AdminOrganizationCreate() {
       });
       setName("");
       setSlug("");
-      setPlanKey("free");
+      setPlanKey("internal");
       setOwnerEmail("");
       create.reset();
       void queryClient.invalidateQueries({ queryKey: ["admin"] });
@@ -171,7 +171,7 @@ export default function AdminOrganizationCreate() {
             <Field label="Plan" error={fieldErrors.planKey}>
               {(c) => (
                 <Select {...c} value={planKey} onChange={(e) => setPlanKey(e.target.value)}>
-                  {(plans.data?.items ?? [{ key: "free", name: "Free" }]).map((p) => (
+                  {(plans.data?.items ?? [{ key: "internal", name: "Internal" }]).map((p) => (
                     <option key={p.key} value={p.key}>
                       {p.name}
                     </option>

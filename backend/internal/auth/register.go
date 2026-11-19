@@ -57,7 +57,7 @@ type RegisterInput struct {
 	DisplayName string
 }
 
-// Register creates a tenant on the free plan, the user as its owner, an audit row and a session
+// Register creates a tenant on the internal plan, the user as its owner, an audit row and a session
 // in one transaction, and returns the session like Login. A duplicate email (also under
 // concurrency, decided by the unique constraint) rolls everything back and returns
 // ErrEmailTaken. Policy failures are *validation.Error. Each attempt that reaches the password

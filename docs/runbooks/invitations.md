@@ -50,7 +50,7 @@ With an address the same link is also sent by email, from the sender configured 
 - Limits: 30 invitation emails per organization per hour and 3 per recipient address per day (per api replica); beyond them the API answers 429 with `Retry-After`. Open invitations also count toward the plan's member limit.
 - Without a tested mail server the dialog shows neither field nor checkbox, and the API refuses a request that asks for an email with 422, rather than pretend it sent one. The API's `sendEmail` flag (optional, default: send when an `email` is given) lets a client keep the address out without sending.
 
-A link works once and for 7 days. Open invitations count toward the plan's member limit (`max_members`: `free` 3, `internal` 50) until they are used, revoked or expire, so revoke the ones nobody will use.
+A link works once and for 7 days. Open invitations count toward the plan's member limit (`max_members`, unlimited on the `internal` plan) until they are used, revoked or expire, so revoke the ones nobody will use.
 
 ### When nobody in the organization can invite
 The platform admin can invite people, add an existing account, change roles and remove members from **Admin → Organizations → (the organization)**, without being a member; see "Add a person to an organization" in [the admin panel runbook](admin-panel.md). Those changes are audited as `admin.invitation.created`, `admin.invitation.revoked`, `admin.member.added`, `admin.member.role_changed` and `admin.member.removed`, in place of the `member.*` names above.

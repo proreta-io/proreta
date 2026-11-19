@@ -17,7 +17,7 @@ The response shows the ping URL once, in `heartbeat.pingUrl`:
 https://proreta.example.com/api/v1/heartbeat/<token>
 ```
 
-Copy it now. Only a hash of the token is stored, so Proreta cannot show it again; if it is lost, regenerate it (section 5). The free plan includes one heartbeat; it does not count against the HTTPS monitors.
+Copy it now. Only a hash of the token is stored, so Proreta cannot show it again; if it is lost, regenerate it (section 5). Heartbeats have their own plan limit (`max_heartbeats`) and do not count against the HTTPS monitors.
 
 ## 2. Configure Alertmanager
 The URL is a secret: anybody who has it can keep the heartbeat green. Keep it out of Git and out of the main configuration: put it in a file (from a Kubernetes Secret, Vault and so on) and reference it with the webhook receiver's `url_file` (available in current Alertmanager releases; on an old one, keep the whole configuration file in a Secret instead).

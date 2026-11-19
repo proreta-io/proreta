@@ -24,7 +24,7 @@ A monitor can check that a host accepts connections on a port, from Proreta's cl
 ### Platform admin panel
 - Create an organization from the panel, with its owner's email.
 - Manage every setting of an organization from its page: plan and usage, Google Workspace sign-in domains, channels and status pages (read-only), Specula executors (register, rename, share, revoke).
-- Create, edit and delete plans under **Admin → Plans**; the plan `internal` may use status page domains.
+- Create, edit and delete plans under **Admin → Plans**; a self-hosted installation has one seeded plan, `internal`, with no limits and every feature.
 - A data retention setting, a list of all status page domains with an abuse switch, and one place per person for their roles in every project.
 - Details: [admin panel runbook](../runbooks/admin-panel.md).
 

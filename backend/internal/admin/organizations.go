@@ -11,6 +11,7 @@ import (
 
 	"github.com/proreta-io/proreta/backend/internal/auth"
 	"github.com/proreta-io/proreta/backend/internal/authz"
+	"github.com/proreta-io/proreta/backend/internal/plans"
 	"github.com/proreta-io/proreta/backend/internal/platform/db"
 	"github.com/proreta-io/proreta/backend/internal/platform/uuidv7"
 	"github.com/proreta-io/proreta/backend/internal/platform/validation"
@@ -59,7 +60,7 @@ func (s *Service) CreateTenant(ctx context.Context, actor Actor, in TenantCreate
 			verr.Add("slug", msg)
 		}
 	}
-	plan := "free"
+	plan := plans.KeyInternal
 	if in.PlanKey != nil {
 		if plan = *in.PlanKey; plan == "" {
 			verr.Add("planKey", "must not be empty")

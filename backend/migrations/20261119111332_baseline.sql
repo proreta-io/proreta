@@ -179,7 +179,7 @@ CREATE TABLE tenants (
     created_at timestamptz DEFAULT now() NOT NULL,
     updated_at timestamptz DEFAULT now() NOT NULL,
     deleted_at timestamptz,
-    plan_key text DEFAULT 'free'::text NOT NULL,
+    plan_key text DEFAULT 'internal'::text NOT NULL,
     CONSTRAINT tenants_limits_is_object CHECK ((jsonb_typeof(limits) = 'object'::text)),
     CONSTRAINT tenants_name_check CHECK (((length(name) >= 1) AND (length(name) <= 200))),
     CONSTRAINT tenants_slug_check CHECK ((slug ~ '^[a-z0-9][a-z0-9-]{0,62}$'::text)),
@@ -269,7 +269,7 @@ CREATE FUNCTION auth_create_tenant(p_id uuid, p_slug text, p_name text) RETURNS 
     SET search_path TO 'public', 'pg_temp'
     AS $$
     INSERT INTO tenants (id, slug, name, plan_key)
-    VALUES (p_id, p_slug, p_name, CASE WHEN p_slug = 'default' THEN 'internal' ELSE 'free' END)
+    VALUES (p_id, p_slug, p_name, 'internal')
     ON CONFLICT (slug) DO NOTHING
     RETURNING id
 $$;
@@ -4486,15 +4486,11 @@ GRANT SELECT ON goose_db_version TO proreta_api, proreta_worker;
 INSERT INTO probe_locations (id, code, name, provider, region, kind)
 VALUES ('01920000-0000-7000-8000-000000000001', 'default', 'Default', 'self-hosted', 'default', 'platform');
 
--- New tenants get free (tenants.plan_key default), the default tenant gets internal
--- (auth_create_tenant), and community is the self-hosted plan without quotas. All three are
--- system plans: the admin panel can edit their limits but not delete them.
+-- The only seeded plan: no quotas (every limit is the largest value a limit may hold). Every
+-- tenant starts on it (tenants.plan_key default and auth_create_tenant). It is a system plan: the
+-- admin panel can edit its limits but not delete it. Other plans are created in the admin panel.
 INSERT INTO plans (key, name, limits, is_system) VALUES
-    ('free', 'Free', '{"max_monitors": 3, "max_heartbeats": 1, "max_channels": 1, "max_members": 3,
-      "max_projects": 50, "max_status_pages": 1, "max_status_page_domains": 0, "max_agents": 1}', true),
-    ('internal', 'Internal', '{"max_monitors": 1000, "max_heartbeats": 100, "max_channels": 10, "max_members": 50,
-      "max_projects": 50, "max_status_pages": 1, "max_status_page_domains": 2147483647, "max_agents": 20}', true),
-    ('community', 'Community', '{"max_monitors": 2147483647, "max_heartbeats": 2147483647, "max_channels": 2147483647,
+    ('internal', 'Internal', '{"max_monitors": 2147483647, "max_heartbeats": 2147483647, "max_channels": 2147483647,
       "max_members": 2147483647, "max_projects": 2147483647, "max_status_pages": 2147483647,
       "max_status_page_domains": 2147483647, "max_agents": 2147483647}', true);
 

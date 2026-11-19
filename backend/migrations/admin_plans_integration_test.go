@@ -32,24 +32,24 @@ func TestIntegrationAdminPlans(t *testing.T) {
 		return n
 	}
 
-	if n := count(`SELECT count(*) FROM plans WHERE is_system = (key IN ('free', 'internal', 'community'))`); n != 3 {
+	if n := count(`SELECT count(*) FROM plans WHERE is_system <> (key = 'internal')`); n != 0 {
 		t.Fatal("exactly the seeded plans must be system plans")
 	}
 
 	t.Run("non-admin refused", func(t *testing.T) {
 		for _, stmt := range []string{
 			`SELECT * FROM admin_plans_list($1)`,
-			`SELECT admin_plan_peak_usage($1, 'free')`,
+			`SELECT admin_plan_peak_usage($1, 'internal')`,
 			`SELECT admin_plan_create($1, 'x', 'X', '` + goodLimits + `', gen_random_uuid(), NULL)`,
-			`SELECT admin_plan_update($1, 'free', 'Free', '` + goodLimits + `', gen_random_uuid(), NULL)`,
-			`SELECT admin_plan_delete($1, 'free', gen_random_uuid(), NULL)`,
+			`SELECT admin_plan_update($1, 'internal', 'Free', '` + goodLimits + `', gen_random_uuid(), NULL)`,
+			`SELECT admin_plan_delete($1, 'internal', gen_random_uuid(), NULL)`,
 		} {
 			if got := exec(stmt, userOwnerA); got != "PRA01" {
 				t.Errorf("%s: state %q, want PRA01", stmt, got)
 			}
 		}
-		if n := count(`SELECT count(*) FROM plans`); n != 3 {
-			t.Fatalf("plans = %d, want 3", n)
+		if n := count(`SELECT count(*) FROM plans`); n != 2 {
+			t.Fatalf("plans = %d, want 2", n)
 		}
 	})
 
@@ -82,7 +82,7 @@ func TestIntegrationAdminPlans(t *testing.T) {
 				t.Errorf("create(%q, %q, %s): state %q, want %s", c.key, c.name, c.limits, got, c.state)
 			}
 		}
-		if n := count(`SELECT count(*) FROM plans`); n != 3 {
+		if n := count(`SELECT count(*) FROM plans`); n != 2 {
 			t.Fatalf("a refused create left plans = %d", n)
 		}
 	})
@@ -121,17 +121,17 @@ func TestIntegrationAdminPlans(t *testing.T) {
 			t.Fatalf("updated audit rows = %d, want 1 (the no-op wrote none)", n)
 		}
 		// A system plan can be renamed and its limits changed; the key stays.
-		if ch, st := update("free", "Starter", goodLimits); !ch || st != "" {
+		if ch, st := update("internal", "Starter", goodLimits); !ch || st != "" {
 			t.Fatalf("update system plan: changed %v, state %q", ch, st)
 		}
-		if n := count(`SELECT count(*) FROM plans WHERE key = 'free' AND name = 'Starter' AND is_system AND limits ->> 'max_monitors' = '5'`); n != 1 {
+		if n := count(`SELECT count(*) FROM plans WHERE key = 'internal' AND name = 'Starter' AND is_system AND limits ->> 'max_monitors' = '5'`); n != 1 {
 			t.Fatal("system plan not updated")
 		}
 
 		del := func(key string) string {
 			return exec(`SELECT admin_plan_delete($1, $2, gen_random_uuid(), NULL)`, userPlatform, key)
 		}
-		for key, want := range map[string]string{"free": "PRA33", "internal": "PRA33", "community": "PRA33", "nope": "PRA02"} {
+		for key, want := range map[string]string{"internal": "PRA33", "nope": "PRA02"} {
 			if got := del(key); got != want {
 				t.Errorf("delete %s: %q, want %s", key, got, want)
 			}
@@ -150,7 +150,7 @@ func TestIntegrationAdminPlans(t *testing.T) {
 		if err := api.QueryRow(ctx, `SELECT organizations, deletable FROM admin_plans_list($1) WHERE key = 'gold'`, userPlatform).Scan(&orgs, &deletable); err != nil || orgs != 0 || deletable {
 			t.Fatalf("list: organizations %d, deletable %v, err %v; want 0, false", orgs, deletable, err)
 		}
-		pgtest.MustExec(t, admin, `UPDATE tenants SET plan_key = 'free' WHERE id = '`+tenantB+`'`)
+		pgtest.MustExec(t, admin, `UPDATE tenants SET plan_key = 'internal' WHERE id = '`+tenantB+`'`)
 		if got := del("gold"); got != "" {
 			t.Fatalf("delete: %q", got)
 		}
@@ -168,7 +168,7 @@ func TestIntegrationAdminPlans(t *testing.T) {
 			FROM admin_plan_peak_usage($1, 'free') AS u`, userPlatform).Scan(&monitors, &heartbeats, &members); err != nil {
 			t.Fatal(err)
 		}
-		// Tenant A (free) holds what seedPlatform made: 2 live http monitors, 1 heartbeat, 1 member.
+		// Tenant A (internal) holds what seedPlatform made: 2 live http monitors, 1 heartbeat, 1 member.
 		if monitors != 2 || heartbeats != 1 || members != 1 {
 			t.Fatalf("peak = monitors %d, heartbeats %d, members %d; want 2, 1, 1", monitors, heartbeats, members)
 		}

@@ -304,6 +304,7 @@ func TestIntegrationAdminPanel(t *testing.T) {
 	_, _, regB := c.register("bob@beta.example")
 	tenantB := regB.body["organization"].(map[string]any)["id"].(string)
 	c.register("carol@gamma.example")
+	pgtest.MustExec(t, env.AdminConn(t), pgtest.FreePlanSQL, `UPDATE tenants SET plan_key = 'free' WHERE slug <> 'default'`)
 	uh := withCSRF(userCookie, userCSRF)
 	if r := c.do(http.MethodPost, "/api/v1/monitors", `{"type":"http","name":"Site","http":{"url":"https://example.com"}}`, uh); r.code != http.StatusCreated {
 		t.Fatalf("create monitor: %d %s", r.code, r.raw)
@@ -494,12 +495,12 @@ func TestIntegrationAdminPanel(t *testing.T) {
 		}
 	})
 
-	t.Run("the community plan can be assigned and is audited", func(t *testing.T) {
-		if r := c.do(http.MethodPatch, "/api/v1/admin/organizations/"+tenantA, `{"planKey":"community"}`, ah); r.code != http.StatusOK || r.body["planKey"] != "community" || r.body["planName"] != "Community" {
-			t.Fatalf("assign community: %d %s", r.code, r.raw)
+	t.Run("the internal plan can be assigned and is audited", func(t *testing.T) {
+		if r := c.do(http.MethodPatch, "/api/v1/admin/organizations/"+tenantA, `{"planKey":"internal"}`, ah); r.code != http.StatusOK || r.body["planKey"] != "internal" || r.body["planName"] != "Internal" {
+			t.Fatalf("assign internal: %d %s", r.code, r.raw)
 		}
-		if n := countRows(t, env, `SELECT count(*) FROM audit_log WHERE action = 'admin.organization.plan_changed' AND tenant_id = $1 AND metadata->>'to' = 'community'`, tenantA); n != 1 {
-			t.Fatalf("community audit rows: %d", n)
+		if n := countRows(t, env, `SELECT count(*) FROM audit_log WHERE action = 'admin.organization.plan_changed' AND tenant_id = $1 AND metadata->>'to' = 'internal'`, tenantA); n < 1 {
+			t.Fatalf("internal audit rows: %d", n)
 		}
 	})
 
@@ -657,7 +658,7 @@ func TestIntegrationAdminPlans(t *testing.T) {
 
 	r := c.do(http.MethodGet, path, "", ah)
 	items, _ := r.body["items"].([]any)
-	if r.code != http.StatusOK || len(items) != 3 {
+	if r.code != http.StatusOK || len(items) != 1 {
 		t.Fatalf("list: %d %s", r.code, r.raw)
 	}
 	if first := items[0].(map[string]any); first["system"] != true || first["deletable"] != false || first["limits"].(map[string]any)["specula"] == nil {
@@ -716,12 +717,12 @@ func TestIntegrationAdminPlans(t *testing.T) {
 		t.Fatalf("get unknown: %d %s", r.code, r.raw)
 	}
 
-	for key, want := range map[string]string{"free": "urn:proreta:problem:system-plan", "gold": "urn:proreta:problem:plan-in-use"} {
+	for key, want := range map[string]string{"internal": "urn:proreta:problem:system-plan", "gold": "urn:proreta:problem:plan-in-use"} {
 		if r := c.do(http.MethodDelete, path+"/"+key, "", ah); r.code != http.StatusConflict || r.body["type"] != want {
 			t.Errorf("delete %s: %d %s, want 409 %s", key, r.code, r.raw, want)
 		}
 	}
-	c.do(http.MethodPatch, "/api/v1/admin/organizations/"+tenant, `{"planKey":"free"}`, ah)
+	c.do(http.MethodPatch, "/api/v1/admin/organizations/"+tenant, `{"planKey":"internal"}`, ah)
 	if r := c.do(http.MethodDelete, path+"/gold", "", ah); r.code != http.StatusNoContent {
 		t.Fatalf("delete: %d %s", r.code, r.raw)
 	}

@@ -382,7 +382,7 @@ func TestIntegrationOAuthDomains(t *testing.T) {
 	}
 	// A join through the domain needs a free place: the free plan holds 3 members and the
 	// organization has them now (admin, the two domain joiners).
-	pgtest.MustExec(t, e.admin, `UPDATE tenants SET plan_key = 'free' WHERE id = '`+admin.Tenant.ID.String()+`'`)
+	pgtest.MustExec(t, e.admin, pgtest.FreePlanSQL, `UPDATE tenants SET plan_key = 'free' WHERE id = '`+admin.Tenant.ID.String()+`'`)
 	var full *plans.LimitError
 	if _, err := e.login(auth.OAuthLoginInput{Identity: google("g-full", "full@example.com", "example.com")}); !errors.As(err, &full) {
 		t.Fatalf("domain join into a full organization: %v", err)

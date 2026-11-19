@@ -15,6 +15,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/platform/clock"
 	"github.com/proreta-io/proreta/backend/internal/platform/crypto"
 	"github.com/proreta-io/proreta/backend/internal/platform/validation"
+	"github.com/proreta-io/proreta/backend/internal/testsupport/pgtest"
 )
 
 // invitationMails returns the queued invitation messages, oldest first.
@@ -152,6 +153,7 @@ func TestIntegrationInvitationEmailNeedsEmail(t *testing.T) {
 func TestIntegrationInvitationEmailRollsBackWithTheInvitation(t *testing.T) {
 	e := newVerifyEnv(t, "auth_invite_mail_limit", true)
 	a := e.actor(e.register("owner@example.com"))
+	pgtest.MustExec(t, e.admin, pgtest.FreePlanSQL, `UPDATE tenants SET plan_key = 'free'`)
 	// The free plan allows 3 members: the owner plus two open invitations.
 	for _, addr := range []string{"a@example.org", "b@example.org"} {
 		if _, _, _, err := e.svc.CreateInvitationFor(e.ctx, a, auth.InvitationInput{Role: auth.RoleMember, Email: addr}); err != nil {

@@ -10,8 +10,8 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/testsupport/pgtest"
 )
 
-// TestIntegrationSeeds checks the rows the baseline seeds: the three plans with their limits and
-// no features, every limit the code knows unlimited on community, and the default probe
+// TestIntegrationSeeds checks the rows the baseline seeds: the one plan, with every limit the code
+// knows unlimited and no features, and the default probe
 // location the worker claims for by default.
 func TestIntegrationSeeds(t *testing.T) {
 	env := pgtest.New(t, pgtest.DBName("seeds"))
@@ -22,25 +22,23 @@ func TestIntegrationSeeds(t *testing.T) {
 	if err := admin.QueryRow(ctx, `SELECT string_agg(key || '=' || name || ' ' || limits::text || ' ' || features::text, '; ' ORDER BY key) FROM plans`).Scan(&seeded); err != nil {
 		t.Fatal(err)
 	}
-	want := `community=Community {"max_agents": 2147483647, "max_members": 2147483647, "max_channels": 2147483647, "max_monitors": 2147483647, "max_projects": 2147483647, "max_heartbeats": 2147483647, "max_status_pages": 2147483647, "max_status_page_domains": 2147483647} {}; ` +
-		`free=Free {"max_agents": 1, "max_members": 3, "max_channels": 1, "max_monitors": 3, "max_projects": 50, "max_heartbeats": 1, "max_status_pages": 1, "max_status_page_domains": 0} {}; ` +
-		`internal=Internal {"max_agents": 20, "max_members": 50, "max_channels": 10, "max_monitors": 1000, "max_projects": 50, "max_heartbeats": 100, "max_status_pages": 1, "max_status_page_domains": 2147483647} {}`
+	want := `internal=Internal {"max_agents": 2147483647, "max_members": 2147483647, "max_channels": 2147483647, "max_monitors": 2147483647, "max_projects": 2147483647, "max_heartbeats": 2147483647, "max_status_pages": 2147483647, "max_status_page_domains": 2147483647} {}`
 	if seeded != want {
 		t.Fatalf("plans = %s\nwant    %s", seeded, want)
 	}
 	// plans.Resolve fails on a missing key, so this also proves every limit the code knows exists.
 	var raw []byte
-	if err := admin.QueryRow(ctx, `SELECT limits FROM plans WHERE key = 'community'`).Scan(&raw); err != nil {
+	if err := admin.QueryRow(ctx, `SELECT limits FROM plans WHERE key = 'internal'`).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
-	l, err := plans.Resolve(plans.KeyCommunity, raw, nil)
+	l, err := plans.Resolve(plans.KeyInternal, raw, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, r := range []plans.Resource{plans.ResourceMonitor, plans.ResourceHeartbeat, plans.ResourceChannel,
 		plans.ResourceMember, plans.ResourceProject, plans.ResourceStatusPage, plans.ResourceAgent, plans.ResourceStatusPageDomain} {
 		if l.Of(r) != plans.Unlimited {
-			t.Errorf("community %s limit = %d, want plans.Unlimited", r, l.Of(r))
+			t.Errorf("internal %s limit = %d, want plans.Unlimited", r, l.Of(r))
 		}
 	}
 
@@ -58,7 +56,7 @@ func TestIntegrationSeeds(t *testing.T) {
 	}
 }
 
-// TestIntegrationPlans checks that new tenants get free, that the plan key is a foreign key,
+// TestIntegrationPlans checks that new tenants get internal, that the plan key is a foreign key,
 // that feature names are slugs, and that plans are read-only for the runtime roles.
 func TestIntegrationPlans(t *testing.T) {
 	env := pgtest.New(t, pgtest.DBName("plans"))
@@ -67,8 +65,8 @@ func TestIntegrationPlans(t *testing.T) {
 
 	pgtest.MustExec(t, admin, `INSERT INTO tenants (id, slug, name) VALUES ('`+tenantA+`', 'a', 'A')`)
 	var plan string
-	if err := admin.QueryRow(ctx, `SELECT plan_key FROM tenants WHERE id = $1`, tenantA).Scan(&plan); err != nil || plan != "free" {
-		t.Fatalf("new tenant plan = %q (%v), want free", plan, err)
+	if err := admin.QueryRow(ctx, `SELECT plan_key FROM tenants WHERE id = $1`, tenantA).Scan(&plan); err != nil || plan != "internal" {
+		t.Fatalf("new tenant plan = %q (%v), want internal", plan, err)
 	}
 	if _, err := admin.Exec(ctx, `UPDATE tenants SET plan_key = 'gold' WHERE id = $1`, tenantA); err == nil || !strings.Contains(err.Error(), "tenants_plan_key_fkey") {
 		t.Fatalf("unknown plan key accepted: %v", err)
@@ -77,6 +75,7 @@ func TestIntegrationPlans(t *testing.T) {
 		t.Fatalf("non-object limits accepted: %v", err)
 	}
 
+	pgtest.MustExec(t, admin, pgtest.FreePlanSQL)
 	for _, bad := range []string{`'{Bad}'`, `'{"a b"}'`, `'{""}'`, `ARRAY['` + strings.Repeat("a", 65) + `']`, `'{NULL}'`} {
 		if _, err := admin.Exec(ctx, `UPDATE plans SET features = `+bad+` WHERE key = 'free'`); err == nil || !strings.Contains(err.Error(), "plans_features_names") {
 			t.Errorf("feature names %s: err = %v, want plans_features_names", bad, err)
@@ -88,7 +87,7 @@ func TestIntegrationPlans(t *testing.T) {
 	for _, url := range []string{env.APIURL, env.WorkerURL} {
 		conn := env.Conn(t, url)
 		var n int
-		if err := conn.QueryRow(ctx, `SELECT count(*) FROM plans`).Scan(&n); err != nil || n != 3 {
+		if err := conn.QueryRow(ctx, `SELECT count(*) FROM plans`).Scan(&n); err != nil || n != 2 {
 			t.Fatalf("runtime role reads plans: n=%d err=%v", n, err)
 		}
 		for _, stmt := range []string{

@@ -12,7 +12,7 @@ import (
 )
 
 // TestIntegrationCreateTenantPlan checks auth_create_tenant: the plan is chosen
-// by the function (internal only for the default slug, free otherwise), a taken slug returns
+// by the function (always internal), a taken slug returns
 // NULL without aborting the transaction, and the slug check still applies.
 func TestIntegrationCreateTenantPlan(t *testing.T) {
 	env := pgtest.New(t, pgtest.DBName("createtenant"))
@@ -40,7 +40,7 @@ func TestIntegrationCreateTenantPlan(t *testing.T) {
 	if err := admin.QueryRow(ctx, `SELECT string_agg(slug || '=' || plan_key, ',' ORDER BY slug) FROM tenants`).Scan(&plans); err != nil {
 		t.Fatal(err)
 	}
-	if plans != "default=internal,internal=free,t-abcdefghij=free" {
+	if plans != "default=internal,internal=internal,t-abcdefghij=internal" {
 		t.Fatalf("plans = %s", plans)
 	}
 

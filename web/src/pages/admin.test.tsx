@@ -202,12 +202,12 @@ describe("admin organization details", () => {
     });
   }
 
-  it("offers the community plan", async () => {
+  it("offers every plan", async () => {
     details({
       "GET /api/v1/admin/stats": () =>
         json({
           ...stats,
-          plans: [{ key: "community", name: "Community", organizations: 0 }, ...stats.plans],
+          plans: [{ key: "gold", name: "Gold", organizations: 0 }, ...stats.plans],
         }),
     });
     renderApp("/admin/organizations/t-1");
@@ -217,7 +217,7 @@ describe("admin organization details", () => {
         within(select)
           .getAllByRole("option")
           .map((o) => o.textContent),
-      ).toEqual(["Community", "Free", "Internal"]),
+      ).toEqual(["Gold", "Free", "Internal"]),
     );
   });
 

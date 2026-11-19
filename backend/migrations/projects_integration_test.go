@@ -67,7 +67,7 @@ func TestIntegrationProjects(t *testing.T) {
 			t.Fatalf("project id version = %d (%v), want 7", version, err)
 		}
 		var limits string
-		if err := admin.QueryRow(ctx, `SELECT string_agg(key || '=' || (limits->>'max_projects'), ',' ORDER BY key) FROM plans`).Scan(&limits); err != nil || limits != "community=2147483647,free=50,internal=50" {
+		if err := admin.QueryRow(ctx, `SELECT string_agg(key || '=' || (limits->>'max_projects'), ',' ORDER BY key) FROM plans`).Scan(&limits); err != nil || limits != "internal=2147483647" {
 			t.Fatalf("max_projects = %s (%v)", limits, err)
 		}
 	})
