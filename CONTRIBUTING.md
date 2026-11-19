@@ -63,7 +63,7 @@ bash scripts/validate-chart.sh   # helm lint and template for every value combin
 - **Tenant isolation:** all tenant data access goes through `db.WithTenantTx`, which sets `app.tenant_id` with `SET LOCAL`; row-level security is enforced in the database. Never use the connection pool directly for tenant data. Every tenant-scoped table has `tenant_id`, and references use composite `(tenant_id, id)` keys.
 - **Identifiers and types:** IDs are UUIDv7 generated in the application, timestamps are `timestamptz` in UTC, enums are `text` with a `CHECK`. Secrets stored in the database are encrypted with AES-256-GCM and carry a key id for rotation.
 - **Outbox:** a state change and its notification are one transaction (incident transitions write `notification_deliveries`); delivery happens later in `jobs`.
-- **Spec first:** change `api/openapi.yaml` first, regenerate (`make generate`, `npm run gen:api`), then implement. Errors are RFC 9457 `application/problem+json`, mapped in one place. CI runs spectral and `oasdiff breaking` against the base branch; an intentional breaking change goes into `api/oasdiff-err-ignore.txt` with its reason.
+- **Spec first:** change `api/openapi.yaml` first, regenerate (`make generate`, `npm run gen:api`), then implement. Errors are RFC 9457 `application/problem+json`, mapped in one place. CI runs spectral and `oasdiff breaking` against the base branch. From 1.0 the API is frozen: see [API compatibility](docs/api.md).
 - **SSRF defence lives in code** (`internal/safehttp`): connect-time IP validation, blocked ranges, redirect re-validation, no proxy from the environment, no response body returned to users. Do not weaken it without a documented decision.
 - **Database roles:** runtime roles are never owners and never `BYPASSRLS`; the worker claims jobs through `SECURITY DEFINER` functions.
 - **Configuration** comes from `PRORETA_*` environment variables, validated at startup (fail fast). Never log secret values.
@@ -117,7 +117,7 @@ actionlint                         # workflows, when .github/workflows/ changed
 - Say so in the description (the template has a section) and name the migration file.
 - Follow every rule in [Database migrations](#database-migrations): forward-only, expand/contract, `lock_timeout`, row-level security for new tenant tables.
 - Keep the migration and the code that needs it in one pull request, and do not mix it with unrelated changes: a merged migration reaches installations with the next release.
-- A change to `api/openapi.yaml` that breaks clients needs an entry in `api/oasdiff-err-ignore.txt` with its reason; `oasdiff` runs on every pull request.
+- A change to `api/openapi.yaml` must not break clients of a stable operation (`oasdiff` runs on every pull request); see [API compatibility](docs/api.md).
 
 ### TODO format
 
