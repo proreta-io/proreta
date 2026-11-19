@@ -270,6 +270,8 @@ The Secrets above are half of a backup; the database is the other half. Take a b
 - **Rehearse a restore once** on a scratch server before you rely on it. The `pg_dump` path is described from the design, not from a rehearsal for this guide.
 
 ## Upgrade
+**Test releases before the first stable release cannot be upgraded in place.** From that release on the schema is one baseline migration and every later change is a forward-only expand/contract migration, but an installation made from an earlier test release has a migration history the new image does not know. Install the new release on a new, empty database and take the data you need out of the old one first ([back up](#back-up-the-database)). Pointing the new image at an old database changes nothing: the migration Job fails and api, worker and jobs refuse to start (see [Troubleshooting](#troubleshooting)). Upgrades between releases made after that one follow the steps below.
+
 1. Read the release notes. **Back up the database** right before the upgrade ([above](#back-up-the-database)): migrations are forward-only and the backup is the only way back ([migrations runbook](runbooks/migrations.md)). Keep your `my-values.yaml` in version control and compare it with the new chart's `values.yaml` and README for renamed or new values.
 2. Check out the new version of the chart and use the new image tag in `--set image.tag=...`. With the OCI chart pass the new `--version` only:
    ```sh
