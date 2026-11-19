@@ -58,14 +58,14 @@ func TestIntegrationAdminCreateOrganization(t *testing.T) {
 		link, _ := r.body["inviteUrl"].(string)
 		_, token, ok := strings.Cut(link, "#")
 		if r.code != http.StatusCreated || !strings.HasPrefix(org["slug"].(string), "t-") || org["planKey"] != "internal" || r.body["member"] != nil ||
-			inv["role"] != "maintainer" || inv["status"] != "open" || !ok || len(token) != 43 {
+			inv["role"] != "owner" || inv["status"] != "open" || !ok || len(token) != 43 {
 			t.Fatalf("create: %d %s", r.code, r.raw)
 		}
 		if strings.Contains(logs.String(), token) || countRows(t, env, `SELECT count(*) FROM audit_log WHERE metadata::text LIKE '%' || $1 || '%'`, token) != 0 {
 			t.Fatal("the invitation token leaked into the logs or an audit row")
 		}
 		reg := registerWithInvite(c, "newcomer@example.org", ownerPassword, token, "198.51.100.50")
-		if reg.code != http.StatusCreated || reg.body["role"] != "maintainer" {
+		if reg.code != http.StatusCreated || reg.body["role"] != "owner" {
 			t.Fatalf("register with the link: %d %s", reg.code, reg.raw)
 		}
 	})

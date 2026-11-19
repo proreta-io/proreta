@@ -105,8 +105,7 @@ export default function AdminOrganizationCreate() {
             <>
               <p className="text-muted-foreground">
                 There is no account with that email yet. Send this link to the person: they join as
-                a maintainer (a link never makes an owner). Promote them to owner under Members
-                after they joined.
+                the owner of the organization.
               </p>
               <CopyField label="Invitation link" value={created.inviteUrl} copyLabel="Copy link" />
               <p className="text-muted-foreground">

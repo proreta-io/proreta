@@ -1854,9 +1854,9 @@ export interface paths {
      * @description Creates an organization with its Default project and its first owner, so it is never left
      *     without one. `ownerEmail` names the owner: an existing account becomes the owner at once
      *     (`member` in the answer; the platform administrator's own account cannot). Without such an
-     *     account a `maintainer` invitation is created instead, because a link never grants the owner
-     *     role: its link is in the answer only (`invitation`, `inviteUrl`; shown once, never emailed,
-     *     logged or audited) and the platform admin promotes the person to owner after they joined. `slug` is optional (1 to 63 lowercase
+     *     account an `owner` invitation is created instead (only the platform admin creates an owner
+     *     link): its link is in the answer only (`invitation`, `inviteUrl`; shown once, never emailed,
+     *     logged or audited) and the person becomes the owner when they accept it. `slug` is optional (1 to 63 lowercase
      *     letters, digits and hyphens, not starting with a hyphen; `default` is reserved) and random
      *     when omitted; a slug in use, a deleted organization's included, is 409
      *     `urn:proreta:problem:slug-taken`. `planKey` is optional (`internal` when omitted) and may be

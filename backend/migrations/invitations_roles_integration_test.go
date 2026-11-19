@@ -83,8 +83,8 @@ func TestIntegrationInvitationsRoles(t *testing.T) {
 	}
 
 	t.Run("checks", func(t *testing.T) {
-		if err := insert(tenantA, other, "owner-role", "owner", ""); err == nil || !strings.Contains(err.Error(), "invitations_role_check") {
-			t.Fatalf("owner invitation: %v", err)
+		if err := insert(tenantA, other, "unknown-role", "admin", ""); err == nil || !strings.Contains(err.Error(), "invitations_role_check") {
+			t.Fatalf("unknown role: %v", err)
 		}
 		if err := insert(tenantA, other, "both", "member", "accepted_at = now(), accepted_by = '"+userB+"', revoked_at = now()"); err == nil ||
 			!strings.Contains(err.Error(), "invitations_single_outcome") {

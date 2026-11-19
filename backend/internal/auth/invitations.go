@@ -125,7 +125,7 @@ const (
 // installation without email.
 const invitationMailDisabledMessage = "this installation does not send email"
 
-// CreateInvitation creates an invitation (maintainer or owner, role maintainer, member or viewer) and
+// CreateInvitation creates an invitation (maintainer or owner, role maintainer, member or viewer; owner only for the platform admin) and
 // returns it with its token, which is shown once and never stored (only its SHA-256). Open
 // invitations count toward max_members, checked under the tenant row lock. No email is sent.
 func (s *Service) CreateInvitation(ctx context.Context, a Actor, role, label string) (Invitation, string, error) {
@@ -205,7 +205,7 @@ func (s *Service) CreateInvitationFor(ctx context.Context, a Actor, in Invitatio
 				return err
 			}
 			inv.ProjectName = &projectName
-		} else if !authz.CanInvite(who, authz.Role(inv.Role)) {
+		} else if (!a.platform || authz.Role(inv.Role) != authz.Owner) && !authz.CanInvite(who, authz.Role(inv.Role)) {
 			return authz.ErrForbidden
 		}
 		u, err := q.GetUserByID(ctx, a.UserID)

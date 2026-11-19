@@ -42,7 +42,7 @@ func TestIntegrationProjectInvitations(t *testing.T) {
 	}
 
 	t.Run("role check follows the project", func(t *testing.T) {
-		if err := insert("org-owner", "owner", ""); err == nil || !strings.Contains(err.Error(), "invitations_role_check") {
+		if err := insert("org-owner", "owner", ""); err != nil {
 			t.Fatalf("owner organization invitation: %v", err)
 		}
 		if err := insert("project-owner", "owner", projA); err != nil {

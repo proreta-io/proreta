@@ -602,7 +602,8 @@ func CanManageIn(a Actor, project uuid.UUID, target, to Role) bool {
 }
 
 // CanInvite reports whether the actor may create an invitation with the role: maintainers and owners,
-// for maintainer, member or viewer (owner is granted by a role change, never by a link).
+// for maintainer, member or viewer (owner is granted by a role change, never by a link; only the
+// platform admin creates an owner link, which the invitation service allows on its own).
 func CanInvite(a Actor, role Role) bool {
 	return a.Role.AtLeast(Maintainer) && role != Owner && Valid(role) && rank(role) <= rank(a.Role)
 }

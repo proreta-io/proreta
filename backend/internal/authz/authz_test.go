@@ -193,7 +193,7 @@ func TestCanInvite(t *testing.T) {
 		want        bool
 	}{
 		{Owner, Maintainer, true},
-		{Owner, Owner, false},
+		{Owner, Owner, false}, // owner links exist only for the platform admin (auth.CreateInvitationFor)
 		{Maintainer, Maintainer, true},
 		{Maintainer, Viewer, true},
 		{Member, Viewer, false},
