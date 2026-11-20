@@ -88,14 +88,16 @@ func (c *fakeClock) Advance(d time.Duration) {
 
 // afterFire waits for the goroutine a timer woke to take the tick and to arm its next timer, which
 // is the sign that it has finished what the tick started. A tick nobody takes (the goroutine
-// left its select by another way) is not waited for.
+// left its select by another way) is not waited for. Arming the next timer is awaited for long: a
+// goroutine that is starved while it checks has not finished, and a clock that moved on would
+// make it skip slots; every woken goroutine arms again at once when it is not starved.
 func (c *fakeClock) afterFire(t *fakeTimer, regsBefore int) {
 	for end := time.Now().Add(100 * time.Millisecond); len(t.ch) > 0; time.Sleep(200 * time.Microsecond) {
 		if time.Now().After(end) {
 			return
 		}
 	}
-	for end := time.Now().Add(100 * time.Millisecond); time.Now().Before(end); time.Sleep(200 * time.Microsecond) {
+	for end := time.Now().Add(10 * time.Second); time.Now().Before(end); time.Sleep(200 * time.Microsecond) {
 		c.mu.Lock()
 		r := c.regs
 		c.mu.Unlock()

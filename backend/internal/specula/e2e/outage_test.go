@@ -158,6 +158,8 @@ func TestLateRowsJustBeforeTheHourChangeAndRetention(t *testing.T) {
 	e.run(5*time.Minute, time.Minute)
 	e.until("every slot is stored", time.Hour, 5*time.Second, func() bool { return e.allStored(e.t0) })
 	e.run(2*time.Hour, 5*time.Minute)
+	// The newest successes wait for their batch time.
+	e.until("every slot is stored", time.Minute, 5*time.Second, func() bool { return e.allStored(e.t0) })
 	end := e.clk.Now()
 	e.wantCovered(e.t0, end)
 
