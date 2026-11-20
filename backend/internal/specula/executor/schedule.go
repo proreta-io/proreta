@@ -344,6 +344,12 @@ func (s *scheduler) check(ctx context.Context, m wire.ScheduledMonitor, slot int
 		return
 	}
 	defer func() { <-e.slots }()
+	// Waiting for a place can take many intervals; a result measured now must not be filed under a
+	// slot that old.
+	if e.now().Sub(time.Unix(slot, 0)) >= time.Duration(m.IntervalSeconds)*time.Second {
+		s.n.missedLate.Add(1)
+		return
+	}
 	defer func() {
 		if r := recover(); r != nil {
 			e.cfg.Log.Error("a check panicked", "monitor_id", m.MonitorID, "panic_type", fmt.Sprintf("%T", r))

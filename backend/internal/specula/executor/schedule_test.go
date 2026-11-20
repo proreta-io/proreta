@@ -608,6 +608,35 @@ func TestSkipsSlotsOfACheckThatOutlastsItsInterval(t *testing.T) {
 	}
 }
 
+func TestACheckThatWaitedForAPlaceBeyondItsIntervalIsSkipped(t *testing.T) {
+	clk := newFakeClock(t0)
+	var ms []wire.ScheduledMonitor
+	for range DefaultConcurrency + 1 {
+		ms = append(ms, monitor(t0.Unix(), 60))
+	}
+	gw := newGateway(clk, ms...)
+	h := newHarness(t, gw, "")
+	h.prob.mu.Lock()
+	h.prob.block = make(chan struct{})
+	h.prob.mu.Unlock()
+	h.waitRunning(len(ms))
+	clk.Advance(30 * time.Second) // every runner is at slot 0; the last one waits for a place
+	clk.Advance(150 * time.Second)
+	close(h.prob.block)
+	eventually(t, "the late runner to give up its slot", func() bool { return h.e.sched.n.missedLate.Load() == 1 })
+	n := 0
+	for _, m := range ms {
+		for _, s := range h.slots(m.MonitorID) {
+			if s == t0.Unix() {
+				n++
+			}
+		}
+	}
+	if n != DefaultConcurrency {
+		t.Fatalf("%d slots recorded, want %d: the waiting runner filed a stale result", n, DefaultConcurrency)
+	}
+}
+
 func TestSlotsFollowTheServersClockNotAWrongLocalOne(t *testing.T) {
 	for _, skew := range []time.Duration{2 * time.Minute, -10 * time.Minute} {
 		t.Run(skew.String(), func(t *testing.T) {
