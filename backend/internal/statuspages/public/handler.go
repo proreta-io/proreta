@@ -335,7 +335,7 @@ func (h *handler) resolveHost(next http.Handler) http.Handler {
 				var err error
 				if slug, found, err = h.hosts.Fetch(r.Context(), ri.host); err != nil {
 					h.log.ErrorContext(r.Context(), "status page host lookup failed", "error", err)
-					h.notFound(w, r)
+					h.unavailable(w)
 					return
 				}
 				h.m.hostLookups.WithLabelValues("miss").Inc()
@@ -407,21 +407,40 @@ func tooMany(w http.ResponseWriter, wait time.Duration) {
 }
 
 // lookup returns the entry of a well-formed slug; anything else is not found.
-func (h *handler) lookup(r *http.Request) (string, Entry, bool) {
+func (h *handler) lookup(r *http.Request) (string, Entry, bool, error) {
 	slug := chi.URLParam(r, "slug")
 	if ri := infoOf(r); ri.custom {
 		slug = ri.slug
 	}
 	if !slugRe.MatchString(slug) {
-		return slug, Entry{}, false
+		return slug, Entry{}, false, nil
 	}
 	e, err := h.cache.Lookup(r.Context(), slug)
 	if err != nil {
 		h.m.errors.Inc()
 		h.log.ErrorContext(r.Context(), "status page lookup failed", "error", err)
-		return slug, Entry{}, false
+		return slug, Entry{}, false, err
 	}
-	return slug, e, e.Found
+	return slug, e, e.Found, nil
+}
+
+// lookupMiss answers a lookup that gave nothing: the 404 for a page that is not served, a 503 when
+// the source failed, which must not be cached as "not found" while the database is down.
+func (h *handler) lookupMiss(w http.ResponseWriter, r *http.Request, err error) {
+	if err != nil {
+		h.unavailable(w)
+		return
+	}
+	h.notFound(w, r)
+}
+
+func (h *handler) unavailable(w http.ResponseWriter) {
+	hd := w.Header()
+	hd.Set("Content-Type", "text/plain; charset=utf-8")
+	hd.Set("Cache-Control", "no-store")
+	hd.Set("Retry-After", "5")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_, _ = w.Write([]byte("Temporarily unavailable. Try again in a moment.\n"))
 }
 
 // notFound is the one answer for unknown, unpublished, deleted and suspended pages, protected
@@ -469,9 +488,9 @@ func (h *handler) urlsOf(r *http.Request, slug string) urls {
 func (u urls) PageURL() string { return u.Origin + u.Page }
 
 func (h *handler) serveRobots(w http.ResponseWriter, r *http.Request) {
-	_, e, ok := h.lookup(r)
+	_, e, ok, err := h.lookup(r)
 	if !ok {
-		h.notFound(w, r)
+		h.lookupMiss(w, r, err)
 		return
 	}
 	body := "User-agent: *\nAllow: /\n"
@@ -524,9 +543,9 @@ func pageHeaders(w http.ResponseWriter, nonce, imgSrc string, protected, custom 
 }
 
 func (h *handler) servePage(w http.ResponseWriter, r *http.Request) {
-	slug, e, ok := h.lookup(r)
+	slug, e, ok, err := h.lookup(r)
 	if !ok {
-		h.notFound(w, r)
+		h.lookupMiss(w, r, err)
 		return
 	}
 	protected := e.PasswordHash != ""
@@ -579,9 +598,9 @@ func (h *handler) renderLock(w http.ResponseWriter, r *http.Request, slug string
 // unlock checks a password (argon2id, one at a time, limited per IP and per page) and sets the
 // signed cookie scoped to the page's path.
 func (h *handler) unlock(w http.ResponseWriter, r *http.Request) {
-	slug, e, ok := h.lookup(r)
+	slug, e, ok, err := h.lookup(r)
 	if !ok || e.PasswordHash == "" {
-		h.notFound(w, r)
+		h.lookupMiss(w, r, err)
 		return
 	}
 	if !h.sameOrigin(r) {
@@ -666,9 +685,9 @@ func (h *handler) verify(ctx context.Context, password, hash string) bool {
 
 // publicOnly serves a JSON, RSS, badge or embed answer only for a page without a password.
 func (h *handler) publicOnly(w http.ResponseWriter, r *http.Request) (string, Entry, bool) {
-	slug, e, ok := h.lookup(r)
+	slug, e, ok, err := h.lookup(r)
 	if !ok || e.PasswordHash != "" {
-		h.notFound(w, r)
+		h.lookupMiss(w, r, err)
 		return "", Entry{}, false
 	}
 	return slug, e, true
