@@ -71,8 +71,8 @@ func TestIntegrationChannels(t *testing.T) {
 	env := pgtest.New(t, pgtest.DBName("notify"))
 	ctx := context.Background()
 	admin := env.AdminConn(t)
-	pgtest.MustExec(t, admin, pgtest.FreePlanSQL,
-		`INSERT INTO tenants (id, slug, name, plan_key) VALUES ('`+tenantA+`', 'a', 'A', 'internal'), ('`+tenantB+`', 'b', 'B', 'free')`,
+	pgtest.MustExec(t, admin, pgtest.CappedPlanSQL,
+		`INSERT INTO tenants (id, slug, name, plan_key) VALUES ('`+tenantA+`', 'a', 'A', 'internal'), ('`+tenantB+`', 'b', 'B', 'capped')`,
 		`INSERT INTO users (id, email) VALUES ('`+userA+`', 'a@example.com')`,
 		`INSERT INTO monitors (id, tenant_id, project_id, name, config) VALUES
 			('`+monitorA+`', '`+tenantA+`', (SELECT id FROM projects WHERE tenant_id = '`+tenantA+`' AND is_default), 'a', '{"url":"https://a.example","expectedStatus":"2xx"}'),
@@ -122,7 +122,7 @@ func TestIntegrationChannels(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Quota: the free plan allows one channel; a deleted channel frees its slot.
+	// Quota: the capped plan allows one channel; a deleted channel frees its slot.
 	var lerr *plans.LimitError
 	if _, err := svc.Create(ctx, b, notify.CreateInput{Name: "b2", WebhookURL: urlB}); !errors.As(err, &lerr) || lerr.Resource != plans.ResourceChannel || lerr.Max != 1 {
 		t.Fatalf("over quota: %v", err)
@@ -298,7 +298,7 @@ func TestIntegrationChannels(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := svc.Create(ctx, b, notify.CreateInput{Name: "b2", WebhookURL: urlB}); err != nil {
-		t.Fatalf("create after delete on free: %v", err)
+		t.Fatalf("create after delete on capped: %v", err)
 	}
 
 	// Delivery lookup in jobs: RLS scopes it, a deleted channel is reported without a URL, and a

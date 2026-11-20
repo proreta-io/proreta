@@ -112,7 +112,7 @@ func TestIntegrationAdminOrganizationSettings(t *testing.T) {
 	})
 
 	t.Run("specula", func(t *testing.T) {
-		useFreePlan(t, env)
+		useCappedPlan(t, env)
 		r := c.do(http.MethodPost, base+"/specula", `{"name":"Prod cluster"}`, ah)
 		token, _ := r.body["token"].(string)
 		sp, _ := r.body["specula"].(map[string]any)
@@ -120,7 +120,7 @@ func TestIntegrationAdminOrganizationSettings(t *testing.T) {
 			t.Fatalf("create: %d %s", r.code, r.raw)
 		}
 		id := sp["id"].(string)
-		// The plan limit of the organization applies to the admin too (Free: one Specula).
+		// The plan limit of the organization applies to the admin too (Capped: one Specula).
 		if r := c.do(http.MethodPost, base+"/specula", `{"name":"Second"}`, ah); r.code != http.StatusConflict || r.body["type"] != "urn:proreta:problem:plan-limit-reached" {
 			t.Fatalf("plan limit: %d %s", r.code, r.raw)
 		}

@@ -170,7 +170,7 @@ func TestIntegrationSpeculaQuotaAPI(t *testing.T) {
 	c := newServer(t, env, auth.Options{})
 	cookie, csrf := c.login()
 	unsafe := withCSRF(cookie, csrf)
-	pgtest.MustExec(t, env.AdminConn(t), pgtest.FreePlanSQL, `UPDATE tenants SET plan_key = 'free' WHERE slug = 'default'`)
+	pgtest.MustExec(t, env.AdminConn(t), pgtest.CappedPlanSQL, `UPDATE tenants SET plan_key = 'capped' WHERE slug = 'default'`)
 
 	r := c.do(http.MethodPost, "/api/v1/specula", `{"name":"one"}`, unsafe)
 	if r.code != http.StatusCreated {

@@ -24,7 +24,7 @@ Leaving `database.bootstrap.enabled: true` is safe. The Job references the admin
 - `proreta_owner` connects to the database with the password from it;
 - the table `goose_db_version` exists (bootstrap is only needed before the first migration).
 
-A database made by a test release before the baseline migration is not upgraded by the bootstrap or by the migration Job (the [migrations runbook](migrations.md#releases-before-the-baseline-cannot-be-upgraded-in-place) explains why): reinstall on an empty database.
+A database made by a 0.x test release (before the baseline migration) is not upgraded by the bootstrap or by the migration Job (the [migrations runbook](migrations.md#releases-before-the-baseline-cannot-be-upgraded-in-place) explains why): reinstall on an empty database.
 
 A Secret left over from an earlier database does not skip: the owner login or the migration table is missing there, so the full bootstrap runs. When the full bootstrap is needed and no admin login is available, the Job fails with `the database is not ready and no database admin login is available` and the reason; create the admin Secret and rerun. The skip check never prints passwords.
 

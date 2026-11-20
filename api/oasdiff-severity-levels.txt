@@ -1,0 +1,2 @@
+response-property-enum-value-added warn
+response-property-max-items-increased warn

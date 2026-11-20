@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/uuid"
-
 	"github.com/proreta-io/proreta/backend/internal/admin"
 	"github.com/proreta-io/proreta/backend/internal/api/gen"
 	"github.com/proreta-io/proreta/backend/internal/platform/httpx"
@@ -168,7 +166,7 @@ func (s *server) AdminResetUserPassword(ctx context.Context, req gen.AdminResetU
 	if err != nil {
 		return nil, err
 	}
-	password, err := s.admin.ResetPassword(ctx, a, uuid.UUID(req.UserId))
+	password, err := s.admin.ResetPassword(ctx, a, req.UserId)
 	if err != nil {
 		return nil, err
 	}

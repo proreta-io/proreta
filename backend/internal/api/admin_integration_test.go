@@ -140,7 +140,7 @@ func adminCalls(t *testing.T, tenantID, userID string) []struct{ method, path, b
 				body = `{"role":"member"}`
 			}
 			out = append(out, struct{ method, path, body string }{method,
-				strings.NewReplacer("{tenantId}", tenantID, "{organizationId}", tenantID, "{userId}", userID, "{invitationId}", userID, "{projectId}", userID, "{domainId}", userID, "{speculaId}", userID, "{key}", "free").Replace(path), body})
+				strings.NewReplacer("{tenantId}", tenantID, "{organizationId}", tenantID, "{userId}", userID, "{invitationId}", userID, "{projectId}", userID, "{domainId}", userID, "{speculaId}", userID, "{key}", "capped").Replace(path), body})
 		}
 	}
 	if len(out) != 55 {
@@ -304,7 +304,7 @@ func TestIntegrationAdminPanel(t *testing.T) {
 	_, _, regB := c.register("bob@beta.example")
 	tenantB := regB.body["organization"].(map[string]any)["id"].(string)
 	c.register("carol@gamma.example")
-	pgtest.MustExec(t, env.AdminConn(t), pgtest.FreePlanSQL, `UPDATE tenants SET plan_key = 'free' WHERE slug <> 'default'`)
+	pgtest.MustExec(t, env.AdminConn(t), pgtest.CappedPlanSQL, `UPDATE tenants SET plan_key = 'capped' WHERE slug <> 'default'`)
 	uh := withCSRF(userCookie, userCSRF)
 	if r := c.do(http.MethodPost, "/api/v1/monitors", `{"type":"http","name":"Site","http":{"url":"https://example.com"}}`, uh); r.code != http.StatusCreated {
 		t.Fatalf("create monitor: %d %s", r.code, r.raw)
@@ -321,7 +321,7 @@ func TestIntegrationAdminPanel(t *testing.T) {
 			r.body["users"] != float64(4) || r.body["monitors"] != float64(1) || r.body["heartbeats"] != float64(1) {
 			t.Fatalf("stats: %d %s", r.code, r.raw)
 		}
-		if !strings.Contains(r.raw, `{"key":"free","name":"Free","organizations":3}`) || !strings.Contains(r.raw, `{"key":"internal","name":"Internal","organizations":1}`) {
+		if !strings.Contains(r.raw, `{"key":"capped","name":"Capped","organizations":3}`) || !strings.Contains(r.raw, `{"key":"internal","name":"Internal","organizations":1}`) {
 			t.Fatalf("stats plans: %s", r.raw)
 		}
 	})
@@ -333,7 +333,7 @@ func TestIntegrationAdminPanel(t *testing.T) {
 			t.Fatalf("list: %d %s", r.code, r.raw)
 		}
 		first := items[0].(map[string]any)
-		if first["name"] != "gamma.example" || first["planKey"] != "free" || first["status"] != "active" || first["deletedAt"] != nil {
+		if first["name"] != "gamma.example" || first["planKey"] != "capped" || first["status"] != "active" || first["deletedAt"] != nil {
 			t.Fatalf("newest first: %v", first)
 		}
 		r = c.do(http.MethodGet, "/api/v1/admin/organizations?limit=2&offset=2", "", ah)
@@ -380,7 +380,7 @@ func TestIntegrationAdminPanel(t *testing.T) {
 				t.Errorf("%s: %d %s", body, r.code, r.raw)
 			}
 		}
-		if r := c.do(http.MethodPatch, "/api/v1/admin/organizations/"+tenantA, `{"plan":"free"}`, ah); r.code != http.StatusBadRequest {
+		if r := c.do(http.MethodPatch, "/api/v1/admin/organizations/"+tenantA, `{"plan":"capped"}`, ah); r.code != http.StatusBadRequest {
 			t.Errorf("unknown field: %d", r.code)
 		}
 		var defaultID string
@@ -474,7 +474,7 @@ func TestIntegrationAdminPanel(t *testing.T) {
 				t.Fatalf("create on internal: %d %s", r.code, r.raw)
 			}
 		}
-		if r := c.do(http.MethodPatch, "/api/v1/admin/organizations/"+tenantA, `{"planKey":"free"}`, ah); r.code != http.StatusOK || r.body["monitors"] != float64(4) {
+		if r := c.do(http.MethodPatch, "/api/v1/admin/organizations/"+tenantA, `{"planKey":"capped"}`, ah); r.code != http.StatusOK || r.body["monitors"] != float64(4) {
 			t.Fatalf("downgrade: %d %s", r.code, r.raw)
 		}
 		u := c.do(http.MethodGet, "/api/v1/usage", "", userCookie)

@@ -328,21 +328,21 @@ func TestIntegrationChannelQuota(t *testing.T) {
 		return c.do(http.MethodPost, "/api/v1/channels", `{"name":"ops","webhookUrl":"`+slackURL+`"}`, unsafe)
 	}
 
-	pgtest.MustExec(t, admin, pgtest.FreePlanSQL, `UPDATE tenants SET plan_key = 'free', limits = '{"max_channels": 0}' WHERE slug = 'default'`)
+	pgtest.MustExec(t, admin, pgtest.CappedPlanSQL, `UPDATE tenants SET plan_key = 'capped', limits = '{"max_channels": 0}' WHERE slug = 'default'`)
 	r := create()
 	if r.code != http.StatusConflict || r.body["type"] != "urn:proreta:problem:plan-limit-reached" ||
-		r.body["limit"] != "channels" || r.body["max"] != float64(0) || r.body["detail"] != "The Free plan allows at most 0 channels." {
+		r.body["limit"] != "channels" || r.body["max"] != float64(0) || r.body["detail"] != "The Capped plan allows at most 0 channels." {
 		t.Fatalf("new channel over quota: %d %s", r.code, r.raw)
 	}
 
-	// The free plan allows one channel; a deleted one frees its slot.
+	// The capped plan allows one channel; a deleted one frees its slot.
 	pgtest.MustExec(t, admin, `UPDATE tenants SET limits = '{}' WHERE slug = 'default'`)
 	first := create()
 	if first.code != http.StatusCreated {
-		t.Fatalf("first on free: %d %s", first.code, first.raw)
+		t.Fatalf("first on capped: %d %s", first.code, first.raw)
 	}
 	if r := create(); r.code != http.StatusConflict || r.body["max"] != float64(1) {
-		t.Fatalf("second on free: %d %s", r.code, r.raw)
+		t.Fatalf("second on capped: %d %s", r.code, r.raw)
 	}
 	u := c.do(http.MethodGet, "/api/v1/usage", "", cookie)
 	if u.code != http.StatusOK || !strings.Contains(u.raw, `"usage":{"channels":1,"heartbeats":0,"members":1,"monitors":0,"projects":1,"specula":0,"statusPageDomains":0,"statusPages":0}`) ||

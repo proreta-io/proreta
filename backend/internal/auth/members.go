@@ -29,6 +29,8 @@ const (
 	ActionMemberRoleChanged    = "member.role_changed"
 	ActionMemberRemoved        = "member.removed"
 	ActionOrganizationSwitched = "organization.switched"
+	// ActionOrganizationDeleted is written by the database function that deletes the organization, not by Go.
+	ActionOrganizationDeleted = "organization.deleted"
 )
 
 var (

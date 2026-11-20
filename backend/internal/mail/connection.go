@@ -37,17 +37,6 @@ type Connection struct {
 	Password config.Secret
 }
 
-// DefaultPort is the usual port of a TLS mode.
-func DefaultPort(tls string) int {
-	switch tls {
-	case TLSImplicit:
-		return 465
-	case TLSNone:
-		return 25
-	}
-	return 587
-}
-
 // String describes the server without credentials, for logs.
 func (c Connection) String() string { return fmt.Sprintf("%s:%d (%s)", c.Host, c.Port, c.TLS) }
 

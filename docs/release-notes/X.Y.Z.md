@@ -2,11 +2,11 @@
 
 The MVP release of Proreta. It is the first release with a compatibility promise: the API is frozen as 1.0 and the database starts from a single baseline.
 
-Earlier releases (0.1.0 to 0.4.0) were test releases. **They cannot be upgraded in place: install X.Y.Z as a new installation** (see [Breaking changes](#breaking-changes-and-what-to-do)).
+Earlier releases and builds (0.x) were test releases. **They cannot be upgraded in place: install X.Y.Z as a new installation.** A pre-release `X.Y.Z-rc.N` carries the same baseline and can be upgraded to X.Y.Z (see [Breaking changes](#breaking-changes-and-what-to-do)).
 
 Install and upgrade: [docs/install.md](../install.md). Images: `ghcr.io/proreta-io/proreta-backend:X.Y.Z` and `ghcr.io/proreta-io/proreta-web:X.Y.Z` (`amd64` and `arm64`). Charts: `oci://ghcr.io/proreta-io/charts/proreta` and `oci://ghcr.io/proreta-io/charts/proreta-specula`, version X.Y.Z.
 
-## What is new since 0.4.0
+## What is new since the 0.x test releases
 
 ### Specula works on its own
 A Specula (the executor that checks services inside your own network, [runbook](../runbooks/specula.md)) no longer asks Proreta for every check.
@@ -49,30 +49,30 @@ A customer proves control of a host name in DNS and serves a status page at the 
 ### Documentation
 A database backup section in the [install guide](../install.md#back-up-the-database), and new documentation for TCP monitors, custom status page domains and Specula autonomy (see [docs/README.md](../README.md)).
 
-## Carried over from 0.1.0 to 0.4.0
+## Carried over from the 0.x test releases
 HTTPS monitors with expected status codes, request method, headers and body ([docs](../monitor-requests.md)); incidents with the notification written in the same transaction; Slack and webhook channels; watchdog heartbeats for Prometheus Alertmanager; public and password-protected status pages with an RSS feed; organizations, projects and roles (`owner`, `maintainer`, `member`, `viewer`, [roles](../roles.md)); invitations by link or email; password, Google and GitHub sign-in with optional Workspace domain auto-join; optional outgoing email (verification, reset, invitations) set up in the admin panel; a forced password change after the first sign-in or a reset; Specula executors for private networks; a Helm chart with a database bootstrap Job.
 
 ## Breaking changes and what to do
 
-**Reinstall.** Releases before X.Y.Z cannot be upgraded in place. The migration chain of the 0.x releases is replaced by one baseline, so a database created by 0.1.0 to 0.4.0 is not migrated. Back up what you need, uninstall, drop or replace the database, and install X.Y.Z as described in [docs/install.md](../install.md). Monitors, results, incidents and users of a test installation are not carried over; there is no import.
+**Reinstall.** The 0.x releases cannot be upgraded in place (pre-releases `X.Y.Z-rc.N` can). The migration chain of the 0.x releases is replaced by one baseline, so a database created by a 0.x release is not migrated. Back up what you need, uninstall, drop or replace the database, and install X.Y.Z as described in [docs/install.md](../install.md). Monitors, results, incidents and users of a test installation are not carried over; there is no import.
 
-**The API is frozen as 1.0.** From X.Y.Z, changes to [api/openapi.yaml](../../api/openapi.yaml) are additive within 1.x, apart from operations marked `x-experimental: true` (the platform admin API). Against 0.4.0 the changes are additive for clients that read the responses, with these behaviour differences:
+**The API is frozen as 1.0.** From X.Y.Z, changes to [api/openapi.yaml](../../api/openapi.yaml) are additive within 1.x, apart from operations marked `x-experimental: true` (the platform admin API and the status page domain operations). Against the 0.x releases the changes are additive for clients that read the responses, with these behaviour differences:
 - The monitor and member lists return at most 100 items by default: follow `nextCursor`.
 - The monitor list order is fixed by the server (down first); a client that relied on oldest-first sees a different order.
-- A channel may list up to five events (was three), and error bodies naming a plan limit may now carry the limits `specula` and `statusPageDomains`: clients must accept unknown values of these enums.
+- A channel may list up to five events (was three), and error bodies naming a plan limit may now carry the limits `specula` and `statusPageDomains`: the monitor `type` may be `tcp`: clients must accept unknown values of these enums.
 
-**Chart and settings changes since 0.4.0** (no setting was removed):
+**Chart and settings changes since the 0.x releases** (no setting was removed):
 
 | What | Before | Now |
 |---|---|---|
 | Chart value `config.trustedProxyHops` (`PRORETA_TRUSTED_PROXY_HOPS`) | `0` | `1`, for the Gateway of the chart's `HTTPRoute`. Set `0` if no proxy sits in front. With the wrong value every client shares one rate-limit bucket (0 behind a proxy) or can influence its address (too high) |
 | `proreta-specula` chart `replicas` | `2` | `1`; two executors for the same Specula are reported as duplicates |
-| `PRORETA_SPECULA_CONCURRENCY` | `20` | `50` |
+| `PRORETA_SPECULA_CONCURRENCY` (binary default) | `20` | `50`; the `proreta-specula` chart keeps `specula.concurrency: 20` |
 | Specula gateway | any `checkedAt` | a check time more than one minute from now is refused |
 
 New, all optional: `PRORETA_STATUS_PAGE_CUSTOM_DOMAINS`, `PRORETA_STATUSPAGE_CNAME_TARGET`, `PRORETA_STATUSPAGE_INSTALLATION_HOSTS`, `PRORETA_ABUSE_URL`, `PRORETA_STATUSPAGE_TLS_ASK_ADDR`, `PRORETA_STATUSPAGE_TLS_ASK_TOKEN`, `PRORETA_SPECULA_LATE_ALERT_AFTER`, `PRORETA_SPECULA_STATE_DIR`, `PRORETA_SPECULA_BUFFER_MAX_MIB`, `PRORETA_SPECULA_BUFFER_MAX_AGE`; the chart values for them are documented in `helm show values`.
 
-**If you are still on 0.3.0 or earlier** (also covered by the reinstall): the role `admin` was renamed `maintainer` in 0.4.0, and Specula and webhook channels were added in 0.4.0.
+**If you ran an early 0.x release** (also covered by the reinstall): the role `admin` is now called `maintainer`.
 
 ## Known limitations
 - **Gateway API only.** The chart creates an `HTTPRoute`; Ingress is not supported.

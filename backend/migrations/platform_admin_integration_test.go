@@ -43,11 +43,11 @@ func sqlState(err error) string {
 // tenant B (owner userOwnerB).
 func seedPlatform(t *testing.T, admin *pgx.Conn) {
 	t.Helper()
-	pgtest.MustExec(t, admin, pgtest.FreePlanSQL,
+	pgtest.MustExec(t, admin, pgtest.CappedPlanSQL,
 		`INSERT INTO tenants (id, slug, name, plan_key, created_at) VALUES
 			('`+tenantDef+`', 'default', 'Default', 'internal', now() - interval '3 days'),
-			('`+tenantA+`', 't-aaaa', 'Alpha Corp', 'free', now() - interval '2 days'),
-			('`+tenantB+`', 't-bbbb', 'Beta Ltd', 'free', now() - interval '1 day')`,
+			('`+tenantA+`', 't-aaaa', 'Alpha Corp', 'capped', now() - interval '2 days'),
+			('`+tenantB+`', 't-bbbb', 'Beta Ltd', 'capped', now() - interval '1 day')`,
 		`INSERT INTO users (id, email, is_platform_admin, is_system_admin) VALUES
 			('`+userPlatform+`', 'admin', true, true), ('`+userOwnerA+`', 'alice@alpha.example', false, false), ('`+userOwnerB+`', 'bob@beta.example', false, false)`,
 		`INSERT INTO memberships (tenant_id, user_id, role) VALUES
@@ -179,7 +179,7 @@ func TestIntegrationAdminFunctions(t *testing.T) {
 			`SELECT * FROM admin_list_tenants($1, '', true, 25, 0)`,
 			`SELECT * FROM admin_get_tenant($1, '` + tenantA + `')`,
 			`SELECT admin_set_tenant_plan($1, '` + tenantA + `', 'internal', gen_random_uuid(), NULL)`,
-			`SELECT admin_create_tenant($1, gen_random_uuid(), 'nope', 'Nope', 'free', gen_random_uuid(), NULL)`,
+			`SELECT admin_create_tenant($1, gen_random_uuid(), 'nope', 'Nope', 'capped', gen_random_uuid(), NULL)`,
 			`SELECT admin_set_tenant_status($1, '` + tenantB + `', 'suspended', gen_random_uuid(), NULL)`,
 			`SELECT admin_delete_tenant($1, '` + tenantB + `', gen_random_uuid(), NULL)`,
 			`SELECT * FROM admin_list_users($1, '` + tenantA + `', '', 25, 0)`,
@@ -198,7 +198,7 @@ func TestIntegrationAdminFunctions(t *testing.T) {
 		wantState(exec(`SELECT admin_stats($1)`, userPlatform), "PRA01")
 		pgtest.MustExec(t, admin, `UPDATE users SET status = 'active' WHERE id = '`+userPlatform+`'`)
 		var changed string
-		if err := admin.QueryRow(ctx, `SELECT plan_key || status FROM tenants WHERE id = $1`, tenantA).Scan(&changed); err != nil || changed != "freeactive" {
+		if err := admin.QueryRow(ctx, `SELECT plan_key || status FROM tenants WHERE id = $1`, tenantA).Scan(&changed); err != nil || changed != "cappedactive" {
 			t.Fatalf("tenant A changed by refused calls: %s %v", changed, err)
 		}
 	})
@@ -252,7 +252,7 @@ func TestIntegrationAdminFunctions(t *testing.T) {
 			userPlatform, tenantA).Scan(&users, &monitors, &heartbeats, &plan, &planName); err != nil {
 			t.Fatal(err)
 		}
-		if users != 1 || monitors != 2 || heartbeats != 1 || plan != "free" || planName != "Free" {
+		if users != 1 || monitors != 2 || heartbeats != 1 || plan != "capped" || planName != "Capped" {
 			t.Fatalf("tenant A: users=%d monitors=%d heartbeats=%d plan=%s/%s", users, monitors, heartbeats, plan, planName)
 		}
 		wantState(exec(`SELECT * FROM admin_get_tenant($1, gen_random_uuid())`, userPlatform), "PRA02")
@@ -282,15 +282,15 @@ func TestIntegrationAdminFunctions(t *testing.T) {
 
 	t.Run("plan changes", func(t *testing.T) {
 		wantState(exec(`SELECT admin_set_tenant_plan($1, $2, 'gold', gen_random_uuid(), NULL)`, userPlatform, tenantA), "PRA03")
-		wantState(exec(`SELECT admin_set_tenant_plan($1, gen_random_uuid(), 'free', gen_random_uuid(), NULL)`, userPlatform), "PRA02")
-		if changed(`SELECT admin_set_tenant_plan($1, $2, 'free', gen_random_uuid(), '203.0.113.9')`, userPlatform, tenantA) {
+		wantState(exec(`SELECT admin_set_tenant_plan($1, gen_random_uuid(), 'capped', gen_random_uuid(), NULL)`, userPlatform), "PRA02")
+		if changed(`SELECT admin_set_tenant_plan($1, $2, 'capped', gen_random_uuid(), '203.0.113.9')`, userPlatform, tenantA) {
 			t.Fatal("same plan reported as a change")
 		}
 		if !changed(`SELECT admin_set_tenant_plan($1, $2, 'internal', gen_random_uuid(), '203.0.113.9')`, userPlatform, tenantA) {
 			t.Fatal("plan change not reported")
 		}
 		rows := auditRows(tenantA, "admin.organization.plan_changed")
-		if len(rows) != 1 || rows[0] != userPlatform+" "+tenantA+` {"to": "internal", "from": "free"}` {
+		if len(rows) != 1 || rows[0] != userPlatform+" "+tenantA+` {"to": "internal", "from": "capped"}` {
 			t.Fatalf("plan audit rows: %q", rows)
 		}
 		var ip string
@@ -298,7 +298,7 @@ func TestIntegrationAdminFunctions(t *testing.T) {
 			t.Fatalf("audit ip = %q (err %v)", ip, err)
 		}
 		// The plan change of the default tenant is allowed (only suspension and deletion are guarded).
-		if !changed(`SELECT admin_set_tenant_plan($1, $2, 'free', gen_random_uuid(), NULL)`, userPlatform, tenantDef) {
+		if !changed(`SELECT admin_set_tenant_plan($1, $2, 'capped', gen_random_uuid(), NULL)`, userPlatform, tenantDef) {
 			t.Fatal("default tenant plan change")
 		}
 		pgtest.MustExec(t, admin, `UPDATE tenants SET plan_key = 'internal' WHERE id = '`+tenantDef+`'`)
@@ -418,7 +418,7 @@ func TestIntegrationAdminFunctions(t *testing.T) {
 			status != "suspended" || !deleted {
 			t.Fatalf("deleted tenant: status=%s deleted=%v err=%v", status, deleted, err)
 		}
-		if rows := auditRows(tenantB, "admin.organization.deleted"); len(rows) != 1 || !strings.HasSuffix(rows[0], `{"plan": "free", "status": "active"}`) {
+		if rows := auditRows(tenantB, "admin.organization.deleted"); len(rows) != 1 || !strings.HasSuffix(rows[0], `{"plan": "capped", "status": "active"}`) {
 			t.Fatalf("delete audit rows: %q", rows)
 		}
 		wantState(exec(`SELECT admin_set_tenant_plan($1, $2, 'internal', gen_random_uuid(), NULL)`, userPlatform, tenantB), "PRA08")
@@ -439,7 +439,7 @@ func TestIntegrationAdminFunctions(t *testing.T) {
 		if err := api.QueryRow(ctx, `SELECT admin_stats($1)::text`, userPlatform).Scan(&raw); err != nil {
 			t.Fatal(err)
 		}
-		want := `{"plans": [{"key": "free", "name": "Free", "tenants": 0}, {"key": "internal", "name": "Internal", "tenants": 2}], ` +
+		want := `{"plans": [{"key": "capped", "name": "Capped", "tenants": 0}, {"key": "internal", "name": "Internal", "tenants": 2}], ` +
 			`"users": 3, "tenants": {"total": 2, "active": 2, "deleted": 1, "suspended": 0}, "monitors": 2, "heartbeats": 1}`
 		if raw != want {
 			t.Fatalf("stats = %s\nwant    %s", raw, want)

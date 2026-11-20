@@ -3619,9 +3619,9 @@ export interface components {
       usage: components["schemas"]["ResourceCounts"];
     };
     PlanRef: {
-      /** @example free */
+      /** @example internal */
       key: string;
-      /** @example Free */
+      /** @example Internal */
       name: string;
     };
     ResourceCounts: {
@@ -3670,9 +3670,9 @@ export interface components {
       id: string;
       slug: string;
       name: string;
-      /** @example free */
+      /** @example internal */
       planKey: string;
-      /** @example Free */
+      /** @example Internal */
       planName: string;
       status: components["schemas"]["OrganizationStatus"];
       /** Format: date-time */
@@ -4681,7 +4681,7 @@ export interface components {
          *       "type": "urn:proreta:problem:plan-limit-reached",
          *       "title": "Plan limit reached",
          *       "status": 409,
-         *       "detail": "The Free plan allows at most 3 monitors.",
+         *       "detail": "The Team plan allows at most 3 monitors.",
          *       "limit": "monitors",
          *       "max": 3
          *     }

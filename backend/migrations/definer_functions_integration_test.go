@@ -55,7 +55,7 @@ var definerCalls = map[string]string{
 	"admin_plans_list":                  `SELECT * FROM admin_plans_list(gen_random_uuid())`,
 	"admin_plan_peak_usage":             `SELECT admin_plan_peak_usage(gen_random_uuid(), 'internal')`,
 	"admin_plan_create":                 `SELECT admin_plan_create(gen_random_uuid(), 'gold', 'Gold', '{}', gen_random_uuid(), NULL)`,
-	"admin_plan_update":                 `SELECT admin_plan_update(gen_random_uuid(), 'internal', 'Free', '{}', gen_random_uuid(), NULL)`,
+	"admin_plan_update":                 `SELECT admin_plan_update(gen_random_uuid(), 'internal', 'Capped', '{}', gen_random_uuid(), NULL)`,
 	"admin_plan_delete":                 `SELECT admin_plan_delete(gen_random_uuid(), 'gold', gen_random_uuid(), NULL)`,
 	"purge_notification_deliveries":     `SELECT purge_notification_deliveries(30)`,
 	"purge_result_rollups":              `SELECT purge_result_rollups(13)`,

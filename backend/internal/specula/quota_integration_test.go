@@ -21,9 +21,9 @@ func TestIntegrationSpeculaQuota(t *testing.T) {
 	ctx := context.Background()
 	admin := env.AdminConn(t)
 	user := uuid.New()
-	pgtest.MustExec(t, admin, pgtest.FreePlanSQL,
+	pgtest.MustExec(t, admin, pgtest.CappedPlanSQL,
 		`INSERT INTO tenants (id, slug, name, limits) VALUES ('`+tenantA+`', 'a', 'A', '{"max_agents": 3}')`,
-		`INSERT INTO tenants (id, slug, name, plan_key) VALUES ('`+tenantB+`', 'b', 'B', 'free')`,
+		`INSERT INTO tenants (id, slug, name, plan_key) VALUES ('`+tenantB+`', 'b', 'B', 'capped')`,
 		`INSERT INTO users (id, email) VALUES ('`+user.String()+`', 'owner@example.com')`)
 	svc := specula.NewService(env.Pool(t, env.APIURL, 4)) // the role allows 20 connections for every package at once
 	a := specula.Actor{TenantID: uuid.MustParse(tenantA), UserID: user}
@@ -35,12 +35,12 @@ func TestIntegrationSpeculaQuota(t *testing.T) {
 	}
 	var lerr *plans.LimitError
 
-	// The free plan allows one.
+	// The capped plan allows one.
 	if _, err := create(b, "one"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := create(b, "two"); !errors.As(err, &lerr) || lerr.Resource != plans.ResourceAgent || lerr.Max != 1 {
-		t.Fatalf("over the free limit: %v", err)
+		t.Fatalf("over the capped limit: %v", err)
 	}
 
 	// A revoked Specula frees its slot; the override of tenant A allows three.

@@ -31,7 +31,7 @@ helm upgrade --install specula oci://ghcr.io/proreta-io/charts/proreta-specula -
 | `PRORETA_URL` | The address of Proreta, for example `https://proreta.example.com` (no trailing slash). |
 | `PRORETA_SPECULA_TOKEN` | The token from the registration. |
 
-Optional: `PRORETA_SPECULA_STATE_DIR` (a writable directory for the schedule and the buffer; unset means memory only), `PRORETA_SPECULA_CONCURRENCY` (checks in flight, default 20), `PRORETA_SPECULA_POLL_INTERVAL` (how often it asks for work, default 5s), `PRORETA_ADMIN_ADDR` (metrics, default `:9090`), `PRORETA_LOG_LEVEL`.
+Optional: `PRORETA_SPECULA_STATE_DIR` (a writable directory for the schedule and the buffer; unset means memory only), `PRORETA_SPECULA_CONCURRENCY` (checks in flight; the binary defaults to 50, the chart sets 20 through `specula.concurrency`), `PRORETA_SPECULA_POLL_INTERVAL` (how often it asks for work, default 5s), `PRORETA_ADMIN_ADDR` (metrics, default `:9090`), `PRORETA_LOG_LEVEL`.
 
 It has no database. It keeps a small state directory (`PRORETA_SPECULA_STATE_DIR`, see [The buffer](#the-buffer)); the chart provides one. Run one executor per Specula: a second one with the same token runs every check twice.
 
@@ -118,7 +118,7 @@ Suggested alerts (PromQL, thresholds are first guesses; the schedule lasts 24 ho
 
 **Downgrade.** Install the previous chart or image. The old executor does not announce the schedule capability, so Proreta serves it checks to claim again from its first call. There is nothing to clean up in Proreta, and results the new executor had not yet delivered are lost with its state directory. An executor of the previous version also does not run TCP monitors, and Proreta does not hand it any; they show *unknown* until you upgrade again.
 
-The chart now runs a single pod and replaces it only after the old one has stopped. If you installed an earlier version with two replicas, the upgrade reduces it to one.
+The chart runs a single pod per Specula and replaces it only after the old one has stopped: two executors for the same Specula are reported as duplicates.
 
 ## Behind a gateway or proxy
 Operators, for the [Specula gateway](#enable-the-gateway) on the Proreta side:

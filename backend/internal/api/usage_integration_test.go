@@ -30,7 +30,7 @@ func TestIntegrationUsage(t *testing.T) {
 		t.Fatalf("usage of the default tenant:\n got %s\nwant %s", got, want)
 	}
 
-	pgtest.MustExec(t, admin, pgtest.FreePlanSQL, `UPDATE tenants SET plan_key = 'free' WHERE slug = 'default'`)
+	pgtest.MustExec(t, admin, pgtest.CappedPlanSQL, `UPDATE tenants SET plan_key = 'capped' WHERE slug = 'default'`)
 	create := func(name string) response {
 		return c.do(http.MethodPost, "/api/v1/monitors", `{"type":"http","name":"`+name+`","http":{"url":"https://example.com/`+name+`"}}`, unsafe)
 	}
@@ -38,7 +38,7 @@ func TestIntegrationUsage(t *testing.T) {
 	for _, name := range []string{"a", "b", "c"} {
 		r := create(name)
 		if r.code != http.StatusCreated {
-			t.Fatalf("create %s on free: %d %s", name, r.code, r.raw)
+			t.Fatalf("create %s on capped: %d %s", name, r.code, r.raw)
 		}
 		ids = append(ids, r.body["id"].(string))
 	}
@@ -48,9 +48,9 @@ func TestIntegrationUsage(t *testing.T) {
 	}
 	if r := create("d"); r.code != http.StatusConflict || r.body["type"] != "urn:proreta:problem:plan-limit-reached" ||
 		r.body["limit"] != "monitors" || r.body["max"] != float64(3) || r.body["status"] != float64(409) {
-		t.Fatalf("4th monitor on free: %d %s", r.code, r.raw)
+		t.Fatalf("4th monitor on capped: %d %s", r.code, r.raw)
 	}
-	if got, want := usage(cookie), `{"limits":{"channels":1,"heartbeats":1,"members":3,"monitors":3,"projects":50,"specula":1,"statusPageDomains":0,"statusPages":1},"plan":{"key":"free","name":"Free"},"usage":{"channels":0,"heartbeats":0,"members":1,"monitors":3,"projects":1,"specula":0,"statusPageDomains":0,"statusPages":0}}`+"\n"; got != want {
+	if got, want := usage(cookie), `{"limits":{"channels":1,"heartbeats":1,"members":3,"monitors":3,"projects":50,"specula":1,"statusPageDomains":0,"statusPages":1},"plan":{"key":"capped","name":"Capped"},"usage":{"channels":0,"heartbeats":0,"members":1,"monitors":3,"projects":1,"specula":0,"statusPageDomains":0,"statusPages":0}}`+"\n"; got != want {
 		t.Fatalf("usage at the limit:\n got %s\nwant %s", got, want)
 	}
 
@@ -67,7 +67,7 @@ func TestIntegrationUsage(t *testing.T) {
 	if r := c.do(http.MethodDelete, "/api/v1/monitors/"+ids[1], "", unsafe); r.code != http.StatusNoContent {
 		t.Fatalf("delete: %d %s", r.code, r.raw)
 	}
-	if got, want := usage(cookie), `{"limits":{"channels":1,"heartbeats":1,"members":3,"monitors":4,"projects":50,"specula":1,"statusPageDomains":0,"statusPages":1},"plan":{"key":"free","name":"Free"},"usage":{"channels":0,"heartbeats":0,"members":1,"monitors":3,"projects":1,"specula":0,"statusPageDomains":0,"statusPages":0}}`+"\n"; got != want {
+	if got, want := usage(cookie), `{"limits":{"channels":1,"heartbeats":1,"members":3,"monitors":4,"projects":50,"specula":1,"statusPageDomains":0,"statusPages":1},"plan":{"key":"capped","name":"Capped"},"usage":{"channels":0,"heartbeats":0,"members":1,"monitors":3,"projects":1,"specula":0,"statusPageDomains":0,"statusPages":0}}`+"\n"; got != want {
 		t.Fatalf("usage after delete:\n got %s\nwant %s", got, want)
 	}
 	if r := create("e"); r.code != http.StatusCreated {
@@ -76,8 +76,8 @@ func TestIntegrationUsage(t *testing.T) {
 
 	// Another tenant sees only its own plan and usage, and its quota is its own.
 	other, otherCSRF := otherTenantSession(t, env)
-	useFreePlan(t, env)
-	if got, want := usage(other), `{"limits":{"channels":1,"heartbeats":1,"members":3,"monitors":3,"projects":50,"specula":1,"statusPageDomains":0,"statusPages":1},"plan":{"key":"free","name":"Free"},"usage":{"channels":0,"heartbeats":0,"members":1,"monitors":0,"projects":1,"specula":0,"statusPageDomains":0,"statusPages":0}}`+"\n"; got != want {
+	useCappedPlan(t, env)
+	if got, want := usage(other), `{"limits":{"channels":1,"heartbeats":1,"members":3,"monitors":3,"projects":50,"specula":1,"statusPageDomains":0,"statusPages":1},"plan":{"key":"capped","name":"Capped"},"usage":{"channels":0,"heartbeats":0,"members":1,"monitors":0,"projects":1,"specula":0,"statusPageDomains":0,"statusPages":0}}`+"\n"; got != want {
 		t.Fatalf("usage of the other tenant:\n got %s\nwant %s", got, want)
 	}
 	if r := c.do(http.MethodPost, "/api/v1/monitors", `{"type":"http","name":"o","http":{"url":"https://example.com/o"}}`, withCSRF(other, otherCSRF)); r.code != http.StatusCreated {
@@ -94,9 +94,9 @@ func TestIntegrationUsage(t *testing.T) {
 	}
 }
 
-// useFreePlan moves every organization to a small plan: the installation seeds only the unlimited
+// useCappedPlan moves every organization to a small plan: the installation seeds only the unlimited
 // `internal` one, so the tests of the quotas need a plan that has some.
-func useFreePlan(t *testing.T, env *pgtest.Env) {
+func useCappedPlan(t *testing.T, env *pgtest.Env) {
 	t.Helper()
-	pgtest.MustExec(t, env.AdminConn(t), pgtest.FreePlanSQL, `UPDATE tenants SET plan_key = 'free'`)
+	pgtest.MustExec(t, env.AdminConn(t), pgtest.CappedPlanSQL, `UPDATE tenants SET plan_key = 'capped'`)
 }

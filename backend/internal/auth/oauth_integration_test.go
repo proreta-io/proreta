@@ -380,9 +380,9 @@ func TestIntegrationOAuthDomains(t *testing.T) {
 	if err != nil || m.Role != auth.RoleMember {
 		t.Fatalf("member join: %v %+v", err, m.SessionInfo)
 	}
-	// A join through the domain needs a free place: the free plan holds 3 members and the
+	// A join through the domain needs a free place: the capped plan holds 3 members and the
 	// organization has them now (admin, the two domain joiners).
-	pgtest.MustExec(t, e.admin, pgtest.FreePlanSQL, `UPDATE tenants SET plan_key = 'free' WHERE id = '`+admin.Tenant.ID.String()+`'`)
+	pgtest.MustExec(t, e.admin, pgtest.CappedPlanSQL, `UPDATE tenants SET plan_key = 'capped' WHERE id = '`+admin.Tenant.ID.String()+`'`)
 	var full *plans.LimitError
 	if _, err := e.login(auth.OAuthLoginInput{Identity: google("g-full", "full@example.com", "example.com")}); !errors.As(err, &full) {
 		t.Fatalf("domain join into a full organization: %v", err)

@@ -98,15 +98,15 @@ func TestIntegrationBootstrapAdminIdempotent(t *testing.T) {
 	if _, err := admin.Exec(ctx, `UPDATE memberships SET role = 'viewer'`); err != nil {
 		t.Fatal(err)
 	}
-	pgtest.MustExec(t, admin, pgtest.FreePlanSQL)
-	if _, err := admin.Exec(ctx, `UPDATE tenants SET plan_key = 'free'`); err != nil {
+	pgtest.MustExec(t, admin, pgtest.CappedPlanSQL)
+	if _, err := admin.Exec(ctx, `UPDATE tenants SET plan_key = 'capped'`); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.BootstrapAdmin(ctx, "ADMIN", hash2); err != nil {
 		t.Fatal(err)
 	}
 	assertCounts(hash2)
-	assertPlan("free")
+	assertPlan("capped")
 	var stored string
 	if err := admin.QueryRow(ctx, `SELECT email::text FROM users`).Scan(&stored); err != nil || stored != "admin" {
 		t.Fatalf("stored login = %q (err %v), want it lowercased", stored, err)
@@ -171,18 +171,18 @@ func TestIntegrationAdminLoginRotation(t *testing.T) {
 	var sessionsA, rotated int
 	if err := admin.QueryRow(ctx, `SELECT (SELECT status FROM users WHERE email = 'a@example.com'),
 		(SELECT count(*) FROM sessions s JOIN users u ON u.id = s.user_id WHERE u.email = 'a@example.com'),
-		(SELECT count(*) FROM audit_log WHERE action = 'admin.rotated'
+		(SELECT count(*) FROM audit_log WHERE action = 'admin.user.rotated'
 		   AND entity_id = (SELECT id::text FROM users WHERE email = 'a@example.com'))`).Scan(&statusA, &sessionsA, &rotated); err != nil {
 		t.Fatal(err)
 	}
 	if statusA != "disabled" || sessionsA != 0 || rotated != 1 {
-		t.Fatalf("old admin: status=%s sessions=%d admin.rotated rows=%d, want disabled/0/1", statusA, sessionsA, rotated)
+		t.Fatalf("old admin: status=%s sessions=%d admin.user.rotated rows=%d, want disabled/0/1", statusA, sessionsA, rotated)
 	}
 
 	// Re-running with the same login changes nothing (no second audit row).
 	_ = newBootstrapped(t, env, "b@example.com", hash)
-	if err := admin.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action = 'admin.rotated'`).Scan(&rotated); err != nil || rotated != 1 {
-		t.Fatalf("admin.rotated rows after rerun = %d (err %v), want 1", rotated, err)
+	if err := admin.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action = 'admin.user.rotated'`).Scan(&rotated); err != nil || rotated != 1 {
+		t.Fatalf("admin.user.rotated rows after rerun = %d (err %v), want 1", rotated, err)
 	}
 
 	// Rotating back re-enables a@ and retires b@.

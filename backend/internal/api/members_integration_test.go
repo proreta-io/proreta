@@ -572,14 +572,14 @@ func TestIntegrationConcurrentOwnerDemotion(t *testing.T) {
 	}
 }
 
-// TestIntegrationMemberQuota: members plus open invitations are limited by max_members (free: 3);
+// TestIntegrationMemberQuota: members plus open invitations are limited by max_members (capped: 3);
 // concurrent invitations never pass the limit, and concurrent registrations through one token
 // make one member.
 func TestIntegrationMemberQuota(t *testing.T) {
 	env := pgtest.New(t, pgtest.DBName("memberquota"))
 	c := newRegistrationServer(t, env, membersOpts(), true, &lockedBuffer{})
 	oCookie, oCSRF, _ := c.register("owner@example.com")
-	useFreePlan(t, env)
+	useCappedPlan(t, env)
 	owner := withCSRF(oCookie, oCSRF)
 
 	t1, _ := invite(t, c, owner, "member")

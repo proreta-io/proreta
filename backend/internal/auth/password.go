@@ -180,7 +180,7 @@ func (s *Service) ChangePassword(ctx context.Context, p Principal, in ChangePass
 	s.ipLimit.Refund(ipKey)
 	s.loginLimit.Reset(accountKey)
 	s.passwordChanges.WithLabelValues("succeeded").Inc()
-	s.log.InfoContext(ctx, "password changed", "user_id", p.UserID, "tenant_id", p.TenantID)
+	s.log.InfoContext(ctx, "password changed", "user_id", p.UserID)
 	return res, nil
 }
 

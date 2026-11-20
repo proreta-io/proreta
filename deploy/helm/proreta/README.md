@@ -70,7 +70,6 @@ not contain `proreta` (`fullnameOverride` replaces it).
 | `database.bootstrap.enabled` | `false` | Run the database bootstrap hook Job. It skips itself once the database is set up, so it may stay on. |
 | `database.bootstrap.force` | `false` | Run the full bootstrap even if the database looks ready (password rotation, a new role). Needs the admin Secret. |
 | `database.bootstrap.adminSecret.existingSecret` | `""` | Secret in the namespace with the server admin login. |
-| `secrets.tlsAsk.remoteKey` (`proreta/statuspage-ask`, when `secrets.tlsAsk.existingSecret` is empty and the ask endpoint is on) | `token` | `<fullname>-statuspage-ask` |
 | `database.bootstrap.adminSecret.remoteKey` | `proreta/db-admin` | With External Secrets and no `existingSecret`: the remote secret. |
 | `database.bootstrap.adminSecret.usernameKey`, `.passwordKey` | `username`, `password` | Keys of the login in that Secret (properties of the remote secret). |
 | `database.bootstrap.backoffLimit`, `.activeDeadlineSeconds`, `.ttlSecondsAfterFinished`, `.resources` | `2`, `300`, `600`, 50m/64Mi | Job settings. |
@@ -165,6 +164,7 @@ Source of truth: `backend/internal/platform/config/config.go`. Secret names belo
 | `PRORETA_LOG_LEVEL` | x | x | x | x | x |
 | `PRORETA_ADMIN_ADDR`, `PRORETA_DATABASE_URL` (`api_url` / `worker_url`) | x | x | x | | |
 | `PRORETA_ENCRYPTION_KEYS`, `PRORETA_ENCRYPTION_ACTIVE_KEY_ID` (`proreta-crypto`) | x | **never** | x | | |
+| `PRORETA_REQUEST_KEYS`, `PRORETA_REQUEST_ACTIVE_KEY_ID` (`proreta-request`) | x | x | | | |
 | `PRORETA_ADMIN_LOGIN`, `PRORETA_ADMIN_PASSWORD_HASH` (`proreta-admin`) | x | **never** | **never** | | |
 | `PRORETA_HTTP_ADDR`, `PRORETA_SESSION_TTL`, `PRORETA_COOKIE_SECURE`, `PRORETA_TRUSTED_PROXY_HOPS` (`config.trustedProxyHops`: number of trusted proxies in front of the api, default `1` for the gateway; `0` only with nothing in front) | x | | | | |
 | `PRORETA_REGISTRATION_ENABLED` (`config.registrationEnabled`, default `false` in the chart and in the binary; self-service creation of new organizations) | x | | | | |
@@ -229,7 +229,7 @@ The default install needs no External Secrets Operator: everything is generated 
 Secret you create. `externalSecrets.enabled` is `false` by default; set it to `true` (with
 `externalSecrets.secretStoreRef.name`) to read any of the Secrets below from your secret store instead.
 
-Workloads always read `<fullname>-admin` (`login`, `password_hash`) and `<fullname>-crypto` (`keys`,
+Workloads always read `<fullname>-admin` (`login`, `password_hash`), `<fullname>-crypto` and `<fullname>-request` (`keys`,
 `active_key_id`). `secrets.admin.source`, `secrets.crypto.source` and `secrets.request.source` choose, per Secret, who creates them:
 
 - `generate` (default): the secrets bootstrap hook Job (`/app/proretactl secrets bootstrap`) creates the Secret
@@ -263,7 +263,7 @@ Rendering fails when neither is configured. See [docs/runbooks/oauth.md](../../.
 
 The secrets Job (`<fullname>-secrets-bootstrap`, rendered when any source is `generate`) has its own ServiceAccount
 with an API token and a Role limited to `create` on secrets and `get,update,patch` on exactly `<fullname>-admin`,
-`<fullname>-admin-initial`, `<fullname>-crypto` (and `<fullname>-statuspage`). It has no database credentials, so
+`<fullname>-admin-initial`, `<fullname>-crypto`, `<fullname>-request` (and `<fullname>-statuspage`). It has no database credentials, so
 unlike the database bootstrap it stays enabled. Admin password reset: delete `<fullname>-admin` (and
 `<fullname>-admin-initial` if still there), run the upgrade again and restart the api. The api applies the hash of
 `<fullname>-admin` only when the admin never changed its password in the app, or when the hash is a new one; a restart

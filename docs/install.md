@@ -19,7 +19,7 @@ Contents: [Prerequisites](#prerequisites) · [Install](#install) · [After insta
 - The pods satisfy the Pod Security Standard **restricted** profile, so the namespace can enforce it.
 
 ### PostgreSQL
-- **PostgreSQL 15 or newer** (CI tests 15; the install below was tested on 16), reachable from the cluster. A bundled database is not part of the chart (not part of the chart): bring your own server, managed or self-hosted.
+- **PostgreSQL 15 or newer** (CI tests 15; the install below was tested on 16), reachable from the cluster. A bundled database is not part of the chart: bring your own server, managed or self-hosted.
 - **An admin login** for the one-time bootstrap. It needs `LOGIN`, `CREATEROLE` and `CREATEDB`; it does not need to be a superuser. It must be able to connect to the database `postgres`. On Amazon RDS and Aurora use the master user (member of `rds_superuser`), on Google Cloud SQL the default `postgres` user (`cloudsqlsuperuser`), on Azure Database for PostgreSQL the server admin.
 - **What the bootstrap does with it** (`proretactl db bootstrap`, idempotent, under an advisory lock):
   - creates the roles `proreta_owner` (migrations), `proreta_api`, `proreta_worker` and `proreta_statuspage`, all `LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`, with connection limits 3, 20, 20 and 10 and per-role statement timeouts. Passwords are random, sent as SCRAM verifiers, and stored only in the Secret `proreta-db` in your namespace;
@@ -89,7 +89,7 @@ Helm runs these steps in order (the same order applies to ArgoCD as sync waves) 
 |---|---|---|
 | 1 | ServiceAccounts and Roles of the two bootstrap Jobs | allowed to create Secrets in this namespace only |
 | 2 | Job `proreta-db-bootstrap` | database, roles, Secret `proreta-db` |
-| 2 | Job `proreta-secrets-bootstrap` | Secrets `proreta-admin`, `proreta-admin-initial`, `proreta-crypto`, `proreta-statuspage` (created only if absent, never overwritten) |
+| 2 | Job `proreta-secrets-bootstrap` | Secrets `proreta-admin`, `proreta-admin-initial`, `proreta-crypto`, `proreta-request`, `proreta-statuspage` (created only if absent, never overwritten) |
 | 3 | ServiceAccount `proreta-migrate`, then Job `proreta-migrate` | applies the database migrations as `proreta_owner` |
 | 4 | Deployments `api`, `worker`, `jobs`, `statuspage`, `web`, Services, HTTPRoute | `--wait` waits until they are ready |
 
@@ -223,7 +223,7 @@ The Secret `proreta-db` (the role passwords) stays; it is not managed by Helm. I
 
 **Back up the encryption keys.** Do this now, once. The Secret `proreta-crypto` holds the keys that encrypt the Slack and webhook URLs stored in the database, and `proreta-request` the keys for the header values and bodies of monitor requests. Without them those values in the database (and in any backup of it) cannot be decrypted: they are lost and must be entered again. The Secret `proreta-statuspage` (the cookie signing key of the status page) is less critical: losing it only signs visitors of password-protected pages out, but it is cheap to keep with the others. [Back up the secrets](#back-up-the-secrets) shows how.
 
-**Optional next steps:** Slack and [webhook](runbooks/alerts-webhook.md) channels in the app, [outgoing email](runbooks/email.md) (configured after your first sign-in under **Admin → Email**: an SMTP server, a test message and three switches; everything is off by default, and nothing is emailed until you turn it on), [sign-in with Google or GitHub](runbooks/oauth.md), [status pages](runbooks/status-page.md), [status pages on your customers' own domains](runbooks/custom-domains.md) (off by default; you terminate TLS for those hosts), [Alertmanager watchdog](runbooks/heartbeat-alertmanager.md), [metrics and alerts](runbooks/observability.md). Add the CIDRs of your cluster and VPC to `config.blockedCIDRs` so monitors cannot probe internal addresses ([chart README](../deploy/helm/proreta/README.md)).
+**Optional next steps:** Slack and [webhook](runbooks/alerts-webhook.md) channels in the app, [outgoing email](runbooks/email.md) (configured after your first sign-in under **Admin → Email**: an SMTP server, a test message and three switches; everything is off by default, and nothing is emailed until you turn it on), [sign-in with Google or GitHub](runbooks/oauth.md), [status pages](runbooks/status-page.md), [status pages on your customers' own domains](runbooks/custom-domains.md) (off by default; you terminate TLS for those hosts), [Alertmanager watchdog](runbooks/heartbeat-alertmanager.md), [metrics and alerts](runbooks/observability.md). Public ranges of your own that monitors must not probe (for example a VPC's public CIDRs) go into `config.blockedCIDRs`; the private ranges are already blocked ([chart README](../deploy/helm/proreta/README.md)).
 
 ## Back up the secrets
 The database backup alone is not enough to restore an installation. Three Secrets are generated in the cluster and exist nowhere else (with `secrets.*.source: externalSecret` your secret store is the copy, and you can skip this):
@@ -252,13 +252,13 @@ kubectl -n proreta apply -f proreta-crypto.yaml -f proreta-request.yaml -f prore
 ```
 Then install with the same `secrets.crypto.keyId`, restore the database, and check that a channel can send a test message. If the Secrets already exist with other content, apply the saved files over them and restart `api`, `worker` and `jobs` (`kubectl -n proreta rollout restart deploy/proreta-api deploy/proreta-worker deploy/proreta-jobs`) and the `statuspage` Deployment, which read the Secrets only at start.
 
-**Rotation.** Add a second entry to `keys` and point `active_key_id` at it; never remove an old entry while stored webhook URLs may still be sealed with it, because there is no re-encryption tool and a webhook URL is re-sealed only when its channel is saved again:
+**Rotation.** Add a second entry to `keys` and point `active_key_id` at it; never remove an old entry while stored values may still be sealed with it, because there is no re-encryption tool and a value is re-sealed only when its channel or monitor is saved again. The snippet rotates `proreta-crypto` (key id `k2`, restart `api` and `jobs`); for the request key use the Secret `proreta-request`, key id `r2` and restart `api` and `worker`:
 ```sh
 NEW=$(openssl rand -base64 32)
 KEYS=$(kubectl -n proreta get secret proreta-crypto -o jsonpath='{.data.keys}' | base64 -d)
 PATCH=$(jq -cn --arg old "$KEYS" --arg new "$NEW" '{stringData: {keys: ($old | fromjson | . + {k2: $new} | tojson), active_key_id: "k2"}}')
 kubectl -n proreta patch secret proreta-crypto --type merge -p "$PATCH"
-kubectl -n proreta rollout restart deploy/proreta-api deploy/proreta-jobs
+kubectl -n proreta rollout restart deploy/proreta-api deploy/proreta-jobs   # proreta-request: deploy/proreta-api deploy/proreta-worker
 ```
 Rotating also ends OAuth sign-ins that are in progress ([OAuth runbook](runbooks/oauth.md)). Export the Secret again afterwards. The cookie key of the status page is rotated by deleting `proreta-statuspage` ([status page runbook](runbooks/status-page.md)); that only signs visitors out.
 
@@ -270,7 +270,7 @@ The Secrets above are half of a backup; the database is the other half. Take a b
 - **Rehearse a restore once** on a scratch server before you rely on it. The `pg_dump` path is described from the design, not from a rehearsal for this guide.
 
 ## Upgrade
-**Test releases before the first stable release cannot be upgraded in place.** From that release on the schema is one baseline migration and every later change is a forward-only expand/contract migration, but an installation made from an earlier test release has a migration history the new image does not know. Install the new release on a new, empty database and take the data you need out of the old one first ([back up](#back-up-the-database)). Pointing the new image at an old database changes nothing: the migration Job fails and api, worker and jobs refuse to start (see [Troubleshooting](#troubleshooting)). Upgrades between releases made after that one follow the steps below.
+**Releases before 1.0.0-rc.1 (the 0.x test releases) cannot be upgraded in place.** Their migration chain was replaced by one baseline, which every release from `1.0.0-rc.1` on shares; every later change is a forward-only expand/contract migration. An installation made from a 0.x release has a migration history the new image does not know: install the new release on a new, empty database and take the data you need out of the old one first ([back up](#back-up-the-database)). Do not point the new image at an old database: the migration Job fails and api, worker and jobs do not start (see [Troubleshooting](#troubleshooting)). Pre-releases `1.0.0-rc.N` and `1.0.0` can be upgraded to each other and to later releases with the steps below, so a test installation of a release candidate does not have to be reinstalled for 1.0.0.
 
 1. Read the release notes. **Back up the database** right before the upgrade ([above](#back-up-the-database)): migrations are forward-only and the backup is the only way back ([migrations runbook](runbooks/migrations.md)). Keep your `my-values.yaml` in version control and compare it with the new chart's `values.yaml` and README for renamed or new values.
 2. Check out the new version of the chart and use the new image tag in `--set image.tag=...`. With the OCI chart pass the new `--version` only:
@@ -377,5 +377,8 @@ The provider shows `redirect_uri_mismatch` (Google) or "The redirect_uri is not 
 
 ### Other first-day problems
 - **The schema check rejects my values** (`values don't meet the specifications of the schema`): the line `at '/config/publicUrl'` (for example) names the key; its description is in `values.schema.json` and [values.yaml](../deploy/helm/proreta/values.yaml).
+- **Where to look:** `kubectl -n proreta logs deploy/proreta-<api|worker|jobs|statuspage>` (JSON lines with `request_id`); `/readyz` on the admin port 9090 of each pod; [metrics and alerts](runbooks/observability.md).
+- **A monitor stays pending or fails at once:** read the worker log. The checks refuse private and blocked addresses (SSRF guard) and, for HTTP monitors, accept only `https` on port 443.
+- **No alert arrives:** send a test message from the channel in the app, then read the `jobs` log; deliveries are retried and a `429` from Slack is honoured through `Retry-After`.
 - **Sign-in "works" but you are logged out at once:** the site is served over http. The session cookie is `Secure`; use the Gateway's HTTPS listener.
 - **Every visitor shares one rate limit:** `config.trustedProxyHops` was set to `0` behind a Gateway (the chart default is `1`); set `1`.

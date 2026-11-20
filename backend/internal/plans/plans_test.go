@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-const freeLimits = `{"max_monitors":3,"max_heartbeats":1,"max_channels":1,"max_members":3,"max_projects":50,"max_status_pages":1,"max_agents":1,"max_status_page_domains":0}`
+const cappedLimits = `{"max_monitors":3,"max_heartbeats":1,"max_channels":1,"max_members":3,"max_projects":50,"max_status_pages":1,"max_agents":1,"max_status_page_domains":0}`
 
 func TestResolve(t *testing.T) {
 	cases := []struct {
@@ -22,7 +22,7 @@ func TestResolve(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := Resolve("free", []byte(freeLimits), []byte(c.overrides))
+			got, err := Resolve("capped", []byte(cappedLimits), []byte(c.overrides))
 			if err != nil || got != c.want {
 				t.Fatalf("Resolve = %+v, %v; want %+v", got, err, c.want)
 			}
@@ -48,10 +48,10 @@ func TestResolveRejectsInvalidValues(t *testing.T) {
 		`[1,2]`,
 		`not json`,
 	} {
-		if _, err := Resolve("free", []byte(freeLimits), []byte(bad)); !errors.Is(err, ErrInvalidLimits) {
+		if _, err := Resolve("capped", []byte(cappedLimits), []byte(bad)); !errors.Is(err, ErrInvalidLimits) {
 			t.Errorf("overrides %s: err = %v, want ErrInvalidLimits", bad, err)
 		}
-		if _, err := Resolve("free", []byte(bad), nil); !errors.Is(err, ErrInvalidLimits) {
+		if _, err := Resolve("capped", []byte(bad), nil); !errors.Is(err, ErrInvalidLimits) {
 			t.Errorf("plan limits %s: err = %v, want ErrInvalidLimits", bad, err)
 		}
 	}
@@ -70,31 +70,31 @@ func TestResolvePlanMissingKey(t *testing.T) {
 }
 
 func TestResolveMaxStatusPageDomains(t *testing.T) {
-	// A plan stored before the key existed is invalid until the migration adds it.
+	// A stored plan without the key is invalid.
 	old := []byte(`{"max_monitors":3,"max_heartbeats":1,"max_channels":1,"max_members":3,"max_projects":50,"max_status_pages":1,"max_agents":1}`)
 	if _, err := Resolve("old", old, nil); !errors.Is(err, ErrInvalidLimits) {
 		t.Fatalf("err = %v, want ErrInvalidLimits", err)
 	}
-	got, err := Resolve("free", []byte(freeLimits), []byte(`{"max_status_page_domains":5}`))
+	got, err := Resolve("capped", []byte(cappedLimits), []byte(`{"max_status_page_domains":5}`))
 	if err != nil || got.MaxStatusPageDomains != 5 || got.Of(ResourceStatusPageDomain) != 5 {
 		t.Fatalf("override: %+v, %v", got, err)
 	}
-	if _, err := Resolve("free", []byte(freeLimits), []byte(`{"max_status_page_domains":-1}`)); !errors.Is(err, ErrInvalidLimits) {
+	if _, err := Resolve("capped", []byte(cappedLimits), []byte(`{"max_status_page_domains":-1}`)); !errors.Is(err, ErrInvalidLimits) {
 		t.Fatalf("negative: err = %v, want ErrInvalidLimits", err)
 	}
 }
 
 func TestResolveMaxAgents(t *testing.T) {
-	// A plan stored before max_agents existed is invalid until the migration adds the key.
+	// A stored plan without max_agents is invalid.
 	old := []byte(`{"max_monitors":3,"max_heartbeats":1,"max_channels":1,"max_members":3,"max_projects":50,"max_status_pages":1,"max_status_page_domains":0}`)
 	if _, err := Resolve("old", old, nil); !errors.Is(err, ErrInvalidLimits) {
 		t.Fatalf("err = %v, want ErrInvalidLimits", err)
 	}
-	got, err := Resolve("free", []byte(freeLimits), []byte(`{"max_agents":5}`))
+	got, err := Resolve("capped", []byte(cappedLimits), []byte(`{"max_agents":5}`))
 	if err != nil || got.MaxAgents != 5 {
 		t.Fatalf("override: %+v, %v", got, err)
 	}
-	if _, err := Resolve("free", []byte(freeLimits), []byte(`{"max_agents":-1}`)); !errors.Is(err, ErrInvalidLimits) {
+	if _, err := Resolve("capped", []byte(cappedLimits), []byte(`{"max_agents":-1}`)); !errors.Is(err, ErrInvalidLimits) {
 		t.Fatalf("negative: err = %v, want ErrInvalidLimits", err)
 	}
 }

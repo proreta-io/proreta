@@ -45,12 +45,12 @@ type cached[V any] struct {
 
 type authCache = ttlCache[specula.Identity]
 
-func newAuthCache(ttl time.Duration, max int) *authCache {
-	return newTTLCache[specula.Identity](ttl, max)
+func newAuthCache(ttl time.Duration, limit int) *authCache {
+	return newTTLCache[specula.Identity](ttl, limit)
 }
 
-func newTTLCache[V any](ttl time.Duration, max int) *ttlCache[V] {
-	return &ttlCache[V]{ttl: ttl, max: max, m: map[string]cached[V]{}}
+func newTTLCache[V any](ttl time.Duration, limit int) *ttlCache[V] {
+	return &ttlCache[V]{ttl: ttl, max: limit, m: map[string]cached[V]{}}
 }
 
 func (c *ttlCache[V]) get(key string, now time.Time) (V, bool) {
