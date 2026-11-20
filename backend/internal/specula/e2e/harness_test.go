@@ -109,6 +109,8 @@ func (p *prober) failDuring(key string, from, to time.Time) {
 }
 
 func (p *prober) Probe(_ context.Context, req checks.Request) checks.Result {
+	p.clk.busy.Add(1)
+	defer p.clk.busy.Add(-1)
 	now := p.clk.Now()
 	key := req.URL
 	if req.TCP {
@@ -329,7 +331,7 @@ type runner struct {
 func (e *env) start(clk executor.Clock, dir string) *runner {
 	e.t.Helper()
 	ex := executor.New(executor.Config{
-		BaseURL: e.link.srv.URL, Token: e.token, Version: "e2e", Hostname: "e2e-host", HTTP: e.link.srv.Client(),
+		BaseURL: e.link.srv.URL, Token: e.token, Version: "e2e", Hostname: "e2e-host", HTTP: e.clk.counted(e.link.srv.Client()),
 		Prober: e.prober, Clock: clk, StateDir: dir,
 		PollInterval: 20 * time.Millisecond, // pull mode polls on a real ticker
 		Log:          slog.New(slog.NewTextHandler(e.logs, &slog.HandlerOptions{Level: slog.LevelInfo})),

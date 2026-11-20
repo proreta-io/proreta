@@ -1,6 +1,8 @@
 package e2e_test
 
 import (
+	"io"
+	"net/http"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -64,6 +66,11 @@ func (c *simClock) settle() {
 		}
 	}
 }
+
+// startup is how long, in real time, an executor that was just started or restarted gets to fetch its
+// schedule (or read the cache) and arm the timers of its checks. A starved goroutine that misses it
+// starts one slot late and the test then misses a slot; it is paid once per start, so it is long.
+const startup = 500 * time.Millisecond
 
 // quiet waits, in real time, until no timer was armed and no request served for d.
 func (c *simClock) quiet(d time.Duration) {
@@ -132,3 +139,44 @@ type skewed struct {
 
 func (s skewed) Now() time.Time                         { return s.c.Now().Add(s.d) }
 func (s skewed) After(d time.Duration) <-chan time.Time { return s.c.After(d) }
+
+// counted wraps c so that every request counts as busy from the moment it is sent until its response
+// body is closed. The link counts a request only while its handler runs, which leaves a window, under
+// load of many milliseconds, where a request is on the wire and the clock looks quiet.
+func (c *simClock) counted(client *http.Client) *http.Client {
+	cp := *client
+	cp.Transport = countingTransport{c, client.Transport}
+	return &cp
+}
+
+type countingTransport struct {
+	c    *simClock
+	next http.RoundTripper
+}
+
+func (t countingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	t.c.busy.Add(1)
+	next := t.next
+	if next == nil {
+		next = http.DefaultTransport
+	}
+	resp, err := next.RoundTrip(r)
+	if err != nil {
+		t.c.busy.Add(-1)
+		return resp, err
+	}
+	resp.Body = &countedBody{ReadCloser: resp.Body, c: t.c}
+	return resp, nil
+}
+
+type countedBody struct {
+	io.ReadCloser
+	c    *simClock
+	once sync.Once
+}
+
+func (b *countedBody) Close() error {
+	err := b.ReadCloser.Close()
+	b.once.Do(func() { b.c.busy.Add(-1) })
+	return err
+}
