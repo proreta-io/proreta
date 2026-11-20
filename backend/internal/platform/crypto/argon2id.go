@@ -27,8 +27,9 @@ var DefaultArgon2Params = Argon2Params{Memory: 64 * 1024, Iterations: 3, Paralle
 // Bounds applied when hashing and when parsing a hash, so a hostile or mistyped hash cannot make
 // one verification allocate more than the api pod can hold or spin for minutes.
 const (
-	// MaxArgon2Memory is 256 MiB in KiB; the api runs up to two verifications at once.
-	MaxArgon2Memory     = 1 << 18
+	// MaxArgon2Memory is 128 MiB in KiB; the api runs up to two verifications at once and its
+	// memory limit is 384 MiB, so two hashes at the cap must leave room for the rest.
+	MaxArgon2Memory     = 1 << 17
 	maxArgon2Iterations = 20
 	minSaltLength       = 8
 	maxSaltLength       = 64

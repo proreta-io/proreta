@@ -82,12 +82,12 @@ func TestMemoryCap(t *testing.T) {
 	p := testParams
 	p.Memory = MaxArgon2Memory + 1
 	if _, err := HashPassword("pw", p); err == nil {
-		t.Fatal("HashPassword accepted memory above 256 MiB")
+		t.Fatal("HashPassword accepted memory above 128 MiB")
 	}
 	valid, _ := HashPassword("pw", testParams)
 	parts := strings.Split(valid, "$")
-	atCap := "$argon2id$v=19$m=262144,t=1,p=1$" + parts[4] + "$" + parts[5]
+	atCap := "$argon2id$v=19$m=131072,t=1,p=1$" + parts[4] + "$" + parts[5]
 	if _, err := ParseArgon2idHash(atCap); err != nil {
-		t.Fatalf("256 MiB exactly must parse: %v", err)
+		t.Fatalf("128 MiB exactly must parse: %v", err)
 	}
 }
