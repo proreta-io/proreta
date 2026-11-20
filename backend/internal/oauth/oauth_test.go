@@ -52,6 +52,7 @@ type fakeProvider struct {
 	keyFetch  int
 	discFetch int
 	discFail  bool
+	keyFail   bool
 }
 
 func newFakeProvider(t *testing.T) *fakeProvider {
@@ -80,7 +81,12 @@ func newFakeProvider(t *testing.T) *fakeProvider {
 	mux.HandleFunc("GET /keys", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.keyFetch++
+		fail := f.keyFail
 		f.mu.Unlock()
+		if fail {
+			http.Error(w, "down", http.StatusServiceUnavailable)
+			return
+		}
 		e := big.NewInt(int64(f.key.E)).Bytes()
 		_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]string{{
 			"kty": "RSA", "kid": f.kid, "use": "sig", "alg": "RS256",
@@ -479,5 +485,38 @@ func TestGoogleDiscoverySingleFetch(t *testing.T) {
 	defer f.mu.Unlock()
 	if f.discFetch > 2 {
 		t.Fatalf("discovery fetched %d times for one cold start", f.discFetch)
+	}
+}
+
+// A failed key refresh serves the cached key of a known kid, up to a bounded age.
+func TestGoogleKeysStaleFallback(t *testing.T) {
+	f := newFakeProvider(t)
+	clk := clock.NewFake(time.Now().UTC())
+	flow, _ := oauth.NewFlow(stateKey, publicURL, clk, f.google(clk))
+	cookie, q := start(t, flow, "google", oauth.IntentLogin, uuid.Nil, nil)
+	st, err := flow.ParseState("google", cookie, q.Get("state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	exchange := func() error {
+		cl := googleClaims(clk.Now(), st.Nonce)
+		cl["iss"] = f.srv.URL
+		f.setClaims(cl)
+		_, err := flow.Exchange(context.Background(), st, "code")
+		return err
+	}
+	if err := exchange(); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	f.keyFail = true
+	f.mu.Unlock()
+	clk.Advance(25 * time.Hour)
+	if err := exchange(); err != nil {
+		t.Fatalf("stale key not served: %v", err)
+	}
+	clk.Advance(8 * 24 * time.Hour)
+	if err := exchange(); !errors.Is(err, oauth.ErrProvider) {
+		t.Fatalf("key older than the bound still served: %v", err)
 	}
 }
