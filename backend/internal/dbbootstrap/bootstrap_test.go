@@ -156,6 +156,21 @@ func TestPasswordsFromRequiresAllKeys(t *testing.T) {
 	}
 }
 
+func TestKubeSecretsRefusesNonOpaque(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(kubeSecret{APIVersion: "v1", Kind: "Secret", Type: "kubernetes.io/service-account-token", Data: map[string][]byte{"token": []byte("x")}})
+	}))
+	defer srv.Close()
+	tokenPath := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenPath, []byte("tok"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data, found, err := newKubeSecrets(srv.URL, tokenPath, srv.Client()).Get(context.Background(), "proreta", "s")
+	if err == nil || found || data != nil {
+		t.Fatalf("data=%v found=%v err=%v", data, found, err)
+	}
+}
+
 func TestKubeSecretsClient(t *testing.T) {
 	stored := map[string]map[string][]byte{}
 	annotations := map[string]map[string]string{}

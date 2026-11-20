@@ -114,6 +114,10 @@ func (k *KubeSecrets) Get(ctx context.Context, namespace, name string) (map[stri
 		if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&s); err != nil {
 			return nil, false, fmt.Errorf("dbbootstrap: decode secret %s/%s: %w", namespace, name, err)
 		}
+		// The bootstrap Roles allow creating any Secret; never read or write one that is not ours.
+		if s.Type != "" && s.Type != "Opaque" {
+			return nil, false, fmt.Errorf("dbbootstrap: secret %s/%s has type %q, only Opaque secrets are used", namespace, name, s.Type)
+		}
 		return s.Data, true, nil
 	case http.StatusNotFound:
 		return nil, false, nil
