@@ -237,6 +237,7 @@ terminationGracePeriodSeconds: 30
 
 serviceAccount:
   annotations: {}
+  bootstrapAnnotations: {}   # the two one-off bootstrap ServiceAccounts do not inherit annotations
 
 api:
   replicas: 2              # stateless; login rate limits are per replica

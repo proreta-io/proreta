@@ -89,7 +89,8 @@ not contain `proreta` (`fullnameOverride` replaces it).
 | `podSecurityContext`, `securityContext` | restricted profile | Pod and container security contexts. Free-form maps: overriding them can break the restricted Pod Security profile. |
 | `strategy.rollingUpdate` | `maxSurge: 1`, `maxUnavailable: 0` | Rollout of every Deployment. |
 | `revisionHistoryLimit`, `terminationGracePeriodSeconds` | `3`, `30` | Deployment defaults. |
-| `serviceAccount.annotations` | `{}` | Annotations of every ServiceAccount. |
+| `serviceAccount.annotations` | `{}` | Annotations of the workload ServiceAccounts (not the bootstrap ones). |
+| `serviceAccount.bootstrapAnnotations` | `{}` | Annotations of the two bootstrap ServiceAccounts, which do not inherit `serviceAccount.annotations`. |
 | `api.replicas`, `.httpPort`, `.resources`, `.env`, `.service.port` | `2`, `8080`, 50m/96Mi, `[]`, `8080` | API Deployment. |
 | `api.terminationGracePeriodSeconds` | unset | Overrides the top-level value. |
 | `api.pdb.enabled`, `.minAvailable` | `false`, `1` | PodDisruptionBudget of the api. |

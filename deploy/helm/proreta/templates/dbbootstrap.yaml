@@ -56,7 +56,7 @@ metadata:
     argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
     argocd.argoproj.io/sync-wave: "-4"
     {{- include "proreta.helmHook" (dict "weight" "-4" "job" false) | nindent 4 }}
-    {{- with .Values.serviceAccount.annotations }}
+    {{- with .Values.serviceAccount.bootstrapAnnotations }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
 automountServiceAccountToken: true

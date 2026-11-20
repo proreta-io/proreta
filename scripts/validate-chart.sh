@@ -57,6 +57,8 @@ combos=(
   "example-admin-external|-f $example $tag $eso --set secrets.admin.source=externalSecret"
   "example-crypto-external|-f $example $tag $eso --set secrets.crypto.source=externalSecret"
   "example-db-ca|-f $example $tag --set database.sslmode=verify-full --set database.tlsCA.existingSecret=rds-ca --set speculagw.enabled=true"
+  "example-sa-annotations|-f $example $tag --set serviceAccount.annotations.example\\.com/role=workload"
+  "example-sa-bootstrap-annotations|-f $example $tag --set serviceAccount.bootstrapAnnotations.example\\.com/role=bootstrap"
   "example-speculagw|-f $example $tag --set speculagw.enabled=true"
   "example-speculagw-netpol|-f $example $tag --set speculagw.enabled=true --set networkPolicy.enabled=true --set serviceMonitor.enabled=true"
   "example-request-external|-f $example $tag $eso --set secrets.request.source=externalSecret"
@@ -113,6 +115,28 @@ kill_switch() { grep -A1 'name: PRORETA_REGISTRATION_ENABLED' "$out/$1.yaml" | s
 [ "$(kill_switch example)" = '"false"' ] || { echo "FAIL: registration not off in values.example.yaml" >&2; exit 1; }
 [ "$(kill_switch example-registration-on)" = '"true"' ] || { echo "FAIL: config.registrationEnabled=true not rendered" >&2; exit 1; }
 echo "chart default \"false\", example \"false\", config.registrationEnabled=true renders \"true\""
+
+echo "== ServiceAccount annotations: workloads inherit serviceAccount.annotations, the bootstrap accounts only bootstrapAnnotations"
+python3 - "$out" <<'EOF'
+import sys, yaml
+out = sys.argv[1]
+def sas(name):
+    r = {}
+    for d in yaml.safe_load_all(open(f"{out}/{name}.yaml")):
+        if d and d.get("kind") == "ServiceAccount":
+            r[d["metadata"]["name"]] = d["metadata"].get("annotations", {})
+    return r
+for name, want_boot in (("example-sa-annotations", False), ("example-sa-bootstrap-annotations", True)):
+    got = sas(name)
+    boot = {n: a for n, a in got.items() if "bootstrap" in n}
+    work = {n: a for n, a in got.items() if "bootstrap" not in n}
+    assert len(boot) == 2 and work, (name, list(got))
+    for n, a in boot.items():
+        assert ("example.com/role" in a) == want_boot, f"{name}: {n} {a}"
+    for n, a in work.items():
+        assert ("example.com/role" in a) == (not want_boot), f"{name}: {n} {a}"
+    print(name, "ok")
+EOF
 
 echo "== database CA (database.tlsCA): every pod and Job that connects verifies with it, nothing else changes"
 python3 - "$out" <<'EOF'

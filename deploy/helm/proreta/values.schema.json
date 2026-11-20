@@ -974,7 +974,15 @@
         "annotations": {
           "type": "object",
           "title": "ServiceAccount annotations",
-          "description": "annotations of every ServiceAccount, for example for workload identity",
+          "description": "annotations of the workload ServiceAccounts, for example for workload identity",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "bootstrapAnnotations": {
+          "type": "object",
+          "title": "bootstrap ServiceAccount annotations",
+          "description": "annotations of the two one-off bootstrap ServiceAccounts, which only write Secrets and do not inherit serviceAccount.annotations",
           "additionalProperties": {
             "type": "string"
           }
