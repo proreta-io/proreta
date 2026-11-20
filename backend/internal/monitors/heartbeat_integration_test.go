@@ -450,3 +450,40 @@ func TestIntegrationHeartbeatPermanentErrorIsMarkedApplied(t *testing.T) {
 		t.Fatalf("second run: %d", n)
 	}
 }
+
+// An update of a heartbeat waits for the row lock an evaluation holds, so the evaluation never
+// records a miss with settings that are being replaced.
+func TestIntegrationHeartbeatUpdateTakesRowLock(t *testing.T) {
+	f := newHBFixture(t, "heartbeatupdlock")
+	m, _ := f.create(false)
+	tx, err := f.admin.Begin(f.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(f.ctx) //nolint:errcheck // already committed on the happy path
+	if _, err := tx.Exec(f.ctx, `SELECT 1 FROM heartbeat_tokens WHERE monitor_id = $1 FOR UPDATE`, m.ID); err != nil {
+		t.Fatal(err)
+	}
+	grace := 3600
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.api.Update(f.ctx, f.actor, m.ID, monitors.UpdateInput{Heartbeat: &monitors.HeartbeatSettings{GraceSeconds: &grace}})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("update finished while the heartbeat row was locked (%v)", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	if err := tx.Commit(f.ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("update still blocked after the lock was released")
+	}
+}
