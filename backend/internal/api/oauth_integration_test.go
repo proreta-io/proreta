@@ -256,12 +256,12 @@ func TestIntegrationOAuthHTTPFlow(t *testing.T) {
 		t.Fatalf("cancelled: %+v", got)
 	}
 
-	// No automatic link to a verified password account with the same email.
+	// An account that already has an identity is not linked to a second one by email.
 	reg := s.do(http.MethodPost, "/api/v1/auth/register", registerBody("victim@example.com", ownerPassword), map[string]string{"X-Forwarded-For": "198.51.100.31"})
 	if reg.code != http.StatusCreated {
 		t.Fatalf("register: %d %s", reg.code, reg.raw)
 	}
-	if _, err := admin.Exec(context.Background(), `UPDATE users SET email_verified_at = now() WHERE email = 'victim@example.com'`); err != nil {
+	if _, err := admin.Exec(context.Background(), `INSERT INTO auth_identities (user_id, provider, subject, email) SELECT id, 'google', 'g-victim', email FROM users WHERE email = 'victim@example.com'`); err != nil {
 		t.Fatal(err)
 	}
 	cookie, state = s.start("github", `{}`, nil)
