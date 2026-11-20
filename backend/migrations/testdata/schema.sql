@@ -871,7 +871,6 @@ status_pages tenant_isolation cmd=* permissive=true to=public using (tenant_id =
 -- triggers
 CREATE TRIGGER monitor_location_state_epoch_sync AFTER INSERT OR DELETE ON public.monitor_location_state FOR EACH ROW EXECUTE FUNCTION monitor_location_state_epoch_sync()
 CREATE TRIGGER monitors_epoch_sync AFTER UPDATE OF paused, deleted_at, config, type, interval_seconds, timeout_seconds ON public.monitors FOR EACH ROW WHEN (((old.paused IS DISTINCT FROM new.paused) OR (old.deleted_at IS DISTINCT FROM new.deleted_at) OR (old.config IS DISTINCT FROM new.config) OR (old.type IS DISTINCT FROM new.type) OR (old.interval_seconds IS DISTINCT FROM new.interval_seconds) OR (old.timeout_seconds IS DISTINCT FROM new.timeout_seconds))) EXECUTE FUNCTION monitors_epoch_sync()
-CREATE TRIGGER specula_agents_sync_location AFTER UPDATE OF name ON public.specula_agents FOR EACH ROW EXECUTE FUNCTION specula_agents_sync_location()
 CREATE TRIGGER status_pages_release_domains AFTER UPDATE OF deleted_at ON public.status_pages FOR EACH ROW WHEN (((old.deleted_at IS NULL) AND (new.deleted_at IS NOT NULL))) EXECUTE FUNCTION status_pages_release_domains()
 CREATE TRIGGER tenants_create_default_project AFTER INSERT ON public.tenants FOR EACH ROW EXECUTE FUNCTION tenants_create_default_project()
 
@@ -956,7 +955,6 @@ purge_result_rollups(integer) owner=proreta_owner definer=true acl=proreta_owner
 reset_monitor_runtime(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 rollup_drain_dirty(integer) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 rollup_mark_dirty(timestamp with time zone) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
-specula_agents_sync_location() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner
 specula_authenticate(bytea) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_create(uuid,text,bytea,boolean,uuid[],uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 specula_delivery_context(uuid,uuid) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
@@ -3158,19 +3156,6 @@ BEGIN
     RETURN true;
 END
 $function$
-CREATE OR REPLACE FUNCTION public.specula_agents_sync_location()
- RETURNS trigger
- LANGUAGE plpgsql
- SECURITY DEFINER
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-BEGIN
-    IF NEW.name IS DISTINCT FROM OLD.name THEN
-        UPDATE probe_locations SET name = NEW.name WHERE id = NEW.location_id;
-    END IF;
-    RETURN NEW;
-END
-$function$
 CREATE OR REPLACE FUNCTION public.specula_authenticate(p_token_hash bytea)
  RETURNS TABLE(specula_id uuid, tenant_id uuid, location_id uuid, location_code text)
  LANGUAGE plpgsql
@@ -3211,8 +3196,9 @@ BEGIN
     IF caller_tenant IS NULL THEN
         RAISE EXCEPTION 'specula_create: app.tenant_id is not set' USING ERRCODE = 'insufficient_privilege';
     END IF;
+    -- probe_locations is shared by all organizations: the customer's name stays in specula_agents (RLS)
     INSERT INTO probe_locations (id, code, name, provider, region, kind)
-    VALUES (loc, 'specula-' || replace(p_id::text, '-', ''), p_name, 'customer', 'private-network', 'agent');
+    VALUES (loc, 'specula-' || replace(p_id::text, '-', ''), 'specula-' || replace(p_id::text, '-', ''), 'customer', 'private-network', 'agent');
     INSERT INTO specula_agents (tenant_id, id, name, token_hash, all_projects, location_id, created_by)
     VALUES (caller_tenant, p_id, p_name, p_token_hash, p_all_projects, loc, p_actor);
     IF NOT p_all_projects THEN

@@ -3480,21 +3480,6 @@ REVOKE ALL ON FUNCTION claim_due_monitors(integer,text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION claim_due_monitors(integer,text) TO proreta_worker;
 
 -- +goose StatementBegin
-CREATE FUNCTION specula_agents_sync_location() RETURNS trigger
-    LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'public', 'pg_temp'
-    AS $$
-BEGIN
-    IF NEW.name IS DISTINCT FROM OLD.name THEN
-        UPDATE probe_locations SET name = NEW.name WHERE id = NEW.location_id;
-    END IF;
-    RETURN NEW;
-END
-$$;
--- +goose StatementEnd
-REVOKE ALL ON FUNCTION specula_agents_sync_location() FROM PUBLIC;
-
--- +goose StatementBegin
 CREATE FUNCTION specula_authenticate(p_token_hash bytea) RETURNS TABLE(specula_id uuid, tenant_id uuid, location_id uuid, location_code text)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public', 'pg_temp'
@@ -3536,8 +3521,9 @@ BEGIN
     IF caller_tenant IS NULL THEN
         RAISE EXCEPTION 'specula_create: app.tenant_id is not set' USING ERRCODE = 'insufficient_privilege';
     END IF;
+    -- probe_locations is shared by all organizations: the customer's name stays in specula_agents (RLS)
     INSERT INTO probe_locations (id, code, name, provider, region, kind)
-    VALUES (loc, 'specula-' || replace(p_id::text, '-', ''), p_name, 'customer', 'private-network', 'agent');
+    VALUES (loc, 'specula-' || replace(p_id::text, '-', ''), 'specula-' || replace(p_id::text, '-', ''), 'customer', 'private-network', 'agent');
     INSERT INTO specula_agents (tenant_id, id, name, token_hash, all_projects, location_id, created_by)
     VALUES (caller_tenant, p_id, p_name, p_token_hash, p_all_projects, loc, p_actor);
     IF NOT p_all_projects THEN
@@ -3837,8 +3823,6 @@ $$;
 -- +goose StatementEnd
 REVOKE ALL ON FUNCTION specula_sync_offline(interval) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION specula_sync_offline(interval) TO proreta_worker;
-
-CREATE TRIGGER specula_agents_sync_location AFTER UPDATE OF name ON specula_agents FOR EACH ROW EXECUTE FUNCTION specula_agents_sync_location();
 
 -- =============================================================================================
 -- Email and platform settings
