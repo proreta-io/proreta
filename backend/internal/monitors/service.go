@@ -263,192 +263,49 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 	if msg != "" {
 		verr.Add("name", msg)
 	}
-	var row monitorsdb.InsertMonitorParams
-	var config any
-	var httpCfg httpConfig
-	var httpSec monitorrequest.Secrets
-	var isHTTP bool
-	resource := plans.ResourceMonitor
+	var p createPlan
+	var perr error
 	switch in.Type {
 	case "", TypeHTTP:
-		row.Type = TypeHTTP
-		if in.Heartbeat != nil {
-			verr.Add(fieldHeartbeat, msgHeartbeatOnly)
-		}
-		if in.TCP != nil {
-			verr.Add(fieldTCP, msgTCPOnly)
-		}
-		h := in.HTTP
-		if h == nil {
-			verr.Add(fieldHTTP, "is required for http monitors")
-			h = &HTTPSettings{}
-		}
-		var target string
-		if h.URL == nil {
-			if in.HTTP != nil {
-				verr.Add(fieldURL, "is required")
-			}
-		} else if target, msg = validateTarget(*h.URL, in.SpeculaID != nil); msg != "" {
-			verr.Add(fieldURL, msg)
-		}
-		checkFixed(&verr, fieldIntervalSeconds, h.IntervalSeconds, IntervalSeconds)
-		checkFixed(&verr, fieldTimeoutSeconds, h.TimeoutSeconds, TimeoutSeconds)
-		expected := orDefault(h.ExpectedStatus, DefaultExpectedStatus)
-		if msg := ValidateExpectedStatus(expected); msg != "" {
-			verr.Add(fieldExpectedStatus, msg)
-		}
-		threshold := orDefault(h.FailureThreshold, DefaultFailureThreshold)
-		checkThreshold(&verr, fieldFailureThreshold, threshold)
-		httpCfg = httpConfig{URL: target, ExpectedStatus: expected}
-		var perr error
-		if httpCfg, httpSec, _, _, perr = s.planRequest(&verr, httpCfg, a.TenantID, uuid.Nil, h); perr != nil {
-			return Monitor{}, perr
-		}
-		isHTTP = true
-		row.IntervalSeconds, row.FailureThreshold = IntervalSeconds, int32(threshold) //nolint:gosec // validated 1..3
+		perr = s.planHTTP(&verr, a, in, &p)
 	case TypeTCP:
-		row.Type = TypeTCP
-		if in.HTTP != nil {
-			verr.Add(fieldHTTP, msgHTTPOnlyType)
-		}
-		if in.Heartbeat != nil {
-			verr.Add(fieldHeartbeat, msgHeartbeatOnly)
-		}
-		t := in.TCP
-		if t == nil {
-			verr.Add(fieldTCP, "is required for tcp monitors")
-			t = &TCPSettings{}
-		}
-		var cfg tcpConfig
-		if t.Host == nil {
-			if in.TCP != nil {
-				verr.Add(fieldHost, "is required")
-			}
-		} else if cfg.Host, msg = ValidateHost(*t.Host, in.SpeculaID != nil); msg != "" {
-			verr.Add(fieldHost, msg)
-		}
-		if t.Port == nil {
-			if in.TCP != nil {
-				verr.Add(fieldPort, "is required")
-			}
-		} else if cfg.Port = *t.Port; ValidatePort(cfg.Port) != "" {
-			verr.Add(fieldPort, ValidatePort(cfg.Port))
-		}
-		threshold := orDefault(t.FailureThreshold, DefaultFailureThreshold)
-		checkThreshold(&verr, fieldTCPFailureThreshold, threshold)
-		config = cfg
-		row.IntervalSeconds, row.FailureThreshold = IntervalSeconds, int32(threshold) //nolint:gosec // validated 1..3
+		planTCP(&verr, in, &p)
 	case TypeHeartbeat:
-		row.Type, resource = TypeHeartbeat, plans.ResourceHeartbeat
-		if in.SpeculaID != nil {
-			verr.Add(fieldSpeculaID, msgHTTPOnly)
-		}
-		if in.HTTP != nil {
-			verr.Add(fieldHTTP, msgHTTPOnlyType)
-		}
-		if in.TCP != nil {
-			verr.Add(fieldTCP, msgTCPOnly)
-		}
-		hb := in.Heartbeat
-		if hb == nil {
-			verr.Add(fieldHeartbeat, "is required for heartbeat monitors")
-			hb = &HeartbeatSettings{}
-		}
-		interval := orDefault(hb.ExpectedIntervalSeconds, DefaultExpectedIntervalSeconds)
-		if msg := ValidateExpectedInterval(interval); msg != "" {
-			verr.Add(fieldExpectedIntervalSeconds, msg)
-		}
-		grace := orDefault(hb.GraceSeconds, DefaultGraceSeconds)
-		if msg := ValidateGrace(grace); msg != "" {
-			verr.Add(fieldGraceSeconds, msg)
-		}
-		config = heartbeatConfig{GraceSeconds: grace}
-		// A heartbeat goes down at its first missed deadline: its failure threshold is always 1.
-		row.IntervalSeconds, row.FailureThreshold = int32(interval), 1 //nolint:gosec // validated 60..86400
+		planHeartbeat(&verr, in, &p)
 	default:
 		verr.Add("type", `must be "http", "tcp" or "heartbeat"`)
+	}
+	if perr != nil {
+		return Monitor{}, perr
 	}
 	if err := verr.Err(); err != nil {
 		return Monitor{}, err
 	}
 	id := uuidv7.New()
-	if isHTTP {
-		if err := s.sealRequest(&httpCfg, a.TenantID, id, httpSec); err != nil {
+	if p.isHTTP {
+		if err := s.sealRequest(&p.httpCfg, a.TenantID, id, p.httpSec); err != nil {
 			return Monitor{}, err
 		}
-		config = httpCfg
+		p.config = p.httpCfg
 	}
-	raw, err := json.Marshal(config)
+	raw, err := json.Marshal(p.config)
 	if err != nil {
 		return Monitor{}, fmt.Errorf("monitors: config: %w", err)
 	}
 	var token string
 	var hash []byte
-	if row.Type == TypeHeartbeat {
+	if p.row.Type == TypeHeartbeat {
 		if token, hash, err = NewHeartbeatToken(); err != nil {
 			return Monitor{}, err
 		}
 	}
 
-	row.ID, row.TenantID, row.Name, row.Config = id, a.TenantID, name, raw
-	row.TimeoutSeconds, row.NotificationsEnabled = TimeoutSeconds, orDefault(in.NotificationsEnabled, true)
+	p.row.ID, p.row.TenantID, p.row.Name, p.row.Config = id, a.TenantID, name, raw
+	p.row.TimeoutSeconds, p.row.NotificationsEnabled = TimeoutSeconds, orDefault(in.NotificationsEnabled, true)
 	var m Monitor
 	err = db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
-		// The tenant row lock taken here serialises concurrent creates, so the count stays true
-		// until this transaction commits.
-		if err := plans.CheckCreate(ctx, tx, a.TenantID, resource); err != nil {
-			return err
-		}
-		q := monitorsdb.New(tx)
-		project, err := projects.ForUse(ctx, tx, a.TenantID, in.ProjectID)
-		if errors.Is(err, projects.ErrNotFound) || (err == nil && !a.Access.Sees(project)) {
-			return projectFieldError()
-		}
-		if err != nil {
-			return err
-		}
-		if !a.Access.CanEditIn(project) {
-			return authz.ErrProjectForbidden
-		}
-		row.ProjectID = project
-		location, err := s.sched.DefaultLocation(ctx, tx)
-		if err != nil {
-			return err
-		}
-		if in.SpeculaID != nil {
-			if location, err = s.speculaLocation(ctx, tx, a.TenantID, *in.SpeculaID, project); err != nil {
-				return err
-			}
-		}
-		if err := q.InsertMonitor(ctx, row); err != nil {
-			return fmt.Errorf("insert monitor: %w", err)
-		}
-		if err := q.InsertMonitorLocation(ctx, monitorsdb.InsertMonitorLocationParams{TenantID: a.TenantID, MonitorID: id, LocationID: location}); err != nil {
-			return fmt.Errorf("insert monitor location: %w", err)
-		}
-		if row.Type == TypeHeartbeat {
-			// The location state only carries the incident machine's state; nothing claims it.
-			if err := s.sched.InitParkedMonitorLocation(ctx, tx, a.TenantID, id, location); err != nil {
-				return err
-			}
-			if err := q.InsertHeartbeatToken(ctx, monitorsdb.InsertHeartbeatTokenParams{TenantID: a.TenantID, MonitorID: id, TokenHash: hash}); err != nil {
-				return fmt.Errorf("insert heartbeat token: %w", err)
-			}
-		} else if err := s.sched.InitMonitorLocation(ctx, tx, a.TenantID, id, location); err != nil {
-			return err
-		}
-		if err := q.InsertMonitorState(ctx, monitorsdb.InsertMonitorStateParams{TenantID: a.TenantID, MonitorID: id}); err != nil {
-			return fmt.Errorf("insert monitor state: %w", err)
-		}
-		if in.ChannelIDs != nil {
-			if _, err := notify.SetMonitorChannels(ctx, tx, a.TenantID, id, project, *in.ChannelIDs); err != nil {
-				return err
-			}
-		}
-		if err := s.audit(ctx, tx, a, ActionCreated, id, map[string]any{"type": row.Type, "projectId": project.String()}); err != nil {
-			return err
-		}
-		m, err = get(ctx, q, a.TenantID, id)
+		var err error
+		m, err = s.insertMonitor(ctx, tx, a, in, &p, hash)
 		return err
 	})
 	if err != nil {
@@ -456,6 +313,187 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 	}
 	m.HeartbeatToken = token
 	return m, nil
+}
+
+// createPlan is a validated CreateInput: the row to insert (without id, name, config and project),
+// the quota resource it counts against and, for an http monitor, the request still to be sealed.
+type createPlan struct {
+	row      monitorsdb.InsertMonitorParams
+	config   any
+	httpCfg  httpConfig
+	httpSec  monitorrequest.Secrets
+	isHTTP   bool
+	resource plans.Resource
+}
+
+// planHTTP validates the http settings of in into p. Only an unexpected error is returned;
+// field problems go to verr.
+func (s *Service) planHTTP(verr *validation.Error, a Actor, in CreateInput, p *createPlan) error {
+	p.resource = plans.ResourceMonitor
+	p.row.Type = TypeHTTP
+	if in.Heartbeat != nil {
+		verr.Add(fieldHeartbeat, msgHeartbeatOnly)
+	}
+	if in.TCP != nil {
+		verr.Add(fieldTCP, msgTCPOnly)
+	}
+	h := in.HTTP
+	if h == nil {
+		verr.Add(fieldHTTP, "is required for http monitors")
+		h = &HTTPSettings{}
+	}
+	var target, msg string
+	if h.URL == nil {
+		if in.HTTP != nil {
+			verr.Add(fieldURL, "is required")
+		}
+	} else if target, msg = validateTarget(*h.URL, in.SpeculaID != nil); msg != "" {
+		verr.Add(fieldURL, msg)
+	}
+	checkFixed(verr, fieldIntervalSeconds, h.IntervalSeconds, IntervalSeconds)
+	checkFixed(verr, fieldTimeoutSeconds, h.TimeoutSeconds, TimeoutSeconds)
+	expected := orDefault(h.ExpectedStatus, DefaultExpectedStatus)
+	if msg := ValidateExpectedStatus(expected); msg != "" {
+		verr.Add(fieldExpectedStatus, msg)
+	}
+	threshold := orDefault(h.FailureThreshold, DefaultFailureThreshold)
+	checkThreshold(verr, fieldFailureThreshold, threshold)
+	p.httpCfg = httpConfig{URL: target, ExpectedStatus: expected}
+	var perr error
+	if p.httpCfg, p.httpSec, _, _, perr = s.planRequest(verr, p.httpCfg, a.TenantID, uuid.Nil, h); perr != nil {
+		return perr
+	}
+	p.isHTTP = true
+	p.row.IntervalSeconds, p.row.FailureThreshold = IntervalSeconds, int32(threshold) //nolint:gosec // validated 1..3
+	return nil
+}
+
+// planTCP validates the tcp settings of in into p.
+func planTCP(verr *validation.Error, in CreateInput, p *createPlan) {
+	p.resource = plans.ResourceMonitor
+	p.row.Type = TypeTCP
+	if in.HTTP != nil {
+		verr.Add(fieldHTTP, msgHTTPOnlyType)
+	}
+	if in.Heartbeat != nil {
+		verr.Add(fieldHeartbeat, msgHeartbeatOnly)
+	}
+	t := in.TCP
+	if t == nil {
+		verr.Add(fieldTCP, "is required for tcp monitors")
+		t = &TCPSettings{}
+	}
+	var cfg tcpConfig
+	var msg string
+	if t.Host == nil {
+		if in.TCP != nil {
+			verr.Add(fieldHost, "is required")
+		}
+	} else if cfg.Host, msg = ValidateHost(*t.Host, in.SpeculaID != nil); msg != "" {
+		verr.Add(fieldHost, msg)
+	}
+	if t.Port == nil {
+		if in.TCP != nil {
+			verr.Add(fieldPort, "is required")
+		}
+	} else if cfg.Port = *t.Port; ValidatePort(cfg.Port) != "" {
+		verr.Add(fieldPort, ValidatePort(cfg.Port))
+	}
+	threshold := orDefault(t.FailureThreshold, DefaultFailureThreshold)
+	checkThreshold(verr, fieldTCPFailureThreshold, threshold)
+	p.config = cfg
+	p.row.IntervalSeconds, p.row.FailureThreshold = IntervalSeconds, int32(threshold) //nolint:gosec // validated 1..3
+}
+
+// planHeartbeat validates the heartbeat settings of in into p.
+func planHeartbeat(verr *validation.Error, in CreateInput, p *createPlan) {
+	p.row.Type, p.resource = TypeHeartbeat, plans.ResourceHeartbeat
+	if in.SpeculaID != nil {
+		verr.Add(fieldSpeculaID, msgHTTPOnly)
+	}
+	if in.HTTP != nil {
+		verr.Add(fieldHTTP, msgHTTPOnlyType)
+	}
+	if in.TCP != nil {
+		verr.Add(fieldTCP, msgTCPOnly)
+	}
+	hb := in.Heartbeat
+	if hb == nil {
+		verr.Add(fieldHeartbeat, "is required for heartbeat monitors")
+		hb = &HeartbeatSettings{}
+	}
+	interval := orDefault(hb.ExpectedIntervalSeconds, DefaultExpectedIntervalSeconds)
+	if msg := ValidateExpectedInterval(interval); msg != "" {
+		verr.Add(fieldExpectedIntervalSeconds, msg)
+	}
+	grace := orDefault(hb.GraceSeconds, DefaultGraceSeconds)
+	if msg := ValidateGrace(grace); msg != "" {
+		verr.Add(fieldGraceSeconds, msg)
+	}
+	p.config = heartbeatConfig{GraceSeconds: grace}
+	// A heartbeat goes down at its first missed deadline: its failure threshold is always 1.
+	p.row.IntervalSeconds, p.row.FailureThreshold = int32(interval), 1 //nolint:gosec // validated 60..86400
+}
+
+// insertMonitor runs inside the tenant transaction of Create: quota, project and permission, the
+// location, the rows of the monitor, its channel selection and the audit entry.
+func (s *Service) insertMonitor(ctx context.Context, tx pgx.Tx, a Actor, in CreateInput, p *createPlan, hash []byte) (Monitor, error) {
+	row, id := &p.row, p.row.ID
+	// The tenant row lock taken here serialises concurrent creates, so the count stays true
+	// until this transaction commits.
+	if err := plans.CheckCreate(ctx, tx, a.TenantID, p.resource); err != nil {
+		return Monitor{}, err
+	}
+	q := monitorsdb.New(tx)
+	project, err := projects.ForUse(ctx, tx, a.TenantID, in.ProjectID)
+	if errors.Is(err, projects.ErrNotFound) || (err == nil && !a.Access.Sees(project)) {
+		return Monitor{}, projectFieldError()
+	}
+	if err != nil {
+		return Monitor{}, err
+	}
+	if !a.Access.CanEditIn(project) {
+		return Monitor{}, authz.ErrProjectForbidden
+	}
+	row.ProjectID = project
+	location, err := s.sched.DefaultLocation(ctx, tx)
+	if err != nil {
+		return Monitor{}, err
+	}
+	if in.SpeculaID != nil {
+		if location, err = s.speculaLocation(ctx, tx, a.TenantID, *in.SpeculaID, project); err != nil {
+			return Monitor{}, err
+		}
+	}
+	if err := q.InsertMonitor(ctx, *row); err != nil {
+		return Monitor{}, fmt.Errorf("insert monitor: %w", err)
+	}
+	if err := q.InsertMonitorLocation(ctx, monitorsdb.InsertMonitorLocationParams{TenantID: a.TenantID, MonitorID: id, LocationID: location}); err != nil {
+		return Monitor{}, fmt.Errorf("insert monitor location: %w", err)
+	}
+	if row.Type == TypeHeartbeat {
+		// The location state only carries the incident machine's state; nothing claims it.
+		if err := s.sched.InitParkedMonitorLocation(ctx, tx, a.TenantID, id, location); err != nil {
+			return Monitor{}, err
+		}
+		if err := q.InsertHeartbeatToken(ctx, monitorsdb.InsertHeartbeatTokenParams{TenantID: a.TenantID, MonitorID: id, TokenHash: hash}); err != nil {
+			return Monitor{}, fmt.Errorf("insert heartbeat token: %w", err)
+		}
+	} else if err := s.sched.InitMonitorLocation(ctx, tx, a.TenantID, id, location); err != nil {
+		return Monitor{}, err
+	}
+	if err := q.InsertMonitorState(ctx, monitorsdb.InsertMonitorStateParams{TenantID: a.TenantID, MonitorID: id}); err != nil {
+		return Monitor{}, fmt.Errorf("insert monitor state: %w", err)
+	}
+	if in.ChannelIDs != nil {
+		if _, err := notify.SetMonitorChannels(ctx, tx, a.TenantID, id, project, *in.ChannelIDs); err != nil {
+			return Monitor{}, err
+		}
+	}
+	if err := s.audit(ctx, tx, a, ActionCreated, id, map[string]any{"type": row.Type, "projectId": project.String()}); err != nil {
+		return Monitor{}, err
+	}
+	return get(ctx, q, a.TenantID, id)
 }
 
 // Update changes the given fields, also inside the type's settings. The interval and timeout of
