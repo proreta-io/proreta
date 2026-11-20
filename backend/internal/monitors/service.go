@@ -503,267 +503,45 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 	var m Monitor
 	err := db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
 		q := monitorsdb.New(tx)
-		cur, err := q.LockMonitor(ctx, monitorsdb.LockMonitorParams{TenantID: a.TenantID, ID: id})
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrNotFound
-		}
-		if err != nil {
-			return fmt.Errorf("lock monitor: %w", err)
-		}
-		if err := a.checkAccess(cur.ProjectID); err != nil {
-			return err
-		}
-		if cur.Type == TypeHeartbeat {
-			// Serialises with the evaluation in jobs, which reads the grace under this lock.
-			if err := lockHeartbeat(ctx, q, a.TenantID, id); err != nil {
-				return err
-			}
-		}
-		name, interval, threshold, notificationsEnabled := cur.Name, int(cur.IntervalSeconds), int(cur.FailureThreshold), cur.NotificationsEnabled
-
-		// Where the monitor runs now and where it should run after this change.
-		curSpecula, err := currentSpecula(ctx, tx, a.TenantID, id)
+		cur, err := lockForUpdate(ctx, q, a, id)
 		if err != nil {
 			return err
 		}
-		wantSpecula := curSpecula
-		if in.Location != nil {
-			wantSpecula = in.Location.SpeculaID
-		}
-		locChanged := cur.Type != TypeHeartbeat && !sameID(curSpecula, wantSpecula)
-
-		var verr validation.Error
-		var changed []string
-		if in.Name != nil {
-			v, msg := ValidateName(*in.Name)
-			if msg != "" {
-				verr.Add("name", msg)
-			}
-			changed, name = appendIf(changed, "name", v != name), v
-		}
-		if in.NotificationsEnabled != nil {
-			changed, notificationsEnabled = appendIf(changed, "notificationsEnabled", *in.NotificationsEnabled != notificationsEnabled), *in.NotificationsEnabled
-		}
-
-		var config any
-		switch cur.Type {
-		case TypeHeartbeat:
-			var cfg heartbeatConfig
-			if err := json.Unmarshal(cur.Config, &cfg); err != nil {
-				return fmt.Errorf("monitor config: %w", err)
-			}
-			if in.Location != nil {
-				verr.Add(fieldSpeculaID, msgHTTPOnly)
-			}
-			if in.HTTP != nil {
-				verr.Add(fieldHTTP, msgHTTPOnlyType)
-			}
-			if in.TCP != nil {
-				verr.Add(fieldTCP, msgTCPOnly)
-			}
-			if hb := in.Heartbeat; hb != nil {
-				if hb.ExpectedIntervalSeconds != nil {
-					if msg := ValidateExpectedInterval(*hb.ExpectedIntervalSeconds); msg != "" {
-						verr.Add(fieldExpectedIntervalSeconds, msg)
-					}
-					changed, interval = appendIf(changed, fieldExpectedIntervalSeconds, *hb.ExpectedIntervalSeconds != interval), *hb.ExpectedIntervalSeconds
-				}
-				if hb.GraceSeconds != nil {
-					if msg := ValidateGrace(*hb.GraceSeconds); msg != "" {
-						verr.Add(fieldGraceSeconds, msg)
-					}
-					changed, cfg.GraceSeconds = appendIf(changed, fieldGraceSeconds, *hb.GraceSeconds != cfg.GraceSeconds), *hb.GraceSeconds
-				}
-			}
-			config = cfg
-		case TypeTCP:
-			var cfg tcpConfig
-			if err := json.Unmarshal(cur.Config, &cfg); err != nil {
-				return fmt.Errorf("monitor config: %w", err)
-			}
-			if in.Heartbeat != nil {
-				verr.Add(fieldHeartbeat, msgHeartbeatOnly)
-			}
-			if in.HTTP != nil {
-				verr.Add(fieldHTTP, msgHTTPOnlyType)
-			}
-			if locChanged && (in.TCP == nil || in.TCP.Host == nil) {
-				// The target stays but must satisfy the rules of the new location.
-				v, msg := ValidateHost(cfg.Host, wantSpecula != nil)
-				if msg != "" {
-					verr.Add(fieldHost, msg)
-				}
-				cfg.Host = v
-			}
-			if t := in.TCP; t != nil {
-				if t.Host != nil {
-					v, msg := ValidateHost(*t.Host, wantSpecula != nil)
-					if msg != "" {
-						verr.Add(fieldHost, msg)
-					}
-					changed, cfg.Host = appendIf(changed, fieldHost, v != cfg.Host), v
-				}
-				if t.Port != nil {
-					if msg := ValidatePort(*t.Port); msg != "" {
-						verr.Add(fieldPort, msg)
-					}
-					changed, cfg.Port = appendIf(changed, fieldPort, *t.Port != cfg.Port), *t.Port
-				}
-				if t.FailureThreshold != nil {
-					checkThreshold(&verr, fieldTCPFailureThreshold, *t.FailureThreshold)
-					changed, threshold = appendIf(changed, fieldTCPFailureThreshold, *t.FailureThreshold != threshold), *t.FailureThreshold
-				}
-			}
-			config = cfg
-		default:
-			var cfg httpConfig
-			if err := json.Unmarshal(cur.Config, &cfg); err != nil {
-				return fmt.Errorf("monitor config: %w", err)
-			}
-			if in.Heartbeat != nil {
-				verr.Add(fieldHeartbeat, msgHeartbeatOnly)
-			}
-			if in.TCP != nil {
-				verr.Add(fieldTCP, msgTCPOnly)
-			}
-			if locChanged && (in.HTTP == nil || in.HTTP.URL == nil) {
-				// The target stays but must satisfy the rules of the new location.
-				v, msg := validateTarget(cfg.URL, wantSpecula != nil)
-				if msg != "" {
-					verr.Add(fieldURL, msg)
-				}
-				cfg.URL = v
-			}
-			if h := in.HTTP; h != nil {
-				oldURL := cfg.URL
-				checkFixed(&verr, fieldIntervalSeconds, h.IntervalSeconds, int(cur.IntervalSeconds))
-				checkFixed(&verr, fieldTimeoutSeconds, h.TimeoutSeconds, int(cur.TimeoutSeconds))
-				if h.URL != nil {
-					v, msg := validateTarget(*h.URL, wantSpecula != nil)
-					if msg != "" {
-						verr.Add(fieldURL, msg)
-					}
-					changed, cfg.URL = appendIf(changed, fieldURL, v != cfg.URL), v
-				}
-				if h.ExpectedStatus != nil {
-					if msg := ValidateExpectedStatus(*h.ExpectedStatus); msg != "" {
-						verr.Add(fieldExpectedStatus, msg)
-					}
-					changed, cfg.ExpectedStatus = appendIf(changed, fieldExpectedStatus, *h.ExpectedStatus != cfg.ExpectedStatus), *h.ExpectedStatus
-				}
-				if h.FailureThreshold != nil {
-					checkThreshold(&verr, fieldFailureThreshold, *h.FailureThreshold)
-					changed, threshold = appendIf(changed, fieldFailureThreshold, *h.FailureThreshold != threshold), *h.FailureThreshold
-				}
-				hostMovedProblems(&verr, oldURL, cfg, h)
-				next, sec, dirty, reqChanged, perr := s.planRequest(&verr, cfg, a.TenantID, id, h)
-				if perr != nil {
-					return perr
-				}
-				cfg, changed = next, append(changed, reqChanged...)
-				if dirty && verr.Err() == nil {
-					if err := s.sealRequest(&cfg, a.TenantID, id, sec); err != nil {
-						return err
-					}
-				}
-			}
-			config = cfg
-		}
-		if err := verr.Err(); err != nil {
+		e, err := s.planUpdate(ctx, tx, a, id, cur, in)
+		if err != nil {
 			return err
 		}
 		project := cur.ProjectID
 		var moveMeta map[string]any
 		if in.ProjectID != nil && *in.ProjectID != project {
-			target, err := projects.ForUse(ctx, tx, a.TenantID, in.ProjectID)
-			if errors.Is(err, projects.ErrNotFound) || (err == nil && !a.Access.Sees(target)) {
-				return projectFieldError()
-			}
-			if err != nil {
+			if moveMeta, project, err = moveMonitor(ctx, tx, q, a, id, project, *in.ProjectID, &e.changed); err != nil {
 				return err
 			}
-			if !a.Access.CanEditIn(target) {
-				return authz.ErrProjectForbidden
-			}
-			if err := q.SetMonitorProject(ctx, monitorsdb.SetMonitorProjectParams{TenantID: a.TenantID, ID: id, ProjectID: target}); err != nil {
-				return fmt.Errorf("move monitor: %w", err)
-			}
-			// Channels of the old project are not allowed in the new one.
-			detached, err := notify.DetachForeignChannels(ctx, tx, a.TenantID, id, target)
-			if err != nil {
-				return err
-			}
-			// Pages of the old project may show only its monitors.
-			componentsRemoved, err := statuspages.DetachForeignComponents(ctx, tx, a.TenantID, id, target, time.Now())
-			if err != nil {
-				return err
-			}
-			moveMeta = map[string]any{"from": project.String(), "to": target.String(), "channelsDetached": detached, "statusPageComponentsRemoved": componentsRemoved}
-			changed, project = append(changed, "projectId"), target
 		}
 		if in.ChannelIDs != nil {
 			selected, err := notify.SetMonitorChannels(ctx, tx, a.TenantID, id, project, *in.ChannelIDs)
 			if err != nil {
 				return err
 			}
-			changed = appendIf(changed, "channelIds", selected)
+			e.changed = appendIf(e.changed, "channelIds", selected)
 		}
 		// A moved project must still be allowed to use the Specula the monitor runs at.
-		if wantSpecula != nil && project != cur.ProjectID && !locChanged {
-			if _, err := s.speculaLocation(ctx, tx, a.TenantID, *wantSpecula, project); err != nil {
+		if e.wantSpecula != nil && project != cur.ProjectID && !e.locChanged {
+			if _, err := s.speculaLocation(ctx, tx, a.TenantID, *e.wantSpecula, project); err != nil {
 				return err
 			}
 		}
-		if locChanged {
-			locID, err := s.sched.DefaultLocation(ctx, tx)
-			if err != nil {
+		if e.locChanged {
+			if err := s.moveLocation(ctx, tx, a, id, project, e.wantSpecula); err != nil {
 				return err
 			}
-			if wantSpecula != nil {
-				if locID, err = s.speculaLocation(ctx, tx, a.TenantID, *wantSpecula, project); err != nil {
-					return err
-				}
-			}
-			var result string
-			if err := tx.QueryRow(ctx, `SELECT monitor_set_location($1, $2)`, id, locID).Scan(&result); err != nil {
-				return fmt.Errorf("set location: %w", err)
-			}
-			if result != "ok" {
-				return speculaFieldError()
-			}
-			changed = append(changed, fieldSpeculaID)
+			e.changed = append(e.changed, fieldSpeculaID)
 		}
-		if slices.Contains(changed, fieldURL) || slices.Contains(changed, fieldHost) || slices.Contains(changed, fieldPort) || locChanged {
-			// A new target (URL or location): its history says nothing about it. Restart like
-			// resume and end an open incident without a notification.
-			if err := s.restart(ctx, tx, q, a.TenantID, id, true); err != nil {
-				return err
-			}
-			reason := incidents.ReasonURLChanged
-			if locChanged {
-				reason = incidents.ReasonLocationChanged
-			}
-			if err := s.incidents.ResolveOpen(ctx, tx, a.TenantID, id, reason); err != nil {
-				return err
-			}
+		if err := s.restartIfRetargeted(ctx, tx, q, a, id, e); err != nil {
+			return err
 		}
-		if len(changed) > 0 {
-			raw, err := json.Marshal(config)
-			if err != nil {
-				return fmt.Errorf("monitor config: %w", err)
-			}
-			if err := q.UpdateMonitor(ctx, monitorsdb.UpdateMonitorParams{
-				TenantID: a.TenantID, ID: id, Name: name, Config: raw, IntervalSeconds: int32(interval), //nolint:gosec // validated
-				FailureThreshold: int32(threshold), NotificationsEnabled: notificationsEnabled, //nolint:gosec // validated 1..3
-			}); err != nil {
-				return fmt.Errorf("update monitor: %w", err)
-			}
-			// Only field names: the URL may carry tokens in its query string.
-			meta := map[string]any{"fields": changed}
-			if moveMeta != nil {
-				meta["move"] = moveMeta
-			}
-			if err := s.audit(ctx, tx, a, ActionUpdated, id, meta); err != nil {
+		if len(e.changed) > 0 {
+			if err := s.saveUpdate(ctx, tx, q, a, id, e, moveMeta); err != nil {
 				return err
 			}
 		}
@@ -774,6 +552,306 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 		return Monitor{}, wrap("update", err)
 	}
 	return m, nil
+}
+
+// restartIfRetargeted restarts the monitor when the update gave it a new target (URL, host, port
+// or location): its history says nothing about the new one. Like resume, and an open incident ends
+// without a notification.
+func (s *Service) restartIfRetargeted(ctx context.Context, tx pgx.Tx, q *monitorsdb.Queries, a Actor, id uuid.UUID, e *monitorEdit) error {
+	if !slices.Contains(e.changed, fieldURL) && !slices.Contains(e.changed, fieldHost) && !slices.Contains(e.changed, fieldPort) && !e.locChanged {
+		return nil
+	}
+	if err := s.restart(ctx, tx, q, a.TenantID, id, true); err != nil {
+		return err
+	}
+	reason := incidents.ReasonURLChanged
+	if e.locChanged {
+		reason = incidents.ReasonLocationChanged
+	}
+	return s.incidents.ResolveOpen(ctx, tx, a.TenantID, id, reason)
+}
+
+// lockForUpdate locks the monitor and returns it if the actor may change it.
+func lockForUpdate(ctx context.Context, q *monitorsdb.Queries, a Actor, id uuid.UUID) (monitorsdb.LockMonitorRow, error) {
+	cur, err := q.LockMonitor(ctx, monitorsdb.LockMonitorParams{TenantID: a.TenantID, ID: id})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return cur, ErrNotFound
+	}
+	if err != nil {
+		return cur, fmt.Errorf("lock monitor: %w", err)
+	}
+	if err := a.checkAccess(cur.ProjectID); err != nil {
+		return cur, err
+	}
+	if cur.Type == TypeHeartbeat {
+		// Serialises with the evaluation in jobs, which reads the grace under this lock.
+		if err := lockHeartbeat(ctx, q, a.TenantID, id); err != nil {
+			return cur, err
+		}
+	}
+	return cur, nil
+}
+
+// monitorEdit is an update resolved against the stored monitor: the values after the change and the
+// names of the fields that differ.
+type monitorEdit struct {
+	name                 string
+	interval, threshold  int
+	notificationsEnabled bool
+	changed              []string
+	config               any
+	// wantSpecula is where the monitor should run after the change (nil: Proreta's worker) and
+	// locChanged says that differs from where it runs now.
+	wantSpecula *uuid.UUID
+	locChanged  bool
+}
+
+// planUpdate validates the request against the stored monitor and merges it over it. Field
+// problems are reported together, in the order name, notificationsEnabled, then those of the
+// monitor's type.
+func (s *Service) planUpdate(ctx context.Context, tx pgx.Tx, a Actor, id uuid.UUID, cur monitorsdb.LockMonitorRow, in UpdateInput) (*monitorEdit, error) {
+	e := &monitorEdit{name: cur.Name, interval: int(cur.IntervalSeconds), threshold: int(cur.FailureThreshold), notificationsEnabled: cur.NotificationsEnabled}
+
+	// Where the monitor runs now and where it should run after this change.
+	curSpecula, err := currentSpecula(ctx, tx, a.TenantID, id)
+	if err != nil {
+		return nil, err
+	}
+	e.wantSpecula = curSpecula
+	if in.Location != nil {
+		e.wantSpecula = in.Location.SpeculaID
+	}
+	e.locChanged = cur.Type != TypeHeartbeat && !sameID(curSpecula, e.wantSpecula)
+
+	var verr validation.Error
+	if in.Name != nil {
+		v, msg := ValidateName(*in.Name)
+		if msg != "" {
+			verr.Add("name", msg)
+		}
+		e.changed, e.name = appendIf(e.changed, "name", v != e.name), v
+	}
+	if in.NotificationsEnabled != nil {
+		e.changed, e.notificationsEnabled = appendIf(e.changed, "notificationsEnabled", *in.NotificationsEnabled != e.notificationsEnabled), *in.NotificationsEnabled
+	}
+	switch cur.Type {
+	case TypeHeartbeat:
+		err = planHeartbeatUpdate(&verr, cur, in, e)
+	case TypeTCP:
+		err = planTCPUpdate(&verr, cur, in, e)
+	default:
+		err = s.planHTTPUpdate(&verr, a, id, cur, in, e)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := verr.Err(); err != nil {
+		return nil, err
+	}
+	return e, nil
+}
+
+func planHeartbeatUpdate(verr *validation.Error, cur monitorsdb.LockMonitorRow, in UpdateInput, e *monitorEdit) error {
+	var cfg heartbeatConfig
+	if err := json.Unmarshal(cur.Config, &cfg); err != nil {
+		return fmt.Errorf("monitor config: %w", err)
+	}
+	if in.Location != nil {
+		verr.Add(fieldSpeculaID, msgHTTPOnly)
+	}
+	if in.HTTP != nil {
+		verr.Add(fieldHTTP, msgHTTPOnlyType)
+	}
+	if in.TCP != nil {
+		verr.Add(fieldTCP, msgTCPOnly)
+	}
+	if hb := in.Heartbeat; hb != nil {
+		if hb.ExpectedIntervalSeconds != nil {
+			if msg := ValidateExpectedInterval(*hb.ExpectedIntervalSeconds); msg != "" {
+				verr.Add(fieldExpectedIntervalSeconds, msg)
+			}
+			e.changed, e.interval = appendIf(e.changed, fieldExpectedIntervalSeconds, *hb.ExpectedIntervalSeconds != e.interval), *hb.ExpectedIntervalSeconds
+		}
+		if hb.GraceSeconds != nil {
+			if msg := ValidateGrace(*hb.GraceSeconds); msg != "" {
+				verr.Add(fieldGraceSeconds, msg)
+			}
+			e.changed, cfg.GraceSeconds = appendIf(e.changed, fieldGraceSeconds, *hb.GraceSeconds != cfg.GraceSeconds), *hb.GraceSeconds
+		}
+	}
+	e.config = cfg
+	return nil
+}
+
+func planTCPUpdate(verr *validation.Error, cur monitorsdb.LockMonitorRow, in UpdateInput, e *monitorEdit) error {
+	var cfg tcpConfig
+	if err := json.Unmarshal(cur.Config, &cfg); err != nil {
+		return fmt.Errorf("monitor config: %w", err)
+	}
+	if in.Heartbeat != nil {
+		verr.Add(fieldHeartbeat, msgHeartbeatOnly)
+	}
+	if in.HTTP != nil {
+		verr.Add(fieldHTTP, msgHTTPOnlyType)
+	}
+	if e.locChanged && (in.TCP == nil || in.TCP.Host == nil) {
+		// The target stays but must satisfy the rules of the new location.
+		v, msg := ValidateHost(cfg.Host, e.wantSpecula != nil)
+		if msg != "" {
+			verr.Add(fieldHost, msg)
+		}
+		cfg.Host = v
+	}
+	if t := in.TCP; t != nil {
+		if t.Host != nil {
+			v, msg := ValidateHost(*t.Host, e.wantSpecula != nil)
+			if msg != "" {
+				verr.Add(fieldHost, msg)
+			}
+			e.changed, cfg.Host = appendIf(e.changed, fieldHost, v != cfg.Host), v
+		}
+		if t.Port != nil {
+			if msg := ValidatePort(*t.Port); msg != "" {
+				verr.Add(fieldPort, msg)
+			}
+			e.changed, cfg.Port = appendIf(e.changed, fieldPort, *t.Port != cfg.Port), *t.Port
+		}
+		if t.FailureThreshold != nil {
+			checkThreshold(verr, fieldTCPFailureThreshold, *t.FailureThreshold)
+			e.changed, e.threshold = appendIf(e.changed, fieldTCPFailureThreshold, *t.FailureThreshold != e.threshold), *t.FailureThreshold
+		}
+	}
+	e.config = cfg
+	return nil
+}
+
+func (s *Service) planHTTPUpdate(verr *validation.Error, a Actor, id uuid.UUID, cur monitorsdb.LockMonitorRow, in UpdateInput, e *monitorEdit) error {
+	var cfg httpConfig
+	if err := json.Unmarshal(cur.Config, &cfg); err != nil {
+		return fmt.Errorf("monitor config: %w", err)
+	}
+	if in.Heartbeat != nil {
+		verr.Add(fieldHeartbeat, msgHeartbeatOnly)
+	}
+	if in.TCP != nil {
+		verr.Add(fieldTCP, msgTCPOnly)
+	}
+	if e.locChanged && (in.HTTP == nil || in.HTTP.URL == nil) {
+		// The target stays but must satisfy the rules of the new location.
+		v, msg := validateTarget(cfg.URL, e.wantSpecula != nil)
+		if msg != "" {
+			verr.Add(fieldURL, msg)
+		}
+		cfg.URL = v
+	}
+	if h := in.HTTP; h != nil {
+		oldURL := cfg.URL
+		checkFixed(verr, fieldIntervalSeconds, h.IntervalSeconds, int(cur.IntervalSeconds))
+		checkFixed(verr, fieldTimeoutSeconds, h.TimeoutSeconds, int(cur.TimeoutSeconds))
+		if h.URL != nil {
+			v, msg := validateTarget(*h.URL, e.wantSpecula != nil)
+			if msg != "" {
+				verr.Add(fieldURL, msg)
+			}
+			e.changed, cfg.URL = appendIf(e.changed, fieldURL, v != cfg.URL), v
+		}
+		if h.ExpectedStatus != nil {
+			if msg := ValidateExpectedStatus(*h.ExpectedStatus); msg != "" {
+				verr.Add(fieldExpectedStatus, msg)
+			}
+			e.changed, cfg.ExpectedStatus = appendIf(e.changed, fieldExpectedStatus, *h.ExpectedStatus != cfg.ExpectedStatus), *h.ExpectedStatus
+		}
+		if h.FailureThreshold != nil {
+			checkThreshold(verr, fieldFailureThreshold, *h.FailureThreshold)
+			e.changed, e.threshold = appendIf(e.changed, fieldFailureThreshold, *h.FailureThreshold != e.threshold), *h.FailureThreshold
+		}
+		hostMovedProblems(verr, oldURL, cfg, h)
+		next, sec, dirty, reqChanged, perr := s.planRequest(verr, cfg, a.TenantID, id, h)
+		if perr != nil {
+			return perr
+		}
+		cfg, e.changed = next, append(e.changed, reqChanged...)
+		if dirty && verr.Err() == nil {
+			if err := s.sealRequest(&cfg, a.TenantID, id, sec); err != nil {
+				return err
+			}
+		}
+	}
+	e.config = cfg
+	return nil
+}
+
+// moveMonitor moves the monitor to the project target (which the actor must be able to edit in),
+// drops the channels and status page components of the old project, and returns the audit
+// metadata of the move and the new project.
+func moveMonitor(ctx context.Context, tx pgx.Tx, q *monitorsdb.Queries, a Actor, id, from, to uuid.UUID, changed *[]string) (map[string]any, uuid.UUID, error) {
+	target, err := projects.ForUse(ctx, tx, a.TenantID, &to)
+	if errors.Is(err, projects.ErrNotFound) || (err == nil && !a.Access.Sees(target)) {
+		return nil, from, projectFieldError()
+	}
+	if err != nil {
+		return nil, from, err
+	}
+	if !a.Access.CanEditIn(target) {
+		return nil, from, authz.ErrProjectForbidden
+	}
+	if err := q.SetMonitorProject(ctx, monitorsdb.SetMonitorProjectParams{TenantID: a.TenantID, ID: id, ProjectID: target}); err != nil {
+		return nil, from, fmt.Errorf("move monitor: %w", err)
+	}
+	// Channels of the old project are not allowed in the new one.
+	detached, err := notify.DetachForeignChannels(ctx, tx, a.TenantID, id, target)
+	if err != nil {
+		return nil, from, err
+	}
+	// Pages of the old project may show only its monitors.
+	componentsRemoved, err := statuspages.DetachForeignComponents(ctx, tx, a.TenantID, id, target, time.Now())
+	if err != nil {
+		return nil, from, err
+	}
+	*changed = append(*changed, "projectId")
+	return map[string]any{"from": from.String(), "to": target.String(), "channelsDetached": detached, "statusPageComponentsRemoved": componentsRemoved}, target, nil
+}
+
+// moveLocation points the monitor at Proreta's worker (specula nil) or at a Specula the project may
+// use.
+func (s *Service) moveLocation(ctx context.Context, tx pgx.Tx, a Actor, id, project uuid.UUID, specula *uuid.UUID) error {
+	locID, err := s.sched.DefaultLocation(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if specula != nil {
+		if locID, err = s.speculaLocation(ctx, tx, a.TenantID, *specula, project); err != nil {
+			return err
+		}
+	}
+	var result string
+	if err := tx.QueryRow(ctx, `SELECT monitor_set_location($1, $2)`, id, locID).Scan(&result); err != nil {
+		return fmt.Errorf("set location: %w", err)
+	}
+	if result != "ok" {
+		return speculaFieldError()
+	}
+	return nil
+}
+
+// saveUpdate writes the merged settings and the audit entry of an update that changed something.
+func (s *Service) saveUpdate(ctx context.Context, tx pgx.Tx, q *monitorsdb.Queries, a Actor, id uuid.UUID, e *monitorEdit, moveMeta map[string]any) error {
+	raw, err := json.Marshal(e.config)
+	if err != nil {
+		return fmt.Errorf("monitor config: %w", err)
+	}
+	if err := q.UpdateMonitor(ctx, monitorsdb.UpdateMonitorParams{
+		TenantID: a.TenantID, ID: id, Name: e.name, Config: raw, IntervalSeconds: int32(e.interval), //nolint:gosec // validated
+		FailureThreshold: int32(e.threshold), NotificationsEnabled: e.notificationsEnabled, //nolint:gosec // validated 1..3
+	}); err != nil {
+		return fmt.Errorf("update monitor: %w", err)
+	}
+	// Only field names: the URL may carry tokens in its query string.
+	meta := map[string]any{"fields": e.changed}
+	if moveMeta != nil {
+		meta["move"] = moveMeta
+	}
+	return s.audit(ctx, tx, a, ActionUpdated, id, meta)
 }
 
 // Delete soft-deletes a monitor. It stops being scheduled (the claim skips deleted monitors)
