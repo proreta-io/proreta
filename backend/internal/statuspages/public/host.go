@@ -130,12 +130,20 @@ func (c *HostCache) Cached(host string) (slug string, found, ok bool) {
 	return it.slug, it.found, true
 }
 
-// Stale returns the last answer for host even when it expired, for when a lookup is not allowed.
+// MaxStaleAge is how long past its expiry an answer may still be served when a lookup is not
+// allowed: long enough to ride out a short flood, short enough that a removed or taken-over
+// domain cannot be kept alive by one.
+const MaxStaleAge = 2 * time.Minute
+
+// Stale returns the last answer for host, up to MaxStaleAge past its expiry, for when a lookup is not allowed.
 func (c *HostCache) Stale(host string) (slug string, found, ok bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	it, ok := c.items[host]
-	return it.slug, it.found, ok
+	if !ok || !c.clock.Now().Before(it.expires.Add(MaxStaleAge)) {
+		return "", false, false
+	}
+	return it.slug, it.found, true
 }
 
 // Fetch asks the source (concurrent calls for one host make one lookup) and caches the answer.
