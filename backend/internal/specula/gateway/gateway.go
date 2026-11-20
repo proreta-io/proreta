@@ -65,7 +65,7 @@ type Deps struct {
 	// LateAlertAfter is how old a slot is, when it is received, for its alerts to say they are
 	// late (PRORETA_SPECULA_LATE_ALERT_AFTER); zero means 10 minutes.
 	LateAlertAfter time.Duration
-	// Limits are the per-token budgets of hello, schedule and reports; zero values use the defaults.
+	// Limits are the per-token budgets of hello, schedule, reports, claim and results; zero values use the defaults.
 	Limits Limits
 }
 
@@ -79,7 +79,7 @@ type Handler struct {
 	// versions caches the schedule version of a Specula for a few seconds (schedule.go).
 	versions *ttlCache[string]
 	// Per-token budgets (limits.go).
-	reportsLimit, scheduleLimit, helloLimit *bucketSet
+	reportsLimit, scheduleLimit, helloLimit, claimLimit, resultsLimit *bucketSet
 }
 
 type ctxKey struct{}
@@ -107,11 +107,13 @@ func New(d Deps) http.Handler {
 		reportsLimit:  d.Limits.Reports.or(reportsRate, reportsBurst),
 		scheduleLimit: d.Limits.Schedule.or(scheduleRate, scheduleBurst),
 		helloLimit:    d.Limits.Hello.or(helloRate, helloBurst),
+		claimLimit:    d.Limits.Claim.or(reportsRate, reportsBurst),
+		resultsLimit:  d.Limits.Results.or(reportsRate, reportsBurst),
 	}
 	mux := http.NewServeMux()
 	mux.Handle("POST "+wire.BasePath+"/hello", g.auth(g.limited("hello", g.helloLimit, g.hello)))
-	mux.Handle("POST "+wire.BasePath+"/claim", g.auth(http.HandlerFunc(g.claim)))
-	mux.Handle("POST "+wire.BasePath+"/results", g.auth(http.HandlerFunc(g.results)))
+	mux.Handle("POST "+wire.BasePath+"/claim", g.auth(g.limited("claim", g.claimLimit, g.claim)))
+	mux.Handle("POST "+wire.BasePath+"/results", g.auth(g.limited("results", g.resultsLimit, g.results)))
 	mux.Handle("POST "+wire.BasePath+"/reports", g.auth(g.limited("reports", g.reportsLimit, g.reports)))
 	mux.Handle("GET "+wire.BasePath+"/schedule", g.auth(g.limited("schedule", g.scheduleLimit, g.schedule)))
 	var h http.Handler = mux
