@@ -2,6 +2,9 @@ openapi: 3.0.3
 info:
   title: Proreta Specula API
   version: 1.0.0
+  contact:
+    name: Proreta maintainers
+    url: https://github.com/proreta-io/proreta
   description: |
     The API that a Specula executor calls. A Specula runs inside a customer's network, where the
     services it checks cannot be reached from outside, and only makes outbound HTTPS calls to
@@ -26,11 +29,21 @@ info:
     backlog and not in the future; it is recorded with the slot as its time. `claim` answers no
     jobs for a location in schedule mode. A `404` on `schedule` or `reports` means an older
     server: stay in pull mode.
+servers:
+  - url: https://proreta.example.com
+    description: Example installation; the executor calls the address of its Proreta
+tags:
+  - name: specula
+    description: Calls made by a Specula executor
 paths:
   /specula/v1/hello:
     post:
       operationId: speculaHello
+      tags: [specula]
       summary: Report the executor's version and host name
+      description: |
+        Sent at start and every minute. The answer carries the server's clock, to notice a skew;
+        the `capabilities` of the latest `hello` decide pull or schedule mode.
       security: [{bearer: []}]
       requestBody:
         required: true
@@ -49,7 +62,11 @@ paths:
   /specula/v1/claim:
     post:
       operationId: speculaClaim
+      tags: [specula]
       summary: Lease up to `max` due checks of this Specula's location
+      description: |
+        Only for an executor in pull mode. Each job comes with a 30 second lease; report it with
+        `results` before the lease ends.
       security: [{bearer: []}]
       requestBody:
         required: true
@@ -67,7 +84,11 @@ paths:
   /specula/v1/results:
     post:
       operationId: speculaResults
+      tags: [specula]
       summary: Report finished checks
+      description: |
+        Only for an executor in pull mode. A result for a lease that has expired or was already
+        completed answers `stale` and must not be sent again.
       security: [{bearer: []}]
       requestBody:
         required: true
@@ -87,6 +108,7 @@ paths:
   /specula/v1/schedule:
     get:
       operationId: speculaSchedule
+      tags: [specula]
       summary: Fetch the schedule of this Specula's location
       description: |
         Only for an executor in schedule mode. Send the last `version` in `If-None-Match`; an
@@ -118,6 +140,7 @@ paths:
   /specula/v1/reports:
     post:
       operationId: speculaReports
+      tags: [specula]
       summary: Report finished checks by slot
       description: |
         Only for an executor in schedule mode. Send results oldest first. Every outcome except a

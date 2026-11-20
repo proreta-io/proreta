@@ -132,7 +132,7 @@ func TestRestartDuringOutage(t *testing.T) {
 	}
 	hellosBefore := e.link.hit(wire.PathHello)
 	e.start(view, dir)
-	e.clk.quiet(100 * time.Millisecond) // it starts checking from the cache, with no connection
+	e.clk.quiet(startup) // it starts checking from the cache, with no connection
 	e.run(5*time.Minute, time.Minute)
 	if got := e.link.hit(wire.PathHello); got != hellosBefore {
 		t.Fatalf("the link is cut, but %d hellos got through", got-hellosBefore)

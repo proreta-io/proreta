@@ -30,7 +30,7 @@ func (e *env) ready() {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	e.clk.quiet(100 * time.Millisecond)
+	e.clk.quiet(startup)
 }
 
 // allStored reports whether every slot up to now has a row.

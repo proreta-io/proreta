@@ -1,12 +1,15 @@
 name: release
 
-# Tests run on the pull request (ci.yml, required check `ci-ok`); this workflow only builds and
-# publishes images after a squash merge to main or a tag. It does not depend on ci.yml.
+# Tests run on the pull request and on every push to main (ci.yml, required check `ci-ok`). A tag
+# build runs ci.yml first (job `ci`) and publishes nothing unless it is green; a push to main builds
+# images without waiting for it.
 # Builds and pushes the multi-arch backend and web images to ghcr.io.
 # - push to main: tags `sha-<7 hex>` and `main`.
 # - tag vX.Y.Z: tags `X.Y.Z`, `X.Y` and `X` (semver, no `latest`; no moving `X` while X is 0), and the Helm charts as the OCI
 #   artifacts oci://ghcr.io/proreta-io/charts/proreta and .../proreta-specula, version X.Y.Z (job `chart`, tags only; a
 #   prerelease tag vX.Y.Z-rc.1 gives the chart version X.Y.Z-rc.1).
+# After the charts, job `finalize` checks the published artifacts anonymously and creates the GitHub
+# release (marked pre-release when the version has a suffix such as -rc.1).
 # Every image carries the labels org.opencontainers.image.revision (the commit) and
 # org.opencontainers.image.source. The workflow only publishes images; it never commits.
 # Path filters apply to branch pushes only; GitHub does not evaluate them for tag pushes.
@@ -30,7 +33,46 @@ concurrency:
 permissions: {}
 
 jobs:
+  # Tags only: the tag must be vX.Y.Z[-pre], point at a commit that is on main, and pass the full CI.
+  verify-tag:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Tag format and branch
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::tag $GITHUB_REF_NAME is not vX.Y.Z or vX.Y.Z-<prerelease>"
+            exit 1
+          fi
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::tag $GITHUB_REF_NAME is not on main"
+            exit 1
+          fi
+
+  ci:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: verify-tag
+    uses: ./.github/workflows/ci.yml
+    # The permissions ci.yml asks for per job; a called workflow cannot have more than its caller gives.
+    permissions:
+      contents: read
+      pull-requests: read
+
   image:
+    # Runs for main (ci and verify-tag skipped) and for a tag whose ci passed; never after a failure, and
+    # a manual run from another branch publishes nothing.
+    needs: [verify-tag, ci]
+    if: ${{ !cancelled() && !failure() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -137,3 +179,57 @@ jobs:
           helm push "$RUNNER_TEMP/chart/proreta-${version}.tgz" oci://ghcr.io/proreta-io/charts
           helm push "$RUNNER_TEMP/chart/proreta-specula-${version}.tgz" oci://ghcr.io/proreta-io/charts
           helm registry logout ghcr.io
+
+  # Tags only, after the images and charts: anonymous reads prove that the packages are public and
+  # carry both platforms, then the GitHub release is created (notes from docs/release-notes/X.Y.Z.md
+  # when that file exists for the version without its suffix, a short pointer otherwise).
+  finalize:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: chart
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
+        with:
+          version: v3.18.6
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Published artifacts are public and complete (no login)
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          for img in proreta-backend proreta-web; do
+            out=$(docker buildx imagetools inspect "ghcr.io/proreta-io/${img}:${version}")
+            for platform in linux/amd64 linux/arm64; do
+              grep -q "Platform:.*${platform}" <<<"$out" || { echo "::error::${img}:${version} has no ${platform}"; exit 1; }
+            done
+          done
+          for chart in proreta proreta-specula; do
+            out=$(helm show chart "oci://ghcr.io/proreta-io/charts/${chart}" --version "$version")
+            grep -q "^version: ${version}\$" <<<"$out" || { echo "::error::chart ${chart} is not version ${version}"; exit 1; }
+            grep -q "^appVersion: \"\?${version}\"\?\$" <<<"$out" || { echo "::error::chart ${chart} has another appVersion"; exit 1; }
+          done
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          # A release made by hand before the run is kept as it is.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME exists; leaving it"
+            exit 0
+          fi
+          flags=()
+          [[ "$version" == *-* ]] && flags+=(--prerelease)
+          notes="docs/release-notes/${version%%-*}.md"
+          if [ -f "$notes" ]; then
+            flags+=(--notes-file "$notes")
+          else
+            flags+=(--notes "Release ${version}. Images ghcr.io/proreta-io/proreta-backend:${version} and proreta-web:${version}, charts oci://ghcr.io/proreta-io/charts/proreta and proreta-specula at version ${version}. See docs/release-notes/ in this tag and docs/install.md.")
+          fi
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "Proreta ${version}" "${flags[@]}"
