@@ -1745,6 +1745,8 @@ BEGIN
         WHERE d.id IN (
             SELECT e.id FROM notification_deliveries AS e
             WHERE e.status IN ('sent', 'failed') AND e.created_at < now() - make_interval(days => p_days)
+              -- the opened row of a running incident routes its reminders and its recovered message
+              AND NOT EXISTS (SELECT 1 FROM incidents AS i WHERE i.tenant_id = e.tenant_id AND i.id = e.incident_id AND i.resolved_at IS NULL)
             ORDER BY e.created_at
             LIMIT 1000
             FOR UPDATE SKIP LOCKED
