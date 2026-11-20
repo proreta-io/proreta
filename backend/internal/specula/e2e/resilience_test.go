@@ -58,7 +58,7 @@ func TestStateDirectoryGone(t *testing.T) {
 			c.remove(t, dir)
 			e.run(10*time.Minute, time.Minute)
 			e.link.cut.Store(false)
-			e.until("the slots after the removal are stored", 30*time.Minute, 5*time.Second, func() bool {
+			lastStored := func() bool {
 				got := e.stored()
 				for _, m := range e.mons {
 					if !slices.Contains(got[m.ID], lastOf(m.slots(e.t0, e.clk.Now()))) {
@@ -66,8 +66,12 @@ func TestStateDirectoryGone(t *testing.T) {
 					}
 				}
 				return true
-			})
+			}
+			e.until("the slots after the removal are stored", 30*time.Minute, 5*time.Second, lastStored)
 			e.run(time.Minute, time.Minute)
+			// A success waits for its batch time, which depends on the random back-off before it: the
+			// newest slot may not be sent yet.
+			e.until("the newest slots are stored", time.Minute, 5*time.Second, lastStored)
 			// Known limit: what was waiting in the segment file when the directory went, and what was
 			// appended to that file before the buffer noticed, is lost: the segment is read by path,
 			// not through the file the process holds. Everything after that is kept in memory.
