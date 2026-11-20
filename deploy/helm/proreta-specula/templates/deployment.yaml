@@ -33,6 +33,9 @@ spec:
       {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- if and .Values.state.enabled .Values.state.persistence.existingClaim (not (hasKey .Values.podSecurityContext "fsGroup")) }}
+        fsGroup: {{ .Values.podSecurityContext.runAsGroup }}
+        {{- end }}
       containers:
         - name: specula
           image: {{ include "proreta-specula.image" . | quote }}
@@ -87,8 +90,13 @@ spec:
             sizeLimit: 16Mi
         {{- if .Values.state.enabled }}
         - name: state
+          {{- if .Values.state.persistence.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.state.persistence.existingClaim | quote }}
+          {{- else }}
           emptyDir:
             sizeLimit: {{ .Values.state.sizeLimit | quote }}
+          {{- end }}
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

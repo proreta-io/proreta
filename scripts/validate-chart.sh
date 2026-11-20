@@ -456,13 +456,15 @@ helm lint --strict "$sp_chart" "${sp_args[@]}" >"$out/specula.lint" 2>&1 || { ca
 helm template specula "$sp_chart" -n specula "${sp_args[@]}" >"$out/specula.yaml"
 helm template specula "$sp_chart" -n specula "${sp_args[@]}" --set specula.concurrency=100 --set state.sizeLimit=1Gi --set 'env[0].name=HTTPS_PROXY' --set 'env[0].value=http://proxy:3128' >"$out/specula-custom.yaml"
 helm template specula "$sp_chart" -n specula "${sp_args[@]}" --set state.enabled=false >"$out/specula-nostate.yaml"
+helm template specula "$sp_chart" -n specula "${sp_args[@]}" --set state.persistence.existingClaim=specula-state >"$out/specula-claim.yaml"
+helm lint --strict "$sp_chart" "${sp_args[@]}" --set state.persistence.existingClaim=specula-state >"$out/specula-claim.lint" 2>&1 || { cat "$out/specula-claim.lint"; exit 1; }
 helm template specula "$sp_chart" -n specula "${sp_args[@]}" --set serviceMonitor.enabled=true --set serviceMonitor.labels.release=prometheus --set serviceMonitor.interval=15s >"$out/specula-monitor.yaml"
 helm package "$sp_chart" --version 1.2.3 --app-version 1.2.3 -d "$out/specula-pkg" >/dev/null
 tar -xzOf "$out/specula-pkg/proreta-specula-1.2.3.tgz" proreta-specula/LICENSE | cmp -s LICENSE - || { echo "FAIL: packaged Specula chart has no LICENSE equal to the repository LICENSE" >&2; exit 1; }
 helm template specula "$out/specula-pkg/proreta-specula-1.2.3.tgz" -n specula --set proreta.url=https://proreta.example.com --set token.existingSecret=specula-token >"$out/specula-packaged.yaml"
 grep -q 'image: "ghcr.io/proreta-io/proreta-specula:1.2.3"' "$out/specula-packaged.yaml" || { echo "FAIL: packaged Specula chart does not use appVersion 1.2.3" >&2; exit 1; }
 helm template specula "$sp_chart" -n specula --set image.digest=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --set proreta.url=https://proreta.example.com --set token.existingSecret=specula-token | grep -qF 'image: "ghcr.io/proreta-io/proreta-specula@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' || { echo "FAIL: Specula chart ignores image.digest" >&2; exit 1; }
-python3 - "$out/specula.yaml" "$out/specula-custom.yaml" "$out/specula-nostate.yaml" <<'PY'
+python3 - "$out/specula.yaml" "$out/specula-custom.yaml" "$out/specula-nostate.yaml" "$out/specula-claim.yaml" <<'PY'
 import sys, yaml
 for path in sys.argv[1:]:
     docs = [d for d in yaml.safe_load_all(open(path)) if d]
@@ -488,7 +490,13 @@ for path in sys.argv[1:]:
         assert "PRORETA_SPECULA_STATE_DIR" not in env and "state" not in vols and "state" not in mounts, "state volume without state.enabled"
     else:
         assert env["PRORETA_SPECULA_STATE_DIR"]["value"] == mounts["state"] == "/var/lib/specula", (env.get("PRORETA_SPECULA_STATE_DIR"), mounts)
-        assert "emptyDir" in vols["state"] and vols["state"]["emptyDir"]["sizeLimit"], "state is not a bounded emptyDir"
+        if path.endswith("claim.yaml"):
+            assert vols["state"] == {"name": "state", "persistentVolumeClaim": {"claimName": "specula-state"}}, vols["state"]
+            assert spec["securityContext"]["fsGroup"] == 65532, "the claim is not writable by the executor"
+            assert not [d for d in docs if d["kind"] == "PersistentVolumeClaim"], "the chart creates a claim"
+        else:
+            assert "emptyDir" in vols["state"] and vols["state"]["emptyDir"]["sizeLimit"], "state is not a bounded emptyDir"
+            assert "fsGroup" not in spec["securityContext"], "fsGroup without a claim"
         assert not [m for m in c["volumeMounts"] if m["name"] == "state" and m.get("readOnly")], "state is read-only"
     assert not [d for d in docs if d["kind"] in ("Service", "Ingress", "HTTPRoute", "Role", "ClusterRole")], "the executor exposes or needs nothing inbound"
 print("ok")

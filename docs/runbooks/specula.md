@@ -76,7 +76,7 @@ The buffer and the cached schedule live in the state directory as plain files (a
 
 Shorter intervals count proportionally. These numbers are estimates, not guarantees.
 
-In the chart the state directory is an `emptyDir` (`state.sizeLimit`, 512Mi). It survives a restart of the container but **not the replacement of the pod** (an upgrade, an eviction or a node drain). When the pod is replaced the executor first sends what it holds, for up to 20 seconds. That is enough when the buffer is small. It is not enough when a replay is still running (a replay is paced, about 100 results every 200 ms): the tail that was not sent in time is lost with the pod. When the pod is replaced while Proreta cannot be reached, the buffer and the cached schedule are lost, and the executor checks nothing until it reaches Proreta again. A volume that outlives the pod is **not available yet**; do not plan on one.
+In the chart the state directory is an `emptyDir` (`state.sizeLimit`, 512Mi). It survives a restart of the container but **not the replacement of the pod** (an upgrade, an eviction or a node drain). When the pod is replaced the executor first sends what it holds, for up to 20 seconds. That is enough when the buffer is small. It is not enough when a replay is still running (a replay is paced, about 100 results every 200 ms): the tail that was not sent in time is lost with the pod. When the pod is replaced while Proreta cannot be reached, the buffer and the cached schedule are lost, and the executor checks nothing until it reaches Proreta again. To keep them, put the state on a volume that outlives the pod: see [Persistent state](#persistent-state).
 
 What a failure costs:
 
@@ -85,6 +85,11 @@ What a failure costs:
 - **Do not drain or reboot the executor's node while Proreta is unreachable.** If the executor and Proreta are restarted together (the same node, the same maintenance window, or one deployment tool), restart Proreta first and the executor after it answers. See [Argo CD](#argo-cd-and-other-tools-that-restart-both).
 
 The cached schedule contains the decrypted headers and bodies of your monitors (tokens may be among them). Treat the state directory like the executor's own memory: do not mount it from shared storage and do not back it up.
+
+## Persistent state
+Set `state.persistence.existingClaim` to the name of a PersistentVolumeClaim in the release namespace, and the chart mounts it at the state directory instead of the `emptyDir` (the default is unchanged). Create the claim yourself, at least 1 GiB; the chart does not create one, so that removing the release never deletes your results. Use a `ReadWriteOnce` claim: together with the `Recreate` strategy and one replica it keeps a single writer, and that is the supported combination (`ReadWriteMany` is not supported). The chart sets the pod's `fsGroup` to its group so that the executor can write to the volume, unless you set `fsGroup` yourself in `podSecurityContext`.
+
+What it fixes: the buffer, the cached schedule and the instance id survive the replacement of the pod. A Proreta and a Specula restarted together by one Argo CD sync no longer lose results. The new pod starts checking from the cached schedule before the gateway answers (while it is still valid, 24 hours by default), and it sends the buffer when the link is back, so the maintenance window leaves no gap. Keeping the sync waves from [Argo CD](#argo-cd-and-other-tools-that-restart-both) is still sensible. It does not help when the volume itself is lost, when the schedule has run out, or beyond the buffer limits. The cached schedule holds your monitors' headers and bodies, so use an encrypted storage class if that matters to you.
 
 ## What is guaranteed
 Producing a result is best effort, at most once per slot: a slot is checked once or not at all, and a slot that was missed (a restart, a busy or stalled executor, an expired schedule) is never checked afterwards. Delivery to Proreta is at least once and in order for as long as the buffer lives, and Proreta stores one result per monitor, location and slot, so a resend is stored once. Beyond the buffer limits, or when the pod is replaced without a chance to send, delivery is at most once: the oldest results are dropped and counted. A result that Proreta answers with `rejected`, `superseded` or `expired` is final and is not sent again, and Proreta does not distinguish a slot that was never checked from one that was lost: both are shown as **no data**.
@@ -110,7 +115,7 @@ metadata:
     argocd.argoproj.io/sync-wave: "1"   # after the wave above is healthy
 ```
 
-Argo CD applies the second wave only after everything in the first is healthy, which includes the gateway answering. A persistent state volume, which would remove this dependency, is not available yet.
+Argo CD applies the second wave only after everything in the first is healthy, which includes the gateway answering. Persistent state (below) is the complementary measure: with it the executor loses nothing even if it is replaced while Proreta is down.
 
 
 ## Degraded state
