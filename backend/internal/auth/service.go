@@ -689,6 +689,10 @@ func normalizeLogin(login string) string {
 // limiterIPKey is the per-client limiter key; requests without a usable address share one.
 func limiterIPKey(ip netip.Addr) string {
 	if ip.IsValid() {
+		// An IPv6 end site owns at least a /64, so one host would otherwise get a bucket per address.
+		if ip = ip.Unmap(); ip.Is6() {
+			return "ip:" + netip.PrefixFrom(ip, 64).Masked().String()
+		}
 		return "ip:" + ip.String()
 	}
 	return unattributedIPKey

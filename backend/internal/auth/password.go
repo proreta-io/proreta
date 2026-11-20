@@ -138,6 +138,10 @@ func (s *Service) ChangePassword(ctx context.Context, p Principal, in ChangePass
 		if err := q.SetUserPassword(ctx, authdb.SetUserPasswordParams{ID: p.UserID, PasswordHash: &phc, ChangedAt: &now}); err != nil {
 			return fmt.Errorf("set password: %w", err)
 		}
+		// A reset link mailed before the change must not set yet another password afterwards.
+		if err := q.SupersedePasswordResets(ctx, authdb.SupersedePasswordResetsParams{UserID: p.UserID, Now: &now}); err != nil {
+			return fmt.Errorf("supersede resets: %w", err)
+		}
 		n, err := revokeUserSessions(ctx, tx, p.UserID)
 		if err != nil {
 			return fmt.Errorf("revoke sessions: %w", err)

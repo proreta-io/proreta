@@ -55,6 +55,7 @@ func TestIntegrationTokenLimits(t *testing.T) {
 		// Two calls, then one more per 4 seconds (hello), 20 seconds (schedule) and 2 seconds (reports).
 		Limits: gateway.Limits{
 			Hello: gateway.Budget{Rate: 0.25, Burst: 2}, Schedule: gateway.Budget{Rate: 0.05, Burst: 2}, Reports: gateway.Budget{Rate: 0.5, Burst: 2},
+			Claim: gateway.Budget{Rate: 0.5, Burst: 2}, Results: gateway.Budget{Rate: 0.5, Burst: 2},
 		},
 	}))
 	t.Cleanup(srv.Close)
@@ -64,8 +65,10 @@ func TestIntegrationTokenLimits(t *testing.T) {
 		"hello":    func(tok string) answer { return doReq(t, srv, http.MethodPost, wire.PathHello, tok) },
 		"reports":  func(tok string) answer { return doReq(t, srv, http.MethodPost, wire.PathReports, tok) },
 		"schedule": func(tok string) answer { return doReq(t, srv, http.MethodGet, wire.PathSchedule, tok) },
+		"claim":    func(tok string) answer { return doReq(t, srv, http.MethodPost, wire.PathClaim, tok) },
+		"results":  func(tok string) answer { return doReq(t, srv, http.MethodPost, wire.PathResults, tok) },
 	}
-	for endpoint, wait := range map[string]time.Duration{"hello": 4 * time.Second, "reports": 2 * time.Second, "schedule": 20 * time.Second} {
+	for endpoint, wait := range map[string]time.Duration{"hello": 4 * time.Second, "reports": 2 * time.Second, "schedule": 20 * time.Second, "claim": 2 * time.Second, "results": 2 * time.Second} {
 		call := do[endpoint]
 		for i := 0; i < 2; i++ {
 			if r := call(tokenA); r.StatusCode == http.StatusTooManyRequests {
@@ -85,12 +88,6 @@ func TestIntegrationTokenLimits(t *testing.T) {
 		}
 		if got := metricValue(t, reg, "proreta_specula_token_limited_total", "endpoint", endpoint); got != 1 {
 			t.Errorf("token_limited_total{endpoint=%q} = %v, want 1", endpoint, got)
-		}
-	}
-	// claim and results (pull mode) have no per-token budget.
-	for i := 0; i < 10; i++ {
-		if code, _ := call(t, srv, tokenA, "/claim", wire.ClaimRequest{Max: 1}); code == http.StatusTooManyRequests {
-			t.Fatal("claim must not be limited per token")
 		}
 	}
 }

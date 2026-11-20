@@ -136,6 +136,31 @@ func AccessIn(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID) (map[u
 	return out, nil
 }
 
+// currentActor reads the actor's roles again, inside the project lock, and checks the permission
+// against them: the roles of the request may be older than a change that has just committed (two
+// owners demoting each other, a maintainer demoted while the request was in flight).
+func currentActor(ctx context.Context, tx pgx.Tx, a Actor, id uuid.UUID, p authz.Permission) (Actor, error) {
+	if a.Admin {
+		return a, need(a, id, p)
+	}
+	var role *string
+	err := tx.QueryRow(ctx, `SELECT role FROM memberships WHERE tenant_id = $1 AND user_id = $2`, a.TenantID, a.Access.UserID).Scan(&role)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return a, ErrNotFound
+	}
+	if err != nil {
+		return a, fmt.Errorf("projects: actor role: %w", err)
+	}
+	a.Access.Role = ""
+	if role != nil {
+		a.Access.Role = authz.Role(*role)
+	}
+	if a.Access.Projects, err = AccessIn(ctx, tx, a.TenantID, a.Access.UserID); err != nil {
+		return a, err
+	}
+	return a, need(a, id, p)
+}
+
 // need checks that the actor holds a project-scope permission in a project: ErrNotFound when it
 // has no role there (so ids of other projects reveal nothing), authz.ErrProjectForbidden when its
 // role does not hold the permission.
@@ -389,6 +414,9 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 		if err != nil {
 			return err
 		}
+		if a, err = currentActor(ctx, tx, a, id, "project.update"); err != nil {
+			return err
+		}
 		newName, newSlug := cur.Name, cur.Slug
 		if in.Name != nil {
 			newName = name
@@ -432,6 +460,9 @@ func (s *Service) Delete(ctx context.Context, a Actor, id uuid.UUID) error {
 		q := projectsdb.New(tx)
 		cur, err := lockProject(ctx, q, a.TenantID, id)
 		if err != nil {
+			return err
+		}
+		if a, err = currentActor(ctx, tx, a, id, "project.delete"); err != nil {
 			return err
 		}
 		if cur.IsDefault {
@@ -535,6 +566,10 @@ func (s *Service) PutMember(ctx context.Context, a Actor, id, userID uuid.UUID, 
 		if _, err := lockProject(ctx, q, a.TenantID, id); err != nil {
 			return err
 		}
+		var err error
+		if a, err = currentActor(ctx, tx, a, id, "project.members.manage"); err != nil {
+			return err
+		}
 		cur, err := q.GetMemberRoles(ctx, projectsdb.GetMemberRolesParams{TenantID: a.TenantID, ProjectID: id, UserID: userID})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrMemberNotFound
@@ -592,6 +627,10 @@ func (s *Service) RemoveMember(ctx context.Context, a Actor, id, userID uuid.UUI
 	return db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
 		q := projectsdb.New(tx)
 		if _, err := lockProject(ctx, q, a.TenantID, id); err != nil {
+			return err
+		}
+		var err error
+		if a, err = currentActor(ctx, tx, a, id, "project.members.manage"); err != nil {
 			return err
 		}
 		cur, err := q.GetMemberRoles(ctx, projectsdb.GetMemberRolesParams{TenantID: a.TenantID, ProjectID: id, UserID: userID})

@@ -239,9 +239,6 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Page, er
 	id := uuidv7.New()
 	var out Page
 	err = db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
-		if err := plans.CheckCreateStatusPage(ctx, tx, a.TenantID, in.ProjectID); err != nil {
-			return err
-		}
 		if in.ProjectID != nil {
 			_, err := projects.ForUse(ctx, tx, a.TenantID, in.ProjectID)
 			if errors.Is(err, projects.ErrNotFound) || (err == nil && !a.Access.Sees(*in.ProjectID)) {
@@ -255,6 +252,10 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Page, er
 			if !a.Access.CanIn(*in.ProjectID, "statuspage.manage") {
 				return authz.ErrProjectForbidden
 			}
+		}
+		// After the visibility checks: a project the caller cannot see must not answer with its quota.
+		if err := plans.CheckCreateStatusPage(ctx, tx, a.TenantID, in.ProjectID); err != nil {
+			return err
 		}
 		if err := checkSlugFree(ctx, statuspagesdb.New(tx), f.slug); err != nil {
 			return err
@@ -567,10 +568,9 @@ func (s *Service) PutComponents(ctx context.Context, a Actor, id uuid.UUID, in [
 		for i, c := range clean {
 			p, ok := projectOf[c.MonitorID]
 			switch {
-			case !ok:
+			case !ok, page.ProjectID != nil && p != *page.ProjectID:
+				// One answer for both: a monitor of another project must not be told apart from a missing one.
 				verr.Add(fmt.Sprintf("items.%d.monitorId", i), "does not exist")
-			case page.ProjectID != nil && p != *page.ProjectID:
-				verr.Add(fmt.Sprintf("items.%d.monitorId", i), "must belong to the project of the page")
 			}
 		}
 		if err := verr.Err(); err != nil {

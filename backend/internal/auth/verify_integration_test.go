@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/proreta-io/proreta/backend/internal/auth"
+	"github.com/proreta-io/proreta/backend/internal/authz"
 	"github.com/proreta-io/proreta/backend/internal/mail"
 	"github.com/proreta-io/proreta/backend/internal/platform/clock"
 	"github.com/proreta-io/proreta/backend/internal/platform/crypto"
@@ -333,5 +334,48 @@ func TestIntegrationInvitedRegistrationQueuesVerification(t *testing.T) {
 	}
 	if _, to := e.queued(); len(to) != 2 || to[1] != "guest@example.com" {
 		t.Fatalf("queued to %v", to)
+	}
+}
+
+// Wrong passwords sent through an invitation link from one address must not lock the account
+// out of joining from another.
+func TestIntegrationInvitationJoinLockoutIsPerAddress(t *testing.T) {
+	e := newVerifyEnv(t, "auth_join_lockout", true)
+	owner := e.register("owner@example.com")
+	e.register("victim@example.com")
+	p := e.principal(owner)
+	_, token, err := e.svc.CreateInvitation(e.ctx, auth.Actor{TenantID: p.TenantID, UserID: p.UserID, IP: testIP}, auth.RoleMember, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	attacker := netip.MustParseAddr("198.51.100.77")
+	for range 15 {
+		_, _ = e.svc.Register(e.ctx, auth.RegisterInput{Email: "victim@example.com", Password: "wrong wrong wrong", InviteToken: token, IP: attacker})
+	}
+	if _, err := e.svc.Register(e.ctx, auth.RegisterInput{Email: "victim@example.com", Password: oldPassword, InviteToken: token, IP: testIP}); err != nil {
+		t.Fatalf("the victim was locked out by another address: %v", err)
+	}
+}
+
+func TestIntegrationMaintainerCannotRevokeAnOwnerInvitation(t *testing.T) {
+	e := newVerifyEnv(t, "auth_revoke_owner_link", true)
+	owner := e.register("owner@example.com")
+	p := e.principal(owner)
+	ownerLink, _, _, err := e.svc.CreateInvitationFor(e.ctx, auth.PlatformActor(p.TenantID, p.UserID, testIP), auth.InvitationInput{Role: auth.RoleOwner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := e.svc.CreateInvitation(e.ctx, auth.Actor{TenantID: p.TenantID, UserID: p.UserID, IP: testIP}, auth.RoleMaintainer, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := e.svc.Register(e.ctx, auth.RegisterInput{Email: "mallory@example.com", Password: "another fine password", InviteToken: token, IP: testIP})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mp := e.principal(m)
+	actor := auth.Actor{TenantID: mp.TenantID, UserID: mp.UserID, IP: testIP}
+	if err := e.svc.RevokeInvitation(e.ctx, actor, ownerLink.ID); !errors.Is(err, authz.ErrForbidden) {
+		t.Fatalf("a maintainer revoked an owner invitation: %v", err)
 	}
 }

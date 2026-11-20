@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -190,5 +191,22 @@ func TestAcquireHashWaitIsBounded(t *testing.T) {
 	<-s.hashSem
 	if err := s.acquireHash(context.Background()); err != nil {
 		t.Fatalf("freed slot: %v", err)
+	}
+}
+
+func TestLimiterIPKeyBucketsIPv6By64(t *testing.T) {
+	a := limiterIPKey(netip.MustParseAddr("2001:db8:1:2::1"))
+	b := limiterIPKey(netip.MustParseAddr("2001:db8:1:2:ffff::9"))
+	if a != b {
+		t.Errorf("same /64 got different buckets: %s %s", a, b)
+	}
+	if a == limiterIPKey(netip.MustParseAddr("2001:db8:1:3::1")) {
+		t.Error("different /64 shares a bucket")
+	}
+	if limiterIPKey(netip.MustParseAddr("::ffff:192.0.2.7")) != limiterIPKey(netip.MustParseAddr("192.0.2.7")) {
+		t.Error("mapped IPv4 differs from IPv4")
+	}
+	if limiterIPKey(netip.Addr{}) != unattributedIPKey {
+		t.Error("invalid address")
 	}
 }

@@ -7338,11 +7338,11 @@ components:
           format: date-time
         createdBy:
           type: string
-          description: Login of the member who created it
+          description: Login of the member who created it; empty for callers without an organization owner or maintainer role
         acceptedBy:
           type: string
           nullable: true
-          description: Login of the user who joined with it
+          description: Login of the user who joined with it; always null for callers without an organization owner or maintainer role
         acceptedAt:
           type: string
           format: date-time

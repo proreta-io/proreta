@@ -653,6 +653,14 @@ func TestHostModeLookupsAreLimitedPerClientAndStaleServed(t *testing.T) {
 	if r := h.at("never.acme.com", http.MethodGet, "/", "", abuser); r.code != http.StatusTooManyRequests {
 		t.Errorf("unseen host: %d", r.code)
 	}
+	// A stale answer does not live on: past MaxStaleAge the flood gets 429, not the old page.
+	h.clk.Advance(MaxStaleAge)
+	for i := range hostMissBurst + 5 {
+		h.at(fmt.Sprintf("w%d.acme.com", i), http.MethodGet, "/", "", abuser)
+	}
+	if r := h.at("status.acme.com", http.MethodGet, "/", "", abuser); r.code != http.StatusTooManyRequests {
+		t.Errorf("answer older than MaxStaleAge: %d", r.code)
+	}
 }
 
 func TestHostCacheEvictsUnknownHostsFirst(t *testing.T) {

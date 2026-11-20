@@ -4070,9 +4070,9 @@ export interface components {
       createdAt: string;
       /** Format: date-time */
       expiresAt: string;
-      /** @description Login of the member who created it */
+      /** @description Login of the member who created it; empty for callers without an organization owner or maintainer role */
       createdBy: string;
-      /** @description Login of the user who joined with it */
+      /** @description Login of the user who joined with it; always null for callers without an organization owner or maintainer role */
       acceptedBy: string | null;
       /** Format: date-time */
       acceptedAt: string | null;

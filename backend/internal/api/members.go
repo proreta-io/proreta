@@ -182,9 +182,10 @@ func (s *server) ListInvitations(ctx context.Context, req gen.ListInvitationsReq
 	if err != nil {
 		return nil, err
 	}
+	showLogins := authz.Role(p.Role).AtLeast(authz.Maintainer)
 	out := gen.ListInvitations200JSONResponse{Items: make([]gen.Invitation, len(list))}
 	for i, inv := range list {
-		out.Items[i] = toInvitation(inv)
+		out.Items[i] = toInvitation(inv, showLogins)
 	}
 	return out, nil
 }
@@ -211,7 +212,7 @@ func (s *server) CreateInvitation(ctx context.Context, req gen.CreateInvitationR
 	if err != nil {
 		return nil, err
 	}
-	return gen.CreateInvitation201JSONResponse{Invitation: toInvitation(inv), InviteUrl: s.cfg.PublicURL + "/invite#" + token, EmailQueued: emailed}, nil
+	return gen.CreateInvitation201JSONResponse{Invitation: toInvitation(inv, true), InviteUrl: s.cfg.PublicURL + "/invite#" + token, EmailQueued: emailed}, nil
 }
 
 // organizationInvitationRole refuses owner for an invitation into the organization (the shared role
@@ -319,7 +320,12 @@ func toMember(m auth.Member, showLogin bool) gen.Member {
 		JoinedAt: m.JoinedAt, IsPlatformAdmin: m.IsPlatformAdmin, IsSystemAdmin: m.IsSystemAdmin}
 }
 
-func toInvitation(i auth.Invitation) gen.Invitation {
+// toInvitation maps an invitation; showLogins is false for callers below organization maintainer,
+// who get an empty creator and no acceptor (the logins of organization-level people).
+func toInvitation(i auth.Invitation, showLogins bool) gen.Invitation {
+	if !showLogins {
+		i.CreatedBy, i.AcceptedBy = "", nil
+	}
 	return gen.Invitation{Id: i.ID, Role: gen.InvitationRole(i.Role), ProjectId: i.ProjectID, ProjectName: i.ProjectName, Label: i.Label, Status: gen.InvitationStatus(i.Status),
 		CreatedAt: i.CreatedAt, ExpiresAt: i.ExpiresAt, CreatedBy: i.CreatedBy, AcceptedBy: i.AcceptedBy,
 		AcceptedAt: i.AcceptedAt, RevokedAt: i.RevokedAt}

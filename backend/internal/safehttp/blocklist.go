@@ -8,21 +8,22 @@ import "net/netip"
 // the tenant, and no legitimate monitor target needs them.
 var builtinBlocked = mustPrefixes(
 	// IPv4
-	"0.0.0.0/8",       // "this network"
-	"10.0.0.0/8",      // private
-	"100.64.0.0/10",   // CGNAT
-	"127.0.0.0/8",     // loopback
-	"169.254.0.0/16",  // link-local, includes the cloud metadata endpoint
-	"172.16.0.0/12",   // private
-	"192.0.0.0/24",    // IETF protocol assignments
-	"192.0.2.0/24",    // documentation
-	"192.88.99.0/24",  // 6to4 relay anycast
-	"192.168.0.0/16",  // private
-	"198.18.0.0/15",   // benchmarking
-	"198.51.100.0/24", // documentation
-	"203.0.113.0/24",  // documentation
-	"224.0.0.0/4",     // multicast
-	"240.0.0.0/4",     // reserved, includes broadcast 255.255.255.255
+	"0.0.0.0/8",        // "this network"
+	"10.0.0.0/8",       // private
+	"100.64.0.0/10",    // CGNAT
+	"127.0.0.0/8",      // loopback
+	"169.254.0.0/16",   // link-local, includes the cloud metadata endpoint
+	"168.63.129.16/32", // Azure WireServer / host agent
+	"172.16.0.0/12",    // private
+	"192.0.0.0/24",     // IETF protocol assignments
+	"192.0.2.0/24",     // documentation
+	"192.88.99.0/24",   // 6to4 relay anycast
+	"192.168.0.0/16",   // private
+	"198.18.0.0/15",    // benchmarking
+	"198.51.100.0/24",  // documentation
+	"203.0.113.0/24",   // documentation
+	"224.0.0.0/4",      // multicast
+	"240.0.0.0/4",      // reserved, includes broadcast 255.255.255.255
 	// IPv6
 	"::/128",         // unspecified
 	"::1/128",        // loopback

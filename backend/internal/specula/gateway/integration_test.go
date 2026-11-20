@@ -367,4 +367,5 @@ func TestIntegrationGateway(t *testing.T) {
 // openLimits lets a test call far faster than an executor does; the limit tests set their own.
 var openLimits = gateway.Limits{
 	Reports: gateway.Budget{Rate: 1e6, Burst: 1e6}, Schedule: gateway.Budget{Rate: 1e6, Burst: 1e6}, Hello: gateway.Budget{Rate: 1e6, Burst: 1e6},
+	Claim: gateway.Budget{Rate: 1e6, Burst: 1e6}, Results: gateway.Budget{Rate: 1e6, Burst: 1e6},
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/platform/db"
 	"github.com/proreta-io/proreta/backend/internal/platform/pagecursor"
 	"github.com/proreta-io/proreta/backend/internal/platform/uuidv7"
+	"github.com/proreta-io/proreta/backend/internal/projects"
 	"github.com/proreta-io/proreta/backend/internal/tenants"
 )
 
@@ -249,6 +250,16 @@ func (s *Service) RemoveMember(ctx context.Context, a Actor, userID uuid.UUID) e
 		}
 		if !authz.CanManage(actor, authz.Role(m.Role), "") {
 			return authz.ErrForbidden
+		}
+		// The removal cascades to the person's project roles, so it needs the right over each of them.
+		held, err := projects.AccessIn(ctx, tx, a.TenantID, userID)
+		if err != nil {
+			return fmt.Errorf("get target project roles: %w", err)
+		}
+		for _, r := range held {
+			if !authz.CanManage(actor, r, "") {
+				return authz.ErrForbidden
+			}
 		}
 		return s.deleteMembership(ctx, tx, a, userID, false)
 	})

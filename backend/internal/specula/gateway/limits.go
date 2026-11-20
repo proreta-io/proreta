@@ -16,6 +16,8 @@ const (
 	// results per second, and the burst absorbs jitter and a few parallel calls.
 	reportsRate  = 5.0
 	reportsBurst = 20
+	// Pull mode (claim and results, executors that predate the schedule) gets the same budget
+	// per endpoint: a crash-looping old executor must not flood the shared database.
 	// scheduleRate and scheduleBurst: the executor refreshes about every 5 minutes and fetches
 	// again when hello names a new version, so a call every 10 seconds is far above any normal use.
 	scheduleRate  = 0.1
@@ -36,7 +38,7 @@ type Budget struct {
 
 // Limits are the per-token budgets; a zero Budget uses the constants above. Tests that call
 // faster than any executor raise them, the server never does.
-type Limits struct{ Reports, Schedule, Hello Budget }
+type Limits struct{ Reports, Schedule, Hello, Claim, Results Budget }
 
 func (b Budget) or(rate float64, burst int) *bucketSet {
 	if b.Rate <= 0 || b.Burst < 1 {

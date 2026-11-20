@@ -86,7 +86,7 @@ func hashpw(args []string, stdin *os.File, stdout, stderr io.Writer) error {
 		return errors.New("parameter out of range")
 	}
 	if *m > crypto.MaxArgon2Memory {
-		return fmt.Errorf("-m must be at most %d KiB (256 MiB): the api refuses larger hashes", crypto.MaxArgon2Memory)
+		return fmt.Errorf("-m must be at most %d KiB (128 MiB): the api refuses larger hashes", crypto.MaxArgon2Memory)
 	}
 	p.Memory, p.Iterations, p.Parallelism = uint32(*m), uint32(*t), uint8(*par) //nolint:gosec // range-checked above
 

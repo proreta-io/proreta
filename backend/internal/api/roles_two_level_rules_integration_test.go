@@ -290,6 +290,10 @@ func TestIntegrationProjectRoleRules(t *testing.T) {
 	if r := c.do(http.MethodDelete, "/api/v1/projects/"+w.alpha+"/members/"+w.people["aOwner"].id, "", aMaint); r.code != http.StatusForbidden {
 		t.Fatalf("maintainer removes the project owner: %d %s", r.code, r.raw)
 	}
+	// Removing the person from the organization would cascade the project role away: refused too.
+	if r := c.do(http.MethodDelete, "/api/v1/members/"+w.people["aOwner"].id, "", w.hdr("maintainer")); r.code != http.StatusForbidden {
+		t.Fatalf("organization maintainer removes a project owner from the organization: %d %s", r.code, r.raw)
+	}
 	if r := put(aMaint, w.alpha, w.userIDs[authz.Owner], "viewer"); r.code != http.StatusNotFound {
 		t.Fatalf("project maintainer touches the organization owner: %d %s", r.code, r.raw)
 	}
