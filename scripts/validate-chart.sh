@@ -70,7 +70,7 @@ combos=(
   "example-oauth|-f $example $tag $oauth_secret --set oauth.google.enabled=true --set oauth.github.enabled=true --set oauth.allowedDomains[0]=example.com --set oauth.allowedDomains[1]=example.org"
   "example-oauth-eso|-f $example $tag $eso --set oauth.google.enabled=true --set oauth.github.enabled=true"
   "example-oauth-only|-f $example $tag $oauth_secret --set oauth.google.enabled=true --set config.passwordLoginEnabled=false"
-  "example-all-optional|-f $example $tag --set statuspage.enabled=true --set serviceMonitor.enabled=true --set networkPolicy.enabled=true --set api.pdb.enabled=true --set topologySpread.enabled=true --set config.blockedCIDRs[0]=100.64.0.0/10 --set config.blockedCIDRs[1]=198.18.0.0/15 --set worker.location=eu-west"
+  "example-all-optional|-f $example $tag --set statuspage.enabled=true --set serviceMonitor.enabled=true --set networkPolicy.enabled=true --set config.blockedCIDRs[0]=100.64.0.0/10 --set config.blockedCIDRs[1]=198.18.0.0/15 --set worker.location=eu-west"
   "example-oauth-existing-default-name|-f $example $tag --set secrets.oauth.existingSecret=proreta-oauth --set oauth.google.enabled=true"
   "example-presync|-f $example $tag --set database.bootstrap.enabled=false --set migration.hookPhase=PreSync"
   "example-no-section-name|-f $example $tag --set httpRoute.parentRef.sectionName="
@@ -529,6 +529,22 @@ sp_fail "state in /tmp" "/state/mountPath" "${sp_args[@]}" --set state.mountPath
 sp_fail "monitor interval without unit" "/serviceMonitor/interval" "${sp_args[@]}" --set serviceMonitor.interval=30
 sp_fail "state size without unit" "/state/sizeLimit" "${sp_args[@]}" --set state.sizeLimit=512
 renders+=("$out/specula.yaml" "$out/specula-custom.yaml" "$out/specula-nostate.yaml")
+
+echo "== PodDisruptionBudgets and topology spread"
+pdbs() { grep -A3 '^kind: PodDisruptionBudget' "$1" | sed -n 's/^  name: //p' | sort | tr '\n' ' '; }
+# shellcheck disable=SC2086
+helm template proreta "$chart" -n proreta $min --set api.replicas=1 --set worker.replicas=1 --set web.replicas=1 >"$out/pdb-single.yaml"
+# shellcheck disable=SC2086
+helm template proreta "$chart" -n proreta $min --set statuspage.replicas=2 --set speculagw.enabled=true >"$out/pdb-more.yaml"
+# shellcheck disable=SC2086
+helm template proreta "$chart" -n proreta $min --set pdb.enabled=false >"$out/pdb-off.yaml"
+[ "$(pdbs "$out/defaults.yaml")" = 'proreta-api proreta-web proreta-worker ' ] || { echo "FAIL: default PDBs are '$(pdbs "$out/defaults.yaml")'" >&2; exit 1; }
+[ -z "$(pdbs "$out/pdb-single.yaml")" ] || { echo "FAIL: a single replica got a PodDisruptionBudget" >&2; exit 1; }
+[ "$(pdbs "$out/pdb-more.yaml")" = 'proreta-api proreta-speculagw proreta-statuspage proreta-web proreta-worker ' ] || { echo "FAIL: PDBs with more replicas are '$(pdbs "$out/pdb-more.yaml")'" >&2; exit 1; }
+[ -z "$(pdbs "$out/pdb-off.yaml")" ] || { echo "FAIL: pdb.enabled=false still rendered a PodDisruptionBudget" >&2; exit 1; }
+grep -q 'whenUnsatisfiable: ScheduleAnyway' "$out/defaults.yaml" || { echo "FAIL: no topology spread by default" >&2; exit 1; }
+renders+=("$out/pdb-single.yaml" "$out/pdb-more.yaml" "$out/pdb-off.yaml")
+echo ok
 
 echo "== kubeconform"
 if ! command -v kubeconform >/dev/null 2>&1; then

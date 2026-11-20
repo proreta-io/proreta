@@ -336,7 +336,7 @@ The defaults fit a single-company installation with a few hundred monitors on a 
 | `statuspage` | 1 | 10m / 48Mi | Caches per replica; more replicas multiply the per-replica rate limits. |
 | `web` | 2 | 10m / 32Mi | Static files served by nginx. |
 
-Two replicas of `api`, `worker` and `web` survive the loss of one pod, but the chart sets no PodDisruptionBudget and no spread by default, so a node drain can evict both replicas of a component that the scheduler put on the same node. On a multi-node cluster set `api.pdb.enabled: true` and `topologySpread.enabled: true` (the PodDisruptionBudget covers the api only; `worker` and `web` are covered by the spread alone). Requests are small on purpose; raise them deliberately when the metrics show pressure.
+Two replicas of `api`, `worker` and `web` survive the loss of one pod. To keep a node drain from evicting both, the chart renders a PodDisruptionBudget (`maxUnavailable: 1`) for every component that runs more than one replica (`pdb.enabled`, on by default) and prefers to place the replicas of a component on different nodes (`topologySpread`, `ScheduleAnyway`, so a single-node cluster still schedules everything). Components with one replica (`jobs`, `statuspage` by default) get no budget, because it would block every drain of their node; raise `statuspage.replicas` if the status page must survive a drain. For a hard guarantee that replicas never share a node set `topologySpread.whenUnsatisfiable: DoNotSchedule`; pods then stay pending when fewer nodes than replicas are available, which is why it is not the default. Requests are small on purpose; raise them deliberately when the metrics show pressure.
 
 ## Troubleshooting
 
