@@ -420,6 +420,10 @@ func passwordPolicy(password, login string, checkLogin bool) string {
 	return ""
 }
 
+// CheckPassword returns the policy message for a password that is not tied to a login (the
+// operator tool that hashes the administrator's password), empty when it passes.
+func CheckPassword(password string) string { return passwordPolicy(password, "", false) }
+
 // maxDisplayNameRunes caps a display name (the column allows 200).
 const maxDisplayNameRunes = 80
 
