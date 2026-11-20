@@ -32,7 +32,7 @@ Contents: [Prerequisites](#prerequisites) · [Install](#install) · [After insta
 - TLS: the default `database.sslmode` is `require` (encrypted, certificate not verified). For production set `verify-full` (checks the certificate chain and that it is issued for `database.host`). Managed servers (RDS, Aurora, Cloud SQL, Azure) sign with a CA that is not in the image's system store: create a Secret with the CA bundle, for example `kubectl -n proreta create secret generic db-ca --from-file=ca.crt=./global-bundle.pem`, and set `database.tlsCA.existingSecret: db-ca` (`database.tlsCA.key` if the key is not `ca.crt`). The chart mounts it in every pod and Job that connects and sets `PGSSLROOTCERT`, so the application, the migration and the bootstrap all verify the server. Use `disable` only for a server without TLS, for example a throwaway test database.
 
 ### Images
-`ghcr.io/proreta-io/proreta-backend` (api, worker, jobs, status pages, migrations, bootstrap) `ghcr.io/proreta-io/proreta-web` (the web app, nginx) and `ghcr.io/proreta-io/proreta-specula` (the Specula executor, one static binary, for a customer network), all `amd64` and `arm64`. Release tags are `X.Y.Z` (no `v`), plus `X.Y` (and `X` from major version 1 on); builds of `main` are `sha-<7 hex>`. If you build them from a fork, GitHub creates the packages as private: make them public or set `imagePullSecrets`.
+`ghcr.io/proreta-io/proreta-backend` (api, worker, jobs, status pages, migrations, bootstrap) `ghcr.io/proreta-io/proreta-web` (the web app, nginx) and `ghcr.io/proreta-io/proreta-specula` (the Specula executor, one static binary, for a customer network), all `amd64` and `arm64`. Release tags are `X.Y.Z` (no `v`), plus `X.Y` (and `X` from major version 1 on); a manual test build is `sha-<7 hex>` (the release workflow, run by hand; nothing is published for a push to `main`). If you build them from a fork, GitHub creates the packages as private: make them public or set `imagePullSecrets`.
 
 ## Install
 
@@ -366,7 +366,7 @@ This recovery is the generic Helm procedure. It was tried against this chart onl
 
 ### `ImagePullBackOff` / `ErrImagePull`
 The first pod to fail is usually `proreta-db-bootstrap`. `kubectl -n proreta describe pod <pod>` shows the message under Events:
-- `not found` / `failed to resolve reference`: the tag does not exist. Check `image.tag` (release tags have no `v`; builds of `main` are `sha-` plus 7 hex digits) against the package list on GitHub, or `docker manifest inspect ghcr.io/proreta-io/proreta-backend:<tag>`.
+- `not found` / `failed to resolve reference`: the tag does not exist. Check `image.tag` (release tags have no `v`; manual test builds are `sha-` plus 7 hex digits) against the package list on GitHub, or `docker manifest inspect ghcr.io/proreta-io/proreta-backend:<tag>`.
 - `unauthorized` / `denied`: the package is private (typical for images built from a fork). Make it public in the package settings on GitHub, or create a pull Secret and set `imagePullSecrets: [{name: <secret>}]`.
 
 ### The database bootstrap cannot connect or is not allowed

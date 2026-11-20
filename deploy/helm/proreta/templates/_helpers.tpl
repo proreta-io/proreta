@@ -29,7 +29,7 @@ is required there.
 */}}
 {{- define "proreta.imageTag" -}}
 {{- $appVersion := ternary "" .Chart.AppVersion (eq .Chart.AppVersion "0.0.0") }}
-{{- required "image.tag is required when installing from a git checkout: a release version (X.Y.Z) or a main-branch build (sha-<7 hex>)" (.Values.image.tag | default $appVersion) }}
+{{- required "image.tag is required when installing from a git checkout: a release version (X.Y.Z) or a manual test build (sha-<7 hex>)" (.Values.image.tag | default $appVersion) }}
 {{- end }}
 
 {{/* Backend image reference. */}}

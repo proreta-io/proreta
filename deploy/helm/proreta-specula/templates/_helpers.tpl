@@ -34,7 +34,7 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | 
 {{- $tag := .Values.image.tag -}}
 {{- if not $tag -}}
 {{- if or (not .Chart.AppVersion) (eq .Chart.AppVersion "0.0.0") -}}
-{{- fail "image.tag is required (this chart has no release appVersion): a release version such as 1.2.3 or sha-<7 hex>" -}}
+{{- fail "image.tag is required (this chart has no release appVersion): a release version such as 1.2.3 or a manual test build sha-<7 hex>" -}}
 {{- end -}}
 {{- $tag = .Chart.AppVersion -}}
 {{- end -}}

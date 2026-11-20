@@ -134,7 +134,7 @@
         "tag": {
           "type": "string",
           "title": "backend image tag",
-          "description": "a release version (X.Y.Z; a leading v such as v1.2.3 is rejected, image tags have none) or a main-branch build (sha-<7 hex>); empty uses the chart appVersion, which only a chart from oci://ghcr.io/proreta-io/charts/proreta has (rendering fails in a git checkout)",
+          "description": "a release version (X.Y.Z; a leading v such as v1.2.3 is rejected, image tags have none) or a manual test build (sha-<7 hex>); empty uses the chart appVersion, which only a chart from oci://ghcr.io/proreta-io/charts/proreta has (rendering fails in a git checkout)",
           "pattern": "^$|^(v|v[A-Za-z_.-][A-Za-z0-9_.-]{0,126}|[A-Za-uw-z0-9_][A-Za-z0-9_.-]{0,127})$"
         },
         "pullPolicy": {

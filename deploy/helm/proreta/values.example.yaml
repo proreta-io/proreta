@@ -8,7 +8,7 @@
 
 image:
   repository: ghcr.io/proreta-io/proreta-backend
-  # Image tag: a release version (1.2.3, no leading v) or a build of main (sha-<first 7 hex of the
+  # Image tag: a release version (1.2.3, no leading v) or a manual test build (sha-<first 7 hex of the
   # commit>, for example sha-1a2b3c4).
   #   git checkout: REQUIRED. Set it here or pass --set image.tag=<tag> (rendering fails without it).
   #   chart from oci://ghcr.io/proreta-io/charts/proreta: omit it; the chart uses its own release.
