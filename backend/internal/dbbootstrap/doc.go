@@ -1,5 +1,5 @@
 // Package dbbootstrap implements `proretactl db bootstrap`: it creates (or repairs) the Proreta
-// database and its four roles inside an existing PostgreSQL 15 instance and keeps their
+// database and its four roles inside an existing PostgreSQL 16 instance and keeps their
 // passwords in a Kubernetes Secret. It runs in a hook Job before the migration Job and is
 // idempotent: running it again changes nothing except re-applying the same passwords.
 //

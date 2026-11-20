@@ -105,7 +105,7 @@ type Result struct {
 	DatabaseOwner   string
 	// AdminOwnerMember reports whether the admin login is still a member of proreta_owner after
 	// the temporary grant was revoked (PostgreSQL 16 keeps an implicit ADMIN OPTION grant for a
-	// CREATEROLE creator; on PostgreSQL 15 it should be false).
+	// CREATEROLE creator; on earlier versions it is false).
 	AdminOwnerMember bool
 }
 

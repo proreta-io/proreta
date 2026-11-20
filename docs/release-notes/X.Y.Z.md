@@ -76,7 +76,7 @@ New, all optional: `PRORETA_STATUS_PAGE_CUSTOM_DOMAINS`, `PRORETA_STATUSPAGE_CNA
 
 ## Known limitations
 - **Gateway API only.** The chart creates an `HTTPRoute`; Ingress is not supported.
-- **One PostgreSQL server per installation** (the role names are fixed), external to the chart; PostgreSQL 15 or newer. No bundled database.
+- **One PostgreSQL server per installation** (the role names are fixed), external to the chart; PostgreSQL 16 (the version CI tests). No bundled database.
 - **HTTP monitors use HTTPS on port 443.** A URL with another port is refused; use a TCP monitor for other ports.
 - **Custom status page domains** need a TLS-terminating proxy of your own with on-demand certificates; Proreta does not obtain certificates.
 - **The platform admin API is experimental** and may change in any release.

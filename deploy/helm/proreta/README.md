@@ -12,7 +12,7 @@ uninstall, troubleshooting). This page is the reference for the chart's values a
 - Kubernetes 1.29 or newer (`kubeVersion`), `amd64` or `arm64` nodes, Helm 3.
 - Gateway API CRDs v1.2 or newer (standard channel), a Gateway controller, and a Gateway with an HTTPS listener that
   admits routes from the release namespace. TLS is terminated by the Gateway.
-- An external PostgreSQL 15 or newer, and for the first install a login with `CREATEROLE` and `CREATEDB` (see
+- An external PostgreSQL 16 (the version CI tests), and for the first install a login with `CREATEROLE` and `CREATEDB` (see
   [database bootstrap](../../../docs/runbooks/database-bootstrap.md)). Only the trusted extension `citext` is used.
   One PostgreSQL server hosts one Proreta installation (the role names are fixed).
 - No External Secrets Operator, cert-manager, metrics-server or StorageClass is needed (no PersistentVolumeClaims).

@@ -1,5 +1,5 @@
 // Package uuidv7 generates time-ordered UUIDv7 identifiers (RFC 9562) in the application,
-// because Postgres 15 has no native generator.
+// because PostgreSQL 16 has no native generator.
 package uuidv7
 
 import "github.com/google/uuid"
