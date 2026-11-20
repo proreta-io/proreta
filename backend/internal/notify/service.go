@@ -450,113 +450,36 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 	var out Channel
 	err := db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
 		q := notifydb.New(tx)
-		if in.ProjectID != nil {
-			// Monitors before the channel, the order of a monitor move.
-			if _, err := q.LockLinkedMonitors(ctx, notifydb.LockLinkedMonitorsParams{TenantID: a.TenantID, ChannelID: id}); err != nil {
-				return fmt.Errorf("notify: lock linked monitors: %w", err)
-			}
-		}
-		if _, err := lock(ctx, q, a.TenantID, id); err != nil {
-			return err
-		}
-		cur, err := get(ctx, q, a.TenantID, id)
+		cur, err := lockForUpdate(ctx, q, a, id, in.ProjectID != nil)
 		if err != nil {
 			return err
 		}
-		if err := a.canManage(cur.ProjectID); err != nil {
+		edit, err := planChannelUpdate(cur, in, upd)
+		if err != nil {
 			return err
 		}
-		var tv validation.Error
-		var target string
-		if in.WebhookURL != nil {
-			target = checkTarget(&tv, cur.Type, *in.WebhookURL)
-		}
-		contentType, tpl := cur.ContentType, cur.BodyTemplate
-		touched := in.ContentType != nil || in.BodyTemplate != nil
-		if in.ContentType != nil {
-			contentType = in.ContentType
-		}
-		if in.BodyTemplate != nil {
-			tpl = in.BodyTemplate
-		}
-		if touched || in.Mention != nil {
-			var m []string
-			if in.Mention != nil {
-				m = upd.mention
-			}
-			if touched {
-				checkWebhookFields(&tv, cur.Type, contentType, tpl, m)
-			} else {
-				checkWebhookFields(&tv, cur.Type, nil, nil, m)
-			}
-		}
-		if err := tv.Err(); err != nil {
-			return err
-		}
-		f := channelFields{name: cur.Name, events: cur.Events, mention: cur.Mention, reminder: cur.ReminderMinutes}
-		if in.Name != nil {
-			f.name = upd.name
-		}
-		if in.Events != nil {
-			f.events = upd.events
-		}
-		if in.Mention != nil {
-			f.mention = upd.mention
-		}
-		if in.ReminderMinutes != nil {
-			f.reminder = upd.reminder
-		}
-		var changed []string
-		if f.name != cur.Name {
-			changed = append(changed, "name")
-		}
-		if !slices.Equal(f.events, cur.Events) {
-			changed = append(changed, "events")
-		}
-		if !slices.Equal(f.mention, cur.Mention) {
-			changed = append(changed, "mention")
-		}
-		if f.reminder != cur.ReminderMinutes {
-			changed = append(changed, "reminderMinutes")
-		}
-		if touched && (!equalPtr(contentType, cur.ContentType) || !equalPtr(tpl, cur.BodyTemplate)) {
-			changed = append(changed, "template")
-		}
+		changed := edit.changed
 		if len(changed) > 0 {
 			if err := q.UpdateChannel(ctx, notifydb.UpdateChannelParams{
-				TenantID: a.TenantID, ID: id, Name: f.name, Events: f.events, Mention: f.mention,
-				ContentType: contentType, BodyTemplate: tpl,
-				ReminderMinutes: int32(f.reminder), //nolint:gosec // validated 0..1440
+				TenantID: a.TenantID, ID: id, Name: edit.fields.name, Events: edit.fields.events, Mention: edit.fields.mention,
+				ContentType: edit.contentType, BodyTemplate: edit.tpl,
+				ReminderMinutes: int32(edit.fields.reminder), //nolint:gosec // validated 0..1440
 			}); err != nil {
 				return fmt.Errorf("notify: update channel: %w", err)
 			}
 		}
 		meta := map[string]any{}
 		if in.ProjectID != nil || in.OrganizationWide {
-			project, err := channelProject(ctx, tx, a.TenantID, in.ProjectID, in.OrganizationWide)
+			moved, err := moveChannel(ctx, tx, q, a, id, cur, in, meta)
 			if err != nil {
 				return err
 			}
-			if !sameProject(project, cur.ProjectID) {
-				if err := a.canUse(project); err != nil {
-					return err
-				}
-				if err := q.SetChannelProject(ctx, notifydb.SetChannelProjectParams{TenantID: a.TenantID, ID: id, ProjectID: project}); err != nil {
-					return fmt.Errorf("notify: move channel: %w", err)
-				}
+			if moved {
 				changed = append(changed, "projectId")
-				meta["project"] = projectMeta(project)
-				if project != nil {
-					detached, err := q.DetachChannelFromOtherProjects(ctx, notifydb.DetachChannelFromOtherProjectsParams{TenantID: a.TenantID, ChannelID: id, ProjectID: *project})
-					if err != nil {
-						return fmt.Errorf("notify: detach channel: %w", err)
-					}
-					meta["monitorsDetached"] = detached
-				}
 			}
 		}
 		if in.WebhookURL != nil {
-			sealed, err := s.keys.Encrypt([]byte(target), channelAAD(id))
+			sealed, err := s.keys.Encrypt([]byte(edit.target), channelAAD(id))
 			if err != nil {
 				return fmt.Errorf("notify: encrypt: %w", err)
 			}
@@ -579,6 +502,127 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 		return Channel{}, err
 	}
 	return out, nil
+}
+
+// lockForUpdate locks the channel (and, when it may move, the monitors that select it first, the
+// order of a monitor move) and returns it if the actor may manage it.
+func lockForUpdate(ctx context.Context, q *notifydb.Queries, a Actor, id uuid.UUID, moving bool) (Channel, error) {
+	if moving {
+		// Monitors before the channel, the order of a monitor move.
+		if _, err := q.LockLinkedMonitors(ctx, notifydb.LockLinkedMonitorsParams{TenantID: a.TenantID, ChannelID: id}); err != nil {
+			return Channel{}, fmt.Errorf("notify: lock linked monitors: %w", err)
+		}
+	}
+	if _, err := lock(ctx, q, a.TenantID, id); err != nil {
+		return Channel{}, err
+	}
+	cur, err := get(ctx, q, a.TenantID, id)
+	if err != nil {
+		return Channel{}, err
+	}
+	if err := a.canManage(cur.ProjectID); err != nil {
+		return Channel{}, err
+	}
+	return cur, nil
+}
+
+// channelEdit is an update resolved against the stored channel: the settings after the change, the
+// webhook URL to store (when one was sent) and the names of the settings that differ.
+type channelEdit struct {
+	fields      channelFields
+	contentType *string
+	tpl         *string
+	target      string
+	changed     []string
+}
+
+// planChannelUpdate validates what depends on the stored channel (its type) and merges the request
+// over it. upd holds the already validated values of the fields the request sent.
+func planChannelUpdate(cur Channel, in UpdateInput, upd channelFields) (channelEdit, error) {
+	var tv validation.Error
+	var target string
+	if in.WebhookURL != nil {
+		target = checkTarget(&tv, cur.Type, *in.WebhookURL)
+	}
+	contentType, tpl := cur.ContentType, cur.BodyTemplate
+	touched := in.ContentType != nil || in.BodyTemplate != nil
+	if in.ContentType != nil {
+		contentType = in.ContentType
+	}
+	if in.BodyTemplate != nil {
+		tpl = in.BodyTemplate
+	}
+	if touched || in.Mention != nil {
+		var m []string
+		if in.Mention != nil {
+			m = upd.mention
+		}
+		if touched {
+			checkWebhookFields(&tv, cur.Type, contentType, tpl, m)
+		} else {
+			checkWebhookFields(&tv, cur.Type, nil, nil, m)
+		}
+	}
+	if err := tv.Err(); err != nil {
+		return channelEdit{}, err
+	}
+	f := channelFields{name: cur.Name, events: cur.Events, mention: cur.Mention, reminder: cur.ReminderMinutes}
+	if in.Name != nil {
+		f.name = upd.name
+	}
+	if in.Events != nil {
+		f.events = upd.events
+	}
+	if in.Mention != nil {
+		f.mention = upd.mention
+	}
+	if in.ReminderMinutes != nil {
+		f.reminder = upd.reminder
+	}
+	var changed []string
+	if f.name != cur.Name {
+		changed = append(changed, "name")
+	}
+	if !slices.Equal(f.events, cur.Events) {
+		changed = append(changed, "events")
+	}
+	if !slices.Equal(f.mention, cur.Mention) {
+		changed = append(changed, "mention")
+	}
+	if f.reminder != cur.ReminderMinutes {
+		changed = append(changed, "reminderMinutes")
+	}
+	if touched && (!equalPtr(contentType, cur.ContentType) || !equalPtr(tpl, cur.BodyTemplate)) {
+		changed = append(changed, "template")
+	}
+	return channelEdit{fields: f, contentType: contentType, tpl: tpl, target: target, changed: changed}, nil
+}
+
+// moveChannel moves the channel to the project (or to the whole organization) the request names,
+// unless it is already there, and records the move in meta. It reports whether the channel moved.
+func moveChannel(ctx context.Context, tx pgx.Tx, q *notifydb.Queries, a Actor, id uuid.UUID, cur Channel, in UpdateInput, meta map[string]any) (bool, error) {
+	project, err := channelProject(ctx, tx, a.TenantID, in.ProjectID, in.OrganizationWide)
+	if err != nil {
+		return false, err
+	}
+	if sameProject(project, cur.ProjectID) {
+		return false, nil
+	}
+	if err := a.canUse(project); err != nil {
+		return false, err
+	}
+	if err := q.SetChannelProject(ctx, notifydb.SetChannelProjectParams{TenantID: a.TenantID, ID: id, ProjectID: project}); err != nil {
+		return false, fmt.Errorf("notify: move channel: %w", err)
+	}
+	meta["project"] = projectMeta(project)
+	if project != nil {
+		detached, err := q.DetachChannelFromOtherProjects(ctx, notifydb.DetachChannelFromOtherProjectsParams{TenantID: a.TenantID, ChannelID: id, ProjectID: *project})
+		if err != nil {
+			return false, fmt.Errorf("notify: detach channel: %w", err)
+		}
+		meta["monitorsDetached"] = detached
+	}
+	return true, nil
 }
 
 // Delete soft-deletes a channel: its webhook URL is wiped, monitors that selected it lose it
