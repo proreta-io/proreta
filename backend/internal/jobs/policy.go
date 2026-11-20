@@ -64,8 +64,14 @@ func decide(attempts int, sendErr error, now time.Time) outcome {
 		return outcome{status: statusFailed, errKind: kind, failChannel: se.Kind == notify.KindNotFound || se.Kind == notify.KindInvalidURL}
 	}
 	if se.Kind == notify.KindRateLimited {
-		// 1 s to 10 min, plus up to 25% so replicas that were throttled together do not return together.
-		d := min(max(se.RetryAfter, Backoff(1)), Backoff(MaxAttempts))
+		// 30 s (without a Retry-After; the row keeps no throttle count, and one second would mean
+		// thousands of calls in the hour a throttled row may live) to 10 min, plus up to 25% so
+		// replicas that were throttled together do not return together.
+		d := se.RetryAfter
+		if d <= 0 {
+			d = Backoff(3)
+		}
+		d = min(max(d, Backoff(1)), Backoff(MaxAttempts))
 		d += time.Duration(jitter() * float64(d) / 4)
 		return outcome{status: statusThrottled, errKind: kind, retryAt: now.Add(d)}
 	}
