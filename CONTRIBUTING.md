@@ -9,7 +9,7 @@ Thank you for your interest. Before larger changes, please open an issue to disc
 Requirements:
 - Go (the version in `backend/go.mod`).
 - Node.js 22 (`web/.nvmrc`) and npm.
-- PostgreSQL 15 or newer for the integration tests (a throwaway local instance or a container).
+- PostgreSQL 16 for the integration tests, the version CI runs (a throwaway local instance or a container).
 - Optional: `golangci-lint` v2.15.0 (the version CI uses), `helm`, `kubeconform`, Python 3 with PyYAML (chart checks).
 
 Code generators (sqlc, oapi-codegen) are pinned in `backend/tools/go.mod` and run with `go tool`; nothing else needs a global install.

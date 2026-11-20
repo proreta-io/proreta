@@ -19,7 +19,7 @@ Contents: [Prerequisites](#prerequisites) · [Install](#install) · [After insta
 - The pods satisfy the Pod Security Standard **restricted** profile, so the namespace can enforce it.
 
 ### PostgreSQL
-- **PostgreSQL 15 or newer** (CI tests 15 and 16), reachable from the cluster. A bundled database is not part of the chart: bring your own server, managed or self-hosted.
+- **PostgreSQL 16** (the version CI tests; other versions are not tested), reachable from the cluster. A bundled database is not part of the chart: bring your own server, managed or self-hosted.
 - **An admin login** for the one-time bootstrap. It needs `LOGIN`, `CREATEROLE` and `CREATEDB`; it does not need to be a superuser. It must be able to connect to the database `postgres`. On Amazon RDS and Aurora use the master user (member of `rds_superuser`), on Google Cloud SQL the default `postgres` user (`cloudsqlsuperuser`), on Azure Database for PostgreSQL the server admin.
 - **What the bootstrap does with it** (`proretactl db bootstrap`, idempotent, under an advisory lock):
   - creates the roles `proreta_owner` (migrations), `proreta_api`, `proreta_worker` and `proreta_statuspage`, all `LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`, with connection limits 3, 20, 20 and 10 and per-role statement timeouts. Passwords are random, sent as SCRAM verifiers, and stored only in the Secret `proreta-db` in your namespace;

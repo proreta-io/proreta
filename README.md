@@ -37,7 +37,7 @@ Proreta runs on Kubernetes with the Helm chart in [deploy/helm/proreta](deploy/h
 Prerequisites in short:
 - Kubernetes 1.29 or newer, `amd64` or `arm64` nodes, Helm 3.
 - **Gateway API only:** the Gateway API CRDs (v1.2 or newer), a Gateway controller and a Gateway with an HTTPS listener (TLS is the Gateway's job). The chart creates an `HTTPRoute`; Ingress is not supported.
-- An external PostgreSQL 15 or newer and a login with `CREATEROLE` and `CREATEDB` for the one-time bootstrap (no superuser needed; only the `citext` extension is used). A bundled database is not part of the chart.
+- An external PostgreSQL 16 (the version CI tests) and a login with `CREATEROLE` and `CREATEDB` for the one-time bootstrap (no superuser needed; only the `citext` extension is used). A bundled database is not part of the chart.
 - Nothing else: no External Secrets Operator, cert-manager or metrics-server is required.
 
 The images are `ghcr.io/proreta-io/proreta-backend` and `ghcr.io/proreta-io/proreta-web` (multi-arch, `amd64` and `arm64`). Every release tag (`X.Y.Z`) is published for both, and the chart is published as `oci://ghcr.io/proreta-io/charts/proreta` with the same version.
