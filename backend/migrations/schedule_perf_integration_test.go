@@ -131,6 +131,9 @@ func TestIntegrationDetachCheckOnLargePartition(t *testing.T) {
 	}
 	start := monthStart(dbNow, -3)
 	name := monthPartition(t, admin, start)
+	// An autovacuum of the freshly loaded partition holds a lock that blocks the DETACH for longer
+	// than the function's lock_timeout on a slow disk; production retries on the next tick.
+	pgtest.MustExec(t, admin, `ALTER TABLE `+name+` SET (autovacuum_enabled = false)`)
 	var monitors []string
 	for range 50 {
 		monitors = append(monitors, seedMonitor(t, admin, tenantA, "'infinity'", false, false))
