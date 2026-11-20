@@ -223,15 +223,11 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
-      - name: Generated code is up to date
-        run: make check-generated
-      # Pinned by version (the Go checksum database verifies the module). The toolchain is the one
-      # in go.mod, the same as the release image; any reachable advisory fails the job.
-      - name: Known vulnerabilities (govulncheck)
-        working-directory: backend
+      # The race detector doubles the test time, so a pull request runs the same tests without it;
+      # every push to main, tag build (release.yml) and manual run keeps -race.
+      - name: Race detector on everything but pull requests
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
-          "$(go env GOPATH)/bin/govulncheck" ./...
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then echo "RACE=" >> "$GITHUB_ENV"; else echo "RACE=-race" >> "$GITHUB_ENV"; fi
       - name: Test
         run: scripts/ci-test.sh "$RUNNER_TEMP/test.log" make test
       # No gate for now; the number is for reading.
@@ -256,6 +252,35 @@ jobs:
             ${{ runner.temp }}/test-e2e.log
           if-no-files-found: ignore
           retention-days: 14
+
+  # The two checks that do not need the database, off the critical path of `backend` (the tests).
+  backend-checks:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: backend/go.mod
+          # The generators are built from their own module (backend/tools), so its sums key the cache too.
+          cache-dependency-path: |
+            backend/go.sum
+            backend/tools/go.sum
+      - name: Generated code is up to date
+        run: make check-generated
+      # Pinned by version (the Go checksum database verifies the module). The toolchain is the one
+      # in go.mod, the same as the release image; any reachable advisory fails the job.
+      - name: Known vulnerabilities (govulncheck)
+        working-directory: backend
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          "$(go env GOPATH)/bin/govulncheck" ./...
 
   # Separate from `backend` so a lint finding never hides the test and e2e results.
   backend-lint:
@@ -464,7 +489,7 @@ jobs:
   # it always runs and fails when any job it needs failed or was cancelled.
   ci-ok:
     if: always()
-    needs: [repo-hygiene, secrets-scan, actionlint, changes, backend, backend-lint, images, api-contract, web, helm]
+    needs: [repo-hygiene, secrets-scan, actionlint, changes, backend, backend-checks, backend-lint, images, api-contract, web, helm]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

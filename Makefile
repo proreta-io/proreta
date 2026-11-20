@@ -6,6 +6,8 @@ TOOLS   := go -C $(BACKEND)/tools tool
 
 VERSION ?= dev
 COMMIT  ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+# The race detector doubles the test time; CI turns it off for pull requests only (RACE= make test).
+RACE ?= -race
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
 # Paths written by `generate`; check-generated fails if they drift from what is committed.
@@ -32,13 +34,13 @@ check-generated: generate
 # The profile covers all packages: ones tested from another package (projects, plans, results) show their real coverage.
 # Integration tests run when TEST_DATABASE_ADMIN_URL points at a scratch Postgres superuser.
 test:
-	cd $(BACKEND) && go test -race -count=1 -timeout 15m -coverpkg=./internal/...,./cmd/... -coverprofile=coverage.out ./...
+	cd $(BACKEND) && go test $(RACE) -count=1 -timeout 15m -coverpkg=./internal/...,./cmd/... -coverprofile=coverage.out ./...
 
 # End-to-end test: api, worker and jobs against real Postgres and loopback TLS servers
 # through the real SSRF guard. Only this target sets the proretatest tag, which compiles
 # safehttp.NewLoopbackTestClient; release builds never do. Skipped without TEST_DATABASE_ADMIN_URL.
 test-e2e:
-	cd $(BACKEND) && go test -tags proretatest -race -count=1 ./internal/e2e/...
+	cd $(BACKEND) && go test -tags proretatest $(RACE) -count=1 ./internal/e2e/...
 
 # CI pins golangci-lint v2.15.0 (.github/workflows/ci.yml, job backend-lint); use the same locally.
 lint:

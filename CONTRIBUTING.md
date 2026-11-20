@@ -18,7 +18,7 @@ Code generators (sqlc, oapi-codegen) are pinned in `backend/tools/go.mod` and ru
 
 ```sh
 make build            # binaries into backend/bin/
-make test             # go test -race -count=1 ./... (integration tests skip without a database)
+make test             # go test -race -count=1 ./... (integration tests skip without a database; RACE= turns -race off)
 make test-e2e         # end-to-end test with the proretatest build tag (needs a database)
 make lint             # golangci-lint run
 make generate         # regenerate sqlc and oapi-codegen output
