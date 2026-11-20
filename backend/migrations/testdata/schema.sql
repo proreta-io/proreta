@@ -673,6 +673,7 @@ status_pages status_pages_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES tena
 status_pages status_pages_tenant_id_id_key UNIQUE (tenant_id, id)
 status_pages status_pages_title_check CHECK (((char_length(title) >= 1) AND (char_length(title) <= 80)))
 tenants tenants_limits_is_object CHECK ((jsonb_typeof(limits) = 'object'::text))
+tenants tenants_limits_valid CHECK ((NOT jsonb_path_exists(limits, '$.keyvalue()?(@."key" like_regex "^max_(monitors|heartbeats|channels|members|projects|status_pages|agents|status_page_domains)$" && !(((@."value".type() == "number" && @."value" >= 0) && @."value" <= 2147483647) && @."value".floor() == @."value"))'::jsonpath, '{}'::jsonb, true)))
 tenants tenants_name_check CHECK (((length(name) >= 1) AND (length(name) <= 200)))
 tenants tenants_pkey PRIMARY KEY (id)
 tenants tenants_plan_key_fkey FOREIGN KEY (plan_key) REFERENCES plans(key)

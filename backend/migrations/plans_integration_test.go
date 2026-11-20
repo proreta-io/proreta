@@ -74,6 +74,15 @@ func TestIntegrationPlans(t *testing.T) {
 	if _, err := admin.Exec(ctx, `UPDATE tenants SET limits = '[]' WHERE id = $1`, tenantA); err == nil || !strings.Contains(err.Error(), "tenants_limits_is_object") {
 		t.Fatalf("non-object limits accepted: %v", err)
 	}
+	for _, bad := range []string{`{"max_monitors": -1}`, `{"max_monitors": 1.5}`, `{"max_agents": "5"}`, `{"max_members": 2147483648}`, `{"max_projects": null}`} {
+		if _, err := admin.Exec(ctx, `UPDATE tenants SET limits = $2 WHERE id = $1`, tenantA, bad); err == nil || !strings.Contains(err.Error(), "tenants_limits_valid") {
+			t.Errorf("limits %s: err = %v, want tenants_limits_valid", bad, err)
+		}
+	}
+	for _, good := range []string{`{}`, `{"max_monitors": 0, "max_members": 2147483647}`, `{"max_agents": 5, "unknown_key": "x"}`} {
+		pgtest.MustExec(t, admin, `UPDATE tenants SET limits = '`+good+`' WHERE id = '`+tenantA+`'`)
+	}
+	pgtest.MustExec(t, admin, `UPDATE tenants SET limits = '{}' WHERE id = '`+tenantA+`'`)
 
 	pgtest.MustExec(t, admin, pgtest.CappedPlanSQL)
 	for _, bad := range []string{`'{Bad}'`, `'{"a b"}'`, `'{""}'`, `ARRAY['` + strings.Repeat("a", 65) + `']`, `'{NULL}'`} {
