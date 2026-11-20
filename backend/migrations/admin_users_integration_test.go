@@ -97,6 +97,16 @@ func TestIntegrationAdminUsers(t *testing.T) {
 		if n := countAudit(t, admin, "admin.user.%"); n != 0 {
 			t.Fatalf("no-op or refused calls wrote %d audit rows", n)
 		}
+		// The only active owner of an organization cannot be disabled; with a second active owner it can.
+		if _, err := api.Exec(ctx, `SELECT * FROM admin_set_user_status($1, $2, 'disabled', gen_random_uuid(), NULL)`, userPlatform, userOwnerA); sqlState(err) != "PRA35" {
+			t.Fatalf("disable the only owner: err = %v, want PRA35", err)
+		}
+		if n := countAudit(t, admin, "admin.user.%"); n != 0 {
+			t.Fatalf("a refused disable wrote %d audit rows", n)
+		}
+		const coOwner = "01920000-0000-7000-8000-0000000000f2"
+		pgtest.MustExec(t, admin, `INSERT INTO users (id, email) VALUES ('`+coOwner+`', 'co-owner@example.com')`,
+			`INSERT INTO memberships (tenant_id, user_id, role) VALUES ('`+tenantA+`', '`+coOwner+`', 'owner')`)
 		if changed, revoked := set(userOwnerA, "disabled"); !changed || revoked != 1 {
 			t.Fatalf("disable: changed %v revoked %d", changed, revoked)
 		}

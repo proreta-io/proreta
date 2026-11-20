@@ -1913,6 +1913,14 @@ BEGIN
     IF p_status = 'disabled' AND v_system THEN
         RAISE EXCEPTION 'admin: the system admin cannot be disabled' USING ERRCODE = 'PRA07';
     END IF;
+    -- an organization must keep an active owner (the same rule as removing or demoting the last one)
+    IF p_status = 'disabled' AND EXISTS (
+        SELECT 1 FROM memberships AS m JOIN tenants AS t ON t.id = m.tenant_id
+        WHERE m.user_id = p_user_id AND m.role = 'owner' AND t.deleted_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM memberships AS o JOIN users AS ou ON ou.id = o.user_id
+                          WHERE o.tenant_id = m.tenant_id AND o.role = 'owner' AND o.user_id <> p_user_id AND ou.status = 'active')) THEN
+        RAISE EXCEPTION 'admin: the user is the only active owner of an organization' USING ERRCODE = 'PRA35';
+    END IF;
     UPDATE users SET status = p_status, updated_at = now() WHERE id = p_user_id;
     IF p_status = 'disabled' THEN
         SELECT count(*)::integer INTO v_n FROM sessions AS s WHERE s.user_id = p_user_id AND s.expires_at > now();

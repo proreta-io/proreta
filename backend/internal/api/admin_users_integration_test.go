@@ -114,6 +114,12 @@ func TestIntegrationAdminUsers(t *testing.T) {
 		if r := c.do(http.MethodGet, "/api/v1/monitors", "", aliceCookie); r.code != http.StatusOK {
 			t.Fatalf("alice before: %d", r.code)
 		}
+		// Alice is the only owner of her organization: disabling her is refused until it has another.
+		if r := c.do(http.MethodPost, base+"/"+alice+"/disable", "", ah); r.code != http.StatusConflict || r.body["type"] != "urn:proreta:problem:last-owner" {
+			t.Fatalf("disable the only owner: %d %s", r.code, r.raw)
+		}
+		pgtest.MustExec(t, env.AdminConn(t), `INSERT INTO users (id, email) VALUES ('01920000-0000-7000-8000-0000000000f2', 'co-owner@example.com')`,
+			`INSERT INTO memberships (tenant_id, user_id, role) SELECT tenant_id, '01920000-0000-7000-8000-0000000000f2', 'owner' FROM memberships WHERE user_id = '`+alice+`'`)
 		r := c.do(http.MethodPost, base+"/"+alice+"/disable", "", ah)
 		u, _ := r.body["user"].(map[string]any)
 		if r.code != http.StatusOK || u["status"] != "disabled" || r.body["openSessions"] != float64(0) {

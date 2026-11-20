@@ -119,6 +119,18 @@ func TestIntegrationAdminCreateOrganization(t *testing.T) {
 		}
 	})
 
+	t.Run("a disabled account cannot be the only owner", func(t *testing.T) {
+		c.register("dormant@alpha.example")
+		pgtest.MustExec(t, env.AdminConn(t), `UPDATE users SET status = 'disabled' WHERE email = 'dormant@alpha.example'`)
+		r := c.do(http.MethodPost, path, `{"name":"Dormant","slug":"dormant","ownerEmail":"dormant@alpha.example"}`, ah)
+		if r.code != http.StatusConflict || !strings.Contains(r.raw, "last-owner") {
+			t.Fatalf("disabled owner: %d %s", r.code, r.raw)
+		}
+		if n := countRows(t, env, `SELECT count(*) FROM tenants WHERE slug = 'dormant'`); n != 0 {
+			t.Fatalf("tenants holding the slug: %d", n)
+		}
+	})
+
 	t.Run("only a platform admin", func(t *testing.T) {
 		if r := c.do(http.MethodPost, path, `{"name":"X","ownerEmail":"alice@alpha.example"}`, alice); r.code != http.StatusForbidden {
 			t.Fatalf("member: %d %s", r.code, r.raw)

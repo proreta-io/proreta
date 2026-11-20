@@ -526,6 +526,8 @@ func mapError(op string, err error) error {
 			return &validation.Error{Fields: []validation.FieldError{{Field: "rollupMonths", Message: "must be between 4 and 60 months"}}}
 		case "PRA18":
 			return &validation.Error{Fields: []validation.FieldError{{Field: "reason", Message: "is required, at most 500 characters"}}}
+		case "PRA35":
+			return auth.ErrLastOwner
 		case "PRA30":
 			return &validation.Error{Fields: []validation.FieldError{{Field: "key", Message: "a plan with this key already exists"}}}
 		case "PRA31":
