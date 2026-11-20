@@ -178,7 +178,7 @@ func TestLoadJobs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.EncryptionKeys["k1"]) != 32 || cfg.EncryptionKeyID != "k1" || cfg.DatabaseMaxConns != 5 {
+	if len(cfg.EncryptionKeys["k1"]) != 32 || cfg.EncryptionKeyID != "k1" || cfg.DatabaseMaxConns != 10 {
 		t.Fatalf("jobs config = %+v", cfg)
 	}
 	delete(e, "PRORETA_ENCRYPTION_KEYS")
@@ -799,5 +799,18 @@ func TestStatusPageDomainRules(t *testing.T) {
 	e["PRORETA_STATUSPAGE_CNAME_TARGET"] = "Not A Host"
 	if _, err = LoadAPI(env(e)); err == nil || !strings.Contains(err.Error(), "PRORETA_STATUSPAGE_CNAME_TARGET") {
 		t.Fatalf("bad target accepted: %v", err)
+	}
+}
+
+func TestDatabaseMaxConnsOverride(t *testing.T) {
+	e := apiEnv(t)
+	e["PRORETA_DATABASE_MAX_CONNS"] = "25"
+	cfg, err := LoadJobs(env(e))
+	if err != nil || cfg.DatabaseMaxConns != 25 {
+		t.Fatalf("max conns = %d, %v", cfg.DatabaseMaxConns, err)
+	}
+	e["PRORETA_DATABASE_MAX_CONNS"] = "1"
+	if _, err := LoadJobs(env(e)); err == nil {
+		t.Fatal("1 connection must be refused")
 	}
 }
