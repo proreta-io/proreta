@@ -37,7 +37,6 @@ spec:
         - name: specula
           image: {{ include "proreta-specula.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: ["/app/specula"]
           env:
             - name: PRORETA_URL
               value: {{ required "proreta.url is required: the address of your Proreta installation, for example https://proreta.example.com" .Values.proreta.url | quote }}

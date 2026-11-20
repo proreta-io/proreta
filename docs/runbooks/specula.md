@@ -24,7 +24,7 @@ helm upgrade --install specula oci://ghcr.io/proreta-io/charts/proreta-specula -
   --set proreta.url=https://proreta.example.com --set token.existingSecret=proreta-specula-token
 ```
 
-**Anywhere else**, run the `/app/specula` binary of the Proreta image (for example with Docker, systemd or a plain process manager). It reads two environment variables:
+**Anywhere else**, run the `ghcr.io/proreta-io/proreta-specula` image, whose entrypoint is the executor (for example with Docker, systemd or a plain process manager). It reads two environment variables:
 
 | Variable | Meaning |
 |---|---|

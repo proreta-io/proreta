@@ -5,7 +5,7 @@ nameOverride: ""
 fullnameOverride: ""
 
 image:
-  repository: ghcr.io/proreta-io/proreta-backend
+  repository: ghcr.io/proreta-io/proreta-specula
   # A release version such as 1.2.3 or a build of main, sha-<first 7 hex>. Empty: the chart's
   # appVersion, which is the release version for a chart installed from
   # oci://ghcr.io/proreta-io/charts/proreta-specula. A chart from a git checkout has no usable
