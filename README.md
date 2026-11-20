@@ -17,7 +17,7 @@ See the [releases](https://github.com/proreta-io/proreta/releases) and the [rele
 
 ### Versioning
 
-Proreta follows semantic versioning. The API contract ([api/openapi.yaml](api/openapi.yaml)) is version 1.0 and changes only in compatible ways, except for operations marked `x-experimental` (the platform admin API). Database migrations are forward-only: take a backup before every upgrade ([install guide](docs/install.md#upgrade)). The Helm chart version always equals the application version.
+Proreta follows semantic versioning. The API contract ([api/openapi.yaml](api/openapi.yaml)) is version 1.0 and changes only in compatible ways, except for operations marked `x-experimental` (the platform admin API and the status page domain operations). Database migrations are forward-only: take a backup before every upgrade ([install guide](docs/install.md#upgrade)). The Helm chart version always equals the application version.
 
 ## Layout
 
