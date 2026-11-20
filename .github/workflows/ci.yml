@@ -1,11 +1,14 @@
 name: ci
 
 # Full CI runs on every pull request, whatever its base branch, so a stacked series is checked before
-# it is retargeted to main (and by hand). It does not run again on push to main: the merge only starts
-# `release`, which builds images. The single required status check is `ci-ok`.
+# it is retargeted to main, on every push to main (the merged result is tested as such), by hand, and
+# as the first job of a tag build (release.yml calls it). The single required status check is `ci-ok`.
 on:
   pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
+  workflow_call:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -16,6 +19,9 @@ permissions: {}
 env:
   # Path of the OpenAPI contract.
   OPENAPI_SPEC: api/openapi.yaml
+  # The wire contract between the gateway and the executors in customer networks; executors are
+  # upgraded on their own schedule, so it gets the same lint and breaking-change check.
+  SPECULA_SPEC: api/specula.yaml
   # Helm used by every job here; must match the pin in release.yml (job chart).
   HELM_VERSION: v3.18.6
 
@@ -143,11 +149,12 @@ jobs:
       api: ${{ github.event_name != 'pull_request' || steps.filter.outputs.api == 'true' }}
       helm: ${{ github.event_name != 'pull_request' || steps.filter.outputs.helm == 'true' }}
       web: ${{ github.event_name != 'pull_request' || steps.filter.outputs.web == 'true' }}
+      images: ${{ github.event_name != 'pull_request' || steps.filter.outputs.images == 'true' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # A manual run (workflow_dispatch) runs every job; the filter only applies to pull requests.
+      # Every event other than a pull request runs every job; the filter only applies to pull requests.
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         if: github.event_name == 'pull_request'
         id: filter
@@ -174,17 +181,29 @@ jobs:
               - 'web/**'
               - 'api/**'
               - '.github/workflows/ci.yml'
+            images:
+              - 'Dockerfile'
+              - '.dockerignore'
+              - 'backend/**'
+              - 'web/**'
+              - '.github/workflows/ci.yml'
 
+  # PostgreSQL 15 is the oldest supported version and 16 the one the guides use; the suite runs on both.
   backend:
+    name: backend (postgres ${{ matrix.postgres }})
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ["15", "16"]
     services:
       postgres:
-        image: postgres:15
+        image: postgres:${{ matrix.postgres }}
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -208,11 +227,14 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      # The next two steps do not depend on the database: once is enough.
       - name: Generated code is up to date
+        if: matrix.postgres == '16'
         run: make check-generated
       # Pinned by version (the Go checksum database verifies the module). The toolchain is the one
       # in go.mod, the same as the release image; any reachable advisory fails the job.
       - name: Known vulnerabilities (govulncheck)
+        if: matrix.postgres == '16'
         working-directory: backend
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
@@ -246,6 +268,43 @@ jobs:
           version: v2.15.0
           working-directory: backend
 
+  # Builds both images as the release does (amd64 only, nothing pushed), so a broken Dockerfile or
+  # .dockerignore fails the pull request instead of the tag build.
+  images:
+    name: image (${{ matrix.name }})
+    needs: changes
+    if: needs.changes.outputs.images == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: backend
+            context: .
+            file: Dockerfile
+          - name: web
+            context: web
+            file: web/Dockerfile
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64
+          push: false
+          build-args: |
+            VERSION=ci
+            COMMIT=${{ github.sha }}
+          # Reads the cache the release builds write (shared with the default branch); writes none.
+          cache-from: type=gha,scope=${{ matrix.name }}
+
   api-contract:
     needs: changes
     if: needs.changes.outputs.api == 'true'
@@ -259,11 +318,12 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Lint OpenAPI (spectral)
-        run: npx --yes @stoplight/spectral-cli@6.11.1 lint "$OPENAPI_SPEC" --ruleset .github/spectral.yaml --fail-severity warn
+        run: npx --yes @stoplight/spectral-cli@6.11.1 lint "$OPENAPI_SPEC" "$SPECULA_SPEC" --ruleset .github/spectral.yaml --fail-severity warn
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         if: github.event_name == 'pull_request'
         with:
-          go-version: stable
+          # The toolchain of go.mod, not "stable", so the oasdiff build does not change under us.
+          go-version-file: backend/go.mod
           cache: false
       - name: Breaking-change check (oasdiff vs base branch)
         if: github.event_name == 'pull_request'
@@ -284,6 +344,13 @@ jobs:
           # Exceptions need an ADR and go into api/oasdiff-err-ignore.txt (empty from 1.0).
           "$(go env GOPATH)/bin/oasdiff" breaking "${RUNNER_TEMP}/base-openapi.yaml" "${RUNNER_TEMP}/head-openapi.yaml" --fail-on ERR \
             --err-ignore api/oasdiff-err-ignore.txt --severity-levels api/oasdiff-severity-levels.txt
+          if git cat-file -e "origin/${BASE_REF}:${SPECULA_SPEC}" 2>/dev/null; then
+            git show "origin/${BASE_REF}:${SPECULA_SPEC}" > "${RUNNER_TEMP}/base-specula.yaml"
+            "$(go env GOPATH)/bin/oasdiff" breaking "${RUNNER_TEMP}/base-specula.yaml" "$SPECULA_SPEC" --fail-on ERR \
+              --err-ignore api/oasdiff-err-ignore.txt --severity-levels api/oasdiff-severity-levels.txt
+          else
+            echo "No ${SPECULA_SPEC} on base branch; skipping its breaking-change check."
+          fi
 
   web:
     needs: changes
@@ -367,7 +434,7 @@ jobs:
   # it always runs and fails when any job it needs failed or was cancelled.
   ci-ok:
     if: always()
-    needs: [repo-hygiene, secrets-scan, actionlint, changes, backend, backend-lint, api-contract, web, helm]
+    needs: [repo-hygiene, secrets-scan, actionlint, changes, backend, backend-lint, images, api-contract, web, helm]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
