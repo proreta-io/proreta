@@ -51,7 +51,6 @@ type schedGateway struct {
 	reportCode     int              // answer /reports with this status
 	retryAfter     int              // seconds, sent with reportCode
 	maxBatch       int              // 413 above this
-	poison         uuid.UUID        // 400 for a batch holding this monitor
 	override       map[int64]string // outcome by slot, not stored
 	commitThenFail int              // store the next n batches, then answer 503
 	noReports      bool
@@ -101,12 +100,6 @@ func (g *schedGateway) handleReports(w http.ResponseWriter, r *http.Request) {
 	}
 	var out wire.ReportsResponse
 	out.ScheduleVersion = g.sched.Version
-	for _, x := range in.Results {
-		if x.MonitorID == g.poison {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-	}
 	for _, x := range in.Results {
 		oc := wire.OutcomeRecorded
 		now := g.serverNow()
