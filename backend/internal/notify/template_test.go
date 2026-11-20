@@ -78,6 +78,8 @@ func TestValidateTemplate(t *testing.T) {
 		{"unknown placeholder named", ContentText, "hi {{monitor.nam}}", "{{monitor.nam}}"},
 		{"json syntax error has position", ContentJSON, `{"a": "{{event}}",}`, "at byte"},
 		{"json placeholder outside a string", ContentJSON, `{"a": {{event}}}`, "not valid JSON"},
+		{"json placeholder empty for some events", ContentJSON, `{"d": {{tls.daysLeft}}}`, "leave some values empty"},
+		{"json unquoted placeholder that is always set", ContentJSON, `{"late": {{late}}}`, ""},
 		{"json not a document", ContentJSON, `{"a":1} {"b":2}`, "not valid JSON"},
 		{"text may be anything", ContentText, `{"a": "`, ""},
 		{"invalid utf-8", ContentText, "a\xffb", "UTF-8"},
