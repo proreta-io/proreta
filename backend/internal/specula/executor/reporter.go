@@ -34,7 +34,6 @@ type reporter struct {
 	sent     int64            // results the gateway answered for
 	retries  int64            // calls that failed as a whole
 	dropped  int64            // results given up on (bad requests, unusable answers)
-	stopped  bool             // the gateway has no /reports: an older server
 	inflight atomic.Int64     // results in the batch being sent now
 }
 
@@ -74,7 +73,7 @@ const (
 	sentOK     sendResult = iota // answered; the batch is done
 	sendRetry                    // the call failed as a whole; the same batch later
 	sendShrink                   // refused for its size or content; smaller batches
-	sendStop                     // no /reports here
+	sendStop                     // the token is rejected
 )
 
 // loop sends on a timer and on pokes until ctx ends or the token is rejected.
@@ -109,18 +108,9 @@ func (r *reporter) loop(ctx context.Context, rejected chan<- error) {
 			}
 			return
 		}
-		if errors.Is(err, errNoReports) {
-			e.cfg.Log.Error("the gateway does not accept reports; results stay in the buffer")
-			r.mu.Lock()
-			r.stopped = true
-			r.mu.Unlock()
-			return
-		}
 		wait = successEvery
 	}
 }
-
-var errNoReports = errors.New("executor: the gateway has no /reports")
 
 // drain sends until the buffer is empty. With retry it waits and tries again when the gateway is
 // unreachable or busy (the buffer's own limits bound how long that can go on); without, the
@@ -182,7 +172,7 @@ func (r *reporter) drain(ctx context.Context, retry bool) error {
 		case sendStop:
 			return err
 		}
-		if err != nil && (errors.Is(err, ErrRejected) || errors.Is(err, errNoReports)) {
+		if err != nil && errors.Is(err, ErrRejected) {
 			return err
 		}
 	}
@@ -211,11 +201,10 @@ func (r *reporter) send(ctx context.Context, batch Batch, badAnswers *int) (send
 			return sendStop, 0, err
 		case errors.As(err, &se):
 			switch se.Status {
-			case http.StatusNotFound:
-				return sendStop, 0, errNoReports
 			case http.StatusRequestEntityTooLarge, http.StatusBadRequest:
 				return sendShrink, 0, err
 			}
+			// 404 too: a gateway mid-upgrade or a misrouted request must not end the reporter for good.
 			return sendRetry, se.RetryAfter, err // 429, 503 and the rest: nothing was written
 		}
 		return sendRetry, 0, err
