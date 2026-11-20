@@ -457,6 +457,10 @@ func TestIntegrationStatusPageDomainsRecordCheckGuards(t *testing.T) {
 	if pgCode(err) != "PRD02" {
 		t.Errorf("api for another tenant: %v, want PRD02", err)
 	}
+	// The api never calls it outside its tenant transaction; without a tenant it is refused.
+	if err := call(f.api, tenantA, mine, "present", "missing", nil); pgCode(err) != "PRD02" {
+		t.Errorf("api without a tenant: %v, want PRD02", err)
+	}
 	err = inTenant(t, f.api, tenantA, func(tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `SELECT * FROM status_page_domain_record_check($1, $2, 'present', 'missing', NULL)`, tenantA, mine)
 		return err

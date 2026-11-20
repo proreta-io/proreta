@@ -81,7 +81,7 @@ func (s *Service) FindUserByEmail(ctx context.Context, email string) (uuid.UUID,
 
 // SetMember makes an existing account a member with the role, or changes the role of a member.
 // action is the audit action written, empty when nothing changed. The member quota counts
-// open invitations and is never overridden; a disabled account can be added. The rules of
+// open invitations and is never overridden; a disabled account can be added, but not as the only active owner. The rules of
 // ChangeRole apply (last owner, platform admin); the platform admin cannot join another
 // organization. a must come from PlatformActor.
 func (s *Service) SetMember(ctx context.Context, a Actor, userID uuid.UUID, role string) (m Member, action string, err error) {
@@ -117,6 +117,16 @@ func (s *Service) SetMember(ctx context.Context, a Actor, userID uuid.UUID, role
 		if u.IsSystemAdmin {
 			// BootstrapAdmin refuses to start when the admin belongs to another tenant.
 			return ErrSystemAdminMember
+		}
+		if role == RoleOwner && u.Status != "active" {
+			// A disabled account can join, but not as the organization's only usable owner.
+			n, err := q.CountOtherActiveOwners(ctx, authdb.CountOtherActiveOwnersParams{TenantID: a.TenantID, UserID: userID})
+			if err != nil {
+				return fmt.Errorf("count owners: %w", err)
+			}
+			if n == 0 {
+				return ErrLastOwner
+			}
 		}
 		if err := plans.CheckCreate(ctx, tx, a.TenantID, plans.ResourceMember); err != nil {
 			return err

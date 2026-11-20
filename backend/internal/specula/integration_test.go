@@ -62,6 +62,11 @@ func TestIntegrationSpecula(t *testing.T) {
 		if err := admin.QueryRow(ctx, `SELECT kind FROM probe_locations WHERE id = $1`, s.LocationID).Scan(&kind); err != nil || kind != "agent" {
 			t.Fatalf("location kind %q %v", kind, err)
 		}
+		// probe_locations is shared by all organizations: it never holds the customer's name.
+		var locName string
+		if err := admin.QueryRow(ctx, `SELECT name FROM probe_locations WHERE id = $1`, s.LocationID).Scan(&locName); err != nil || strings.Contains(locName, "Prod") {
+			t.Fatalf("location name %q %v, want no customer-chosen name", locName, err)
+		}
 		if _, err := specula.Hello(ctx, worker, s.ID, specula.HelloInput{Version: "0.1.0", Hostname: "pod-1"}); err != nil {
 			t.Fatal(err)
 		}

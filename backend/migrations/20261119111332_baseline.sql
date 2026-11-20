@@ -1745,6 +1745,8 @@ BEGIN
         WHERE d.id IN (
             SELECT e.id FROM notification_deliveries AS e
             WHERE e.status IN ('sent', 'failed') AND e.created_at < now() - make_interval(days => p_days)
+              -- the opened row of a running incident routes its reminders and its recovered message
+              AND NOT EXISTS (SELECT 1 FROM incidents AS i WHERE i.tenant_id = e.tenant_id AND i.id = e.incident_id AND i.resolved_at IS NULL)
             ORDER BY e.created_at
             LIMIT 1000
             FOR UPDATE SKIP LOCKED
@@ -2133,7 +2135,8 @@ BEGIN
        OR (p_error IS NOT NULL AND p_error NOT IN ('txt-missing', 'txt-mismatch', 'cname-missing', 'cname-wrong', 'dns-error')) THEN
         RAISE EXCEPTION 'status page domain: invalid check result' USING ERRCODE = 'PRD01';
     END IF;
-    IF v_ctx IS NOT NULL AND v_ctx <> p_tenant::text THEN
+    -- the worker works across tenants; the api only inside its own tenant transaction
+    IF (v_ctx IS NULL AND session_user = 'proreta_api') OR (v_ctx IS NOT NULL AND v_ctx <> p_tenant::text) THEN
         RAISE EXCEPTION 'status page domain: wrong tenant' USING ERRCODE = 'PRD02';
     END IF;
     SELECT * INTO d FROM status_page_domains AS x WHERE x.tenant_id = p_tenant AND x.id = p_id AND x.released_at IS NULL FOR UPDATE;
@@ -2568,6 +2571,35 @@ REVOKE ALL ON FUNCTION admin_create_tenant(uuid,uuid,text,text,text,uuid,inet) F
 GRANT EXECUTE ON FUNCTION admin_create_tenant(uuid,uuid,text,text,text,uuid,inet) TO proreta_api;
 
 -- +goose StatementBegin
+CREATE FUNCTION admin_discard_new_tenant(p_actor uuid, p_tenant_id uuid, p_audit_id uuid, p_ip inet) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+    v_plan text;
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    -- Undo of a creation whose first owner could not be added: only an organization without any
+    -- member, ten minutes old at most, and it gives its slug back (a deleted tenant keeps its slug).
+    UPDATE tenants AS t
+    SET deleted_at = now(), status = 'suspended', updated_at = now(), slug = 'discarded-' || replace(t.id::text, '-', '')
+    WHERE t.id = p_tenant_id AND t.deleted_at IS NULL AND t.slug <> 'default'
+      AND t.created_at > now() - interval '10 minutes'
+      AND NOT EXISTS (SELECT 1 FROM memberships AS m WHERE m.tenant_id = t.id)
+    RETURNING t.plan_key INTO v_plan;
+    IF NOT FOUND THEN
+        RETURN false;
+    END IF;
+    PERFORM admin_audit(p_tenant_id, p_actor, p_audit_id, 'admin.organization.deleted', 'organization', p_tenant_id::text,
+                        jsonb_build_object('plan', v_plan, 'discarded', true), p_ip);
+    RETURN true;
+END
+$$;
+-- +goose StatementEnd
+REVOKE ALL ON FUNCTION admin_discard_new_tenant(uuid,uuid,uuid,inet) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION admin_discard_new_tenant(uuid,uuid,uuid,inet) TO proreta_api;
+
+-- +goose StatementBegin
 CREATE FUNCTION admin_delete_tenant(p_actor uuid, p_tenant_id uuid, p_audit_id uuid, p_ip inet) RETURNS boolean
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public', 'pg_temp'
@@ -2994,6 +3026,7 @@ BEGIN
     -- it creates its session. The user must replace the temporary password at the next sign-in.
     UPDATE users SET password_hash = p_password_hash, password_must_change = true, updated_at = now() WHERE id = p_user_id;
     v_n := auth_revoke_user_sessions(p_user_id);
+    UPDATE password_resets SET used_at = now() WHERE user_id = p_user_id AND used_at IS NULL;
     PERFORM admin_audit(v_tenant, p_actor, p_audit_id, 'admin.user.password_reset', 'user', p_user_id::text,
                         jsonb_build_object('sessionsRevoked', v_n), p_ip);
     RETURN QUERY SELECT v_tenant, v_n;
@@ -3201,6 +3234,14 @@ BEGIN
     END IF;
     IF p_status = 'disabled' AND v_system THEN
         RAISE EXCEPTION 'admin: the system admin cannot be disabled' USING ERRCODE = 'PRA07';
+    END IF;
+    -- an organization must keep an active owner (the same rule as removing or demoting the last one)
+    IF p_status = 'disabled' AND EXISTS (
+        SELECT 1 FROM memberships AS m JOIN tenants AS t ON t.id = m.tenant_id
+        WHERE m.user_id = p_user_id AND m.role = 'owner' AND t.deleted_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM memberships AS o JOIN users AS ou ON ou.id = o.user_id
+                          WHERE o.tenant_id = m.tenant_id AND o.role = 'owner' AND o.user_id <> p_user_id AND ou.status = 'active')) THEN
+        RAISE EXCEPTION 'admin: the user is the only active owner of an organization' USING ERRCODE = 'PRA35';
     END IF;
     UPDATE users SET status = p_status, updated_at = now() WHERE id = p_user_id;
     IF p_status = 'disabled' THEN
@@ -3476,21 +3517,6 @@ REVOKE ALL ON FUNCTION claim_due_monitors(integer,text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION claim_due_monitors(integer,text) TO proreta_worker;
 
 -- +goose StatementBegin
-CREATE FUNCTION specula_agents_sync_location() RETURNS trigger
-    LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'public', 'pg_temp'
-    AS $$
-BEGIN
-    IF NEW.name IS DISTINCT FROM OLD.name THEN
-        UPDATE probe_locations SET name = NEW.name WHERE id = NEW.location_id;
-    END IF;
-    RETURN NEW;
-END
-$$;
--- +goose StatementEnd
-REVOKE ALL ON FUNCTION specula_agents_sync_location() FROM PUBLIC;
-
--- +goose StatementBegin
 CREATE FUNCTION specula_authenticate(p_token_hash bytea) RETURNS TABLE(specula_id uuid, tenant_id uuid, location_id uuid, location_code text)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public', 'pg_temp'
@@ -3532,8 +3558,9 @@ BEGIN
     IF caller_tenant IS NULL THEN
         RAISE EXCEPTION 'specula_create: app.tenant_id is not set' USING ERRCODE = 'insufficient_privilege';
     END IF;
+    -- probe_locations is shared by all organizations: the customer's name stays in specula_agents (RLS)
     INSERT INTO probe_locations (id, code, name, provider, region, kind)
-    VALUES (loc, 'specula-' || replace(p_id::text, '-', ''), p_name, 'customer', 'private-network', 'agent');
+    VALUES (loc, 'specula-' || replace(p_id::text, '-', ''), 'specula-' || replace(p_id::text, '-', ''), 'customer', 'private-network', 'agent');
     INSERT INTO specula_agents (tenant_id, id, name, token_hash, all_projects, location_id, created_by)
     VALUES (caller_tenant, p_id, p_name, p_token_hash, p_all_projects, loc, p_actor);
     IF NOT p_all_projects THEN
@@ -3833,8 +3860,6 @@ $$;
 -- +goose StatementEnd
 REVOKE ALL ON FUNCTION specula_sync_offline(interval) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION specula_sync_offline(interval) TO proreta_worker;
-
-CREATE TRIGGER specula_agents_sync_location AFTER UPDATE OF name ON specula_agents FOR EACH ROW EXECUTE FUNCTION specula_agents_sync_location();
 
 -- =============================================================================================
 -- Email and platform settings

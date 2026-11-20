@@ -83,6 +83,37 @@ func TestIntegrationRetention(t *testing.T) {
 		}
 	})
 
+	t.Run("open incident", func(t *testing.T) {
+		// An incident that is still open keeps all its deliveries: the opened one routes the
+		// recovered message and the reminders.
+		var open, closed string
+		for _, c := range []struct {
+			dst      *string
+			resolved bool
+		}{{&open, false}, {&closed, true}} {
+			*c.dst = uuid.NewString()
+			resolved, reason := "NULL", "NULL"
+			if c.resolved {
+				resolved, reason = "now() - interval '40 days'", "'recovered'"
+			}
+			pgtest.MustExec(t, admin, `INSERT INTO incidents (id, tenant_id, started_at, resolved_at, resolve_reason, reason, monitor_id)
+				VALUES ('`+*c.dst+`', '`+tenantA+`', now() - interval '50 days', `+resolved+`, `+reason+`, 'http', '`+mon+`')`)
+			pgtest.MustExec(t, admin, `INSERT INTO notification_deliveries (id, tenant_id, kind, monitor_id, incident_id, channel_id, payload, status, created_at, sent_at)
+				VALUES (gen_random_uuid(), '`+tenantA+`', 'opened', '`+mon+`', '`+*c.dst+`', '`+channel+`', '{}', 'sent', now() - interval '45 days', now())`)
+		}
+		var n int
+		if err := worker.QueryRow(ctx, `SELECT purge_notification_deliveries(30)`).Scan(&n); err != nil || n != 1 {
+			t.Fatalf("purged %d, err %v; want only the delivery of the resolved incident", n, err)
+		}
+		if got := count(`SELECT count(*) FROM notification_deliveries WHERE incident_id = '` + open + `'`); got != 1 {
+			t.Fatalf("deliveries of the open incident = %d, want 1", got)
+		}
+		pgtest.MustExec(t, admin, `UPDATE incidents SET resolved_at = now(), resolve_reason = 'recovered' WHERE id = '`+open+`'`)
+		if err := worker.QueryRow(ctx, `SELECT purge_notification_deliveries(30)`).Scan(&n); err != nil || n != 1 {
+			t.Fatalf("purged %d, err %v; want the delivery once the incident is resolved", n, err)
+		}
+	})
+
 	t.Run("rollups", func(t *testing.T) {
 		for _, age := range []string{"14 months", "13 months 2 days", "12 months", "5 months", "1 hour"} {
 			pgtest.MustExec(t, admin, `INSERT INTO result_rollups_hourly (tenant_id, monitor_id, location_id, hour, total, ok_count, latency_sum_ms, latency_histogram)

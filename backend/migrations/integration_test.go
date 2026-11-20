@@ -57,6 +57,7 @@ var definerAllowList = map[string][]string{
 	"admin_create_tenant":       {"proreta_api"},
 	"admin_set_tenant_status":   {"proreta_api"},
 	"admin_delete_tenant":       {"proreta_api"},
+	"admin_discard_new_tenant":  {"proreta_api"},
 	"admin_list_users":          {"proreta_api"},
 	"admin_reset_user_password": {"proreta_api"},
 	"admin_stats":               {"proreta_api"},
@@ -71,11 +72,10 @@ var definerAllowList = map[string][]string{
 	"claim_due_monitors":          {"proreta_worker"},
 	// Specula, the executor in a customer's network: create and revoke by the api inside the
 	// tenant, token authentication and self-report by the gateway, the rename trigger.
-	"specula_create":               {"proreta_api"},
-	"specula_revoke":               {"proreta_api"},
-	"specula_authenticate":         {"proreta_worker"},
-	"specula_hello":                {"proreta_worker"},
-	"specula_agents_sync_location": {},
+	"specula_create":       {"proreta_api"},
+	"specula_revoke":       {"proreta_api"},
+	"specula_authenticate": {"proreta_worker"},
+	"specula_hello":        {"proreta_worker"},
 	// Specula schedule mode: the schedule of one Specula, the hour marks of late results, and the
 	// epoch functions and triggers that only the monitor and state triggers call.
 	"specula_schedule":                  {"proreta_worker"},

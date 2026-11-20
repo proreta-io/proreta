@@ -73,6 +73,7 @@ var definerCalls = map[string]string{
 	"admin_create_tenant":         `SELECT admin_create_tenant(gen_random_uuid(), gen_random_uuid(), 'x', 'X', 'internal', gen_random_uuid(), NULL)`,
 	"admin_set_tenant_status":     `SELECT admin_set_tenant_status(gen_random_uuid(), gen_random_uuid(), 'active', gen_random_uuid(), NULL)`,
 	"admin_delete_tenant":         `SELECT admin_delete_tenant(gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), NULL)`,
+	"admin_discard_new_tenant":    `SELECT admin_discard_new_tenant(gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), NULL)`,
 	"admin_list_users":            `SELECT * FROM admin_list_users(gen_random_uuid(), gen_random_uuid(), '', 1, 0)`,
 	"admin_reset_user_password":   `SELECT * FROM admin_reset_user_password(gen_random_uuid(), gen_random_uuid(), '$argon2id$x', gen_random_uuid(), NULL)`,
 	"admin_stats":                 `SELECT admin_stats(gen_random_uuid())`,
@@ -103,14 +104,13 @@ var definerCalls = map[string]string{
 	"admin_status_page_domain_set_disabled": `SELECT admin_status_page_domain_set_disabled(gen_random_uuid(), gen_random_uuid(), true, 'x', gen_random_uuid(), NULL)`,
 	"status_page_domains_export":            `SELECT * FROM status_page_domains_export(false)`,
 	"auth_domain_lookup":                    `SELECT * FROM auth_domain_lookup('example.com')`,
-	// Specula: the in-function refusal without a tenant, an unknown token, a trigger function.
-	"specula_create":               `SELECT specula_create(gen_random_uuid(), 'x', '\x00', true, NULL, gen_random_uuid())`,
-	"specula_revoke":               `SELECT specula_revoke(gen_random_uuid())`,
-	"specula_authenticate":         `SELECT * FROM specula_authenticate('\x00')`,
-	"specula_hello":                `SELECT * FROM specula_hello(gen_random_uuid(), 'v', 'h', NULL::text[], 'i', NULL::timestamptz, 0, NULL::timestamptz, false, 0::bigint)`,
-	"specula_agents_sync_location": `SELECT specula_agents_sync_location()`,
-	"monitor_set_location":         `SELECT monitor_set_location(gen_random_uuid(), gen_random_uuid())`,
-	"specula_mark_unreachable":     `SELECT specula_mark_unreachable()`,
+	// Specula: the in-function refusal without a tenant, an unknown token.
+	"specula_create":           `SELECT specula_create(gen_random_uuid(), 'x', '\x00', true, NULL, gen_random_uuid())`,
+	"specula_revoke":           `SELECT specula_revoke(gen_random_uuid())`,
+	"specula_authenticate":     `SELECT * FROM specula_authenticate('\x00')`,
+	"specula_hello":            `SELECT * FROM specula_hello(gen_random_uuid(), 'v', 'h', NULL::text[], 'i', NULL::timestamptz, 0, NULL::timestamptz, false, 0::bigint)`,
+	"monitor_set_location":     `SELECT monitor_set_location(gen_random_uuid(), gen_random_uuid())`,
+	"specula_mark_unreachable": `SELECT specula_mark_unreachable()`,
 	// Schedule mode: the schedule of an unknown Specula is empty, the hour mark of an open hour is
 	// ignored, the epoch functions find no monitor, the triggers are not callable.
 	"specula_schedule":                  `SELECT * FROM specula_schedule(gen_random_uuid(), gen_random_uuid())`,
