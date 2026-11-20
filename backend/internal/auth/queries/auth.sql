@@ -20,7 +20,7 @@ WHERE id = @id;
 -- name: GetPasswordMustChange :one
 -- Read for every authenticated request: while it is true the api answers only the session and
 -- password-change operations.
-SELECT password_must_change
+SELECT password_must_change, email
 FROM users
 WHERE id = @id;
 

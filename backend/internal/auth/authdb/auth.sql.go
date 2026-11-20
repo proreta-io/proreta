@@ -96,18 +96,23 @@ func (q *Queries) GetMembershipRole(ctx context.Context, arg GetMembershipRolePa
 }
 
 const getPasswordMustChange = `-- name: GetPasswordMustChange :one
-SELECT password_must_change
+SELECT password_must_change, email
 FROM users
 WHERE id = $1
 `
 
+type GetPasswordMustChangeRow struct {
+	PasswordMustChange bool
+	Email              string
+}
+
 // Read for every authenticated request: while it is true the api answers only the session and
 // password-change operations.
-func (q *Queries) GetPasswordMustChange(ctx context.Context, id uuid.UUID) (bool, error) {
+func (q *Queries) GetPasswordMustChange(ctx context.Context, id uuid.UUID) (GetPasswordMustChangeRow, error) {
 	row := q.db.QueryRow(ctx, getPasswordMustChange, id)
-	var password_must_change bool
-	err := row.Scan(&password_must_change)
-	return password_must_change, err
+	var i GetPasswordMustChangeRow
+	err := row.Scan(&i.PasswordMustChange, &i.Email)
+	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one

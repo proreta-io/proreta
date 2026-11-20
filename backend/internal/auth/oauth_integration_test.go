@@ -657,3 +657,38 @@ func TestIntegrationOAuthClaimConcurrent(t *testing.T) {
 		t.Fatalf("identities = %d", c)
 	}
 }
+
+// A panel reset flags the user, but with password login off the flag cannot be cleared
+// (changePassword is refused), so it must not lock the user out.
+func TestIntegrationMustChangeIgnoredWhilePasswordLoginIsOff(t *testing.T) {
+	e := newOAuthEnv(t, "auth_oauth_mustchange", auth.Options{PasswordLoginDisabled: true})
+	u, err := e.login(auth.OAuthLoginInput{Identity: google("g-mc", "mc@example.com", ""), RegistrationEnabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pgtest.MustExec(t, e.admin, `UPDATE users SET password_must_change = true WHERE id = '`+u.User.ID.String()+`'`)
+
+	res, err := e.login(auth.OAuthLoginInput{Identity: google("g-mc", "mc@example.com", "")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.User.MustChangePassword {
+		t.Fatal("sign-in: MustChangePassword = true while password login is off")
+	}
+	if p := e.principal(res); p.MustChangePassword {
+		t.Fatal("request: MustChangePassword = true while password login is off")
+	}
+
+	// The same row with password login on keeps the flag.
+	on := e.service(auth.Options{})
+	p, err := on.Authenticate(e.ctx, res.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.MustChangePassword {
+		t.Fatal("password login on: flag lost")
+	}
+	if res, err := on.OAuthLogin(e.ctx, auth.OAuthLoginInput{Identity: google("g-mc", "mc@example.com", ""), IP: oauthIP}); err != nil || !res.User.MustChangePassword {
+		t.Fatalf("password login on, sign-in: %v, flag = %v", err, res.User.MustChangePassword)
+	}
+}
