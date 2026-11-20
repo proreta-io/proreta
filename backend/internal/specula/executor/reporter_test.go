@@ -248,23 +248,25 @@ func TestATooLargeBatchIsSplit(t *testing.T) {
 	}
 }
 
-func TestABadResultIsDroppedAndTheRestDelivered(t *testing.T) {
+// The gateway answers 400 only for a whole request (a version skew, a proxy), never for one
+// result, so the results stay buffered and go out when the gateway accepts them again.
+func TestABadRequestKeepsEveryResultUntilTheGatewayAccepts(t *testing.T) {
 	clk := newFakeClock(t0)
 	gw := newGateway(clk)
-	bad, good := uuid.New(), uuid.New()
-	gw.poison = bad
+	gw.reportCode = http.StatusBadRequest
 	env := newReportEnv(t, gw, 500)
-	env.fill(good, past, 20, true)
-	env.fill(bad, past+100, 1, true)
-	env.fill(good, past+200, 20, true)
+	id := uuid.New()
+	env.fill(id, past, 40, true)
 	env.e.rep.poke()
-	clk.Advance(30 * time.Second)
-	eventually(t, "delivery", func() bool { return env.e.buf.Depth() == 0 })
-	if n := len(gw.storedSlots(good)); n != 40 {
-		t.Fatalf("stored %d", n)
+	clk.Advance(30 * time.Minute)
+	if env.e.buf.Depth() != 40 || env.e.rep.Stats().Dropped != 0 {
+		t.Fatalf("depth %d, dropped %d", env.e.buf.Depth(), env.e.rep.Stats().Dropped)
 	}
-	if env.e.rep.Stats().Dropped != 1 {
-		t.Fatalf("dropped %d", env.e.rep.Stats().Dropped)
+	gw.set(func(g *schedGateway) { g.reportCode = 0 })
+	clk.Advance(2 * time.Minute)
+	eventually(t, "delivery", func() bool { return env.e.buf.Depth() == 0 })
+	if got := gw.storedSlots(id); !eq(got, seq(past, 40)...) {
+		t.Fatalf("stored %d", len(got))
 	}
 }
 

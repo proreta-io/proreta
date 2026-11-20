@@ -33,7 +33,7 @@ type reporter struct {
 	outcomes map[string]int64 // by outcome, as answered
 	sent     int64            // results the gateway answered for
 	retries  int64            // calls that failed as a whole
-	dropped  int64            // results given up on (bad requests, unusable answers)
+	dropped  int64            // results given up on (too large alone, unusable answers)
 	inflight atomic.Int64     // results in the batch being sent now
 }
 
@@ -72,7 +72,7 @@ type sendResult int
 const (
 	sentOK     sendResult = iota // answered; the batch is done
 	sendRetry                    // the call failed as a whole; the same batch later
-	sendShrink                   // refused for its size or content; smaller batches
+	sendShrink                   // refused for its size; smaller batches
 	sendStop                     // the token is rejected
 )
 
@@ -137,7 +137,7 @@ func (r *reporter) drain(ctx context.Context, retry bool) error {
 			size = min(size*2, wire.MaxResults)
 		case sendShrink:
 			if len(batch.Reports) == 1 {
-				e.cfg.Log.Error("the gateway refused a result; it is dropped", "monitor_id", batch.Reports[0].MonitorID, "slot", batch.Reports[0].Slot)
+				e.cfg.Log.Error("the gateway refused a single result as too large; it is dropped", "monitor_id", batch.Reports[0].MonitorID, "slot", batch.Reports[0].Slot)
 				e.buf.Ack(batch)
 				r.mu.Lock()
 				r.dropped++
@@ -201,9 +201,11 @@ func (r *reporter) send(ctx context.Context, batch Batch, badAnswers *int) (send
 			return sendStop, 0, err
 		case errors.As(err, &se):
 			switch se.Status {
-			case http.StatusRequestEntityTooLarge, http.StatusBadRequest:
+			case http.StatusRequestEntityTooLarge:
 				return sendShrink, 0, err
 			}
+			// 400 too: the gateway answers it only for a whole request (an executor and a gateway that
+			// disagree, a proxy), never for one result, so dropping on it would lose the buffer.
 			// 404 too: a gateway mid-upgrade or a misrouted request must not end the reporter for good.
 			return sendRetry, se.RetryAfter, err // 429, 503 and the rest: nothing was written
 		}
