@@ -8,11 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/proreta-io/proreta/backend/internal/checkresult"
 	"github.com/proreta-io/proreta/backend/internal/incidents"
 	"github.com/proreta-io/proreta/backend/internal/incidents/machine"
 	"github.com/proreta-io/proreta/backend/internal/monitors/monitorsdb"
@@ -260,25 +262,33 @@ func (s *Service) evaluateHeartbeat(ctx context.Context, tenantID, id uuid.UUID)
 		}
 		in := incidents.ResultInput{TenantID: tenantID, MonitorID: id, LocationID: locs[0].LocationID, Now: now}
 		applied, missedAt := hb.AppliedPingAt, hb.MissedDeadline
-		if step.Ping != nil {
-			// An OK result changes nothing for a heartbeat that is already up (one location,
-			// failure threshold 1), so the ping is only marked as seen: steady pings
-			// cost one row update here, not the incident machine's writes.
-			if locs[0].Status != string(machine.Up) {
-				in.Result = machine.Result{OK: true, CheckedAt: *step.Ping}
-				if _, err := s.incidents.ApplyResult(ctx, tx, in); err != nil {
-					return err
-				}
+		// In a savepoint: a permanent error undoes only the machine's part, and the step is
+		// still marked applied, so a row the machine cannot apply to is not retried by every run.
+		sp, err := tx.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		out, err := s.applyHeartbeatStep(ctx, sp, in, step, locs[0].Status)
+		if err != nil {
+			kind := checkresult.PermanentKind(err)
+			if kind == "" {
+				return err
 			}
+			if err := sp.Rollback(ctx); err != nil {
+				return err
+			}
+			slog.Warn("heartbeat step not applied", "monitor_id", id, "tenant_id", tenantID, "kind", kind)
+		} else {
+			if err := sp.Commit(ctx); err != nil {
+				return err
+			}
+			missed = step.Missed != nil && !out.Ignored
+		}
+		if step.Ping != nil {
 			applied = step.Ping
 		}
 		if step.Missed != nil {
-			in.Result = machine.Result{ErrorKind: ErrorKindHeartbeatMissed, CheckedAt: *step.Missed}
-			out, err := s.incidents.ApplyResult(ctx, tx, in)
-			if err != nil {
-				return err
-			}
-			missedAt, missed = step.Missed, !out.Ignored
+			missedAt = step.Missed
 		}
 		return q.MarkHeartbeatApplied(ctx, monitorsdb.MarkHeartbeatAppliedParams{
 			TenantID: tenantID, MonitorID: id, AppliedPingAt: applied, MissedDeadline: missedAt,
@@ -288,4 +298,26 @@ func (s *Service) evaluateHeartbeat(ctx context.Context, tenantID, id uuid.UUID)
 		return false, err
 	}
 	return missed, nil
+}
+
+// applyHeartbeatStep runs a step through the incident machine in tx and returns the outcome of
+// the missed deadline, if any.
+func (s *Service) applyHeartbeatStep(ctx context.Context, tx pgx.Tx, in incidents.ResultInput, step heartbeatStep, status string) (machine.Output, error) {
+	var out machine.Output
+	if step.Ping != nil {
+		// An OK result changes nothing for a heartbeat that is already up (one location,
+		// failure threshold 1), so the ping is only marked as seen: steady pings
+		// cost one row update here, not the incident machine's writes.
+		if status != string(machine.Up) {
+			in.Result = machine.Result{OK: true, CheckedAt: *step.Ping}
+			if _, err := s.incidents.ApplyResult(ctx, tx, in); err != nil {
+				return out, err
+			}
+		}
+	}
+	if step.Missed != nil {
+		in.Result = machine.Result{ErrorKind: ErrorKindHeartbeatMissed, CheckedAt: *step.Missed}
+		return s.incidents.ApplyResult(ctx, tx, in)
+	}
+	return out, nil
 }

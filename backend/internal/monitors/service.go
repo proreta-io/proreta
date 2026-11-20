@@ -475,6 +475,12 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 		if err := a.checkAccess(cur.ProjectID); err != nil {
 			return err
 		}
+		if cur.Type == TypeHeartbeat {
+			// Serialises with the evaluation in jobs, which reads the grace under this lock.
+			if err := lockHeartbeat(ctx, q, a.TenantID, id); err != nil {
+				return err
+			}
+		}
 		name, interval, threshold, notificationsEnabled := cur.Name, int(cur.IntervalSeconds), int(cur.FailureThreshold), cur.NotificationsEnabled
 
 		// Where the monitor runs now and where it should run after this change.

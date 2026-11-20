@@ -338,3 +338,26 @@ func TestIntegrationCheckStatusPageDomainsConcurrentRuns(t *testing.T) {
 		t.Fatalf("unchecked domains left: %d %v", left, err)
 	}
 }
+
+// A domain whose check cannot be recorded does not hold up the others, however many are due.
+func TestIntegrationCheckStatusPageDomainsIsolatesFailingRow(t *testing.T) {
+	e := newDomEnv(t, "jobsdomainsbad", true)
+	pgtest.MustExec(t, e.admin, `CREATE FUNCTION fail_bad_domain() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN IF NEW.host = 'bad.acme.com' THEN RAISE EXCEPTION 'broken row'; END IF; RETURN NEW; END $$`,
+		`CREATE TRIGGER fail_bad_domain BEFORE UPDATE ON status_page_domains FOR EACH ROW EXECUTE FUNCTION fail_bad_domain()`)
+	// The bad row has never been checked, so it is picked first on every run.
+	bad := e.add(tenantA, "bad.acme.com", "pending")
+	var good []string
+	for i := range jobs.StatusDomainsBatch + 5 {
+		good = append(good, e.add(tenantA, fmt.Sprintf("d%d.acme.com", i), "pending", "last_checked_at = now() - interval '1 hour'"))
+	}
+	e.run()
+	for _, id := range good {
+		if r := e.row(id); r.lastError != "txt-missing" {
+			t.Fatalf("a healthy domain was not checked: %+v", r)
+		}
+	}
+	if r := e.row(bad); r.checked {
+		t.Fatalf("bad row: %+v", r)
+	}
+}

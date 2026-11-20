@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"slices"
 
@@ -292,6 +293,21 @@ func Lock(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error {
 	return err
 }
 
+// resolveLimits is Resolve, except that overrides which cannot be read are dropped with a log
+// line: a bad tenants.limits value must not stop the organization from creating anything.
+func resolveLimits(planKey string, planLimits, overrides []byte) (Limits, error) {
+	l, err := Resolve(planKey, planLimits, overrides)
+	if err == nil || len(bytes.TrimSpace(overrides)) == 0 {
+		return l, err
+	}
+	base, baseErr := Resolve(planKey, planLimits, nil)
+	if baseErr != nil {
+		return Limits{}, err
+	}
+	slog.Warn("ignoring unreadable tenant limit overrides", "plan", planKey, "error", err)
+	return base, nil
+}
+
 func resolveQuota(ctx context.Context, tx pgx.Tx, q tenants.Quota) (Plan, Limits, error) {
 	row, err := plansdb.New(tx).GetPlan(ctx, q.PlanKey)
 	var raw []byte
@@ -302,7 +318,7 @@ func resolveQuota(ctx context.Context, tx pgx.Tx, q tenants.Quota) (Plan, Limits
 	default:
 		raw = row.Limits
 	}
-	l, err := Resolve(q.PlanKey, raw, q.Overrides)
+	l, err := resolveLimits(q.PlanKey, raw, q.Overrides)
 	if err != nil {
 		return Plan{}, Limits{}, fmt.Errorf("plans: %w", err)
 	}

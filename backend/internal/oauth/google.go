@@ -29,6 +29,8 @@ const (
 	discoveryTTL = 24 * time.Hour
 	// jwksRefreshMin limits refetching the keys for an unknown kid (key rotation) to once a minute.
 	jwksRefreshMin = time.Minute
+	// jwksMaxStale bounds how long a cached key serves while the key set cannot be fetched.
+	jwksMaxStale = 7 * 24 * time.Hour
 	// discoveryBackoff is how long a failed discovery fetch is not retried while a stale copy serves.
 	discoveryBackoff = 30 * time.Second
 	// clockSkew is the tolerance for exp and iat.
@@ -318,9 +320,11 @@ func (g *Google) key(ctx context.Context, d *discovery, kid string) (*rsa.Public
 		g.mu.Unlock()
 		return k, nil
 	}
+	// A cached key past its TTL still serves while the refresh fails, up to jwksMaxStale.
+	usable := ok && now.Sub(g.keysAt) < jwksMaxStale
 	if now.Sub(g.keysFetch) < jwksRefreshMin {
 		g.mu.Unlock()
-		if ok {
+		if usable {
 			return k, nil
 		}
 		return nil, fmt.Errorf("%w: unknown id token key", ErrProvider)
@@ -330,6 +334,9 @@ func (g *Google) key(ctx context.Context, d *discovery, kid string) (*rsa.Public
 
 	v, err, _ := g.sf.Do("keys", func() (any, error) { return g.fetchKeys(ctx, d.JWKSURI) })
 	if err != nil {
+		if usable {
+			return k, nil
+		}
 		return nil, err
 	}
 	keys := v.(map[string]*rsa.PublicKey)

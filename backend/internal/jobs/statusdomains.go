@@ -2,8 +2,10 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -69,7 +71,7 @@ func CheckStatusPageDomains(cfg StatusDomainsConfig, m *Metrics) Task {
 			if !cfg.Enabled {
 				return 0, nil
 			}
-			c := domainChecker{cfg: cfg, m: m}
+			c := domainChecker{cfg: cfg, m: m, failed: map[uuid.UUID]error{}}
 			n, err := c.run(ctx, pool)
 			if gerr := c.gauge(ctx, pool); err == nil {
 				err = gerr
@@ -81,6 +83,9 @@ func CheckStatusPageDomains(cfg StatusDomainsConfig, m *Metrics) Task {
 type domainChecker struct {
 	cfg StatusDomainsConfig
 	m   *Metrics
+	// failed holds the domains whose check could not be recorded in this run: they stay due, so
+	// later batches skip them instead of picking them first again.
+	failed map[uuid.UUID]error
 }
 
 type dueDomain struct {
@@ -106,7 +111,12 @@ func (c domainChecker) run(ctx context.Context, pool *db.Pool) (int, error) {
 			break
 		}
 	}
-	return total, nil
+	// The rest progressed; the run still reports the rows it could not record.
+	var errs []error
+	for id, err := range c.failed {
+		errs = append(errs, fmt.Errorf("domain %s: %w", id, err))
+	}
+	return total, errors.Join(errs...)
 }
 
 // batch checks one batch of due domains in one transaction and returns how many it checked.
@@ -114,7 +124,7 @@ func (c domainChecker) batch(ctx context.Context, pool *db.Pool) (int, error) {
 	n := 0
 	results := map[string]int{}
 	err := db.WithTx(ctx, pool, func(tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `SELECT tenant_id, id, page_id, host, token, state FROM status_page_domains_due($1)`, StatusDomainsBatch)
+		rows, err := tx.Query(ctx, `SELECT tenant_id, id, page_id, host, token, state FROM status_page_domains_due($1)`, StatusDomainsBatch+len(c.failed))
 		if err != nil {
 			return err
 		}
@@ -125,11 +135,27 @@ func (c domainChecker) batch(ctx context.Context, pool *db.Pool) (int, error) {
 		if err != nil {
 			return err
 		}
-		n = len(due)
-		for _, d := range c.probe(ctx, due) {
-			res, err := c.record(ctx, tx, d)
+		due = slices.DeleteFunc(due, func(d dueDomain) bool { _, bad := c.failed[d.id]; return bad })
+		n = min(len(due), StatusDomainsBatch)
+		for _, d := range c.probe(ctx, due[:n]) {
+			// A savepoint per domain: an error undoes this domain only.
+			sp, err := tx.Begin(ctx)
 			if err != nil {
-				return fmt.Errorf("record check of %s: %w", d.host, err)
+				return err
+			}
+			res, err := c.record(ctx, sp, d)
+			if err != nil {
+				if rerr := sp.Rollback(ctx); rerr != nil {
+					return rerr
+				}
+				c.failed[d.id] = err
+				if c.cfg.Log != nil {
+					c.cfg.Log.ErrorContext(ctx, "status page domain check not recorded", "domain_id", d.id, "error", err)
+				}
+				continue
+			}
+			if err := sp.Commit(ctx); err != nil {
+				return err
 			}
 			results[res]++
 		}
