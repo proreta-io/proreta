@@ -153,6 +153,8 @@ Suggested alerts (PromQL, thresholds are first guesses; the schedule lasts 24 ho
 ## Upgrade and downgrade
 **Upgrade.** Upgrade the executor chart or image. No setting is needed in Proreta. When it starts, the executor tells Proreta what it supports, fetches its schedule and takes over from the next slot. From then on Proreta hands that Specula no more checks to claim, so no check runs twice. A check that was already claimed by the old executor finishes within 30 seconds. The gateway must be upgraded first or at the same time: a new executor that finds an older gateway (no schedule endpoint) stays in the previous mode, in which it claims one check at a time as before.
 
+**Protocol rule (for contributors and for mixed versions).** A `schedule/1` request or response never gains a field; a new field needs a new capability (`schedule/2`). Upgrade the gateway first. An executor that sends a field the gateway does not know gets `400` and keeps its buffer, retrying, so skew between versions stalls delivery instead of dropping results. A test in the wire package records the field names and fails when one is added without a new capability.
+
 **Downgrade.** Install the previous chart or image. The old executor does not announce the schedule capability, so Proreta serves it checks to claim again from its first call. There is nothing to clean up in Proreta, and results the new executor had not yet delivered are lost with its state directory. An executor of the previous version also does not run TCP monitors, and Proreta does not hand it any; they show *unknown* until you upgrade again.
 
 The chart runs a single pod per Specula and replaces it only after the old one has stopped: two executors for the same Specula are reported as duplicates.

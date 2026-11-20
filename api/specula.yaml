@@ -29,6 +29,12 @@ info:
     backlog and not in the future; it is recorded with the slot as its time. `claim` answers no
     jobs for a location in schedule mode. A `404` on `schedule` or `reports` means an older
     server: stay in pull mode.
+
+    *Versioning rule.* A `schedule/1` request or response never gains a field: both sides reject
+    unknown fields (an older gateway answers a `hello` or `reports` with an unknown field with
+    `400`, and an executor retries a `400` on `reports` for ever, because it keeps its buffer). A
+    new field needs a new capability (`schedule/2`), announced in `hello` and offered in `modes`.
+    Upgrade the gateway first.
 servers:
   - url: https://proreta.example.com
     description: Example installation; the executor calls the address of its Proreta
