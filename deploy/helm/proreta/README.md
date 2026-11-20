@@ -65,7 +65,8 @@ not contain `proreta` (`fullnameOverride` replaces it).
 | `config.blockedCIDRs` | `[]` | Extra ranges the SSRF guard refuses (cluster and VPC CIDRs). |
 | `database.secretName` | `""` | Secret with the connection URLs. Empty: `<fullname>-db`. |
 | `database.host` | `""` | PostgreSQL host; required when `database.bootstrap.enabled`. |
-| `database.port`, `database.name`, `database.sslmode` | `5432`, `proreta`, `require` | Server port, database name, libpq `sslmode`. |
+| `database.port`, `database.name`, `database.sslmode` | `5432`, `proreta`, `require` | Server port, database name, libpq `sslmode` (`verify-full` for a verified connection). |
+| `database.tlsCA.existingSecret`, `.key` | empty, `ca.crt` | Secret with the PEM CA bundle of the database server (RDS, Cloud SQL, a private CA). Mounted in every pod and Job that connects and passed as `PGSSLROOTCERT`; needed for `verify-ca` / `verify-full` when the CA is not in the system store. |
 | `database.bootstrap.enabled` | `false` | Run the database bootstrap hook Job. It skips itself once the database is set up, so it may stay on. |
 | `database.bootstrap.force` | `false` | Run the full bootstrap even if the database looks ready (password rotation, a new role). Needs the admin Secret. |
 | `database.bootstrap.adminSecret.existingSecret` | `""` | Secret in the namespace with the server admin login. |
@@ -166,7 +167,7 @@ Source of truth: `backend/internal/platform/config/config.go`. Secret names belo
 | `PRORETA_ENCRYPTION_KEYS`, `PRORETA_ENCRYPTION_ACTIVE_KEY_ID` (`proreta-crypto`) | x | **never** | x | | |
 | `PRORETA_ADMIN_LOGIN`, `PRORETA_ADMIN_PASSWORD_HASH` (`proreta-admin`) | x | **never** | **never** | | |
 | `PRORETA_HTTP_ADDR`, `PRORETA_SESSION_TTL`, `PRORETA_COOKIE_SECURE`, `PRORETA_TRUSTED_PROXY_HOPS` (`config.trustedProxyHops`: number of trusted proxies in front of the api, default `1` for the gateway; `0` only with nothing in front) | x | | | | |
-| `PRORETA_REGISTRATION_ENABLED` (`config.registrationEnabled`, chart default `false`; self-service creation of new organizations) | x | | | | |
+| `PRORETA_REGISTRATION_ENABLED` (`config.registrationEnabled`, default `false` in the chart and in the binary; self-service creation of new organizations) | x | | | | |
 | `PRORETA_PASSWORD_LOGIN_ENABLED` (`config.passwordLoginEnabled`, default `true`, `false` keeps the password form for the platform admin only and needs an OAuth provider) | x | | | | |
 | `PRORETA_OAUTH_ALLOWED_DOMAINS` (`oauth.allowedDomains`, only rendered when non-empty; the Workspace domains organizations may claim) | x | | | | |
 | `PRORETA_OAUTH_GOOGLE_CLIENT_ID`/`_SECRET`, `PRORETA_OAUTH_GITHUB_CLIENT_ID`/`_SECRET` (`secrets.oauth.existingSecret` or `proreta-oauth`, only for providers enabled in `oauth.*.enabled`) | x | **never** | **never** | | |

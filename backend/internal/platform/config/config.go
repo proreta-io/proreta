@@ -109,7 +109,7 @@ type API struct {
 	// Slack messages.
 	PublicURL string
 	// RegistrationEnabled is the kill switch of self-service registration
-	// (PRORETA_REGISTRATION_ENABLED, default true).
+	// (PRORETA_REGISTRATION_ENABLED, default false: closed until the operator opens it).
 	RegistrationEnabled bool
 	// PasswordLoginEnabled turns the password form off for everyone but the admin login when
 	// false (PRORETA_PASSWORD_LOGIN_ENABLED, default true).
@@ -305,7 +305,7 @@ func LoadAPI(lookup LookupFunc) (API, error) {
 		CookieSecure:            l.boolean("PRORETA_COOKIE_SECURE", true),
 		TrustedProxyHops:        l.integer("PRORETA_TRUSTED_PROXY_HOPS", 0, 0, 10),
 		PublicURL:               l.publicURL("PRORETA_PUBLIC_URL"),
-		RegistrationEnabled:     l.boolean("PRORETA_REGISTRATION_ENABLED", true),
+		RegistrationEnabled:     l.boolean("PRORETA_REGISTRATION_ENABLED", false),
 		PasswordLoginEnabled:    l.boolean("PRORETA_PASSWORD_LOGIN_ENABLED", true),
 		StatusPageCustomDomains: l.boolean("PRORETA_STATUS_PAGE_CUSTOM_DOMAINS", false),
 		OAuth:                   l.oauth(),

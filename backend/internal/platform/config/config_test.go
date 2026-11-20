@@ -63,7 +63,7 @@ func TestLoadAPIDefaults(t *testing.T) {
 	if cfg.LogLevel != slog.LevelInfo || cfg.HTTPAddr != ":8080" || cfg.AdminAddr != ":9090" {
 		t.Fatalf("unexpected defaults: %+v", cfg)
 	}
-	if cfg.SessionTTL != 12*time.Hour || !cfg.CookieSecure || cfg.TrustedProxyHops != 0 || !cfg.RegistrationEnabled {
+	if cfg.SessionTTL != 12*time.Hour || !cfg.CookieSecure || cfg.TrustedProxyHops != 0 || cfg.RegistrationEnabled {
 		t.Fatalf("unexpected auth defaults: ttl=%v secure=%v hops=%d", cfg.SessionTTL, cfg.CookieSecure, cfg.TrustedProxyHops)
 	}
 	if cfg.ShutdownTimeout != 25*time.Second {
