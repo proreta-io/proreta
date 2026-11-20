@@ -408,12 +408,12 @@ func TestIntegrationChannelSecretsFollowTheOrganization(t *testing.T) {
 	}
 }
 
-// TestIntegrationStatusPageLimitIsPerProject runs on the default Free limit (1): every project gets
+// TestIntegrationStatusPageLimitIsPerProject runs on the default Capped limit (1): every project gets
 // its own page and so does the organization, a full scope answers 409 naming the scope, the list can
 // be filtered by project, and raising max_status_pages is all that allows a second page in a project.
 func TestIntegrationStatusPageLimitIsPerProject(t *testing.T) {
 	w := newProjectWorld(t, "statuspageperproject")
-	useFreePlan(t, w.env)
+	useCappedPlan(t, w.env)
 	owner := w.hdr("owner")
 	create := func(project string) response {
 		body := `{"slug":"` + nextSlug() + `","title":"t"`

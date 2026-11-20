@@ -210,9 +210,6 @@ func scopeArgs(sc authz.Scope) []any {
 	return []any{sc.All, ids}
 }
 
-// MaxSearchRunes bounds a monitor search text.
-const MaxSearchRunes = 100
-
 // MonitorFilter narrows the list; the zero value keeps every monitor. Status is "up", "down",
 // "paused" or "unknown" (the summary's own classes, see Summary); Search is a case-insensitive
 // substring of the name, URL or host:port, taken literally (no pattern characters).
@@ -231,9 +228,6 @@ var statusSQL = map[string]string{
 	"paused":      `m.paused`,
 	StatusUnknown: `NOT m.paused AND s.status NOT IN ('` + StatusUp + `', '` + StatusDown + `')`,
 }
-
-// ValidStatus reports whether s is a status filter value.
-func ValidStatus(s string) bool { _, ok := statusSQL[s]; return ok }
 
 // ListMonitors returns one page of the live monitors of the tenant in the scope's projects that
 // match the filter. The order is explicit: down monitors, then the other active ones, then paused

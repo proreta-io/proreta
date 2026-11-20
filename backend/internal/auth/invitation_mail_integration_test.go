@@ -100,7 +100,7 @@ func TestIntegrationInvitationEmail(t *testing.T) {
 		t.Fatalf("label: %+v %v", inv2, err)
 	}
 	// Without an address nothing is queued, as before email existed (a place is freed first: the
-	// free plan has three).
+	// capped plan has three).
 	if err := e.svc.RevokeInvitation(e.ctx, a, inv2.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -153,8 +153,8 @@ func TestIntegrationInvitationEmailNeedsEmail(t *testing.T) {
 func TestIntegrationInvitationEmailRollsBackWithTheInvitation(t *testing.T) {
 	e := newVerifyEnv(t, "auth_invite_mail_limit", true)
 	a := e.actor(e.register("owner@example.com"))
-	pgtest.MustExec(t, e.admin, pgtest.FreePlanSQL, `UPDATE tenants SET plan_key = 'free'`)
-	// The free plan allows 3 members: the owner plus two open invitations.
+	pgtest.MustExec(t, e.admin, pgtest.CappedPlanSQL, `UPDATE tenants SET plan_key = 'capped'`)
+	// The capped plan allows 3 members: the owner plus two open invitations.
 	for _, addr := range []string{"a@example.org", "b@example.org"} {
 		if _, _, _, err := e.svc.CreateInvitationFor(e.ctx, a, auth.InvitationInput{Role: auth.RoleMember, Email: addr}); err != nil {
 			t.Fatal(err)

@@ -19,7 +19,7 @@ import (
 func TestIntegrationStatusPageAdmin(t *testing.T) {
 	w := newProjectWorld(t, "apistatuspages")
 	c, owner := w.c, w.sessions[authz.Owner]
-	useFreePlan(t, w.env)
+	useCappedPlan(t, w.env)
 	ctx := context.Background()
 	public := w.env.Conn(t, w.env.StatuspageURL)
 	snapshot := func(slug string) (payload string, hash *string, found bool) {
@@ -217,7 +217,7 @@ func TestIntegrationStatusPageAdmin(t *testing.T) {
 	}
 
 	// Usage counts the page; audit rows carry field names, never the password.
-	useFreePlan(t, w.env)
+	useCappedPlan(t, w.env)
 	if r := c.do(http.MethodGet, "/api/v1/usage", "", other); r.body["usage"].(map[string]any)["statusPages"] != float64(1) ||
 		r.body["limits"].(map[string]any)["statusPages"] != float64(1) {
 		t.Fatalf("usage: %s", r.raw)

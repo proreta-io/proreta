@@ -29,9 +29,9 @@ type TenantCreate struct {
 	Name string
 	// Slug is optional: a random "t-..." one is generated when nil.
 	Slug *string
-	// PlanKey is optional: "free" when nil.
+	// PlanKey is optional: the internal plan when nil.
 	PlanKey *string
-	// OwnerEmail is the first owner: an existing account becomes the owner, otherwise a
+	// OwnerEmail is the first owner: an existing account becomes the owner, otherwise an
 	// owner invitation is created.
 	OwnerEmail string
 }

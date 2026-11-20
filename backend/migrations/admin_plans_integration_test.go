@@ -41,7 +41,7 @@ func TestIntegrationAdminPlans(t *testing.T) {
 			`SELECT * FROM admin_plans_list($1)`,
 			`SELECT admin_plan_peak_usage($1, 'internal')`,
 			`SELECT admin_plan_create($1, 'x', 'X', '` + goodLimits + `', gen_random_uuid(), NULL)`,
-			`SELECT admin_plan_update($1, 'internal', 'Free', '` + goodLimits + `', gen_random_uuid(), NULL)`,
+			`SELECT admin_plan_update($1, 'internal', 'Capped', '` + goodLimits + `', gen_random_uuid(), NULL)`,
 			`SELECT admin_plan_delete($1, 'internal', gen_random_uuid(), NULL)`,
 		} {
 			if got := exec(stmt, userOwnerA); got != "PRA01" {
@@ -165,7 +165,7 @@ func TestIntegrationAdminPlans(t *testing.T) {
 	t.Run("peak usage", func(t *testing.T) {
 		var monitors, heartbeats, members int
 		if err := api.QueryRow(ctx, `SELECT (u ->> 'monitors')::int, (u ->> 'heartbeats')::int, (u ->> 'members')::int
-			FROM admin_plan_peak_usage($1, 'free') AS u`, userPlatform).Scan(&monitors, &heartbeats, &members); err != nil {
+			FROM admin_plan_peak_usage($1, 'capped') AS u`, userPlatform).Scan(&monitors, &heartbeats, &members); err != nil {
 			t.Fatal(err)
 		}
 		// Tenant A (internal) holds what seedPlatform made: 2 live http monitors, 1 heartbeat, 1 member.

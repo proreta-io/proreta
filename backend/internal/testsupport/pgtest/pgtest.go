@@ -364,8 +364,8 @@ func MustExec(t testing.TB, conn *pgx.Conn, stmts ...string) {
 // DBName returns a per-package database name.
 func DBName(suffix string) string { return fmt.Sprintf("proreta_it_%s", suffix) }
 
-// FreePlanSQL adds a small plan for the tests that need real quotas: the installation seeds only
+// CappedPlanSQL adds a small plan for the tests that need real quotas: the installation seeds only
 // the unlimited `internal` plan. Idempotent.
-const FreePlanSQL = `INSERT INTO plans (key, name, limits) VALUES ('free', 'Free',
+const CappedPlanSQL = `INSERT INTO plans (key, name, limits) VALUES ('capped', 'Capped',
 	'{"max_monitors": 3, "max_heartbeats": 1, "max_channels": 1, "max_members": 3, "max_projects": 50,
 	  "max_status_pages": 1, "max_status_page_domains": 0, "max_agents": 1}') ON CONFLICT (key) DO NOTHING`

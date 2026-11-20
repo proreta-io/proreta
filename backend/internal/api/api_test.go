@@ -193,7 +193,7 @@ func TestWriteErrorMapping(t *testing.T) {
 		{errNotFound, 404, problemNotFound},
 		{&featureError{feature: "sso"}, 403, problemFeatureUnavailable},
 		{fmt.Errorf("x: %w", monitors.ErrNotFound), 404, problemNotFound},
-		{fmt.Errorf("monitors: create: %w", &plans.LimitError{Resource: plans.ResourceMonitor, Max: 3, PlanName: "Free"}), 409, problemPlanLimitReached},
+		{fmt.Errorf("monitors: create: %w", &plans.LimitError{Resource: plans.ResourceMonitor, Max: 3, PlanName: "Capped"}), 409, problemPlanLimitReached},
 		{fmt.Errorf("monitors: create: %w", scheduler.ErrNoLocation), 503, problemUnavailable},
 		{&validation.Error{Fields: []validation.FieldError{{Field: "url", Message: "must use https"}}}, 422, problemValidation},
 		{errors.New("database exploded: password=hunter2"), 500, problemInternal},
@@ -218,7 +218,7 @@ func TestWriteErrorMapping(t *testing.T) {
 		if c.status == 422 && (len(p.FieldErrors) != 1 || p.FieldErrors[0].Field != "url" || p.FieldErrors[0].Message != "must use https") {
 			t.Errorf("422 field errors = %+v", p.FieldErrors)
 		}
-		if c.typ == problemPlanLimitReached && (p.Limit != "monitors" || p.Max == nil || *p.Max != 3 || p.Detail != "The Free plan allows at most 3 monitors.") {
+		if c.typ == problemPlanLimitReached && (p.Limit != "monitors" || p.Max == nil || *p.Max != 3 || p.Detail != "The Capped plan allows at most 3 monitors.") {
 			t.Errorf("409 problem = %+v", p)
 		}
 		if c.typ != problemPlanLimitReached && (p.Limit != "" || p.Max != nil) {

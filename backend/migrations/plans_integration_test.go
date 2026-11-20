@@ -75,14 +75,14 @@ func TestIntegrationPlans(t *testing.T) {
 		t.Fatalf("non-object limits accepted: %v", err)
 	}
 
-	pgtest.MustExec(t, admin, pgtest.FreePlanSQL)
+	pgtest.MustExec(t, admin, pgtest.CappedPlanSQL)
 	for _, bad := range []string{`'{Bad}'`, `'{"a b"}'`, `'{""}'`, `ARRAY['` + strings.Repeat("a", 65) + `']`, `'{NULL}'`} {
-		if _, err := admin.Exec(ctx, `UPDATE plans SET features = `+bad+` WHERE key = 'free'`); err == nil || !strings.Contains(err.Error(), "plans_features_names") {
+		if _, err := admin.Exec(ctx, `UPDATE plans SET features = `+bad+` WHERE key = 'capped'`); err == nil || !strings.Contains(err.Error(), "plans_features_names") {
 			t.Errorf("feature names %s: err = %v, want plans_features_names", bad, err)
 		}
 	}
-	pgtest.MustExec(t, admin, `UPDATE plans SET features = '{sso,audit-export,a_b}' WHERE key = 'free'`,
-		`UPDATE plans SET features = '{}' WHERE key = 'free'`)
+	pgtest.MustExec(t, admin, `UPDATE plans SET features = '{sso,audit-export,a_b}' WHERE key = 'capped'`,
+		`UPDATE plans SET features = '{}' WHERE key = 'capped'`)
 
 	for _, url := range []string{env.APIURL, env.WorkerURL} {
 		conn := env.Conn(t, url)
@@ -94,7 +94,7 @@ func TestIntegrationPlans(t *testing.T) {
 			`INSERT INTO plans (key, name, limits) VALUES ('gold', 'Gold', '{}')`,
 			`UPDATE plans SET limits = '{"max_monitors": 100000}'`,
 			`UPDATE plans SET features = '{x}'`,
-			`DELETE FROM plans WHERE key = 'free'`,
+			`DELETE FROM plans WHERE key = 'capped'`,
 			`TRUNCATE plans`,
 		} {
 			if _, err := conn.Exec(ctx, stmt); err == nil || !strings.Contains(err.Error(), "permission denied") {

@@ -333,12 +333,12 @@ func TestIntegrationHeartbeatTenantsAndQuota(t *testing.T) {
 		t.Fatalf("unknown token: %v", err)
 	}
 
-	// The free plan: one heartbeat, separate from the three monitors; concurrent creates cannot
+	// The capped plan: one heartbeat, separate from the three monitors; concurrent creates cannot
 	// overshoot it.
-	pgtest.MustExec(t, f.admin, pgtest.FreePlanSQL, `UPDATE tenants SET plan_key = 'free' WHERE id = '`+tenantB+`'`)
+	pgtest.MustExec(t, f.admin, pgtest.CappedPlanSQL, `UPDATE tenants SET plan_key = 'capped' WHERE id = '`+tenantB+`'`)
 	f.actor.TenantID = uuid.MustParse(tenantB)
 	if _, err := f.api.Create(f.ctx, f.actor, monitors.CreateInput{Type: monitors.TypeHeartbeat, Name: "second", Heartbeat: &monitors.HeartbeatSettings{}}); !isLimit(err, plans.ResourceHeartbeat, 1) {
-		t.Fatalf("second heartbeat on free: %v", err)
+		t.Fatalf("second heartbeat on capped: %v", err)
 	}
 	if err := f.api.Delete(f.ctx, f.actor, b.ID); err != nil {
 		t.Fatal(err)
@@ -361,7 +361,7 @@ func TestIntegrationHeartbeatTenantsAndQuota(t *testing.T) {
 		}
 	}
 	if ok != 1 {
-		t.Fatalf("%d concurrent creates succeeded at the free limit of 1", ok)
+		t.Fatalf("%d concurrent creates succeeded at the capped limit of 1", ok)
 	}
 	url := "https://example.com/"
 	for i := range 3 {
@@ -370,7 +370,7 @@ func TestIntegrationHeartbeatTenantsAndQuota(t *testing.T) {
 		}
 	}
 	if _, err := f.api.Create(f.ctx, f.actor, monitors.CreateInput{Name: "site", HTTP: &monitors.HTTPSettings{URL: &url}}); !isLimit(err, plans.ResourceMonitor, 3) {
-		t.Fatalf("fourth http monitor on free: %v", err)
+		t.Fatalf("fourth http monitor on capped: %v", err)
 	}
 }
 

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"github.com/proreta-io/proreta/backend/internal/api/gen"
 	"github.com/proreta-io/proreta/backend/internal/auth"
@@ -376,6 +375,6 @@ func (s *server) DeleteAuthDomain(ctx context.Context, req gen.DeleteAuthDomainR
 }
 
 func toAuthDomain(d auth.Domain) gen.AuthDomain {
-	return gen.AuthDomain{Id: openapi_types.UUID(d.ID), Domain: d.Domain, DefaultRole: gen.AuthDomainRole(d.DefaultRole),
+	return gen.AuthDomain{Id: d.ID, Domain: d.Domain, DefaultRole: gen.AuthDomainRole(d.DefaultRole),
 		Enabled: d.Enabled, CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt}
 }

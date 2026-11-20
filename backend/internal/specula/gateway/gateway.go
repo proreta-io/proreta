@@ -486,16 +486,16 @@ func cleanCapabilities(in []string) []string {
 	return out
 }
 
-func clean(s string, max int) string {
+func clean(s string, limit int) string {
 	s = strings.Map(func(r rune) rune {
 		if r < 0x20 || r == 0x7f {
 			return -1
 		}
 		return r
 	}, strings.ToValidUTF8(s, ""))
-	if len(s) > max {
+	if len(s) > limit {
 		// Cut on a rune boundary: a split rune is invalid UTF-8, which Postgres rejects.
-		s = s[:max]
+		s = s[:limit]
 		for len(s) > 0 && !utf8.ValidString(s) {
 			s = s[:len(s)-1]
 		}

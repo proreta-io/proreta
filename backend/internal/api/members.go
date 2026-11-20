@@ -33,13 +33,13 @@ var errPasswordChangeRequired = errors.New("password change required")
 // name a project are checked again for that project by the service. It runs after the request
 // validator, so the session (and the CSRF token) were already checked.
 func (s *server) authorize(f gen.StrictHandlerFunc, operationID string) gen.StrictHandlerFunc {
-	min, known := authz.MinRole(operationID)
+	needRole, known := authz.MinRole(operationID)
 	return func(ctx context.Context, w http.ResponseWriter, r *http.Request, req any) (any, error) {
 		if !known {
 			s.log.ErrorContext(ctx, "operation missing from the authorization table; refused", "operation", operationID)
 			return nil, &roleError{required: authz.Owner}
 		}
-		if min == authz.Public {
+		if needRole == authz.Public {
 			return f(ctx, w, r, req)
 		}
 		p, err := s.resolve(r)
@@ -66,8 +66,8 @@ func (s *server) authorize(f gen.StrictHandlerFunc, operationID string) gen.Stri
 			allowed = authz.Can(full, operationID)
 		}
 		if !allowed {
-			s.log.WarnContext(ctx, "operation refused by role", "operation", operationID, "role", p.Role, "required", string(min))
-			return nil, &roleError{required: min}
+			s.log.WarnContext(ctx, "operation refused by role", "operation", operationID, "role", p.Role, "required", string(needRole))
+			return nil, &roleError{required: needRole}
 		}
 		return f(ctx, w, r, req)
 	}

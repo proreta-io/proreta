@@ -61,8 +61,8 @@ type bucket struct {
 	at     time.Time
 }
 
-func newBucketSet(rate float64, burst, max int) *bucketSet {
-	return &bucketSet{rate: rate, burst: float64(burst), max: max, buckets: map[uuid.UUID]*list.Element{}, lru: list.New()}
+func newBucketSet(rate float64, burst, limit int) *bucketSet {
+	return &bucketSet{rate: rate, burst: float64(burst), max: limit, buckets: map[uuid.UUID]*list.Element{}, lru: list.New()}
 }
 
 // take uses one token of key at now. When there is none it reports false and how long until there is.

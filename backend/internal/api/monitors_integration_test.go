@@ -205,8 +205,8 @@ func TestIntegrationMonitorPlanLimitUnderConcurrency(t *testing.T) {
 	env := pgtest.New(t, pgtest.DBName("apimonlimit"))
 	c := newServer(t, env, auth.Options{})
 	cookie, csrf := c.login()
-	// The free plan allows 3 monitors (the default tenant is on internal).
-	pgtest.MustExec(t, env.AdminConn(t), pgtest.FreePlanSQL, `UPDATE tenants SET plan_key = 'free' WHERE slug = 'default'`)
+	// The capped plan allows 3 monitors (the default tenant is on internal).
+	pgtest.MustExec(t, env.AdminConn(t), pgtest.CappedPlanSQL, `UPDATE tenants SET plan_key = 'capped' WHERE slug = 'default'`)
 	const limit = 3
 
 	const n = 20
@@ -248,7 +248,7 @@ func TestIntegrationMonitorPlanLimitUnderConcurrency(t *testing.T) {
 	// The limit problem says which limit and its value; a deleted monitor frees its slot.
 	r := c.do(http.MethodPost, "/api/v1/monitors", `{"type":"http","name":"x","http":{"url":"https://example.com"}}`, withCSRF(cookie, csrf))
 	if r.code != http.StatusConflict || r.body["type"] != "urn:proreta:problem:plan-limit-reached" || r.body["limit"] != "monitors" ||
-		r.body["max"] != float64(limit) || r.body["title"] != "Plan limit reached" || r.body["detail"] != "The Free plan allows at most 3 monitors." {
+		r.body["max"] != float64(limit) || r.body["title"] != "Plan limit reached" || r.body["detail"] != "The Capped plan allows at most 3 monitors." {
 		t.Fatalf("over limit: %d %s", r.code, r.raw)
 	}
 	l := c.do(http.MethodGet, "/api/v1/monitors", "", cookie)

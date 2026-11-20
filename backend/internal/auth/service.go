@@ -39,7 +39,7 @@ const (
 	ActionLoginSucceeded = "auth.login_succeeded"
 	ActionLoginFailed    = "auth.login_failed"
 	ActionLogout         = "auth.logged_out"
-	ActionAdminRotated   = "admin.rotated"
+	ActionAdminRotated   = "admin.user.rotated"
 	ActionRegister       = "auth.registered"
 )
 

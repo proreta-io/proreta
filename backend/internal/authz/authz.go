@@ -48,8 +48,8 @@ func rank(r Role) int {
 // Valid reports whether r is one of the four roles.
 func Valid(r Role) bool { return rank(r) > 0 }
 
-// AtLeast reports whether r is min or higher.
-func (r Role) AtLeast(min Role) bool { return rank(r) > 0 && rank(r) >= rank(min) }
+// AtLeast reports whether r is floor or higher.
+func (r Role) AtLeast(floor Role) bool { return rank(r) > 0 && rank(r) >= rank(floor) }
 
 // Actor is the user of a request: the role of its membership in the session's organization (empty
 // when the person belongs to the organization only through projects) and the direct roles it

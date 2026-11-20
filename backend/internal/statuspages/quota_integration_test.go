@@ -24,8 +24,8 @@ func TestIntegrationStatusPageQuotaIsPerScope(t *testing.T) {
 	ctx := context.Background()
 	f := fixture{t: t, admin: env.AdminConn(t)}
 	tenant := uuid.NewString()
-	f.exec(pgtest.FreePlanSQL)
-	f.exec(`INSERT INTO tenants (id, slug, name, plan_key) VALUES ($1, 'sp-q', 'Q', 'free')`, tenant)
+	f.exec(pgtest.CappedPlanSQL)
+	f.exec(`INSERT INTO tenants (id, slug, name, plan_key) VALUES ($1, 'sp-q', 'Q', 'capped')`, tenant)
 	f.exec(`INSERT INTO users (id, email) VALUES ($1, 'owner@example.com')`, owner)
 	p1, p2 := uuid.New(), uuid.New()
 	f.exec(`INSERT INTO projects (id, tenant_id, name, slug) VALUES ($1, $3, 'One', 'one'), ($2, $3, 'Two', 'two')`, p1, p2, tenant)
@@ -43,7 +43,7 @@ func TestIntegrationStatusPageQuotaIsPerScope(t *testing.T) {
 		}
 	}
 
-	// The free plan allows one page per scope: each project and the organization get their own.
+	// The capped plan allows one page per scope: each project and the organization get their own.
 	first, err := create("q-one", &p1)
 	if err != nil {
 		t.Fatal(err)

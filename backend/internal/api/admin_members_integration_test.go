@@ -33,7 +33,7 @@ func TestIntegrationAdminMembers(t *testing.T) {
 	_, _, regC := c.register("carol@gamma.example")
 	carolID := regC.body["user"].(map[string]any)["id"].(string)
 	_, _, regD := c.register("dave@delta.example")
-	useFreePlan(t, env)
+	useCappedPlan(t, env)
 	daveID := regD.body["user"].(map[string]any)["id"].(string)
 
 	var adminID, defaultOrg string
@@ -242,7 +242,7 @@ func TestIntegrationAdminMembers(t *testing.T) {
 	})
 
 	t.Run("plan limit", func(t *testing.T) {
-		// Free: three members. alice, bob and carol fill it; an open invitation also holds a place.
+		// Capped: three members. alice, bob and carol fill it; an open invitation also holds a place.
 		r := c.do(http.MethodPut, base+orgA+"/members/"+daveID, `{"role":"member"}`, ah)
 		if r.code != http.StatusConflict || r.body["type"] != "urn:proreta:problem:plan-limit-reached" {
 			t.Fatalf("add over the limit: %d %s", r.code, r.raw)
