@@ -74,7 +74,7 @@ func (s *server) AdminListOrganizationInvitations(ctx context.Context, req gen.A
 	}
 	out := gen.AdminListOrganizationInvitations200JSONResponse{Items: make([]gen.Invitation, len(list))}
 	for i, inv := range list {
-		out.Items[i] = toInvitation(inv)
+		out.Items[i] = toInvitation(inv, true)
 	}
 	return out, nil
 }
@@ -99,7 +99,7 @@ func (s *server) AdminCreateOrganizationInvitation(ctx context.Context, req gen.
 	if err != nil {
 		return nil, err
 	}
-	return gen.AdminCreateOrganizationInvitation201JSONResponse{Invitation: toInvitation(inv), InviteUrl: s.cfg.PublicURL + "/invite#" + token, EmailQueued: emailed}, nil
+	return gen.AdminCreateOrganizationInvitation201JSONResponse{Invitation: toInvitation(inv, true), InviteUrl: s.cfg.PublicURL + "/invite#" + token, EmailQueued: emailed}, nil
 }
 
 func (s *server) AdminRevokeOrganizationInvitation(ctx context.Context, req gen.AdminRevokeOrganizationInvitationRequestObject) (gen.AdminRevokeOrganizationInvitationResponseObject, error) {

@@ -201,7 +201,7 @@ func (s *server) AdminCreateOrganization(ctx context.Context, req gen.AdminCreat
 		out.Member = &m
 	}
 	if c.Invitation != nil {
-		inv := toInvitation(*c.Invitation)
+		inv := toInvitation(*c.Invitation, true)
 		url := s.cfg.PublicURL + "/invite#" + c.Token
 		out.Invitation, out.InviteUrl = &inv, &url
 	}

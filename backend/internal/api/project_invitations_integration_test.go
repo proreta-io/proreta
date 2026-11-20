@@ -492,4 +492,14 @@ func TestIntegrationProjectOnlyPeopleList(t *testing.T) {
 	if pm.code != http.StatusOK || strings.Contains(pm.raw, "@example.com") {
 		t.Errorf("project-only maintainer sees addresses: %d %s", pm.code, pm.raw)
 	}
+	// ... and neither does the invitations list: the creator is an organization-level person.
+	if r := c.do(http.MethodPost, "/api/v1/invitations", `{"role":"viewer","projectId":"`+w.alpha+`"}`, w.hdr("owner")); r.code != http.StatusCreated {
+		t.Fatalf("owner invites into the project: %d %s", r.code, r.raw)
+	}
+	if il := c.do(http.MethodGet, "/api/v1/invitations", "", w.hdr("aMaint")); il.code != http.StatusOK || !strings.Contains(il.raw, w.alpha) || !strings.Contains(il.raw, `"createdBy":""`) {
+		t.Errorf("project-only maintainer sees addresses in the invitations: %d %s", il.code, il.raw)
+	}
+	if il := c.do(http.MethodGet, "/api/v1/invitations", "", w.hdr("maintainer")); il.code != http.StatusOK || !strings.Contains(il.raw, `"createdBy":"admin"`) {
+		t.Errorf("organization maintainer lost the addresses: %d %s", il.code, il.raw)
+	}
 }
