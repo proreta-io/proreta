@@ -26,8 +26,11 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
-{{/* Image tag: image.tag, else the chart's appVersion; a git checkout has neither. */}}
+{{/* Image: image.digest when set, else image.tag, else the chart's appVersion; a git checkout has neither. */}}
 {{- define "proreta-specula.image" -}}
+{{- if .Values.image.digest -}}
+{{- printf "%s@%s" .Values.image.repository .Values.image.digest -}}
+{{- else -}}
 {{- $tag := .Values.image.tag -}}
 {{- if not $tag -}}
 {{- if or (not .Chart.AppVersion) (eq .Chart.AppVersion "0.0.0") -}}
@@ -36,4 +39,5 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | 
 {{- $tag = .Chart.AppVersion -}}
 {{- end -}}
 {{- printf "%s:%s" .Values.image.repository $tag -}}
+{{- end -}}
 {{- end }}

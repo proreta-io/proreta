@@ -53,6 +53,7 @@ not contain `proreta` (`fullnameOverride` replaces it).
 | `nameOverride`, `fullnameOverride` | `""` | Replace the chart name / the full base name of every resource. |
 | `image.repository` | `ghcr.io/proreta-io/proreta-backend` | Backend image. |
 | `image.tag` | `""` | `X.Y.Z` (no `v`) or `sha-<7 hex>`. Empty: the chart's `appVersion` (packaged chart only; required from a git checkout). |
+| `image.digest`, `web.image.digest` | `""` | Optional content digest, `sha256:<64 hex>`, of the backend / web image. When set it replaces the tag in the image reference (`repository@digest`). The two images have different digests, so set both. |
 | `image.pullPolicy` | `IfNotPresent` | Pull policy of every container. |
 | `imagePullSecrets` | `[]` | Pull secrets for a private registry, `[{name: ...}]`. |
 | `config.publicUrl` | `""` | **Required.** The https URL users open, no trailing slash. `http://` is accepted only for `localhost`, `127.0.0.1` and `[::1]` (local trial) and then needs `config.cookieSecure: false`. Its host is the default of `httpRoute.hostnames`. |
@@ -133,6 +134,8 @@ version there (`helm package --app-version X.Y.Z`); the chart in a git checkout 
 `image.tag` is required and rendering fails without it. Pick
 - a release version, for example `1.2.3` (the Git tag is `v1.2.3`, the image tag has no `v`), or
 - a build of `main`: `sha-` plus the first 7 hex digits of the commit, for example `sha-1a2b3c4`.
+
+To pin the images by content instead of by tag, set `image.digest` and `web.image.digest` (`docker buildx imagetools inspect ghcr.io/proreta-io/proreta-backend:X.Y.Z` prints the `Digest:`). The digest takes precedence over the tag in the pod image reference; the tag is still used for labels. Verify the digest against the release attestation first (`docs/install.md`).
 
 `web.image.tag` defaults to the backend tag. When you publish the images from a fork, GitHub creates the ghcr
 packages as private on the first push: set each package's visibility to public (package settings on GitHub) after

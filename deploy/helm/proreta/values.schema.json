@@ -125,6 +125,12 @@
           "description": "registry and repository of the backend image",
           "minLength": 1
         },
+"digest": {
+          "type": "string",
+          "title": "backend image digest",
+          "description": "optional content digest (sha256:<64 hex>); when set it replaces the tag in the image reference",
+          "pattern": "^$|^sha256:[0-9a-f]{64}$"
+        },
         "tag": {
           "type": "string",
           "title": "backend image tag",
@@ -1473,6 +1479,12 @@
               "title": "web image repository",
               "description": "registry and repository of the web image",
               "minLength": 1
+            },
+            "digest": {
+              "type": "string",
+              "title": "web image digest",
+              "description": "optional content digest (sha256:<64 hex>); when set it replaces the tag in the image reference",
+              "pattern": "^$|^sha256:[0-9a-f]{64}$"
             },
             "tag": {
               "type": "string",

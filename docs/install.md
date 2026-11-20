@@ -150,6 +150,17 @@ helm upgrade --install proreta oci://ghcr.io/proreta-io/charts/proreta --version
 ```
 `helm show values oci://ghcr.io/proreta-io/charts/proreta --version "$VERSION"` prints every default with its comment, as a reference. For later upgrades pass the new `--version`.
 
+### Verifying a release
+Every release image and chart carries a signed build provenance attestation that ties it to this repository's release workflow. Check it with the [GitHub CLI](https://cli.github.com/manual/gh_attestation_verify) before you install:
+```sh
+VERSION=X.Y.Z
+gh attestation verify "oci://ghcr.io/proreta-io/proreta-backend:$VERSION" --owner proreta-io
+gh attestation verify "oci://ghcr.io/proreta-io/proreta-web:$VERSION" --owner proreta-io
+helm pull oci://ghcr.io/proreta-io/charts/proreta --version "$VERSION"
+gh attestation verify "proreta-$VERSION.tgz" --owner proreta-io
+```
+The same works for the `proreta-specula` chart. Tags can be moved by anyone who can write to the registry, so to install exactly what you verified, pin the images by digest: `docker buildx imagetools inspect ghcr.io/proreta-io/proreta-backend:$VERSION` prints the `Digest:`; set it as `image.digest` (and the web image's as `web.image.digest`) in `my-values.yaml`. The digest takes precedence over the tag.
+
 ### Installing with Argo CD
 The chart works under Argo CD with the same order as Helm: the ServiceAccounts, Roles, bootstrap Jobs and the migration Job are hooks ordered by sync waves, the workloads come last. Tested with Argo CD 3.x, Envoy Gateway and Amazon RDS (PostgreSQL 16), from the git source below; installing from the OCI registry as an Argo CD source was not tested (it needs the registry registered in Argo CD as a Helm repository with OCI enabled).
 

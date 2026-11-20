@@ -23,6 +23,11 @@
           "minLength": 1,
           "description": "the backend image; it contains /app/specula"
         },
+        "digest": {
+          "type": "string",
+          "pattern": "^$|^sha256:[0-9a-f]{64}$",
+          "description": "optional content digest of the backend image; when set it replaces the tag"
+        },
         "tag": {
           "type": "string",
           "pattern": "^([0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?|sha-[0-9a-f]{7})?$",
