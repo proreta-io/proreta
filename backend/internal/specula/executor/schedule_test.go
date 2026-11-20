@@ -613,19 +613,34 @@ func TestACheckThatWaitedForAPlaceBeyondItsIntervalIsSkipped(t *testing.T) {
 	h.prob.block = make(chan struct{})
 	h.prob.mu.Unlock()
 	h.waitRunning(len(ms))
-	clk.Advance(30 * time.Second) // every runner is at slot 0; the last one waits for a place
+	// Every place is taken by a blocked probe of slot 0 before the clock moves; the last runner is
+	// the one waiting. Without this, a runner that was slow to start finds itself late at its own
+	// slot and the test counts the wrong runners.
+	eventually(t, "every place to be taken", func() bool {
+		h.prob.mu.Lock()
+		defer h.prob.mu.Unlock()
+		return h.prob.calls == DefaultConcurrency
+	})
+	time.Sleep(100 * time.Millisecond) // the last runner reaches its wait for a place (not observable)
+	clk.Advance(30 * time.Second)
 	clk.Advance(150 * time.Second)
 	close(h.prob.block)
-	eventually(t, "the late runner to give up its slot", func() bool { return h.e.sched.n.missedLate.Load() == 1 })
-	n := 0
-	for _, m := range ms {
-		for _, s := range h.slots(m.MonitorID) {
-			if s == t0.Unix() {
-				n++
+	slot0 := func() (n int) {
+		for _, m := range ms {
+			for _, s := range h.slots(m.MonitorID) {
+				if s == t0.Unix() {
+					n++
+				}
 			}
 		}
+		return n
 	}
-	if n != DefaultConcurrency {
+	// The blocked probes file their results after the release: wait for them, then for the late
+	// runner's decision. A stale result of the waiting runner would make it more than the places.
+	eventually(t, "the blocked checks and the late runner", func() bool {
+		return slot0() >= DefaultConcurrency && h.e.sched.n.missedLate.Load() >= 1
+	})
+	if n := slot0(); n != DefaultConcurrency {
 		t.Fatalf("%d slots recorded, want %d: the waiting runner filed a stale result", n, DefaultConcurrency)
 	}
 }
