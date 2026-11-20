@@ -120,3 +120,20 @@ func TestLimitsJSONRoundTrip(t *testing.T) {
 		t.Fatalf("nil: %v, want ErrUnknownPlan", err)
 	}
 }
+
+func TestResolveQuotaFallsBackToThePlan(t *testing.T) {
+	want := Limits{MaxMonitors: 3, MaxHeartbeats: 1, MaxChannels: 1, MaxMembers: 3, MaxProjects: 50, MaxStatusPages: 1, MaxAgents: 1}
+	for _, bad := range []string{`{"max_monitors":"ten"}`, `{"max_monitors":-1}`, `{"max_monitors":1.5}`, `[1]`} {
+		got, err := resolveLimits("free", []byte(cappedLimits), []byte(bad))
+		if err != nil || got != want {
+			t.Errorf("overrides %s: %+v, %v; want the plan's %+v", bad, got, err, want)
+		}
+	}
+	// A broken plan is not hidden.
+	if _, err := resolveLimits("free", []byte(`{"max_monitors":"x"}`), nil); !errors.Is(err, ErrInvalidLimits) {
+		t.Errorf("broken plan: %v", err)
+	}
+	if _, err := resolveLimits("gone", nil, nil); !errors.Is(err, ErrUnknownPlan) {
+		t.Errorf("unknown plan: %v", err)
+	}
+}
