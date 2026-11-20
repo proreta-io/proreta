@@ -139,12 +139,49 @@ func (s *Service) CreateInvitation(ctx context.Context, a Actor, role, label str
 // so the maintainer can hand the link over as before. When the label is empty and the address is
 // short enough, the address becomes the label, so the invitations list says who was invited.
 func (s *Service) CreateInvitationFor(ctx context.Context, a Actor, in InvitationInput) (inv Invitation, token string, emailed bool, err error) {
-	label := strings.TrimSpace(in.Label)
+	label, to, err := s.validateInvitation(ctx, in)
+	if err != nil {
+		return Invitation{}, "", false, err
+	}
+	if to != "" && label == "" && utf8.RuneCountInString(to) <= maxInvitationLabel {
+		label = to
+	}
+	if token, err = newToken(); err != nil {
+		return Invitation{}, "", false, err
+	}
+	if to != "" {
+		if err := s.reserveInvitationMail(ctx, a.TenantID, to); err != nil {
+			return Invitation{}, "", false, err
+		}
+	}
+	now := s.clock.Now()
+	inv = Invitation{ID: uuidv7.New(), Role: in.Role, ProjectID: in.ProjectID, Label: label, Status: InvitationOpen, CreatedAt: now, ExpiresAt: now.Add(InvitationTTL)}
+	err = db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
+		return s.insertInvitation(ctx, tx, a, in, &inv, token, to)
+	})
+	if err != nil {
+		if to != "" {
+			s.refundInvitationMail(a.TenantID, to)
+		}
+		var limit *plans.LimitError
+		if errors.As(err, &limit) || errors.Is(err, authz.ErrForbidden) ||
+			errors.Is(err, authz.ErrProjectForbidden) || errors.Is(err, projects.ErrNotFound) || errors.Is(err, ErrUnauthenticated) {
+			return Invitation{}, "", false, err
+		}
+		return Invitation{}, "", false, fmt.Errorf("auth: create invitation: %w", err)
+	}
+	return inv, token, to != "", nil
+}
+
+// validateInvitation checks the input and returns the trimmed label and the normalised address to
+// mail the link to ("" when no mail is sent). All field problems are reported together, in the
+// order label, email, role.
+func (s *Service) validateInvitation(ctx context.Context, in InvitationInput) (label, to string, err error) {
+	label = strings.TrimSpace(in.Label)
 	var verr validation.Error
 	if utf8.RuneCountInString(label) > maxInvitationLabel {
 		verr.Add("label", fmt.Sprintf("must be at most %d characters", maxInvitationLabel))
 	}
-	to := ""
 	sendMail := strings.TrimSpace(in.Email) != ""
 	if in.SendEmail != nil {
 		sendMail = *in.SendEmail
@@ -164,106 +201,108 @@ func (s *Service) CreateInvitationFor(ctx context.Context, a Actor, in Invitatio
 		verr.Add("role", `must be "owner", "maintainer", "member" or "viewer"`)
 	}
 	if err := verr.Err(); err != nil {
-		return Invitation{}, "", false, err
+		return "", "", err
 	}
-	if to != "" && label == "" && utf8.RuneCountInString(to) <= maxInvitationLabel {
-		label = to
+	return label, to, nil
+}
+
+// insertInvitation runs inside the tenant transaction: permissions, then the member quota, then the
+// row, the optional mail and the audit entry. It fills inv.CreatedBy and inv.ProjectName.
+func (s *Service) insertInvitation(ctx context.Context, tx pgx.Tx, a Actor, in InvitationInput, inv *Invitation, token, to string) error {
+	q := authdb.New(tx)
+	projectName, err := checkInvitePermission(ctx, tx, q, a, in, inv)
+	if err != nil {
+		return err
 	}
-	if token, err = newToken(); err != nil {
-		return Invitation{}, "", false, err
+	// Permissions first: a refused request must not report a full quota.
+	if err := plans.CheckCreate(ctx, tx, a.TenantID, plans.ResourceMember); err != nil {
+		return err
+	}
+	u, err := q.GetUserByID(ctx, a.UserID)
+	if err != nil {
+		return fmt.Errorf("get creator: %w", err)
+	}
+	inv.CreatedBy = u.Email
+	if err := q.InsertInvitation(ctx, authdb.InsertInvitationParams{
+		ID: inv.ID, TenantID: a.TenantID, Role: inv.Role, Label: inv.Label, TokenHash: hashToken(token),
+		CreatedBy: a.UserID, CreatedAt: inv.CreatedAt, ExpiresAt: inv.ExpiresAt, ProjectID: in.ProjectID,
+	}); err != nil {
+		return fmt.Errorf("insert invitation: %w", err)
 	}
 	if to != "" {
-		if err := s.reserveInvitationMail(ctx, a.TenantID, to); err != nil {
-			return Invitation{}, "", false, err
-		}
-	}
-	now := s.clock.Now()
-	inv = Invitation{ID: uuidv7.New(), Role: in.Role, ProjectID: in.ProjectID, Label: label, Status: InvitationOpen, CreatedAt: now, ExpiresAt: now.Add(InvitationTTL)}
-	err = db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
-		q := authdb.New(tx)
-		role := authz.Owner
-		if !a.platform {
-			r, err := q.GetMembershipRole(ctx, authdb.GetMembershipRoleParams{TenantID: a.TenantID, UserID: a.UserID})
-			if err != nil {
-				return ErrUnauthenticated
-			}
-			role = authz.Role(r)
-		}
-		who := authz.Actor{UserID: a.UserID, Role: role}
-		var projectName string
-		if in.ProjectID != nil {
-			if !a.platform {
-				if who.Projects, err = projects.AccessIn(ctx, tx, a.TenantID, a.UserID); err != nil {
-					return err
-				}
-			}
-			if projectName, err = projects.CheckInvite(ctx, tx, a.TenantID, *in.ProjectID, who, authz.Role(inv.Role)); err != nil {
-				return err
-			}
-			inv.ProjectName = &projectName
-		} else if (!a.platform || authz.Role(inv.Role) != authz.Owner) && !authz.CanInvite(who, authz.Role(inv.Role)) {
-			return authz.ErrForbidden
-		}
-		// Permissions first: a refused request must not report a full quota.
-		if err := plans.CheckCreate(ctx, tx, a.TenantID, plans.ResourceMember); err != nil {
+		if err := s.queueInvitationMail(ctx, tx, a, in, *inv, token, to, projectName, u.DisplayName); err != nil {
 			return err
 		}
-		u, err := q.GetUserByID(ctx, a.UserID)
+	}
+	return audit.Record(ctx, tx, audit.Entry{
+		TenantID: a.TenantID, ActorUserID: &a.UserID, Action: a.action(ActionMemberInvited),
+		EntityType: "invitation", EntityID: inv.ID.String(), IP: a.IP, Metadata: invitationAuditMeta(a, in, *inv, to != ""),
+	})
+}
+
+// checkInvitePermission refuses an actor who may not invite this role (into this project) and
+// returns the project's name for a project invitation, also stored in inv.ProjectName.
+func checkInvitePermission(ctx context.Context, tx pgx.Tx, q *authdb.Queries, a Actor, in InvitationInput, inv *Invitation) (projectName string, err error) {
+	role := authz.Owner
+	if !a.platform {
+		r, err := q.GetMembershipRole(ctx, authdb.GetMembershipRoleParams{TenantID: a.TenantID, UserID: a.UserID})
 		if err != nil {
-			return fmt.Errorf("get creator: %w", err)
+			return "", ErrUnauthenticated
 		}
-		inv.CreatedBy = u.Email
-		if err := q.InsertInvitation(ctx, authdb.InsertInvitationParams{
-			ID: inv.ID, TenantID: a.TenantID, Role: inv.Role, Label: inv.Label, TokenHash: hashToken(token),
-			CreatedBy: a.UserID, CreatedAt: inv.CreatedAt, ExpiresAt: inv.ExpiresAt, ProjectID: in.ProjectID,
-		}); err != nil {
-			return fmt.Errorf("insert invitation: %w", err)
+		role = authz.Role(r)
+	}
+	who := authz.Actor{UserID: a.UserID, Role: role}
+	if in.ProjectID == nil {
+		if (!a.platform || authz.Role(inv.Role) != authz.Owner) && !authz.CanInvite(who, authz.Role(inv.Role)) {
+			return "", authz.ErrForbidden
 		}
-		meta := map[string]any{"role": inv.Role, "expiresAt": inv.ExpiresAt.UTC().Format(time.RFC3339)}
+		return "", nil
+	}
+	if !a.platform {
+		if who.Projects, err = projects.AccessIn(ctx, tx, a.TenantID, a.UserID); err != nil {
+			return "", err
+		}
+	}
+	if projectName, err = projects.CheckInvite(ctx, tx, a.TenantID, *in.ProjectID, who, authz.Role(inv.Role)); err != nil {
+		return "", err
+	}
+	inv.ProjectName = &projectName
+	return projectName, nil
+}
+
+// queueInvitationMail queues the link mail in the invitation's transaction.
+func (s *Service) queueInvitationMail(ctx context.Context, tx pgx.Tx, a Actor, in InvitationInput, inv Invitation, token, to, projectName, inviter string) error {
+	t, err := tenants.Get(ctx, tx, a.TenantID)
+	if err != nil {
+		return err
+	}
+	// Only this organization's name and the inviter's display name go into the message:
+	// the inviter's login is an address and is not shared with the invitee.
+	params := map[string]string{"token": token, "org": t.Name, "role": inv.Role, "inviter": inviter, "expires": "7 days"}
+	if in.ProjectID != nil {
+		params["project"] = projectName
+	}
+	return s.mail.Enqueue(ctx, tx, mail.Request{Kind: mail.KindInvitation, To: to, ExpiresAt: inv.ExpiresAt, Params: params})
+}
+
+// invitationAuditMeta is the metadata of the audit entry: the platform admin's entry always says
+// whether it was emailed and has no expiry, a customer's says so only when it was.
+func invitationAuditMeta(a Actor, in InvitationInput, inv Invitation, emailed bool) map[string]any {
+	if a.platform {
+		meta := map[string]any{"role": inv.Role, "emailed": emailed}
 		if in.ProjectID != nil {
 			meta["projectId"] = in.ProjectID.String()
 		}
-		if to != "" {
-			t, err := tenants.Get(ctx, tx, a.TenantID)
-			if err != nil {
-				return err
-			}
-			// Only this organization's name and the inviter's display name go into the message:
-			// the inviter's login is an address and is not shared with the invitee.
-			params := map[string]string{"token": token, "org": t.Name, "role": inv.Role, "inviter": u.DisplayName, "expires": "7 days"}
-			if in.ProjectID != nil {
-				params["project"] = projectName
-			}
-			if err := s.mail.Enqueue(ctx, tx, mail.Request{
-				Kind: mail.KindInvitation, To: to, ExpiresAt: inv.ExpiresAt, Params: params,
-			}); err != nil {
-				return err
-			}
-			meta["emailed"] = true
-		}
-		if a.platform {
-			meta = map[string]any{"role": inv.Role, "emailed": to != ""}
-			if in.ProjectID != nil {
-				meta["projectId"] = in.ProjectID.String()
-			}
-		}
-		return audit.Record(ctx, tx, audit.Entry{
-			TenantID: a.TenantID, ActorUserID: &a.UserID, Action: a.action(ActionMemberInvited),
-			EntityType: "invitation", EntityID: inv.ID.String(), IP: a.IP, Metadata: meta,
-		})
-	})
-	if err != nil {
-		if to != "" {
-			s.refundInvitationMail(a.TenantID, to)
-		}
-		var limit *plans.LimitError
-		if errors.As(err, &limit) || errors.Is(err, authz.ErrForbidden) ||
-			errors.Is(err, authz.ErrProjectForbidden) || errors.Is(err, projects.ErrNotFound) || errors.Is(err, ErrUnauthenticated) {
-			return Invitation{}, "", false, err
-		}
-		return Invitation{}, "", false, fmt.Errorf("auth: create invitation: %w", err)
+		return meta
 	}
-	return inv, token, to != "", nil
+	meta := map[string]any{"role": inv.Role, "expiresAt": inv.ExpiresAt.UTC().Format(time.RFC3339)}
+	if in.ProjectID != nil {
+		meta["projectId"] = in.ProjectID.String()
+	}
+	if emailed {
+		meta["emailed"] = true
+	}
+	return meta
 }
 
 func invitationMailKeys(tenantID uuid.UUID, to string) (tenantKey, recipientKey string) {
