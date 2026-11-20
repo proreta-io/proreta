@@ -283,7 +283,7 @@ jobs:
           go install github.com/oasdiff/oasdiff@v1.37.0
           # Exceptions need an ADR and go into api/oasdiff-err-ignore.txt (empty from 1.0).
           "$(go env GOPATH)/bin/oasdiff" breaking "${RUNNER_TEMP}/base-openapi.yaml" "${RUNNER_TEMP}/head-openapi.yaml" --fail-on ERR \
-            --err-ignore api/oasdiff-err-ignore.txt
+            --err-ignore api/oasdiff-err-ignore.txt --severity-levels api/oasdiff-severity-levels.txt
 
   web:
     needs: changes
