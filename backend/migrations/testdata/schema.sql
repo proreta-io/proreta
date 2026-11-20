@@ -3560,7 +3560,8 @@ BEGIN
        OR (p_error IS NOT NULL AND p_error NOT IN ('txt-missing', 'txt-mismatch', 'cname-missing', 'cname-wrong', 'dns-error')) THEN
         RAISE EXCEPTION 'status page domain: invalid check result' USING ERRCODE = 'PRD01';
     END IF;
-    IF v_ctx IS NOT NULL AND v_ctx <> p_tenant::text THEN
+    -- the worker works across tenants; the api only inside its own tenant transaction
+    IF (v_ctx IS NULL AND session_user = 'proreta_api') OR (v_ctx IS NOT NULL AND v_ctx <> p_tenant::text) THEN
         RAISE EXCEPTION 'status page domain: wrong tenant' USING ERRCODE = 'PRD02';
     END IF;
     SELECT * INTO d FROM status_page_domains AS x WHERE x.tenant_id = p_tenant AND x.id = p_id AND x.released_at IS NULL FOR UPDATE;
