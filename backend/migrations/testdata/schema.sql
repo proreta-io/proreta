@@ -878,6 +878,7 @@ CREATE TRIGGER tenants_create_default_project AFTER INSERT ON public.tenants FOR
 admin_audit(uuid,uuid,uuid,text,text,text,jsonb,inet) owner=proreta_owner definer=false acl=proreta_owner=X/proreta_owner
 admin_create_tenant(uuid,uuid,text,text,text,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_delete_tenant(uuid,uuid,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
+admin_discard_new_tenant(uuid,uuid,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_email_settings_clear(uuid,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_email_settings_get(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 admin_email_settings_set_features(uuid,boolean,boolean,boolean,uuid,inet) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
@@ -1058,6 +1059,32 @@ BEGIN
     UPDATE tenants SET deleted_at = now(), status = 'suspended', updated_at = now() WHERE id = p_tenant_id;
     PERFORM admin_audit(p_tenant_id, p_actor, p_audit_id, 'admin.organization.deleted', 'organization', p_tenant_id::text,
                         jsonb_build_object('status', v_status, 'plan', v_plan), p_ip);
+    RETURN true;
+END
+$function$
+CREATE OR REPLACE FUNCTION public.admin_discard_new_tenant(p_actor uuid, p_tenant_id uuid, p_audit_id uuid, p_ip inet)
+ RETURNS boolean
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_plan text;
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    -- Undo of a creation whose first owner could not be added: only an organization without any
+    -- member, ten minutes old at most, and it gives its slug back (a deleted tenant keeps its slug).
+    UPDATE tenants AS t
+    SET deleted_at = now(), status = 'suspended', updated_at = now(), slug = 'discarded-' || replace(t.id::text, '-', '')
+    WHERE t.id = p_tenant_id AND t.deleted_at IS NULL AND t.slug <> 'default'
+      AND t.created_at > now() - interval '10 minutes'
+      AND NOT EXISTS (SELECT 1 FROM memberships AS m WHERE m.tenant_id = t.id)
+    RETURNING t.plan_key INTO v_plan;
+    IF NOT FOUND THEN
+        RETURN false;
+    END IF;
+    PERFORM admin_audit(p_tenant_id, p_actor, p_audit_id, 'admin.organization.deleted', 'organization', p_tenant_id::text,
+                        jsonb_build_object('plan', v_plan, 'discarded', true), p_ip);
     RETURN true;
 END
 $function$

@@ -57,6 +57,7 @@ var definerAllowList = map[string][]string{
 	"admin_create_tenant":       {"proreta_api"},
 	"admin_set_tenant_status":   {"proreta_api"},
 	"admin_delete_tenant":       {"proreta_api"},
+	"admin_discard_new_tenant":  {"proreta_api"},
 	"admin_list_users":          {"proreta_api"},
 	"admin_reset_user_password": {"proreta_api"},
 	"admin_stats":               {"proreta_api"},

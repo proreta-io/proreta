@@ -73,6 +73,7 @@ var definerCalls = map[string]string{
 	"admin_create_tenant":         `SELECT admin_create_tenant(gen_random_uuid(), gen_random_uuid(), 'x', 'X', 'internal', gen_random_uuid(), NULL)`,
 	"admin_set_tenant_status":     `SELECT admin_set_tenant_status(gen_random_uuid(), gen_random_uuid(), 'active', gen_random_uuid(), NULL)`,
 	"admin_delete_tenant":         `SELECT admin_delete_tenant(gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), NULL)`,
+	"admin_discard_new_tenant":    `SELECT admin_discard_new_tenant(gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), NULL)`,
 	"admin_list_users":            `SELECT * FROM admin_list_users(gen_random_uuid(), gen_random_uuid(), '', 1, 0)`,
 	"admin_reset_user_password":   `SELECT * FROM admin_reset_user_password(gen_random_uuid(), gen_random_uuid(), '$argon2id$x', gen_random_uuid(), NULL)`,
 	"admin_stats":                 `SELECT admin_stats(gen_random_uuid())`,

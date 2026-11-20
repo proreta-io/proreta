@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -47,8 +48,8 @@ type TenantCreated struct {
 
 // CreateTenant creates an organization with its default project and a first owner, so it is never
 // left unreachable. The owner step runs after the tenant exists (the member services work in the
-// organization's own transaction); when it fails the new organization is deleted again and the
-// error returned.
+// organization's own transaction); when it fails the new organization is discarded (deleted, slug
+// released) and the error returned.
 func (s *Service) CreateTenant(ctx context.Context, actor Actor, in TenantCreate) (TenantCreated, error) {
 	var verr validation.Error
 	name := strings.TrimSpace(in.Name)
@@ -80,8 +81,8 @@ func (s *Service) CreateTenant(ctx context.Context, actor Actor, in TenantCreate
 	}
 	out := TenantCreated{}
 	if err := s.addFirstOwner(ctx, actor, id, email, &out); err != nil {
-		// Best effort: the organization has no owner, so it must not stay behind.
-		if derr := s.DeleteTenant(ctx, actor, id); derr != nil {
+		// Best effort: the organization has no owner, so it must not stay behind; its slug is released.
+		if derr := s.discardNewTenant(ctx, actor, id); derr != nil {
 			s.log.ErrorContext(ctx, "delete organization left without an owner", "tenant_id", id, "error", derr)
 		}
 		return TenantCreated{}, err
@@ -91,6 +92,17 @@ func (s *Service) CreateTenant(ctx context.Context, actor Actor, in TenantCreate
 	}
 	s.recorded(ctx, ActionCreated, "tenant_id", id, "plan_key", plan)
 	return out, nil
+}
+
+// discardNewTenant undoes a creation that failed before it got an owner. It uses a fresh context
+// so a cancelled request still cleans up.
+func (s *Service) discardNewTenant(ctx context.Context, actor Actor, id uuid.UUID) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	return db.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		_, err := callChange(ctx, tx, `SELECT admin_discard_new_tenant($1, $2, $3, $4)`, actor.UserID, id, uuidv7.New(), actor.ip())
+		return err
+	})
 }
 
 func (s *Service) insertTenant(ctx context.Context, actor Actor, slug *string, name, plan string) (id uuid.UUID, err error) {

@@ -2571,6 +2571,35 @@ REVOKE ALL ON FUNCTION admin_create_tenant(uuid,uuid,text,text,text,uuid,inet) F
 GRANT EXECUTE ON FUNCTION admin_create_tenant(uuid,uuid,text,text,text,uuid,inet) TO proreta_api;
 
 -- +goose StatementBegin
+CREATE FUNCTION admin_discard_new_tenant(p_actor uuid, p_tenant_id uuid, p_audit_id uuid, p_ip inet) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+    v_plan text;
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    -- Undo of a creation whose first owner could not be added: only an organization without any
+    -- member, ten minutes old at most, and it gives its slug back (a deleted tenant keeps its slug).
+    UPDATE tenants AS t
+    SET deleted_at = now(), status = 'suspended', updated_at = now(), slug = 'discarded-' || replace(t.id::text, '-', '')
+    WHERE t.id = p_tenant_id AND t.deleted_at IS NULL AND t.slug <> 'default'
+      AND t.created_at > now() - interval '10 minutes'
+      AND NOT EXISTS (SELECT 1 FROM memberships AS m WHERE m.tenant_id = t.id)
+    RETURNING t.plan_key INTO v_plan;
+    IF NOT FOUND THEN
+        RETURN false;
+    END IF;
+    PERFORM admin_audit(p_tenant_id, p_actor, p_audit_id, 'admin.organization.deleted', 'organization', p_tenant_id::text,
+                        jsonb_build_object('plan', v_plan, 'discarded', true), p_ip);
+    RETURN true;
+END
+$$;
+-- +goose StatementEnd
+REVOKE ALL ON FUNCTION admin_discard_new_tenant(uuid,uuid,uuid,inet) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION admin_discard_new_tenant(uuid,uuid,uuid,inet) TO proreta_api;
+
+-- +goose StatementBegin
 CREATE FUNCTION admin_delete_tenant(p_actor uuid, p_tenant_id uuid, p_audit_id uuid, p_ip inet) RETURNS boolean
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public', 'pg_temp'

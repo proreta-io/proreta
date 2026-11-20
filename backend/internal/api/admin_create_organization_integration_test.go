@@ -94,7 +94,7 @@ func TestIntegrationAdminCreateOrganization(t *testing.T) {
 		}
 	})
 
-	t.Run("an owner that cannot be added removes the organization again", func(t *testing.T) {
+	t.Run("an owner that cannot be added releases its slug", func(t *testing.T) {
 		pgtest.MustExec(t, env.AdminConn(t), pgtest.CappedPlanSQL)
 		if _, err := env.AdminConn(t).Exec(t.Context(), `UPDATE plans SET limits = limits || '{"max_members":0}' WHERE key = 'capped'`); err != nil {
 			t.Fatal(err)
@@ -103,8 +103,19 @@ func TestIntegrationAdminCreateOrganization(t *testing.T) {
 		if r.code != http.StatusConflict || !strings.Contains(r.raw, "plan-limit-reached") {
 			t.Fatalf("over the limit: %d %s", r.code, r.raw)
 		}
-		if n := countRows(t, env, `SELECT count(*) FROM tenants WHERE slug = 'full' AND deleted_at IS NOT NULL`); n != 1 {
-			t.Fatalf("deleted tenant rows: %d", n)
+		if n := countRows(t, env, `SELECT count(*) FROM tenants WHERE slug = 'full'`); n != 0 {
+			t.Fatalf("tenants still holding the slug: %d", n)
+		}
+		if n := countRows(t, env, `SELECT count(*) FROM tenants WHERE deleted_at IS NOT NULL AND slug <> 'full' AND name = 'Full'`); n != 1 {
+			t.Fatalf("discarded tenant rows: %d", n)
+		}
+		// The slug is free again for a creation that works.
+		pgtest.MustExec(t, env.AdminConn(t), pgtest.CappedPlanSQL)
+		if _, err := env.AdminConn(t).Exec(t.Context(), `UPDATE plans SET limits = limits || '{"max_members":3}' WHERE key = 'capped'`); err != nil {
+			t.Fatal(err)
+		}
+		if r := c.do(http.MethodPost, path, `{"name":"Full","slug":"full","planKey":"capped","ownerEmail":"alice@alpha.example"}`, ah); r.code != http.StatusCreated {
+			t.Fatalf("retry with the same slug: %d %s", r.code, r.raw)
 		}
 	})
 
