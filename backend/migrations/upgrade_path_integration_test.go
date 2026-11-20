@@ -56,7 +56,7 @@ func applyExtra(t *testing.T, env *pgtest.Env, extra map[string]string) int {
 // new file's name (its SQL is already embedded, so extra is empty) and asserts what the
 // migration promises for existing rows. The synthetic migration here exercises the rules every
 // migration follows: lock_timeout first, a constant-default column on a table with rows, and the
-// default privileges that give runtime roles access to a new table.
+// rule that a new table is closed to the runtime roles until the migration grants them access.
 func TestIntegrationUpgradePath(t *testing.T) {
 	env := pgtest.New(t, pgtest.DBName("upgrade"))
 	ctx := context.Background()
@@ -70,6 +70,7 @@ func TestIntegrationUpgradePath(t *testing.T) {
 SET LOCAL lock_timeout = '5s';
 ALTER TABLE monitors ADD COLUMN upgrade_probe text NOT NULL DEFAULT 'filled';
 CREATE TABLE upgrade_probe (id uuid PRIMARY KEY);
+GRANT SELECT, INSERT ON upgrade_probe TO proreta_api;
 `})
 	if n != 1 {
 		t.Fatalf("applied %d migrations, want 1", n)
@@ -80,7 +81,12 @@ CREATE TABLE upgrade_probe (id uuid PRIMARY KEY);
 	}
 	api := env.Conn(t, env.APIURL)
 	if _, err := api.Exec(ctx, `INSERT INTO upgrade_probe (id) VALUES (gen_random_uuid())`); err != nil {
-		t.Fatalf("default privileges on a new table: %v", err)
+		t.Fatalf("explicit grant on a new table: %v", err)
+	}
+	// No default privileges: the worker got no grant, so the new table stays closed to it.
+	worker := env.Conn(t, env.WorkerURL)
+	if _, err := worker.Exec(ctx, `SELECT 1 FROM upgrade_probe`); err == nil {
+		t.Fatal("worker can read a new table that was never granted to it")
 	}
 	if v := schemaViolations(t, ctx, admin); len(v) > 0 {
 		t.Fatalf("schema lint after the upgrade: %v", v)

@@ -515,14 +515,14 @@ monitor_state monitor_state_tenant_id_monitor_id_fkey FOREIGN KEY (tenant_id, mo
 monitors monitors_check CHECK (((timeout_seconds > 0) AND (timeout_seconds < interval_seconds)))
 monitors monitors_config_check CHECK ((jsonb_typeof(config) = 'object'::text))
 monitors monitors_failure_threshold_check CHECK (((failure_threshold >= 1) AND (failure_threshold <= 3)))
+monitors monitors_fixed_interval CHECK (((type = 'heartbeat'::text) OR (interval_seconds = 60)))
+monitors monitors_fixed_timeout CHECK (((type = 'heartbeat'::text) OR (timeout_seconds = 10)))
 monitors monitors_heartbeat_check CHECK (((type <> 'heartbeat'::text) OR (((interval_seconds >= 60) AND (interval_seconds <= 86400)) AND (failure_threshold = 1) AND
 CASE
     WHEN ((jsonb_typeof((config -> 'graceSeconds'::text)) = 'number'::text) AND ((config ->> 'graceSeconds'::text) ~ '^[0-9]+$'::text)) THEN ((((config ->> 'graceSeconds'::text))::numeric >= (0)::numeric) AND (((config ->> 'graceSeconds'::text))::numeric <= (3600)::numeric))
     ELSE false
 END)))
 monitors monitors_interval_seconds_check CHECK ((interval_seconds > 0))
-monitors monitors_mvp_interval CHECK (((type = 'heartbeat'::text) OR (interval_seconds = 60)))
-monitors monitors_mvp_timeout CHECK (((type = 'heartbeat'::text) OR (timeout_seconds = 10)))
 monitors monitors_name_check CHECK (((char_length(name) >= 1) AND (char_length(name) <= 80)))
 monitors monitors_pkey PRIMARY KEY (id)
 monitors monitors_project_fkey FOREIGN KEY (tenant_id, project_id) REFERENCES projects(tenant_id, id)
@@ -704,6 +704,7 @@ CREATE UNIQUE INDEX heartbeat_tokens_tenant_id_monitor_id_key ON public.heartbea
 CREATE UNIQUE INDEX heartbeat_tokens_token_hash_key ON public.heartbeat_tokens USING btree (token_hash)
 CREATE INDEX incident_monitors_monitor_idx ON public.incident_monitors USING btree (tenant_id, monitor_id)
 CREATE UNIQUE INDEX incident_monitors_pkey ON public.incident_monitors USING btree (incident_id, monitor_id)
+CREATE INDEX incidents_monitor_started_idx ON public.incidents USING btree (tenant_id, monitor_id, started_at DESC)
 CREATE UNIQUE INDEX incidents_one_open_per_monitor_idx ON public.incidents USING btree (monitor_id) WHERE ((resolved_at IS NULL) AND (monitor_id IS NOT NULL))
 CREATE UNIQUE INDEX incidents_one_open_per_specula_idx ON public.incidents USING btree (specula_id) WHERE ((resolved_at IS NULL) AND (specula_id IS NOT NULL))
 CREATE UNIQUE INDEX incidents_pkey ON public.incidents USING btree (id)
@@ -961,8 +962,6 @@ specula_create(uuid,text,bytea,boolean,uuid[],uuid) owner=proreta_owner definer=
 specula_delivery_context(uuid,uuid) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_epoch_close(uuid,uuid,uuid) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner
 specula_epoch_open(uuid,uuid,uuid) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner
-specula_hello(uuid,text,text) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
-specula_hello(uuid,text,text,text[],text,timestamp with time zone,integer,timestamp with time zone,boolean) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_hello(uuid,text,text,text[],text,timestamp with time zone,integer,timestamp with time zone,boolean,bigint) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_mark_unreachable(interval) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_revoke(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
@@ -987,8 +986,6 @@ webhook_delivery_context(uuid) owner=proreta_owner definer=true acl=proreta_owne
 
 -- default privileges
 proreta_owner * f proreta_owner=X/proreta_owner
-proreta_owner public S proreta_api=rU/proreta_owner,proreta_worker=rU/proreta_owner
-proreta_owner public r proreta_api=arwd/proreta_owner,proreta_worker=arwd/proreta_owner
 
 -- functions
 CREATE OR REPLACE FUNCTION public.admin_audit(p_tenant_id uuid, p_actor uuid, p_audit_id uuid, p_action text, p_entity_type text, p_entity_id text, p_metadata jsonb, p_ip inet)
@@ -3287,41 +3284,6 @@ BEGIN
     VALUES (p_tenant, p_monitor, p_location, nxt, start + phase, ival, now());
     RETURN nxt;
 END
-$function$
-CREATE OR REPLACE FUNCTION public.specula_hello(p_specula_id uuid, p_version text, p_hostname text)
- RETURNS boolean
- LANGUAGE sql
- SECURITY DEFINER
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-    WITH u AS (
-        UPDATE specula_agents SET version = left(p_version, 64), hostname = left(p_hostname, 253), last_seen_at = now()
-        WHERE id = p_specula_id AND revoked_at IS NULL
-        RETURNING 1
-    )
-    SELECT EXISTS (SELECT 1 FROM u)
-$function$
-CREATE OR REPLACE FUNCTION public.specula_hello(p_specula_id uuid, p_version text, p_hostname text, p_capabilities text[], p_instance_id text, p_schedule_issued_at timestamp with time zone, p_buffer_depth integer, p_oldest_unsent_at timestamp with time zone, p_buffer_degraded boolean)
- RETURNS boolean
- LANGUAGE sql
- SECURITY DEFINER
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-    WITH u AS (
-        UPDATE specula_agents SET
-            version = left(p_version, 64),
-            hostname = left(p_hostname, 253),
-            capabilities = coalesce(p_capabilities, '{}'),
-            instance_id = left(p_instance_id, 64),
-            schedule_issued_at = p_schedule_issued_at,
-            buffer_depth = p_buffer_depth,
-            oldest_unsent_at = p_oldest_unsent_at,
-            buffer_degraded = coalesce(p_buffer_degraded, false),
-            last_seen_at = now()
-        WHERE id = p_specula_id AND revoked_at IS NULL
-        RETURNING 1
-    )
-    SELECT EXISTS (SELECT 1 FROM u)
 $function$
 CREATE OR REPLACE FUNCTION public.specula_hello(p_specula_id uuid, p_version text, p_hostname text, p_capabilities text[], p_instance_id text, p_schedule_issued_at timestamp with time zone, p_buffer_depth integer, p_oldest_unsent_at timestamp with time zone, p_buffer_degraded boolean, p_clock_offset_ms bigint)
  RETURNS TABLE(found boolean, duplicate boolean)

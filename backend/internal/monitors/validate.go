@@ -15,7 +15,7 @@ const (
 )
 
 // Fixed check settings of http monitors: every check runs once a minute with a 10 s deadline.
-// The database enforces them too (the monitors_mvp_* constraints).
+// The database enforces them too (the monitors_fixed_* constraints).
 const (
 	IntervalSeconds         = 60
 	TimeoutSeconds          = 10
