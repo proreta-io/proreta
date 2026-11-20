@@ -648,7 +648,7 @@ func (s *Service) checkPassword(ctx context.Context, login, password string) (*U
 	if row == nil {
 		return nil, uuid.Nil, credential{}, false, nil
 	}
-	u := &User{ID: row.ID, Login: row.Email, DisplayName: row.DisplayName, IsPlatformAdmin: row.IsPlatformAdmin, IsSystemAdmin: row.IsSystemAdmin, MustChangePassword: row.PasswordMustChange, EmailVerified: row.EmailVerifiedAt != nil}
+	u := &User{ID: row.ID, Login: row.Email, DisplayName: row.DisplayName, IsPlatformAdmin: row.IsPlatformAdmin, IsSystemAdmin: row.IsSystemAdmin, MustChangePassword: s.mustChange(row.PasswordMustChange, row.Email), EmailVerified: row.EmailVerifiedAt != nil}
 	ok := match && hash != s.dummy && row.Status == userStatusActive
 	var cred credential
 	if ok {
@@ -806,13 +806,14 @@ func (s *Service) Authenticate(ctx context.Context, token string) (Principal, er
 			return fmt.Errorf("get membership: %w", err)
 		}
 		p.Role = role
-		p.MustChangePassword, err = authdb.New(tx).GetPasswordMustChange(ctx, p.UserID)
+		flag, err := authdb.New(tx).GetPasswordMustChange(ctx, p.UserID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrUnauthenticated
 		}
 		if err != nil {
 			return fmt.Errorf("get password flag: %w", err)
 		}
+		p.MustChangePassword = s.mustChange(flag.PasswordMustChange, flag.Email)
 		return nil
 	})
 	if errors.Is(err, ErrUnauthenticated) {
@@ -860,7 +861,7 @@ func (s *Service) Me(ctx context.Context, p Principal) (SessionInfo, error) {
 			return err
 		}
 		info = SessionInfo{
-			User:   User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, IsPlatformAdmin: u.IsPlatformAdmin, IsSystemAdmin: u.IsSystemAdmin, MustChangePassword: u.PasswordMustChange, EmailVerified: u.EmailVerifiedAt != nil},
+			User:   User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, IsPlatformAdmin: u.IsPlatformAdmin, IsSystemAdmin: u.IsSystemAdmin, MustChangePassword: s.mustChange(u.PasswordMustChange, u.Email), EmailVerified: u.EmailVerifiedAt != nil},
 			Tenant: t, Role: role, CSRFToken: p.CSRFToken, ExpiresAt: p.ExpiresAt,
 		}
 		return nil

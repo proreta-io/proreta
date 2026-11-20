@@ -618,7 +618,7 @@ func (s *Service) AcceptInvitation(ctx context.Context, p Principal, token strin
 			return err
 		}
 		res = LoginResult{Token: sess.token, SessionInfo: SessionInfo{
-			User: User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, MustChangePassword: u.PasswordMustChange, EmailVerified: u.EmailVerifiedAt != nil}, Tenant: tenant, Role: role,
+			User: User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, MustChangePassword: s.mustChange(u.PasswordMustChange, u.Email), EmailVerified: u.EmailVerifiedAt != nil}, Tenant: tenant, Role: role,
 			CSRFToken: sess.csrf, ExpiresAt: sess.expiresAt,
 		}}
 		return nil
