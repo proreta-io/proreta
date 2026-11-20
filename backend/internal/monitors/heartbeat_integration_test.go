@@ -430,3 +430,23 @@ func TestIntegrationHeartbeatPingWhileUp(t *testing.T) {
 		t.Fatalf("recovery: %+v ping %v applied %v checked %v/%v", s, third, applied, stateChecked, locChecked)
 	}
 }
+
+// A stored state the machine cannot apply to (an open incident the monitor does not point at) is
+// a permanent error: the deadline is marked applied, not retried by every run.
+func TestIntegrationHeartbeatPermanentErrorIsMarkedApplied(t *testing.T) {
+	f := newHBFixture(t, "heartbeatperm")
+	m, _ := f.create(false)
+	pgtest.MustExec(t, f.admin, `INSERT INTO incidents (id, tenant_id, monitor_id, started_at, reason)
+		VALUES (gen_random_uuid(), '`+tenantA+`', '`+m.ID.String()+`', now(), 'stray')`)
+	f.age(m.ID, 91*time.Second)
+	if n := f.evaluate(); n != 0 {
+		t.Fatalf("missed %d, want 0", n)
+	}
+	var due int
+	if err := f.admin.QueryRow(f.ctx, `SELECT count(*) FROM list_due_heartbeats(10)`).Scan(&due); err != nil || due != 0 {
+		t.Fatalf("still due: %d (%v)", due, err)
+	}
+	if n := f.evaluate(); n != 0 {
+		t.Fatalf("second run: %d", n)
+	}
+}
