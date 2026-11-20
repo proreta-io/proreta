@@ -31,19 +31,22 @@ var (
 )
 
 func main() {
-	if err := run(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	err := run(ctx, os.LookupEnv)
+	stop()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "specula:", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
-	cfg, err := config.LoadSpecula(os.LookupEnv)
+func run(ctx context.Context, lookup func(string) (string, bool)) error {
+	cfg, err := config.LoadSpecula(lookup)
 	if err != nil {
 		return err
 	}
 	log := logging.New(os.Stdout, cfg.LogLevel).With("service", "specula", "version", version)
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 	hostname, _ := os.Hostname()
 

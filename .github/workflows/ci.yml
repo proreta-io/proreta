@@ -241,6 +241,17 @@ jobs:
           "$(go env GOPATH)/bin/govulncheck" ./...
       - name: Test
         run: make test
+      # No gate for now; the number is for reading.
+      - name: Coverage report
+        if: matrix.postgres == '16'
+        working-directory: backend
+        run: go tool cover -func=coverage.out | tail -n 1 | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        if: matrix.postgres == '16'
+        with:
+          name: backend-coverage
+          path: backend/coverage.out
+          retention-days: 14
       # TEST_DATABASE_ADMIN_URL comes from the job env above, like the normal tests.
       - name: End-to-end test (proretatest build tag)
         run: make test-e2e
