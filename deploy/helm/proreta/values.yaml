@@ -9,7 +9,7 @@ fullnameOverride: ""
 
 image:
   repository: ghcr.io/proreta-io/proreta-backend
-  # A release version such as 1.2.3 (image tags have no leading v) or a build of main,
+  # A release version such as 1.2.3 (image tags have no leading v) or a manual test build,
   # sha-<first 7 hex of the commit>. Empty: the chart's appVersion, which is the release version for
   # a chart installed from oci://ghcr.io/proreta-io/charts/proreta. A chart from a git checkout has
   # no usable appVersion, so the tag is REQUIRED there (rendering fails without it).

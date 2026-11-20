@@ -38,7 +38,7 @@ helm upgrade --install proreta oci://ghcr.io/proreta-io/charts/proreta --version
 - `values.schema.json` strict validation with a title and description per key: Helm rejects a values file with an
   unknown key (for example a typo such as `database.hots`) or a malformed value and names the key.
 - Images: `ghcr.io/proreta-io/proreta-backend` and `ghcr.io/proreta-io/proreta-web` (the Specula executor has its own chart and image, `proreta-specula`), tagged `X.Y.Z` for releases and
-  `sha-<7 hex>` for builds of `main` (`.github/workflows/release.yml`).
+  `sha-<7 hex>` for manual test builds (`.github/workflows/release.yml`).
 
 ## Values reference
 
@@ -133,7 +133,7 @@ database Secret each workload reads (below) and the database role names.
 version there (`helm package --app-version X.Y.Z`); the chart in a git checkout has the placeholder `0.0.0`, so there
 `image.tag` is required and rendering fails without it. Pick
 - a release version, for example `1.2.3` (the Git tag is `v1.2.3`, the image tag has no `v`), or
-- a build of `main`: `sha-` plus the first 7 hex digits of the commit, for example `sha-1a2b3c4`.
+- a manual test build of one commit (release workflow run by hand): `sha-` plus the first 7 hex digits of the commit, for example `sha-1a2b3c4`. To test a build of the whole release path, push a pre-release tag `vX.Y.Z-rc.N`.
 
 To pin the images by content instead of by tag, set `image.digest` and `web.image.digest` (`docker buildx imagetools inspect ghcr.io/proreta-io/proreta-backend:X.Y.Z` prints the `Digest:`). The digest takes precedence over the tag in the pod image reference; the tag is still used for labels. Verify the digest against the release attestation first (`docs/install.md`).
 

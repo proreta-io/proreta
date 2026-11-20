@@ -1,10 +1,11 @@
 name: release
 
-# Tests run on the pull request and on every push to main (ci.yml, required check `ci-ok`). A tag
-# build runs ci.yml first (job `ci`) and publishes nothing unless it is green; a push to main builds
-# images without waiting for it.
-# Builds and pushes the multi-arch backend and web images to ghcr.io.
-# - push to main: tags `sha-<7 hex>` and `main`.
+# Tests run on the pull request and on every push to main (ci.yml, required check `ci-ok`); a merge to
+# main publishes nothing. Images are published only for release tags and by a manual run.
+# A tag build runs ci.yml first (job `ci`) and publishes nothing unless it is green.
+# Builds and pushes the multi-arch backend, web and Specula images to ghcr.io.
+# - manual run (workflow_dispatch) on a branch: tag `sha-<7 hex>` only, no CI gate; use it for a test build
+#   of an unmerged commit. A pre-release tag vX.Y.Z-rc.N tests the whole release path.
 # - tag vX.Y.Z: tags `X.Y.Z`, `X.Y` and `X` (semver, no `latest`; no moving `X` while X is 0), and the Helm charts as the OCI
 #   artifacts oci://ghcr.io/proreta-io/charts/proreta and .../proreta-specula, version X.Y.Z (job `chart`, tags only; a
 #   prerelease tag vX.Y.Z-rc.1 gives the chart version X.Y.Z-rc.1).
@@ -14,17 +15,9 @@ name: release
 # (actions/attest-build-provenance; verify with `gh attestation verify`, docs/install.md).
 # Every image carries the labels org.opencontainers.image.revision (the commit) and
 # org.opencontainers.image.source. The workflow only publishes images; it never commits.
-# Path filters apply to branch pushes only; GitHub does not evaluate them for tag pushes.
 on:
   push:
-    branches: [main]
     tags: ["v*.*.*"]
-    paths:
-      - backend/**
-      - api/**
-      - Dockerfile
-      - web/**
-      - .github/workflows/release.yml
   workflow_dispatch:
 
 # Serialise releases per ref; never cancel a run that is pushing an image.
@@ -71,10 +64,9 @@ jobs:
       pull-requests: read
 
   image:
-    # Runs for main (ci and verify-tag skipped) and for a tag whose ci passed; never after a failure, and
-    # a manual run from another branch publishes nothing.
+    # A tag run needs its ci to pass; a manual run on a branch skips verify-tag and ci and goes straight here.
     needs: [verify-tag, ci]
-    if: ${{ !cancelled() && !failure() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+    if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -118,8 +110,7 @@ jobs:
           images: ${{ matrix.image }}
           flavor: latest=false
           tags: |
-            type=sha,prefix=sha-,format=short,enable=${{ github.ref == 'refs/heads/main' }}
-            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,prefix=sha-,format=short,enable=${{ !startsWith(github.ref, 'refs/tags/v') }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}},enable=${{ !startsWith(github.ref, 'refs/tags/v0.') }}
@@ -156,7 +147,7 @@ jobs:
           push-to-registry: true
 
   # Tags only: the chart version and appVersion are the release (vX.Y.Z[-pre] -> X.Y.Z[-pre]), so the packaged
-  # chart defaults image.tag to the images built above. Never runs for pushes to main.
+  # chart defaults image.tag to the images built above. Never runs for a manual branch run.
   chart:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: image
