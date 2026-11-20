@@ -36,10 +36,10 @@ info:
     - Problem `type` URNs are stable identifiers: match on them, never on `title` or `detail`.
       New problem types may be added.
     - List endpoints answer an object with `items` (never a bare array) and document their caps;
-      cursor pagination may be added later as optional parameters and response fields, without
+      other lists may gain cursor pagination as optional parameters and response fields, without
       breaking existing clients.
-    - Operations marked `x-experimental: true` (the platform admin API) may change in any
-      release.
+    - Operations marked `x-experimental: true` (the platform admin API and the status page domain
+      operations) may change in any release.
 
     Roles: the same four roles exist at two levels. A role on the organization applies to every
     project of it; a direct role on a project applies to that project only; the effective role in
@@ -5208,7 +5208,7 @@ components:
             type: urn:proreta:problem:plan-limit-reached
             title: Plan limit reached
             status: 409
-            detail: The Free plan allows at most 3 monitors.
+            detail: The Team plan allows at most 3 monitors.
             limit: monitors
             max: 3
     UnprocessableEntity:
@@ -6502,10 +6502,10 @@ components:
       properties:
         key:
           type: string
-          example: free
+          example: internal
         name:
           type: string
-          example: Free
+          example: Internal
     ResourceCounts:
       type: object
       additionalProperties: false
@@ -6603,10 +6603,10 @@ components:
           type: string
         planKey:
           type: string
-          example: free
+          example: internal
         planName:
           type: string
-          example: Free
+          example: Internal
         status:
           $ref: "#/components/schemas/OrganizationStatus"
         createdAt:
