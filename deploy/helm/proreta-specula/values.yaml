@@ -11,6 +11,8 @@ image:
   # oci://ghcr.io/proreta-io/charts/proreta-specula. A chart from a git checkout has no usable
   # appVersion, so the tag is REQUIRED there.
   tag: ""
+  # Optional content digest, sha256:<64 hex>. When set it replaces the tag (repository@digest).
+  digest: ""
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []

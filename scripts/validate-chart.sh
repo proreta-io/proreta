@@ -109,6 +109,20 @@ grep -q 'image: "ghcr.io/proreta-io/proreta-backend:1.2.3"' "$out/packaged-no-ta
 grep -q 'image: "ghcr.io/proreta-io/proreta-web:1.2.3"' "$out/packaged-no-tag.yaml" || { echo "FAIL: packaged chart does not use appVersion 1.2.3 for the web" >&2; exit 1; }
 echo ok
 
+echo "== image digest replaces the tag"
+dg="--set image.digest=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --set web.image.digest=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+# shellcheck disable=SC2086
+helm template proreta "$chart" -n proreta $min $dg >"$out/digest.yaml"
+for ref in 'proreta-backend@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' 'proreta-web@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'; do
+  grep -qF "image: \"ghcr.io/proreta-io/$ref\"" "$out/digest.yaml" || { echo "FAIL: digest render has no image $ref" >&2; exit 1; }
+done
+# The tag form stays when no digest is set, and a backend digest does not touch the web image.
+grep -q 'image: "ghcr.io/proreta-io/proreta-backend:sha-0000000"' "$out/defaults.yaml" || { echo "FAIL: defaults lost the tag form" >&2; exit 1; }
+# shellcheck disable=SC2086
+helm template proreta "$chart" -n proreta $min --set image.digest=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa | grep -q 'image: "ghcr.io/proreta-io/proreta-web:sha-0000000"' || { echo "FAIL: a backend digest changed the web image" >&2; exit 1; }
+renders+=("$out/digest.yaml")
+echo ok
+
 echo "== registration kill switch (PRORETA_REGISTRATION_ENABLED, api only)"
 kill_switch() { grep -A1 'name: PRORETA_REGISTRATION_ENABLED' "$out/$1.yaml" | sed -n 's/.*value: //p'; }
 [ "$(kill_switch defaults)" = '"false"' ] || { echo "FAIL: registration not off by the chart default" >&2; exit 1; }
@@ -211,6 +225,7 @@ expect_fail "External Secrets without a store" -f "$example" "${eso_args[@]}" --
 expect_fail "External Secrets without a store name" --msg "externalSecrets.secretStoreRef.name" -f "$example" --set externalSecrets.enabled=true
 expect_fail "email settings are not chart values" --msg "additional properties 'email' not allowed" --set email.enabled=true
 expect_fail "SMTP Secret is not a chart value" --msg "additional properties 'smtp' not allowed" --set secrets.smtp.existingSecret=x
+expect_fail "malformed image digest" --set image.digest=sha256:abc
 expect_fail "image tag with a leading v" --set image.tag=v1.2.3
 expect_fail "hostname with an inner wildcard" -f "$example" --set "httpRoute.hostnames[0]=a*b.example.com"
 expect_fail "http public URL" --set config.publicUrl=http://proreta.example.com
@@ -446,6 +461,7 @@ helm package "$sp_chart" --version 1.2.3 --app-version 1.2.3 -d "$out/specula-pk
 tar -xzOf "$out/specula-pkg/proreta-specula-1.2.3.tgz" proreta-specula/LICENSE | cmp -s LICENSE - || { echo "FAIL: packaged Specula chart has no LICENSE equal to the repository LICENSE" >&2; exit 1; }
 helm template specula "$out/specula-pkg/proreta-specula-1.2.3.tgz" -n specula --set proreta.url=https://proreta.example.com --set token.existingSecret=specula-token >"$out/specula-packaged.yaml"
 grep -q 'image: "ghcr.io/proreta-io/proreta-backend:1.2.3"' "$out/specula-packaged.yaml" || { echo "FAIL: packaged Specula chart does not use appVersion 1.2.3" >&2; exit 1; }
+helm template specula "$sp_chart" -n specula --set image.digest=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --set proreta.url=https://proreta.example.com --set token.existingSecret=specula-token | grep -qF 'image: "ghcr.io/proreta-io/proreta-backend@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' || { echo "FAIL: Specula chart ignores image.digest" >&2; exit 1; }
 python3 - "$out/specula.yaml" "$out/specula-custom.yaml" "$out/specula-nostate.yaml" <<'PY'
 import sys, yaml
 for path in sys.argv[1:]:

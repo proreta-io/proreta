@@ -34,12 +34,20 @@ is required there.
 
 {{/* Backend image reference. */}}
 {{- define "proreta.image" -}}
+{{- if .Values.image.digest }}
+{{- printf "%s@%s" .Values.image.repository .Values.image.digest }}
+{{- else }}
 {{- printf "%s:%s" .Values.image.repository (include "proreta.imageTag" .) }}
 {{- end }}
+{{- end }}
 
-{{/* Web image reference (tag falls back to image.tag). */}}
+{{/* Web image reference (tag falls back to image.tag; web.image.digest, when set, replaces the tag). */}}
 {{- define "proreta.webImage" -}}
+{{- if .Values.web.image.digest }}
+{{- printf "%s@%s" .Values.web.image.repository .Values.web.image.digest }}
+{{- else }}
 {{- printf "%s:%s" .Values.web.image.repository (default (include "proreta.imageTag" .) .Values.web.image.tag) }}
+{{- end }}
 {{- end }}
 
 {{/* Selector labels. Args: dict ctx, component */}}

@@ -14,6 +14,10 @@ image:
   # a chart installed from oci://ghcr.io/proreta-io/charts/proreta. A chart from a git checkout has
   # no usable appVersion, so the tag is REQUIRED there (rendering fails without it).
   tag: ""
+  # Optional content digest, sha256:<64 hex> (docker buildx imagetools inspect <image>:<tag>). When set
+  # it replaces the tag in the image reference (repository@digest), so the pull cannot change under you;
+  # the tag is still used for labels. Set web.image.digest as well: the two images have different digests.
+  digest: ""
   pullPolicy: IfNotPresent
 
 # Pull secrets for a private registry or mirror, e.g. [{name: registry-pull}].
@@ -375,6 +379,7 @@ web:
   image:
     repository: ghcr.io/proreta-io/proreta-web
     tag: ""                # empty -> falls back to image.tag
+    digest: ""             # sha256:<64 hex> of the web image; replaces the tag when set
   # Container port; must be the port nginx listens on (8080 in the published image).
   httpPort: 8080
   service:

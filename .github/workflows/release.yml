@@ -10,6 +10,8 @@ name: release
 #   prerelease tag vX.Y.Z-rc.1 gives the chart version X.Y.Z-rc.1).
 # After the charts, job `finalize` checks the published artifacts anonymously and creates the GitHub
 # release (marked pre-release when the version has a suffix such as -rc.1).
+# Every pushed image digest and both chart packages get a signed build provenance attestation
+# (actions/attest-build-provenance; verify with `gh attestation verify`, docs/install.md).
 # Every image carries the labels org.opencontainers.image.revision (the commit) and
 # org.opencontainers.image.source. The workflow only publishes images; it never commits.
 # Path filters apply to branch pushes only; GitHub does not evaluate them for tag pushes.
@@ -78,6 +80,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -125,6 +129,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        id: build
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
@@ -139,6 +144,12 @@ jobs:
             COMMIT=${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+      # Signed provenance for the pushed digest, stored next to the image in the registry.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ matrix.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
 
   # Tags only: the chart version and appVersion are the release (vX.Y.Z[-pre] -> X.Y.Z[-pre]), so the packaged
   # chart defaults image.tag to the images built above. Never runs for pushes to main.
@@ -150,6 +161,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -179,6 +192,11 @@ jobs:
           helm push "$RUNNER_TEMP/chart/proreta-${version}.tgz" oci://ghcr.io/proreta-io/charts
           helm push "$RUNNER_TEMP/chart/proreta-specula-${version}.tgz" oci://ghcr.io/proreta-io/charts
           helm registry logout ghcr.io
+      # The attestation covers the packaged files; `helm pull` returns the same bytes, so a customer verifies the pulled .tgz.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/chart/proreta-*.tgz
 
   # Tags only, after the images and charts: anonymous reads prove that the packages are public and
   # carry both platforms, then the GitHub release is created (notes from docs/release-notes/X.Y.Z.md
