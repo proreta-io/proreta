@@ -253,6 +253,12 @@ func TestIntegrationStatusPageProjectRules(t *testing.T) {
 			t.Errorf("%s: monitor of another project: %d %s", who, r.code, r.raw)
 		}
 	}
+	// A monitor of another project answers like one that does not exist.
+	other := c.do(http.MethodPut, mine+"/components", `{"items":[`+own+`,{"monitorId":"`+w.mBeta+`","publicName":"Other"}]}`, aMaint)
+	missing := c.do(http.MethodPut, mine+"/components", `{"items":[`+own+`,{"monitorId":"0192b9c4-7c5e-7000-8000-0000000000ee","publicName":"Other"}]}`, aMaint)
+	if strings.Contains(other.raw, "must belong") || other.code != missing.code || !strings.Contains(other.raw, "does not exist") {
+		t.Errorf("another project's monitor is told apart from a missing one: %s / %s", other.raw, missing.raw)
+	}
 	if r := c.do(http.MethodGet, mine+"/components", "", aMaint); len(r.body["items"].([]any)) != 2 {
 		t.Errorf("components after a refused change: %s", r.raw)
 	}
@@ -433,6 +439,11 @@ func TestIntegrationStatusPageLimitIsPerProject(t *testing.T) {
 			r.body["max"] != float64(1) || !strings.Contains(fmt.Sprint(r.body["detail"]), scope) {
 			t.Fatalf("second page of %q: %d %s", p, r.code, r.raw)
 		}
+	}
+	// A project the caller cannot see answers the same whether it is full or not.
+	hidden := `{"slug":"` + nextSlug() + `","title":"t","projectId":"`
+	if r := w.c.do(http.MethodPost, "/api/v1/status-pages", hidden+w.beta+`"}`, w.hdr("aMaint")); r.code != http.StatusUnprocessableEntity {
+		t.Fatalf("full project the caller cannot see: %d %s", r.code, r.raw)
 	}
 	if r := w.c.do(http.MethodGet, "/api/v1/status-pages?projectId="+w.beta, "", owner); r.code != http.StatusOK || len(r.body["items"].([]any)) != 1 {
 		t.Fatalf("list of one project: %d %s", r.code, r.raw)
