@@ -240,7 +240,7 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           "$(go env GOPATH)/bin/govulncheck" ./...
       - name: Test
-        run: make test
+        run: scripts/ci-test.sh "$RUNNER_TEMP/test.log" make test
       # No gate for now; the number is for reading.
       - name: Coverage report
         if: matrix.postgres == '16'
@@ -254,7 +254,17 @@ jobs:
           retention-days: 14
       # TEST_DATABASE_ADMIN_URL comes from the job env above, like the normal tests.
       - name: End-to-end test (proretatest build tag)
-        run: make test-e2e
+        run: scripts/ci-test.sh "$RUNNER_TEMP/test-e2e.log" make test-e2e
+      - name: Upload the test output
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-output-postgres-${{ matrix.postgres }}
+          path: |
+            ${{ runner.temp }}/test.log
+            ${{ runner.temp }}/test-e2e.log
+          if-no-files-found: ignore
+          retention-days: 14
 
   # Separate from `backend` so a lint finding never hides the test and e2e results.
   backend-lint:
