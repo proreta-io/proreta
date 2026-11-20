@@ -180,10 +180,6 @@ func (s *Service) CreateInvitationFor(ctx context.Context, a Actor, in Invitatio
 	now := s.clock.Now()
 	inv = Invitation{ID: uuidv7.New(), Role: in.Role, ProjectID: in.ProjectID, Label: label, Status: InvitationOpen, CreatedAt: now, ExpiresAt: now.Add(InvitationTTL)}
 	err = db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
-		// CheckCreate takes the tenant row lock first, like every member change.
-		if err := plans.CheckCreate(ctx, tx, a.TenantID, plans.ResourceMember); err != nil {
-			return err
-		}
 		q := authdb.New(tx)
 		role := authz.Owner
 		if !a.platform {
@@ -207,6 +203,10 @@ func (s *Service) CreateInvitationFor(ctx context.Context, a Actor, in Invitatio
 			inv.ProjectName = &projectName
 		} else if (!a.platform || authz.Role(inv.Role) != authz.Owner) && !authz.CanInvite(who, authz.Role(inv.Role)) {
 			return authz.ErrForbidden
+		}
+		// Permissions first: a refused request must not report a full quota.
+		if err := plans.CheckCreate(ctx, tx, a.TenantID, plans.ResourceMember); err != nil {
+			return err
 		}
 		u, err := q.GetUserByID(ctx, a.UserID)
 		if err != nil {
@@ -500,7 +500,7 @@ func (s *Service) CheckInvitation(ctx context.Context, token string, ip netip.Ad
 // organization role afterwards, empty for a person who belongs through projects only.
 //
 // An organization invitation gives the invited organization role and is refused for a person who
-// already belongs (ErrAlreadyMember). A project invitation gives no organization role: a new
+// already has an organization role (ErrAlreadyMember); a person who belongs through projects only gets it. A project invitation gives no organization role: a new
 // person joins with none, a person who already belongs keeps what they have, and either gets the
 // invited role in the project unless they hold an equal or higher one there.
 func (s *Service) joinInvited(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID, tokenHash []byte, ip netip.Addr) (string, error) {
@@ -534,7 +534,14 @@ func (s *Service) joinInvited(ctx context.Context, tx pgx.Tx, tenantID, userID u
 		return "", fmt.Errorf("get membership: %w", err)
 	}
 	if member && inv.ProjectID == nil {
-		return "", ErrAlreadyMember
+		// A person who belongs through projects only has no organization role yet: the link gives it.
+		if current != "" {
+			return "", ErrAlreadyMember
+		}
+		if n, err := q.UpdateMembershipRole(ctx, authdb.UpdateMembershipRoleParams{TenantID: tenantID, UserID: userID, Role: inv.Role}); err != nil || n != 1 {
+			return "", fmt.Errorf("set membership role (%d): %w", n, err)
+		}
+		current = inv.Role
 	}
 	// A person who already belongs takes no new place, whatever the plan limit says now.
 	if !member {

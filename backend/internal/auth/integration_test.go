@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/proreta-io/proreta/backend/internal/auth"
+	"github.com/proreta-io/proreta/backend/internal/authz"
 	"github.com/proreta-io/proreta/backend/internal/platform/clock"
 	"github.com/proreta-io/proreta/backend/internal/platform/crypto"
 	"github.com/proreta-io/proreta/backend/internal/platform/validation"
@@ -1049,5 +1050,72 @@ func TestIntegrationMustChangePasswordFromSecret(t *testing.T) {
 	newBootstrapped(t, env, "admin", secret2)
 	if mustChangeFlag(t, env, "admin") {
 		t.Fatal("an upgrade with the same Secret asked for a change")
+	}
+}
+
+// A person who belongs through projects only has no organization role: an organization
+// invitation gives it, while a person who already has one is still refused.
+func TestIntegrationOrgInvitationUpgradesProjectOnlyMember(t *testing.T) {
+	env := pgtest.New(t, pgtest.DBName("auth_accept_upgrade"))
+	ctx := context.Background()
+	hash, _ := crypto.HashPassword("admin password", cheap)
+	svc := newBootstrapped(t, env, "admin", hash)
+	owner, err := svc.Register(ctx, auth.RegisterInput{Email: "owner@example.com", Password: "owner passphrase", IP: testIP})
+	if err != nil {
+		t.Fatal(err)
+	}
+	guest, err := svc.Register(ctx, auth.RegisterInput{Email: "guest@example.com", Password: "guest passphrase", IP: testIP})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin := env.AdminConn(t)
+	pgtest.MustExec(t, admin, `INSERT INTO memberships (tenant_id, user_id, role) VALUES ('`+owner.Tenant.ID.String()+`', '`+guest.User.ID.String()+`', NULL)`)
+	creator := auth.Actor{TenantID: owner.Tenant.ID, UserID: owner.User.ID}
+	_, token, err := svc.CreateInvitation(ctx, creator, "viewer", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := svc.Authenticate(ctx, guest.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := svc.AcceptInvitation(ctx, p, token, testIP, "")
+	if err != nil || res.Role != "viewer" {
+		t.Fatalf("accept: role %q, %v", res.Role, err)
+	}
+	_, token, err = svc.CreateInvitation(ctx, creator, "maintainer", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, err = svc.Authenticate(ctx, res.Token); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AcceptInvitation(ctx, p, token, testIP, ""); !errors.Is(err, auth.ErrAlreadyMember) {
+		t.Fatalf("second accept: %v", err)
+	}
+}
+
+// A person who may not invite is refused with "forbidden", not told the member quota is full.
+func TestIntegrationInviteChecksPermissionBeforeQuota(t *testing.T) {
+	env := pgtest.New(t, pgtest.DBName("auth_invite_perm_quota"))
+	ctx := context.Background()
+	hash, _ := crypto.HashPassword("admin password", cheap)
+	svc := newBootstrapped(t, env, "admin", hash)
+	owner, err := svc.Register(ctx, auth.RegisterInput{Email: "owner@example.com", Password: "owner passphrase", IP: testIP})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := svc.CreateInvitation(ctx, auth.Actor{TenantID: owner.Tenant.ID, UserID: owner.User.ID}, "viewer", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	viewer, err := svc.Register(ctx, auth.RegisterInput{Email: "viewer@example.com", Password: "viewer passphrase", IP: testIP, InviteToken: token})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pgtest.MustExec(t, env.AdminConn(t), `UPDATE tenants SET limits = '{"max_members":1}' WHERE id = '`+owner.Tenant.ID.String()+`'`)
+	_, _, err = svc.CreateInvitation(ctx, auth.Actor{TenantID: owner.Tenant.ID, UserID: viewer.User.ID}, "viewer", "")
+	if !errors.Is(err, authz.ErrForbidden) {
+		t.Fatalf("viewer invites at a full quota: %v", err)
 	}
 }

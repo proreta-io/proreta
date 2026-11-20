@@ -151,7 +151,7 @@ func TestSendFailures(t *testing.T) {
 		"recipient deferred": {smtptest.Options{Mode: smtptest.StartTLS}, "", "", [][2]string{{"RCPT", "451 4.7.1 greylisted"}}, want{mail.KindRecipient, 451, false}},
 		"data rejected":      {smtptest.Options{Mode: smtptest.StartTLS}, "", "", [][2]string{{"DATAEND", "554 5.7.1 spam"}}, want{mail.KindRejected, 554, true}},
 		"sender rejected":    {smtptest.Options{Mode: smtptest.StartTLS}, "", "", [][2]string{{"MAIL", "550 5.7.1 relay denied"}}, want{mail.KindRejected, 550, true}},
-		"wrong password":     {smtptest.Options{Mode: smtptest.StartTLS, User: "u", Pass: "right"}, "u", "wrong", nil, want{mail.KindAuth, 535, false}},
+		"wrong password":     {smtptest.Options{Mode: smtptest.StartTLS, User: "u", Pass: "right"}, "u", "wrong", nil, want{mail.KindAuth, 535, true}},
 		"no login offered":   {smtptest.Options{Mode: smtptest.StartTLS}, "u", "p", nil, want{mail.KindAuth, 0, false}},
 		"downgrade refused":  {smtptest.Options{Mode: smtptest.StartTLS, NoSTARTTLS: true}, "", "", nil, want{mail.KindTLS, 0, false}},
 	}

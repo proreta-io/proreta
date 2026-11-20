@@ -446,7 +446,9 @@ func LoadSpecula(lookup LookupFunc) (Specula, error) {
 // LoadJobs loads the jobs configuration.
 func LoadJobs(lookup LookupFunc) (Jobs, error) {
 	l := &loader{lookup: lookup}
-	cfg := Jobs{Server: l.server(5), Encryption: l.encryption(), Guard: l.guard(), PublicURL: l.publicURL("PRORETA_PUBLIC_URL")}
+	// 10: up to four housekeeping tasks hold a connection for their session-level lock while
+	// delivery transactions run on the others.
+	cfg := Jobs{Server: l.server(10), Encryption: l.encryption(), Guard: l.guard(), PublicURL: l.publicURL("PRORETA_PUBLIC_URL")}
 	cfg.DomainChecks = l.domainChecks()
 	return cfg, l.err()
 }
@@ -652,7 +654,7 @@ func (l *loader) server(defaultMaxConns int32) Server {
 		AdminAddr:        l.addr("PRORETA_ADMIN_ADDR", ":9090"),
 		DatabaseURL:      l.databaseURL("PRORETA_DATABASE_URL"),
 		ShutdownTimeout:  shutdownTimeout,
-		DatabaseMaxConns: defaultMaxConns,
+		DatabaseMaxConns: int32(l.integer("PRORETA_DATABASE_MAX_CONNS", int(defaultMaxConns), 2, 200)), //nolint:gosec // range-checked by integer
 	}
 	return s
 }

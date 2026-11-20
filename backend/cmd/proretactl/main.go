@@ -24,6 +24,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/term"
 
+	"github.com/proreta-io/proreta/backend/internal/auth"
 	"github.com/proreta-io/proreta/backend/internal/dbbootstrap"
 	"github.com/proreta-io/proreta/backend/internal/platform/config"
 	"github.com/proreta-io/proreta/backend/internal/platform/crypto"
@@ -123,9 +124,12 @@ func readPassword(stdin *os.File, stderr io.Writer) (string, error) {
 		}
 		return checkPassword(string(a))
 	}
-	line, err := bufio.NewReader(io.LimitReader(stdin, 4096)).ReadString('\n')
+	line, err := bufio.NewReader(io.LimitReader(stdin, maxPasswordInput+1)).ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
 		return "", err
+	}
+	if len(line) > maxPasswordInput {
+		return "", errors.New("password input is too long")
 	}
 	line = trimNewline(line)
 	return checkPassword(line)
@@ -141,9 +145,12 @@ func trimNewline(s string) string {
 	return s
 }
 
+// maxPasswordInput bounds a piped password (the policy allows 128 characters of up to 4 bytes).
+const maxPasswordInput = 4096
+
 func checkPassword(p string) (string, error) {
-	if p == "" {
-		return "", errors.New("empty password")
+	if msg := auth.CheckPassword(p); msg != "" {
+		return "", errors.New("password " + msg)
 	}
 	return p, nil
 }
