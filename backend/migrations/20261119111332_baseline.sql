@@ -177,6 +177,8 @@ CREATE TABLE tenants (
     deleted_at timestamptz,
     plan_key text DEFAULT 'internal'::text NOT NULL,
     CONSTRAINT tenants_limits_is_object CHECK ((jsonb_typeof(limits) = 'object'::text)),
+    -- An override may name any subset of the plan's keys (the reader ignores other keys), each a non-negative integer up to 2147483647.
+    CONSTRAINT tenants_limits_valid CHECK (NOT jsonb_path_exists(limits, '$.keyvalue() ? (@.key like_regex "^max_(monitors|heartbeats|channels|members|projects|status_pages|agents|status_page_domains)$" && !(@.value.type() == "number" && @.value >= 0 && @.value <= 2147483647 && @.value.floor() == @.value))', '{}', true)),
     CONSTRAINT tenants_name_check CHECK (((length(name) >= 1) AND (length(name) <= 200))),
     CONSTRAINT tenants_slug_check CHECK ((slug ~ '^[a-z0-9][a-z0-9-]{0,62}$'::text)),
     CONSTRAINT tenants_status_check CHECK ((status = ANY (ARRAY['active'::text, 'suspended'::text]))),
