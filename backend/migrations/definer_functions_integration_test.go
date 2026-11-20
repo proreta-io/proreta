@@ -107,7 +107,7 @@ var definerCalls = map[string]string{
 	"specula_create":               `SELECT specula_create(gen_random_uuid(), 'x', '\x00', true, NULL, gen_random_uuid())`,
 	"specula_revoke":               `SELECT specula_revoke(gen_random_uuid())`,
 	"specula_authenticate":         `SELECT * FROM specula_authenticate('\x00')`,
-	"specula_hello":                `SELECT specula_hello(gen_random_uuid(), 'v', 'h')`,
+	"specula_hello":                `SELECT * FROM specula_hello(gen_random_uuid(), 'v', 'h', NULL::text[], 'i', NULL::timestamptz, 0, NULL::timestamptz, false, 0::bigint)`,
 	"specula_agents_sync_location": `SELECT specula_agents_sync_location()`,
 	"monitor_set_location":         `SELECT monitor_set_location(gen_random_uuid(), gen_random_uuid())`,
 	"specula_mark_unreachable":     `SELECT specula_mark_unreachable()`,

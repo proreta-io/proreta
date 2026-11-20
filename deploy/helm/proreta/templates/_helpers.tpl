@@ -138,6 +138,29 @@ helm.sh/hook-delete-policy: {{ ternary "before-hook-creation" "before-hook-creat
 {{- if and .Values.statuspage.enabled (eq .Values.secrets.statuspage.source "generate") }}true{{ end }}
 {{- end }}
 
+{{/* Database CA (database.tlsCA): env, mount and volume, empty without database.tlsCA.existingSecret. Arg: root context */}}
+{{- define "proreta.db.caEnv" -}}
+{{- if .Values.database.tlsCA.existingSecret }}
+- name: PGSSLROOTCERT
+  value: /etc/proreta/db-ca/{{ .Values.database.tlsCA.key }}
+{{- end }}
+{{- end }}
+{{- define "proreta.db.caMount" -}}
+{{- if .Values.database.tlsCA.existingSecret }}
+- name: db-ca
+  mountPath: /etc/proreta/db-ca
+  readOnly: true
+{{- end }}
+{{- end }}
+{{- define "proreta.db.caVolume" -}}
+{{- if .Values.database.tlsCA.existingSecret }}
+- name: db-ca
+  secret:
+    secretName: {{ .Values.database.tlsCA.existingSecret }}
+    defaultMode: 0444
+{{- end }}
+{{- end }}
+
 {{/* Env shared by the backend Deployments (config.Server + config.Base). Args: dict ctx, dbKey (a fixed key of the database Secret) */}}
 {{- define "proreta.env.common" -}}
 - name: PRORETA_LOG_LEVEL
@@ -149,6 +172,7 @@ helm.sh/hook-delete-policy: {{ ternary "before-hook-creation" "before-hook-creat
     secretKeyRef:
       name: {{ include "proreta.secret.db" .ctx }}
       key: {{ .dbKey }}
+{{- include "proreta.db.caEnv" .ctx }}
 {{- end }}
 
 {{/*
@@ -490,10 +514,12 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- include "proreta.db.caMount" $ctx | nindent 12 }}
       volumes:
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi
+        {{- include "proreta.db.caVolume" $ctx | nindent 8 }}
       {{- include "proreta.scheduling" $sel | nindent 6 }}
 {{- end }}
 

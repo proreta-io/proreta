@@ -167,6 +167,7 @@ spec:
                   name: {{ $adminSecret }}
                   key: {{ $b.adminSecret.passwordKey }}
                   optional: true
+            {{- include "proreta.db.caEnv" . | nindent 12 }}
           resources:
             {{- toYaml $b.resources | nindent 12 }}
           securityContext:
@@ -174,9 +175,11 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- include "proreta.db.caMount" . | nindent 12 }}
       volumes:
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi
+        {{- include "proreta.db.caVolume" . | nindent 8 }}
       {{- include "proreta.scheduling" $sel | nindent 6 }}
 {{- end }}

@@ -14,15 +14,11 @@ SET LOCAL lock_timeout = '5s';
 -- Default privileges
 -- =============================================================================================
 
--- Every object proreta_owner creates from here on. Runtime roles get DML on tables (RLS still
--- filters tenant tables) and sequence usage; tables that need less revoke it explicitly.
--- Functions get no EXECUTE by default: SECURITY DEFINER functions are granted one by one. The
--- function default is global (not IN SCHEMA) because a per-schema default can only add to the
--- global one, and the global one grants EXECUTE to PUBLIC.
-ALTER DEFAULT PRIVILEGES FOR ROLE proreta_owner IN SCHEMA public
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO proreta_api, proreta_worker;
-ALTER DEFAULT PRIVILEGES FOR ROLE proreta_owner IN SCHEMA public
-    GRANT USAGE, SELECT ON SEQUENCES TO proreta_api, proreta_worker;
+-- No default privileges on tables or sequences: a table owner creates is closed to the runtime
+-- roles until its migration grants exactly what the code needs (a forgotten grant fails loudly,
+-- a forgotten revoke would not). Functions get no EXECUTE by default: SECURITY DEFINER functions
+-- are granted one by one. The function default is global (not IN SCHEMA) because a per-schema
+-- default can only add to the global one, and the global one grants EXECUTE to PUBLIC.
 ALTER DEFAULT PRIVILEGES FOR ROLE proreta_owner
     REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 
@@ -720,8 +716,8 @@ CASE
     ELSE false
 END))),
     CONSTRAINT monitors_interval_seconds_check CHECK ((interval_seconds > 0)),
-    CONSTRAINT monitors_mvp_interval CHECK (((type = 'heartbeat'::text) OR (interval_seconds = 60))),
-    CONSTRAINT monitors_mvp_timeout CHECK (((type = 'heartbeat'::text) OR (timeout_seconds = 10))),
+    CONSTRAINT monitors_fixed_interval CHECK (((type = 'heartbeat'::text) OR (interval_seconds = 60))),
+    CONSTRAINT monitors_fixed_timeout CHECK (((type = 'heartbeat'::text) OR (timeout_seconds = 10))),
     CONSTRAINT monitors_name_check CHECK (((char_length(name) >= 1) AND (char_length(name) <= 80))),
     CONSTRAINT monitors_tcp_check CHECK (((type <> 'tcp'::text) OR ((COALESCE(jsonb_typeof((config -> 'host'::text)), ''::text) = 'string'::text) AND
 CASE
@@ -1378,6 +1374,7 @@ CREATE TABLE incidents (
 ALTER TABLE ONLY incidents FORCE ROW LEVEL SECURITY;
 CREATE UNIQUE INDEX incidents_one_open_per_monitor_idx ON incidents USING btree (monitor_id) WHERE ((resolved_at IS NULL) AND (monitor_id IS NOT NULL));
 CREATE UNIQUE INDEX incidents_one_open_per_specula_idx ON incidents USING btree (specula_id) WHERE ((resolved_at IS NULL) AND (specula_id IS NOT NULL));
+CREATE INDEX incidents_monitor_started_idx ON incidents USING btree (tenant_id, monitor_id, started_at DESC);
 CREATE INDEX incidents_tenant_started_idx ON incidents USING btree (tenant_id, started_at DESC);
 ALTER TABLE incidents ENABLE ROW LEVEL SECURITY;
 CREATE POLICY owner_reminder_read ON incidents FOR SELECT TO proreta_owner USING (true);
@@ -1986,6 +1983,8 @@ ALTER TABLE ONLY status_page_snapshots FORCE ROW LEVEL SECURITY;
 ALTER TABLE status_page_snapshots ENABLE ROW LEVEL SECURITY;
 CREATE POLICY owner_statuspage_read ON status_page_snapshots FOR SELECT TO proreta_owner USING (true);
 CREATE POLICY tenant_isolation ON status_page_snapshots USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+REVOKE ALL ON status_page_snapshots FROM proreta_api, proreta_worker;
+GRANT SELECT, INSERT, UPDATE, DELETE ON status_page_snapshots TO proreta_api, proreta_worker;
 
 CREATE TABLE status_pages (
     id uuid NOT NULL,
@@ -3620,47 +3619,6 @@ END
 $$;
 -- +goose StatementEnd
 REVOKE ALL ON FUNCTION specula_epoch_open(uuid,uuid,uuid) FROM PUBLIC;
-
--- +goose StatementBegin
-CREATE FUNCTION specula_hello(p_specula_id uuid, p_version text, p_hostname text) RETURNS boolean
-    LANGUAGE sql SECURITY DEFINER
-    SET search_path TO 'public', 'pg_temp'
-    AS $$
-    WITH u AS (
-        UPDATE specula_agents SET version = left(p_version, 64), hostname = left(p_hostname, 253), last_seen_at = now()
-        WHERE id = p_specula_id AND revoked_at IS NULL
-        RETURNING 1
-    )
-    SELECT EXISTS (SELECT 1 FROM u)
-$$;
--- +goose StatementEnd
-REVOKE ALL ON FUNCTION specula_hello(uuid,text,text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION specula_hello(uuid,text,text) TO proreta_worker;
-
--- +goose StatementBegin
-CREATE FUNCTION specula_hello(p_specula_id uuid, p_version text, p_hostname text, p_capabilities text[], p_instance_id text, p_schedule_issued_at timestamp with time zone, p_buffer_depth integer, p_oldest_unsent_at timestamp with time zone, p_buffer_degraded boolean) RETURNS boolean
-    LANGUAGE sql SECURITY DEFINER
-    SET search_path TO 'public', 'pg_temp'
-    AS $$
-    WITH u AS (
-        UPDATE specula_agents SET
-            version = left(p_version, 64),
-            hostname = left(p_hostname, 253),
-            capabilities = coalesce(p_capabilities, '{}'),
-            instance_id = left(p_instance_id, 64),
-            schedule_issued_at = p_schedule_issued_at,
-            buffer_depth = p_buffer_depth,
-            oldest_unsent_at = p_oldest_unsent_at,
-            buffer_degraded = coalesce(p_buffer_degraded, false),
-            last_seen_at = now()
-        WHERE id = p_specula_id AND revoked_at IS NULL
-        RETURNING 1
-    )
-    SELECT EXISTS (SELECT 1 FROM u)
-$$;
--- +goose StatementEnd
-REVOKE ALL ON FUNCTION specula_hello(uuid,text,text,text[],text,timestamp with time zone,integer,timestamp with time zone,boolean) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION specula_hello(uuid,text,text,text[],text,timestamp with time zone,integer,timestamp with time zone,boolean) TO proreta_worker;
 
 -- +goose StatementBegin
 CREATE FUNCTION specula_hello(p_specula_id uuid, p_version text, p_hostname text, p_capabilities text[], p_instance_id text, p_schedule_issued_at timestamp with time zone, p_buffer_depth integer, p_oldest_unsent_at timestamp with time zone, p_buffer_degraded boolean, p_clock_offset_ms bigint) RETURNS TABLE(found boolean, duplicate boolean)

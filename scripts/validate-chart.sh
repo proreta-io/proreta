@@ -56,6 +56,7 @@ combos=(
   "example-external-secrets|-f $example $tag $eso --set secrets.admin.source=externalSecret --set secrets.crypto.source=externalSecret"
   "example-admin-external|-f $example $tag $eso --set secrets.admin.source=externalSecret"
   "example-crypto-external|-f $example $tag $eso --set secrets.crypto.source=externalSecret"
+  "example-db-ca|-f $example $tag --set database.sslmode=verify-full --set database.tlsCA.existingSecret=rds-ca --set speculagw.enabled=true"
   "example-speculagw|-f $example $tag --set speculagw.enabled=true"
   "example-speculagw-netpol|-f $example $tag --set speculagw.enabled=true --set networkPolicy.enabled=true --set serviceMonitor.enabled=true"
   "example-request-external|-f $example $tag $eso --set secrets.request.source=externalSecret"
@@ -112,6 +113,34 @@ kill_switch() { grep -A1 'name: PRORETA_REGISTRATION_ENABLED' "$out/$1.yaml" | s
 [ "$(kill_switch example)" = '"false"' ] || { echo "FAIL: registration not off in values.example.yaml" >&2; exit 1; }
 [ "$(kill_switch example-registration-on)" = '"true"' ] || { echo "FAIL: config.registrationEnabled=true not rendered" >&2; exit 1; }
 echo "chart default \"false\", example \"false\", config.registrationEnabled=true renders \"true\""
+
+echo "== database CA (database.tlsCA): every pod and Job that connects verifies with it, nothing else changes"
+python3 - "$out" <<'EOF'
+import sys, yaml
+out = sys.argv[1]
+def conns(name):
+    n = 0
+    for d in yaml.safe_load_all(open(f"{out}/{name}.yaml")):
+        if not d or d.get("kind") not in ("Deployment", "Job"):
+            continue
+        spec = d["spec"]["template"]["spec"]
+        for c in spec["containers"]:
+            env = {e["name"]: e for e in c.get("env", [])}
+            if not ({"PRORETA_DATABASE_URL", "PRORETA_MIGRATE_DATABASE_URL", "PRORETA_BOOTSTRAP_HOST"} & set(env)):
+                continue
+            n += 1
+            has = "PGSSLROOTCERT" in env
+            mount = any(m["name"] == "db-ca" and m.get("readOnly") for m in c.get("volumeMounts", []))
+            vol = any(v["name"] == "db-ca" and v["secret"]["secretName"] == "rds-ca" for v in spec.get("volumes", []))
+            if name == "example-db-ca":
+                assert env["PGSSLROOTCERT"]["value"] == "/etc/proreta/db-ca/ca.crt" and mount and vol, f"{d['metadata']['name']}: CA not wired"
+            else:
+                assert not (has or mount or vol), f"{d['metadata']['name']}: CA wired without database.tlsCA"
+    return n
+a, b = conns("example-speculagw"), conns("example-db-ca")
+assert a == b >= 6, (a, b)
+print(f"{b} workloads checked")
+EOF
 
 echo "== negative checks (rendering must fail)"
 # Every negative starts from $min, which renders, so each one fails for its own reason. With

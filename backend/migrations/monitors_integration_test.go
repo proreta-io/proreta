@@ -107,8 +107,8 @@ INSERT INTO monitor_state (tenant_id, monitor_id) VALUES ('` + tenantA + `', '` 
 
 	// The fixed http schedule and value checks.
 	for stmt, want := range map[string]string{
-		`UPDATE monitors SET interval_seconds = 30`:    "monitors_mvp_interval",
-		`UPDATE monitors SET timeout_seconds = 5`:      "monitors_mvp_timeout",
+		`UPDATE monitors SET interval_seconds = 30`:    "monitors_fixed_interval",
+		`UPDATE monitors SET timeout_seconds = 5`:      "monitors_fixed_timeout",
 		`UPDATE monitors SET failure_threshold = 4`:    "check constraint",
 		`UPDATE monitors SET type = 'tcp'`:             "check constraint",
 		`UPDATE monitor_state SET status = 'degraded'`: "check constraint",

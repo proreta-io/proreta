@@ -42,5 +42,5 @@ With `database.bootstrap.enabled: false` from the start, create the database Sec
 Run the same command by hand against a server you can reach, with the environment variables the Job uses (`PRORETA_BOOTSTRAP_HOST`, `PRORETA_BOOTSTRAP_PORT`, `PRORETA_BOOTSTRAP_ADMIN_USER`, `PRORETA_BOOTSTRAP_ADMIN_PASSWORD`, `PRORETA_BOOTSTRAP_DB_NAME`, `PRORETA_BOOTSTRAP_SSLMODE`, `PRORETA_BOOTSTRAP_SECRET_NAME`, `PRORETA_BOOTSTRAP_NAMESPACE`), from a pod or machine with access to the Kubernetes API for the Secret. Never pass passwords as command arguments and never commit them.
 
 ## Notes
-- `sslmode=require` encrypts the connection but does not verify the server certificate.
+- `sslmode=require` encrypts the connection but does not verify the server certificate. Use `verify-full` and, when the server's CA is not a public one, `database.tlsCA.existingSecret` (a Secret with the PEM bundle under `ca.crt`); the Job reads it through `PGSSLROOTCERT`. By hand, export `PGSSLROOTCERT` the same way.
 - Proreta roles can connect to other databases of the server (default `PUBLIC` connect privilege) but own and are granted nothing there. Revoke `CONNECT` from `PUBLIC` on those databases if that matters for your server.

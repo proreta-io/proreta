@@ -267,7 +267,7 @@ def check(path):
     # Specula gateway: the worker's database role and the request keyring, nothing else.
     gw = env_of("speculagw")
     if gw:
-        allowed = {"PRORETA_LOG_LEVEL", "PRORETA_ADMIN_ADDR", "PRORETA_DATABASE_URL", "PRORETA_HTTP_ADDR", "PRORETA_TRUSTED_PROXY_HOPS", "PRORETA_SPECULA_LATE_ALERT_AFTER"} | ENV_NAMES_REQUEST
+        allowed = {"PRORETA_LOG_LEVEL", "PRORETA_ADMIN_ADDR", "PRORETA_DATABASE_URL", "PRORETA_HTTP_ADDR", "PRORETA_TRUSTED_PROXY_HOPS", "PRORETA_SPECULA_LATE_ALERT_AFTER", "PGSSLROOTCERT"} | ENV_NAMES_REQUEST
         extra = set(gw) - allowed
         if extra:
             fail(f"speculagw env has {sorted(extra)}; it may only have {sorted(allowed)} (no data keys, admin credentials or SSRF settings)")
@@ -278,8 +278,8 @@ def check(path):
     # Status page renderer: least privilege.
     sp = env_of("statuspage")
     if sp:
-        if set(sp) - ALL_DOMAIN_ENV != STATUSPAGE_ENV:
-            fail(f"statuspage env is {sorted(set(sp) - ALL_DOMAIN_ENV)}, want exactly {sorted(STATUSPAGE_ENV)} plus custom domain settings")
+        if set(sp) - ALL_DOMAIN_ENV - {"PGSSLROOTCERT"} != STATUSPAGE_ENV:
+            fail(f"statuspage env is {sorted(set(sp) - ALL_DOMAIN_ENV - {'PGSSLROOTCERT'})}, want exactly {sorted(STATUSPAGE_ENV)} plus custom domain settings")
         db_ref = sp.get("PRORETA_DATABASE_URL", {}).get("valueFrom", {}).get("secretKeyRef", {})
         if db_ref.get("key") != "statuspage_url":
             fail(f"statuspage must use the statuspage_url key, got {db_ref}")

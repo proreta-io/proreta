@@ -46,7 +46,7 @@ func TestIntegrationHeartbeatSchema(t *testing.T) {
 
 	t.Run("constraints: the fixed http schedule binds http only, heartbeats have their own", func(t *testing.T) {
 		for stmt, want := range map[string]string{
-			`INSERT INTO monitors (id, tenant_id, project_id, name, config, interval_seconds) VALUES (gen_random_uuid(), '` + tenantA + `', ` + defaultProject(tenantA) + `, 'h', '{"url":"https://example.com"}', 300)`:                                   "monitors_mvp_interval",
+			`INSERT INTO monitors (id, tenant_id, project_id, name, config, interval_seconds) VALUES (gen_random_uuid(), '` + tenantA + `', ` + defaultProject(tenantA) + `, 'h', '{"url":"https://example.com"}', 300)`:                                   "monitors_fixed_interval",
 			`INSERT INTO monitors (id, tenant_id, project_id, name, type, config, interval_seconds, failure_threshold) VALUES (gen_random_uuid(), '` + tenantA + `', ` + defaultProject(tenantA) + `, 'h', 'heartbeat', '{"graceSeconds": 0}', 59, 1)`:     "monitors_heartbeat_check",
 			`INSERT INTO monitors (id, tenant_id, project_id, name, type, config, interval_seconds, failure_threshold) VALUES (gen_random_uuid(), '` + tenantA + `', ` + defaultProject(tenantA) + `, 'h', 'heartbeat', '{"graceSeconds": 0}', 86401, 1)`:  "monitors_heartbeat_check",
 			`INSERT INTO monitors (id, tenant_id, project_id, name, type, config, interval_seconds, failure_threshold) VALUES (gen_random_uuid(), '` + tenantA + `', ` + defaultProject(tenantA) + `, 'h', 'heartbeat', '{"graceSeconds": 0}', 300, 2)`:    "monitors_heartbeat_check",
@@ -60,7 +60,7 @@ func TestIntegrationHeartbeatSchema(t *testing.T) {
 			`INSERT INTO monitors (id, tenant_id, project_id, name, type, config) VALUES (gen_random_uuid(), '` + tenantA + `', ` + defaultProject(tenantA) + `, 'h', 'tcp', '{"host":"db.example.com","port":70000}')`:                                    "monitors_tcp_check",
 			`INSERT INTO monitors (id, tenant_id, project_id, name, type, config) VALUES (gen_random_uuid(), '` + tenantA + `', ` + defaultProject(tenantA) + `, 'h', 'tcp', '{"host":"db.example.com","port":"5432"}')`:                                   "monitors_tcp_check",
 			`INSERT INTO monitors (id, tenant_id, project_id, name, type, config) VALUES (gen_random_uuid(), '` + tenantA + `', ` + defaultProject(tenantA) + `, 'h', 'tcp', '{"port":5432}')`:                                                             "monitors_tcp_check",
-			`INSERT INTO monitors (id, tenant_id, project_id, name, type, config, interval_seconds) VALUES (gen_random_uuid(), '` + tenantA + `', ` + defaultProject(tenantA) + `, 'h', 'tcp', '{"host":"db.example.com","port":5432}', 300)`:              "monitors_mvp_interval",
+			`INSERT INTO monitors (id, tenant_id, project_id, name, type, config, interval_seconds) VALUES (gen_random_uuid(), '` + tenantA + `', ` + defaultProject(tenantA) + `, 'h', 'tcp', '{"host":"db.example.com","port":5432}', 300)`:              "monitors_fixed_interval",
 		} {
 			if _, err := admin.Exec(ctx, stmt); err == nil || !strings.Contains(err.Error(), want) {
 				t.Errorf("%s: err = %v, want %s", stmt, err, want)
