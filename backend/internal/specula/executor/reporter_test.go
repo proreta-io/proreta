@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/proreta-io/proreta/backend/internal/checks"
 	"github.com/proreta-io/proreta/backend/internal/specula/wire"
@@ -189,6 +190,42 @@ func TestFinalOutcomesAreAcknowledgedAndNeverSentAgain(t *testing.T) {
 	clk.Advance(time.Minute)
 	if len(gw.reportTimes) != calls {
 		t.Fatal("something was sent again")
+	}
+}
+
+func TestRefusedOutcomesAreExportedAndCountedAsDropped(t *testing.T) {
+	clk := newFakeClock(t0)
+	gw := newGateway(clk)
+	gw.override = map[int64]string{past + 1: wire.OutcomeRejected, past + 2: wire.OutcomeSuperseded}
+	env := newReportEnv(t, gw, 100)
+	env.fill(uuid.New(), past, 4, true)
+	env.e.rep.poke()
+	clk.Advance(time.Second)
+	eventually(t, "an empty buffer", func() bool { return env.e.buf.Depth() == 0 })
+	reg := prometheus.NewPedanticRegistry()
+	if err := env.e.Register(reg); err != nil {
+		t.Fatal(err)
+	}
+	mfs, err := reg.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]float64{}
+	for _, mf := range mfs {
+		for _, m := range mf.Metric {
+			switch mf.GetName() {
+			case "specula_report_outcomes_total":
+				got["outcome="+m.Label[0].GetValue()] = m.Counter.GetValue()
+			case "specula_results_dropped_total":
+				got["dropped="+m.Label[0].GetValue()] = m.Counter.GetValue()
+			}
+		}
+	}
+	want := map[string]float64{"outcome=recorded": 2, "outcome=rejected": 1, "outcome=superseded": 1, "outcome=duplicate": 0, "outcome=expired": 0, "dropped=refused": 2}
+	for k, v := range want {
+		if got[k] != v {
+			t.Fatalf("%s = %v, want %v (all: %v)", k, got[k], v, got)
+		}
 	}
 }
 
