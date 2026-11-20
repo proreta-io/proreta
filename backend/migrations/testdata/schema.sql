@@ -1646,6 +1646,7 @@ BEGIN
     -- it creates its session. The user must replace the temporary password at the next sign-in.
     UPDATE users SET password_hash = p_password_hash, password_must_change = true, updated_at = now() WHERE id = p_user_id;
     v_n := auth_revoke_user_sessions(p_user_id);
+    UPDATE password_resets SET used_at = now() WHERE user_id = p_user_id AND used_at IS NULL;
     PERFORM admin_audit(v_tenant, p_actor, p_audit_id, 'admin.user.password_reset', 'user', p_user_id::text,
                         jsonb_build_object('sessionsRevoked', v_n), p_ip);
     RETURN QUERY SELECT v_tenant, v_n;

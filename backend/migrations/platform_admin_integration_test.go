@@ -387,7 +387,14 @@ func TestIntegrationAdminFunctions(t *testing.T) {
 		if _, _, err := reset(uuid.NewString(), fakeHash); sqlState(err) != "PRA02" {
 			t.Fatalf("reset of an unknown user: err = %v, want PRA02", err)
 		}
+		// A reset link requested before the panel reset must not set a password afterwards.
+		pgtest.MustExec(t, admin, `INSERT INTO password_resets (token_hash, user_id, email, expires_at)
+			VALUES (sha256('panel-reset-link'), '`+userOwnerA+`', 'owner-a@example.com', now() + interval '1 hour')`)
 		tenant, n, err := reset(userOwnerA, fakeHash)
+		var openLinks int
+		if err := admin.QueryRow(ctx, `SELECT count(*) FROM password_resets WHERE user_id = $1 AND used_at IS NULL`, userOwnerA).Scan(&openLinks); err != nil || openLinks != 0 {
+			t.Fatalf("open reset links after the panel reset = %d, err %v; want 0", openLinks, err)
+		}
 		if err != nil || tenant != tenantA || n != 1 {
 			t.Fatalf("reset: tenant=%s sessions=%d err=%v", tenant, n, err)
 		}
