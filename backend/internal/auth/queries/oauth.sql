@@ -95,9 +95,9 @@ SELECT password_hash, email
 FROM users
 WHERE id = @id;
 
--- name: LockUserForClaim :one
--- Serialises a takeover of an unverified account with every other change of it.
-SELECT status, is_platform_admin, is_system_admin, email, email_verified_at
+-- name: LockUserForLink :one
+-- Serialises the link of a provider identity by email with every other change of the account.
+SELECT status, is_platform_admin, is_system_admin, email
 FROM users
 WHERE id = @id
 FOR UPDATE;

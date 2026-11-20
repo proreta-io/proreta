@@ -439,10 +439,11 @@ export interface paths {
      *     GitHub numeric id), never by email. Google needs `email_verified`; GitHub uses the primary
      *     verified address only. Without a linked user, an account is created only with a valid
      *     invitation, a Google Workspace domain (`hd`) claimed by an organization, or open
-     *     registration; an email that already belongs to an account is not linked automatically
-     *     (`account_exists`: sign in with the password, then link), except an account whose email was
-     *     never verified and that has no linked identity: the provider-verified sign-in takes it over
-     *     (its password and sessions are removed, `auth.account_claimed`). Success sets the session
+     *     registration. An email that already belongs to an active account without a linked
+     *     identity links the provider to that account (password, memberships and data stay, the
+     *     email counts as verified, every other session of the account ends,
+     *     `auth.identity_linked`); an account that already has an identity, a disabled account and
+     *     the admin accounts answer `account_exists` (sign in the usual way, then link). Success sets the session
      *     cookie like a password login and redirects to `/`.
      *
      *     Link (`intent: link`): the identity is added to the signed-in user and the browser goes to
@@ -453,7 +454,7 @@ export interface paths {
      *     `invitation_invalid`, `already_member`, `plan_limit`, `suspended`, `rate_limited`; link
      *     errors add `identity_in_use`, `already_linked` and `session_expired`. Provider error text
      *     is never reflected. Every outcome is audited (`auth.oauth_login_succeeded`, `auth.oauth_login_failed`,
-     *     `auth.identity_linked`, `auth.account_claimed`). Failed callbacks count against the login's per-client-IP limit.
+     *     `auth.identity_linked`). Failed callbacks count against the login's per-client-IP limit.
      */
     get: operations["oauthCallback"];
     put?: never;

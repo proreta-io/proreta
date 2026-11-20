@@ -324,35 +324,6 @@ func (q *Queries) LockAuthDomain(ctx context.Context, arg LockAuthDomainParams) 
 	return i, err
 }
 
-const lockUserForClaim = `-- name: LockUserForClaim :one
-SELECT status, is_platform_admin, is_system_admin, email, email_verified_at
-FROM users
-WHERE id = $1
-FOR UPDATE
-`
-
-type LockUserForClaimRow struct {
-	Status          string
-	IsPlatformAdmin bool
-	IsSystemAdmin   bool
-	Email           string
-	EmailVerifiedAt *time.Time
-}
-
-// Serialises a takeover of an unverified account with every other change of it.
-func (q *Queries) LockUserForClaim(ctx context.Context, id uuid.UUID) (LockUserForClaimRow, error) {
-	row := q.db.QueryRow(ctx, lockUserForClaim, id)
-	var i LockUserForClaimRow
-	err := row.Scan(
-		&i.Status,
-		&i.IsPlatformAdmin,
-		&i.IsSystemAdmin,
-		&i.Email,
-		&i.EmailVerifiedAt,
-	)
-	return i, err
-}
-
 const lockUserForIdentities = `-- name: LockUserForIdentities :one
 SELECT password_hash, status, is_platform_admin, is_system_admin, email
 FROM users
@@ -374,6 +345,33 @@ func (q *Queries) LockUserForIdentities(ctx context.Context, id uuid.UUID) (Lock
 	var i LockUserForIdentitiesRow
 	err := row.Scan(
 		&i.PasswordHash,
+		&i.Status,
+		&i.IsPlatformAdmin,
+		&i.IsSystemAdmin,
+		&i.Email,
+	)
+	return i, err
+}
+
+const lockUserForLink = `-- name: LockUserForLink :one
+SELECT status, is_platform_admin, is_system_admin, email
+FROM users
+WHERE id = $1
+FOR UPDATE
+`
+
+type LockUserForLinkRow struct {
+	Status          string
+	IsPlatformAdmin bool
+	IsSystemAdmin   bool
+	Email           string
+}
+
+// Serialises the link of a provider identity by email with every other change of the account.
+func (q *Queries) LockUserForLink(ctx context.Context, id uuid.UUID) (LockUserForLinkRow, error) {
+	row := q.db.QueryRow(ctx, lockUserForLink, id)
+	var i LockUserForLinkRow
+	err := row.Scan(
 		&i.Status,
 		&i.IsPlatformAdmin,
 		&i.IsSystemAdmin,
