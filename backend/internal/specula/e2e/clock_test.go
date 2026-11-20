@@ -111,7 +111,9 @@ func (c *simClock) Advance(d time.Duration) {
 	}
 }
 
-// afterFire waits for the goroutine a timer woke to take the tick and to arm its next timer.
+// afterFire waits for the goroutine a timer woke to take the tick and to arm its next timer. The
+// second wait is long on purpose: a goroutine that is starved while it checks has not finished, and a
+// clock that moved on would make it skip slots; every woken goroutine arms again at once when it is not starved.
 func (c *simClock) afterFire(t *simTimer, regsBefore int) {
 	// A tick nobody takes within 25 ms belongs to a goroutine that gave up that timer (a select that
 	// another case won): not worth waiting for.
@@ -120,7 +122,7 @@ func (c *simClock) afterFire(t *simTimer, regsBefore int) {
 			return
 		}
 	}
-	for end := time.Now().Add(100 * time.Millisecond); time.Now().Before(end); time.Sleep(200 * time.Microsecond) {
+	for end := time.Now().Add(10 * time.Second); time.Now().Before(end); time.Sleep(200 * time.Microsecond) {
 		c.mu.Lock()
 		r := c.regs
 		c.mu.Unlock()
