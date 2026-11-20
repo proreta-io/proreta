@@ -29,7 +29,7 @@ Contents: [Prerequisites](#prerequisites) · [Install](#install) · [After insta
 - **Extensions:** only `citext` is needed. It is a trusted extension, so the database owner may create it without superuser rights. It is part of the standard contrib modules (present in the official images, RDS, Aurora and Cloud SQL). On Azure Database for PostgreSQL allow-list it first (server parameter `azure.extensions` must include `CITEXT`). The migrations themselves create no extensions.
 - **One installation per PostgreSQL server:** the role names (`proreta_owner`, `proreta_api`, `proreta_worker`, `proreta_statuspage`) are fixed and not configurable, so one PostgreSQL server hosts exactly one Proreta installation. A second installation on the same server, even with another `database.name`, would reset the role passwords of the first one. Use a separate server (or managed instance) per installation.
 - `pg_hba.conf` (or the provider's firewall) must allow password (SCRAM) logins of the four roles and the admin login from the cluster's pod network, and `max_connections` must leave room for up to 53 connections of these roles.
-- TLS: the default `database.sslmode` is `require` (encrypted, certificate not verified). Use `disable` only for a server without TLS, for example a throwaway test database.
+- TLS: the default `database.sslmode` is `require` (encrypted, certificate not verified). For production set `verify-full` (checks the certificate chain and that it is issued for `database.host`). Managed servers (RDS, Aurora, Cloud SQL, Azure) sign with a CA that is not in the image's system store: create a Secret with the CA bundle, for example `kubectl -n proreta create secret generic db-ca --from-file=ca.crt=./global-bundle.pem`, and set `database.tlsCA.existingSecret: db-ca` (`database.tlsCA.key` if the key is not `ca.crt`). The chart mounts it in every pod and Job that connects and sets `PGSSLROOTCERT`, so the application, the migration and the bootstrap all verify the server. Use `disable` only for a server without TLS, for example a throwaway test database.
 
 ### Images
 `ghcr.io/proreta-io/proreta-backend` (api, worker, jobs, status pages, migrations, bootstrap) and `ghcr.io/proreta-io/proreta-web` (the web app, nginx), both `amd64` and `arm64`. Release tags are `X.Y.Z` (no `v`), plus `X.Y` (and `X` from major version 1 on); builds of `main` are `sha-<7 hex>`. If you build them from a fork, GitHub creates the packages as private: make them public or set `imagePullSecrets`.
@@ -313,7 +313,7 @@ The defaults fit a single-company installation with a few hundred monitors on a 
 | `statuspage` | 1 | 10m / 48Mi | Caches per replica; more replicas multiply the per-replica rate limits. |
 | `web` | 2 | 10m / 32Mi | Static files served by nginx. |
 
-Two replicas of `api` and `worker` keep the service up during node drains; the `api.pdb` and `topologySpread` values (off by default) help on multi-node clusters. Requests are small on purpose; raise them deliberately when the metrics show pressure.
+Two replicas of `api`, `worker` and `web` survive the loss of one pod, but the chart sets no PodDisruptionBudget and no spread by default, so a node drain can evict both replicas of a component that the scheduler put on the same node. On a multi-node cluster set `api.pdb.enabled: true` and `topologySpread.enabled: true` (the PodDisruptionBudget covers the api only; `worker` and `web` are covered by the spread alone). Requests are small on purpose; raise them deliberately when the metrics show pressure.
 
 ## Troubleshooting
 
@@ -348,6 +348,7 @@ The first pod to fail is usually `proreta-db-bootstrap`. `kubectl -n proreta des
 ### The database bootstrap cannot connect or is not allowed
 `kubectl -n proreta logs job/proreta-db-bootstrap` names the cause:
 - `failed SASL auth: FATAL: password authentication failed`: wrong `username` or `password` in the admin Secret. Recreate it (step 2), then rerun the upgrade.
+- `failed to verify certificate: x509: certificate signed by unknown authority` (`verify-ca` / `verify-full`): the server's CA is not trusted; provide it with `database.tlsCA.existingSecret` (see the PostgreSQL requirements above). `certificate is valid for ..., not <host>`: use `verify-ca`, or set `database.host` to a name on the certificate.
 - `tls error: server refused TLS connection`: the server has no TLS; set `database.sslmode: disable` (only on a trusted network) or enable TLS on the server.
 - `no pg_hba.conf entry`, `i/o timeout`, `connection refused`, `no such host`: the pod cannot reach the server. Check `database.host` and `database.port`, DNS, security groups or firewall rules, `pg_hba.conf`, and any NetworkPolicy in the namespace.
 - `permission denied to create role` or `permission denied to create database`: the admin login lacks `CREATEROLE` or `CREATEDB`.

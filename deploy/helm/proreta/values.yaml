@@ -67,6 +67,13 @@ database:
   port: 5432
   name: proreta            # database name
   sslmode: require         # disable only for a server without TLS (e.g. a throwaway test database)
+  # CA that signed the server certificate, for sslmode verify-ca / verify-full with a server whose CA
+  # is not in the system store (RDS, Cloud SQL, a private CA). existingSecret: a Secret in the release
+  # namespace holding the PEM bundle under `key`; it is mounted in every pod and Job that connects
+  # and passed as PGSSLROOTCERT.
+  tlsCA:
+    existingSecret: ""
+    key: ca.crt
   # Hook Job (Helm pre-install/pre-upgrade or ArgoCD Sync, weight/wave -3) running
   # `proretactl db bootstrap` BEFORE the migration Job: creates the database and the roles
   # (idempotent) and the Secret `secretName`.

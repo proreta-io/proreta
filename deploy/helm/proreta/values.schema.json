@@ -294,7 +294,7 @@
         "sslmode": {
           "type": "string",
           "title": "sslmode",
-          "description": "libpq sslmode of the connections; require encrypts without verifying the certificate",
+          "description": "libpq sslmode of the connections; require encrypts without verifying the certificate, verify-full also checks the host name (give the CA in tlsCA when the system store does not have it)",
           "enum": [
             "disable",
             "allow",
@@ -303,6 +303,27 @@
             "verify-ca",
             "verify-full"
           ]
+        },
+        "tlsCA": {
+          "type": "object",
+          "title": "database server CA",
+          "description": "CA bundle for sslmode verify-ca / verify-full when the server certificate is not signed by a CA in the system store (RDS, Cloud SQL, a private CA)",
+          "additionalProperties": false,
+          "properties": {
+            "existingSecret": {
+              "type": "string",
+              "title": "Secret with the CA bundle",
+              "description": "name of a Secret in the release namespace; mounted in every pod and Job that connects to the database and passed as PGSSLROOTCERT. Empty: system CAs only",
+              "maxLength": 253
+            },
+            "key": {
+              "type": "string",
+              "title": "key in the Secret",
+              "description": "key holding the PEM bundle",
+              "pattern": "^[A-Za-z0-9._-]+$",
+              "minLength": 1
+            }
+          }
         },
         "bootstrap": {
           "type": "object",

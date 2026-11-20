@@ -47,6 +47,7 @@ spec:
                 secretKeyRef:
                   name: {{ include "proreta.secret.db" . }}
                   key: owner_url
+            {{- include "proreta.db.caEnv" . | nindent 12 }}
           resources:
             {{- toYaml .Values.migration.resources | nindent 12 }}
           securityContext:
@@ -54,8 +55,10 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- include "proreta.db.caMount" . | nindent 12 }}
       volumes:
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi
+        {{- include "proreta.db.caVolume" . | nindent 8 }}
       {{- include "proreta.scheduling" $sel | nindent 6 }}
