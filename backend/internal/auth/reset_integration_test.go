@@ -292,3 +292,22 @@ func TestIntegrationPasswordResetDisabled(t *testing.T) {
 		t.Fatalf("password form off: %v", err)
 	}
 }
+
+func TestIntegrationPasswordChangeKillsOpenResetLinks(t *testing.T) {
+	e := newVerifyEnv(t, "auth_reset_change", true)
+	res := e.register("ada@example.com")
+	if err := e.svc.RequestPasswordReset(e.ctx, "ada@example.com", testIP); err != nil {
+		t.Fatal(err)
+	}
+	tok := mustFirstReset(t, e)
+	p, err := e.svc.Authenticate(e.ctx, res.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.ChangePassword(e.ctx, p, auth.ChangePasswordInput{Current: oldPassword, New: newPassword, IP: testIP}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.ResetPassword(e.ctx, tok, "yet another passphrase", testIP); !errors.Is(err, auth.ErrResetInvalid) {
+		t.Fatalf("a reset link requested before the password change still works: %v", err)
+	}
+}

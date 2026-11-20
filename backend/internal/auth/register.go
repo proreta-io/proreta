@@ -274,7 +274,8 @@ func (s *Service) joinNewAccount(ctx context.Context, email string, target invit
 // the account to the invited organization and creates a session there, all in one transaction
 // that re-checks the credential. A wrong password leaves the invitation open.
 func (s *Service) joinExistingAccount(ctx context.Context, row authdb.GetUserByEmailRow, email string, target invitationTarget, in RegisterInput) (LoginResult, error) {
-	loginKey := normalizeLogin(email)
+	// Per login and address like Login: a bare login would let anyone lock the account out of joining.
+	loginKey := normalizeLogin(email) + "|" + limiterIPKey(in.IP)
 	if ok, wait := s.loginLimit.Reserve(loginKey); !ok {
 		return LoginResult{}, &RateLimitedError{RetryAfter: wait}
 	}

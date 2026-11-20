@@ -396,6 +396,10 @@ func (s *Service) canRevoke(ctx context.Context, tx pgx.Tx, a Actor, project *uu
 		if !who.Role.AtLeast(authz.Maintainer) {
 			return ErrInvitationNotFound
 		}
+		// Nobody revokes a link above their own role: an owner link is the platform admin's.
+		if !authz.CanManage(who, authz.Role(role), "") {
+			return authz.ErrForbidden
+		}
 		return nil
 	}
 	if who.Projects, err = projects.AccessIn(ctx, tx, a.TenantID, a.UserID); err != nil {
