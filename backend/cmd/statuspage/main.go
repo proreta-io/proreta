@@ -8,10 +8,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/proreta-io/proreta/backend/internal/platform/clock"
 	"github.com/proreta-io/proreta/backend/internal/platform/config"
@@ -59,18 +62,7 @@ func run() error {
 	defer pool.Close()
 
 	reg := metrics.NewRegistry("statuspage", version, commit)
-	handler := public.NewHandler(public.Config{
-		PublicURL:        cfg.PublicURL,
-		TrustedProxyHops: cfg.TrustedProxyHops,
-		CookieSecure:     cfg.CookieSecure,
-	}, public.Deps{
-		Source:      public.DBSource{Pool: pool},
-		Cookies:     public.NewCookieSigner([]byte(cfg.CookieKey.Value())),
-		Clock:       clock.System{},
-		Logger:      log,
-		Registerer:  reg,
-		HTTPMetrics: metrics.NewHTTP(reg),
-	})
+	handler := newHandler(cfg, public.DBSource{Pool: pool}, log, reg)
 	servers := []*http.Server{
 		httpx.NewServer(cfg.HTTPAddr, handler, log),
 		httpx.NewServer(cfg.AdminAddr, httpx.AdminHandler(log, pool.Ping, reg), log),
@@ -85,4 +77,24 @@ func run() error {
 		servers = append(servers, httpx.NewServer(cfg.TLSAskAddr, httpx.Recover(log)(ask), log))
 	}
 	return httpx.Serve(ctx, log, cfg.ShutdownTimeout, servers...)
+}
+
+// newHandler wires the renderer from the loaded configuration; every setting of the public
+// handler comes from cfg here, so a test through this function covers what main serves.
+func newHandler(cfg config.Statuspage, src public.Source, log *slog.Logger, reg *prometheus.Registry) http.Handler {
+	return public.NewHandler(public.Config{
+		PublicURL:         cfg.PublicURL,
+		TrustedProxyHops:  cfg.TrustedProxyHops,
+		CookieSecure:      cfg.CookieSecure,
+		CustomDomains:     cfg.CustomDomains,
+		InstallationHosts: cfg.InstallationHosts,
+		AbuseURL:          cfg.AbuseURL,
+	}, public.Deps{
+		Source:      src,
+		Cookies:     public.NewCookieSigner([]byte(cfg.CookieKey.Value())),
+		Clock:       clock.System{},
+		Logger:      log,
+		Registerer:  reg,
+		HTTPMetrics: metrics.NewHTTP(reg),
+	})
 }

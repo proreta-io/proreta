@@ -747,6 +747,28 @@ func TestIntegrationHousekeeping(t *testing.T) {
 		}
 	})
 
+	t.Run("a long task holds its lock outside a transaction", func(t *testing.T) {
+		const key = 424242
+		var state string
+		long := jobs.Task{Name: "long_task", Every: time.Hour, LockKey: key,
+			RunOutsideTx: func(ctx context.Context, _ *db.Pool, _ time.Time) (int, error) {
+				// The worker role kills sessions that sit idle in a transaction after 30 s.
+				err := e.admin.QueryRow(ctx, `SELECT a.state FROM pg_locks l JOIN pg_stat_activity a USING (pid)
+					WHERE l.locktype = 'advisory' AND l.objid = $1 AND l.granted`, int32(key)).Scan(&state)
+				return 0, err
+			}}
+		if got := h.RunTask(e.ctx, long); got != "ok" {
+			t.Fatalf("run: %s (lock holder state %q)", got, state)
+		}
+		if state != "idle" {
+			t.Fatalf("the lock is held by a session that is %q, which the server may kill", state)
+		}
+		var held int
+		if err := e.admin.QueryRow(e.ctx, `SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND objid = $1`, int32(key)).Scan(&held); err != nil || held != 0 {
+			t.Fatalf("lock left behind: %d %v", held, err)
+		}
+	})
+
 	t.Run("purge_expired_sessions deletes a backlog in batches and keeps live sessions", func(t *testing.T) {
 		pgtest.MustExec(t, e.admin,
 			`INSERT INTO sessions (id, user_id, tenant_id, token_hash, csrf_token, expires_at)

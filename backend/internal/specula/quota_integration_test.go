@@ -25,7 +25,7 @@ func TestIntegrationSpeculaQuota(t *testing.T) {
 		`INSERT INTO tenants (id, slug, name, limits) VALUES ('`+tenantA+`', 'a', 'A', '{"max_agents": 3}')`,
 		`INSERT INTO tenants (id, slug, name, plan_key) VALUES ('`+tenantB+`', 'b', 'B', 'free')`,
 		`INSERT INTO users (id, email) VALUES ('`+user.String()+`', 'owner@example.com')`)
-	svc := specula.NewService(env.Pool(t, env.APIURL, 16))
+	svc := specula.NewService(env.Pool(t, env.APIURL, 4)) // the role allows 20 connections for every package at once
 	a := specula.Actor{TenantID: uuid.MustParse(tenantA), UserID: user}
 	b := specula.Actor{TenantID: uuid.MustParse(tenantB), UserID: user}
 

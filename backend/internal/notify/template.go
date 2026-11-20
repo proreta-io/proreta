@@ -167,6 +167,18 @@ func ValidateTemplate(contentType, tpl string) string {
 		if msg := jsonProblem(out); msg != "" {
 			return "is not valid JSON once rendered with sample data: " + msg
 		}
+		// Values that only some events carry render as empty text, so a placeholder outside a
+		// JSON string would produce a broken body for the other events.
+		sparse := SampleData("https://proreta.example")
+		for _, k := range []string{"monitor.id", "specula.id", "specula.name", "error.kind", "incident.id", "incident.startedAt",
+			"incident.resolvedAt", "incident.duration", "tls.expiresAt", "tls.daysLeft", "observedAt"} {
+			sparse[k] = ""
+		}
+		if out, err := RenderTemplate(contentType, tpl, sparse); err == nil {
+			if msg := jsonProblem(out); msg != "" {
+				return "is not valid JSON for events that leave some values empty (put placeholders inside quotes): " + msg
+			}
+		}
 	}
 	return ""
 }

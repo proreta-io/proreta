@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -28,6 +29,7 @@ type fakeSource struct {
 	mu      sync.Mutex
 	pages   map[string]stored
 	lookups int
+	err     error // returned by every lookup while set
 }
 
 type stored struct {
@@ -39,6 +41,9 @@ func (f *fakeSource) Lookup(_ context.Context, slug string) (Entry, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.lookups++
+	if f.err != nil {
+		return Entry{}, f.err
+	}
 	p, ok := f.pages[slug]
 	if !ok {
 		return Entry{}, nil
@@ -525,5 +530,34 @@ func TestLimiterEvictsLeastRecentlyUsed(t *testing.T) {
 	}
 	if ok, _ := l2.Has("x"); !ok {
 		t.Fatal("Has spent a token")
+	}
+}
+
+func (f *fakeSource) setErr(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.err = err
+}
+
+func TestSourceErrorIsAnUncachedUnavailable(t *testing.T) {
+	h := newHarness(t)
+	h.src.setErr(errors.New("db down"))
+	for _, p := range []string{"/status/acme", "/status/acme.json", "/status/acme/badge"} {
+		r := h.get(p)
+		if r.code != http.StatusServiceUnavailable || r.header.Get("Cache-Control") != "no-store" {
+			t.Errorf("%s: %d, Cache-Control %q", p, r.code, r.header.Get("Cache-Control"))
+		}
+	}
+}
+
+func TestLastGoodSnapshotIsServedWhileTheSourceIsDown(t *testing.T) {
+	h := newHarness(t)
+	if r := h.get("/status/acme"); r.code != http.StatusOK {
+		t.Fatal(r.code)
+	}
+	h.src.setErr(errors.New("db down"))
+	h.clk.Advance(CacheTTL + time.Second)
+	if r := h.get("/status/acme"); r.code != http.StatusOK {
+		t.Errorf("expired snapshot not served during an outage: %d", r.code)
 	}
 }

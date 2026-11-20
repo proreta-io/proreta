@@ -296,22 +296,28 @@ func TestReplayRunsAtMostFiveBatchesPerSecond(t *testing.T) {
 	}
 }
 
-func TestAnOlderGatewayWithoutReportsKeepsTheBuffer(t *testing.T) {
+func TestAGatewayWithoutReportsIsRetriedUntilItHasThem(t *testing.T) {
 	clk := newFakeClock(t0)
+	id := uuid.New()
 	gw := newGateway(clk)
 	gw.noReports = true
 	env := newReportEnv(t, gw, 100)
-	env.fill(uuid.New(), past, 5, false)
+	env.fill(id, past, 5, false)
 	env.e.rep.poke()
 	clk.Advance(time.Minute)
-	eventually(t, "the reporter to stop", func() bool {
-		env.e.rep.mu.Lock()
-		defer env.e.rep.mu.Unlock()
-		return env.e.rep.stopped
-	})
+	eventually(t, "the first refused call", func() bool { return env.e.rep.Stats().Retries > 0 })
 	if env.e.buf.Depth() != 5 {
 		t.Fatal("results were dropped")
 	}
+	gw.set(func(g *schedGateway) { g.noReports = false })
+	for range 20 {
+		clk.Advance(time.Minute)
+		if len(gw.storedSlots(id)) == 5 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("results never delivered after the gateway recovered: %v", gw.storedSlots(id))
 }
 
 func TestARejectedTokenStopsTheReporter(t *testing.T) {

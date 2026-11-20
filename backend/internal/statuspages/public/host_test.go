@@ -672,12 +672,11 @@ func TestHostCacheEvictsUnknownHostsFirst(t *testing.T) {
 	}
 }
 
-func TestHostModeLookupErrorIsTheSame404(t *testing.T) {
+func TestHostModeLookupErrorIsAnUncachedUnavailable(t *testing.T) {
 	h := newHostHarness(t, nil)
-	base := h.getAt("nobody.acme.com", "/")
 	h.hosts.err = errors.New("db down")
-	if r := h.getAt("fresh.acme.com", "/"); comparable(r) != comparable(base) {
-		t.Errorf("lookup error: %d", r.code)
+	if r := h.getAt("fresh.acme.com", "/"); r.code != http.StatusServiceUnavailable || r.header.Get("Cache-Control") != "no-store" {
+		t.Errorf("lookup error: %d, Cache-Control %q", r.code, r.header.Get("Cache-Control"))
 	}
 }
 

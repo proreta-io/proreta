@@ -122,6 +122,9 @@ func (c *Cache) Lookup(ctx context.Context, slug string) (Entry, error) {
 	v, err, _ := c.group.Do(slug, func() (any, error) {
 		e, err := c.src.Lookup(context.WithoutCancel(ctx), slug)
 		if err != nil {
+			if ok { // the last good snapshot beats an error page while the source is down
+				return it.entry, nil
+			}
 			return Entry{}, err
 		}
 		c.mu.Lock()
