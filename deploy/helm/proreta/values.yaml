@@ -252,9 +252,6 @@ api:
   env: []                  # extra env vars (list of EnvVar)
   service:
     port: 8080
-  pdb:
-    enabled: false
-    minAvailable: 1
 
 worker:
   # SECURITY: the worker must NEVER run with hostNetwork. The node metadata endpoint
@@ -450,9 +447,17 @@ serviceMonitor:
   path: /metrics
   labels: {}
 
-# Spread api/worker replicas across a topology key.
+# PodDisruptionBudget per component (api, worker, web, statuspage, speculagw) that runs more than one
+# replica, so a node drain evicts one pod at a time. Components with one replica get none: a budget
+# there would block every drain. Turn it off if your platform manages budgets itself.
+pdb:
+  enabled: true
+  maxUnavailable: 1
+
+# Spread the replicas of each component across a topology key. ScheduleAnyway only prefers a spread,
+# so a single-node cluster still schedules everything; use DoNotSchedule to require it.
 topologySpread:
-  enabled: false
+  enabled: true
   topologyKey: kubernetes.io/hostname
   maxSkew: 1
   whenUnsatisfiable: ScheduleAnyway

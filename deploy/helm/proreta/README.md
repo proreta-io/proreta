@@ -94,7 +94,6 @@ not contain `proreta` (`fullnameOverride` replaces it).
 | `serviceAccount.bootstrapAnnotations` | `{}` | Annotations of the two bootstrap ServiceAccounts, which do not inherit `serviceAccount.annotations`. |
 | `api.replicas`, `.httpPort`, `.resources`, `.env`, `.service.port` | `2`, `8080`, 50m/96Mi, `[]`, `8080` | API Deployment. |
 | `api.terminationGracePeriodSeconds` | unset | Overrides the top-level value. |
-| `api.pdb.enabled`, `.minAvailable` | `false`, `1` | PodDisruptionBudget of the api. |
 | `worker.replicas`, `.resources`, `.env`, `.terminationGracePeriodSeconds` | `2`, 50m/96Mi, `[]`, `45` | Worker Deployment. |
 | `worker.claimBatch`, `.concurrency`, `.tenantConcurrency`, `.hostConcurrency` | `100`, `50`, `5`, `2` | Check scheduling limits. |
 | `worker.location` | `default` | Probe location whose checks the worker runs (the database is seeded with `default`). |
@@ -122,7 +121,8 @@ not contain `proreta` (`fullnameOverride` replaces it).
 | `networkPolicy.gatewayNamespace` | `""` | Namespace of the Gateway's proxy pods; empty: `httpRoute.parentRef.namespace`, else the release namespace. |
 | `networkPolicy.monitoringNamespace` | `monitoring` | Namespace allowed to scrape the admin port. |
 | `serviceMonitor.enabled`, `.interval`, `.path`, `.labels` | `false`, `30s`, `/metrics`, `{}` | Prometheus Operator ServiceMonitor. |
-| `topologySpread.enabled`, `.topologyKey`, `.maxSkew`, `.whenUnsatisfiable` | `false`, `kubernetes.io/hostname`, `1`, `ScheduleAnyway` | Spread the pods. |
+| `pdb.enabled`, `.maxUnavailable` | `true`, `1` | One PodDisruptionBudget per component (api, worker, web, statuspage, speculagw) that runs more than one replica; none for a single replica, where it would block every node drain. |
+| `topologySpread.enabled`, `.topologyKey`, `.maxSkew`, `.whenUnsatisfiable` | `true`, `kubernetes.io/hostname`, `1`, `ScheduleAnyway` | Spread the replicas of each component over nodes; `ScheduleAnyway` only prefers it, so a single-node cluster still works. |
 
 Fixed by the chart, not values: the container commands (`/app/api`, `/app/worker`, `/app/jobs`,
 `/app/statuspage`, `/app/migrate`, `/app/proretactl db bootstrap`, `/app/proretactl secrets bootstrap`), the keys of the
@@ -224,7 +224,7 @@ Only the migrate Job reads `owner_url`.
   requests stay around 0.5Gi. Sizing and scaling per component: [docs/install.md](../../../docs/install.md#sizing).
   `jobs.replicas` may only be 0 or 1.
 - No Service is of type `LoadBalancer` or `NodePort`: traffic enters through your Gateway only.
-- Optional and off: `api.pdb`, `serviceMonitor` (needs the Prometheus Operator CRDs), `networkPolicy`, `topologySpread`.
+- Optional and off: `serviceMonitor` (needs the Prometheus Operator CRDs), `networkPolicy`. On by default: `pdb` (components with more than one replica) and `topologySpread` (`ScheduleAnyway`).
 - Routing: `/api` goes to the api (60 s request timeout), `/status` to the statuspage, `/` to the web when `web.enabled`.
 
 ## Secrets

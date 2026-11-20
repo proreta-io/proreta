@@ -1031,27 +1031,6 @@
         },
         "service": {
           "$ref": "#/definitions/service"
-        },
-        "pdb": {
-          "type": "object",
-          "title": "api PodDisruptionBudget",
-          "description": "optional PodDisruptionBudget of the api",
-          "additionalProperties": false,
-          "properties": {
-            "enabled": {
-              "type": "boolean",
-              "title": "PDB enabled",
-              "description": "render a PodDisruptionBudget for the api"
-            },
-            "minAvailable": {
-              "type": [
-                "integer",
-                "string"
-              ],
-              "title": "min available",
-              "description": "minAvailable of the PodDisruptionBudget (number or percentage)"
-            }
-          }
         }
       },
       "required": [
@@ -1718,10 +1697,31 @@
         }
       }
     },
+    "pdb": {
+      "type": "object",
+      "title": "PodDisruptionBudgets",
+      "description": "a PodDisruptionBudget for every component that runs more than one replica",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "PDB enabled",
+          "description": "render the PodDisruptionBudgets"
+        },
+        "maxUnavailable": {
+          "type": [
+            "integer",
+            "string"
+          ],
+          "title": "max unavailable",
+          "description": "maxUnavailable of each PodDisruptionBudget (number or percentage)"
+        }
+      }
+    },
     "topologySpread": {
       "type": "object",
       "title": "topology spread",
-      "description": "optional topologySpreadConstraints of every pod",
+      "description": "topologySpreadConstraints of every pod, one constraint per component",
       "additionalProperties": false,
       "properties": {
         "enabled": {

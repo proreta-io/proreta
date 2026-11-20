@@ -1,13 +1,20 @@
-{{- if .Values.api.pdb.enabled }}
+{{- /* One PodDisruptionBudget per component that runs more than one replica. A budget on a single
+replica would block every node drain, so it is skipped there. */ -}}
+{{- if .Values.pdb.enabled }}
+{{- range $c := list (dict "n" "api" "on" true "r" .Values.api.replicas) (dict "n" "worker" "on" true "r" .Values.worker.replicas) (dict "n" "web" "on" .Values.web.enabled "r" .Values.web.replicas) (dict "n" "statuspage" "on" .Values.statuspage.enabled "r" .Values.statuspage.replicas) (dict "n" "speculagw" "on" .Values.speculagw.enabled "r" .Values.speculagw.replicas) }}
+{{- if and $c.on (gt (int $c.r) 1) }}
+---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: {{ include "proreta.componentName" (dict "ctx" . "component" "api") }}
+  name: {{ include "proreta.componentName" (dict "ctx" $ "component" $c.n) }}
   labels:
-    {{- include "proreta.labels" (dict "ctx" . "component" "api") | nindent 4 }}
+    {{- include "proreta.labels" (dict "ctx" $ "component" $c.n) | nindent 4 }}
 spec:
-  minAvailable: {{ .Values.api.pdb.minAvailable }}
+  maxUnavailable: {{ $.Values.pdb.maxUnavailable }}
   selector:
     matchLabels:
-      {{- include "proreta.selectorLabels" (dict "ctx" . "component" "api") | nindent 6 }}
+      {{- include "proreta.selectorLabels" (dict "ctx" $ "component" $c.n) | nindent 6 }}
+{{- end }}
+{{- end }}
 {{- end }}
