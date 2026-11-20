@@ -34,14 +34,17 @@ var (
 )
 
 func main() {
-	if err := run(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	err := run(ctx, os.LookupEnv)
+	stop()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "statuspage:", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
-	cfg, err := config.LoadStatuspage(os.LookupEnv)
+func run(ctx context.Context, lookup func(string) (string, bool)) error {
+	cfg, err := config.LoadStatuspage(lookup)
 	if err != nil {
 		return err
 	}
@@ -52,8 +55,6 @@ func run() error {
 	if cfg.CustomDomains && cfg.AbuseURL == "" {
 		log.Warn("PRORETA_ABUSE_URL is empty: pages on customer domains show no \"Report abuse\" link")
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
-	defer stop()
 
 	pool, err := db.Open(ctx, cfg.DatabaseURL.Value(), db.Options{MaxConns: cfg.DatabaseMaxConns, ApplicationName: "proreta-statuspage"})
 	if err != nil {

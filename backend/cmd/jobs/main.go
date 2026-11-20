@@ -36,20 +36,21 @@ var (
 )
 
 func main() {
-	if err := run(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	err := run(ctx, os.LookupEnv)
+	stop()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "jobs:", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
-	cfg, err := config.LoadJobs(os.LookupEnv)
+func run(ctx context.Context, lookup func(string) (string, bool)) error {
+	cfg, err := config.LoadJobs(lookup)
 	if err != nil {
 		return err
 	}
 	log := logging.New(os.Stdout, cfg.LogLevel).With("service", "jobs", "version", version)
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
-	defer stop()
 
 	keys, err := crypto.NewKeyring(cfg.EncryptionKeys, cfg.EncryptionKeyID)
 	if err != nil {

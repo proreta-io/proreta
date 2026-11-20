@@ -29,9 +29,10 @@ check-generated: generate
 		exit 1; \
 	fi
 
+# The profile covers all packages: ones tested from another package (projects, plans, results) show their real coverage.
 # Integration tests run when TEST_DATABASE_ADMIN_URL points at a scratch Postgres superuser.
 test:
-	cd $(BACKEND) && go test -race -count=1 -timeout 15m ./...
+	cd $(BACKEND) && go test -race -count=1 -timeout 15m -coverpkg=./internal/...,./cmd/... -coverprofile=coverage.out ./...
 
 # End-to-end test: api, worker and jobs against real Postgres and loopback TLS servers
 # through the real SSRF guard. Only this target sets the proretatest tag, which compiles

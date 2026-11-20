@@ -42,14 +42,17 @@ var (
 )
 
 func main() {
-	if err := run(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	err := run(ctx, os.LookupEnv)
+	stop()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "api:", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
-	cfg, err := config.LoadAPI(os.LookupEnv)
+func run(ctx context.Context, lookup func(string) (string, bool)) error {
+	cfg, err := config.LoadAPI(lookup)
 	if err != nil {
 		return err
 	}
@@ -57,8 +60,6 @@ func run() error {
 	if config.CookieInsecureOverHTTPS(cfg.CookieSecure, cfg.PublicURL) {
 		log.Warn("PRORETA_COOKIE_SECURE is false while PRORETA_PUBLIC_URL is https: cookies are sent without the Secure attribute")
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
-	defer stop()
 
 	pool, err := db.Open(ctx, cfg.DatabaseURL.Value(), db.Options{MaxConns: cfg.DatabaseMaxConns, ApplicationName: "proreta-api"})
 	if err != nil {

@@ -24,20 +24,21 @@ var (
 )
 
 func main() {
-	if err := run(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	err := run(ctx, os.LookupEnv)
+	stop()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "migrate:", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
-	cfg, err := config.LoadMigrate(os.LookupEnv)
+func run(ctx context.Context, lookup func(string) (string, bool)) error {
+	cfg, err := config.LoadMigrate(lookup)
 	if err != nil {
 		return err
 	}
 	log := logging.New(os.Stdout, cfg.LogLevel).With("service", "migrate", "version", version, "commit", commit)
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
-	defer stop()
 
 	connCfg, err := pgx.ParseConfig(cfg.DatabaseURL.Value())
 	if err != nil {
