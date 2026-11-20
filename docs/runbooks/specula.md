@@ -76,9 +76,42 @@ The buffer and the cached schedule live in the state directory as plain files (a
 
 Shorter intervals count proportionally. These numbers are estimates, not guarantees.
 
-In the chart the state directory is an `emptyDir` (`state.sizeLimit`, 512Mi). It survives a restart of the container but **not the replacement of the pod** (an upgrade, an eviction or a node drain). When the pod is replaced while the link is up, the executor sends what it holds before it stops. When it is replaced while the link is down, the buffer and the cached schedule are lost, and the executor checks nothing until it reaches Proreta again. A volume that outlives the pod is not part of the chart yet.
+In the chart the state directory is an `emptyDir` (`state.sizeLimit`, 512Mi). It survives a restart of the container but **not the replacement of the pod** (an upgrade, an eviction or a node drain). When the pod is replaced the executor first sends what it holds, for up to 20 seconds. That is enough when the buffer is small. It is not enough when a replay is still running (a replay is paced, about 100 results every 200 ms): the tail that was not sent in time is lost with the pod. When the pod is replaced while Proreta cannot be reached, the buffer and the cached schedule are lost, and the executor checks nothing until it reaches Proreta again. A volume that outlives the pod is **not available yet**; do not plan on one.
+
+What a failure costs:
+
+- **A crash or kill of the executor process** (an out-of-memory kill, a liveness restart) loses nothing that was buffered, and the state directory is still there. Only the check in flight and the seconds of downtime are missing.
+- **A crash of the node** loses what the operating system had not written to disk yet, up to about a second of results, and the pod is then replaced as above.
+- **Do not drain or reboot the executor's node while Proreta is unreachable.** If the executor and Proreta are restarted together (the same node, the same maintenance window, or one deployment tool), restart Proreta first and the executor after it answers. See [Argo CD](#argo-cd-and-other-tools-that-restart-both).
 
 The cached schedule contains the decrypted headers and bodies of your monitors (tokens may be among them). Treat the state directory like the executor's own memory: do not mount it from shared storage and do not back it up.
+
+## What is guaranteed
+Producing a result is best effort, at most once per slot: a slot is checked once or not at all, and a slot that was missed (a restart, a busy or stalled executor, an expired schedule) is never checked afterwards. Delivery to Proreta is at least once and in order for as long as the buffer lives, and Proreta stores one result per monitor, location and slot, so a resend is stored once. Beyond the buffer limits, or when the pod is replaced without a chance to send, delivery is at most once: the oldest results are dropped and counted. A result that Proreta answers with `rejected`, `superseded` or `expired` is final and is not sent again, and Proreta does not distinguish a slot that was never checked from one that was lost: both are shown as **no data**.
+
+## Argo CD and other tools that restart both
+If one Argo CD manages the cluster of Proreta and the cluster of the Specula, a single sync can replace the Proreta pods and the executor pod at the same time. If the executor pod is replaced while the gateway is down, the buffer and the cached schedule are lost and the executor starts with nothing: no checks run until the gateway answers, the gap is shown as **no data**, and after about 3 minutes the Specula shows *unreachable* and its monitors *unknown*. Nothing is wrong afterwards; the results of those minutes are simply missing.
+
+Make the executor wait for Proreta. In an app-of-apps, give the Proreta application an earlier sync wave than the Specula application, so that Argo CD replaces the executor only once Proreta is healthy. Or sync the two applications separately, Proreta first. This is a choice for the operator; the charts do not set it. A sketch of the child `Application` resources of the parent application:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: proreta
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"   # first
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: proreta-specula
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"   # after the wave above is healthy
+```
+
+Argo CD applies the second wave only after everything in the first is healthy, which includes the gateway answering. A persistent state volume, which would remove this dependency, is not available yet.
+
 
 ## Degraded state
 If the state directory is unusable (full, read-only, removed, or not configured) the executor does not stop. It keeps the schedule and a small number of recent results in memory and reports itself as **degraded**. In that mode:
@@ -123,6 +156,8 @@ Suggested alerts (PromQL, thresholds are first guesses; the schedule lasts 24 ho
 **Downgrade.** Install the previous chart or image. The old executor does not announce the schedule capability, so Proreta serves it checks to claim again from its first call. There is nothing to clean up in Proreta, and results the new executor had not yet delivered are lost with its state directory. An executor of the previous version also does not run TCP monitors, and Proreta does not hand it any; they show *unknown* until you upgrade again.
 
 The chart runs a single pod per Specula and replaces it only after the old one has stopped: two executors for the same Specula are reported as duplicates.
+
+**The gap during an upgrade.** A rollout takes the old pod down first and only then pulls the new image and starts the new pod. In a slow network the pull alone can take minutes. Above 3 minutes without a hello the Specula shows *unreachable* and its monitors *unknown*, the *Specula unreachable* incident opens and notifies, although nothing is lost: the checks of the gap are missing (shown as **no data**) and nothing else. In slow networks pre-pull the image on the nodes or pull through a registry mirror, so that the gap is the start of the process only.
 
 ## Behind a gateway or proxy
 Operators, for the [Specula gateway](#enable-the-gateway) on the Proreta side:
