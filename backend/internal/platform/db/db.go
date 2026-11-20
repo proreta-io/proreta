@@ -69,6 +69,31 @@ func WithTx(ctx context.Context, p *Pool, fn TxFunc) error {
 	return pgx.BeginTxFunc(ctx, p.p, pgx.TxOptions{}, fn)
 }
 
+// WithAdvisoryLock runs fn while holding the session-level advisory lock key on a dedicated
+// connection, and reports whether the lock was free. The lock is not tied to a transaction, so a
+// long fn does not leave an idle-in-transaction session for the server to kill. fn gets no
+// connection; it uses the pool as usual.
+func WithAdvisoryLock(ctx context.Context, p *Pool, key int64, fn func() error) (bool, error) {
+	conn, err := p.p.Acquire(ctx)
+	if err != nil {
+		return false, err
+	}
+	var locked bool
+	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, key).Scan(&locked); err != nil || !locked {
+		conn.Release()
+		return false, err
+	}
+	defer func() {
+		uctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if _, err := conn.Exec(uctx, `SELECT pg_advisory_unlock($1)`, key); err != nil {
+			_ = conn.Conn().Close(uctx) // closing the session releases the lock; the pool drops the connection
+		}
+		conn.Release()
+	}()
+	return true, fn()
+}
+
 // ErrNoTenant is returned when WithTenantTx is called with the zero UUID.
 var ErrNoTenant = errors.New("db: tenant id is required")
 

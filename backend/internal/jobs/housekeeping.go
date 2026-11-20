@@ -24,11 +24,11 @@ import (
 type Task struct {
 	Name  string
 	Every time.Duration
-	// LockKey is the pg_try_advisory_xact_lock key; unique per task.
+	// LockKey is the advisory lock key (transaction-level, session-level with RunOutsideTx); unique per task.
 	LockKey int64
 	Run     func(ctx context.Context, tx pgx.Tx, now time.Time) (int, error)
 	// RunOutsideTx, when set, replaces Run for tasks whose steps need their own transactions. It
-	// runs on other pool connections while the advisory lock transaction stays open.
+	// runs on other pool connections while the session-level advisory lock is held.
 	RunOutsideTx func(ctx context.Context, pool *db.Pool, now time.Time) (int, error)
 }
 
@@ -438,18 +438,24 @@ func (h *Housekeeper) RunTask(parent context.Context, t Task) string {
 		locked bool
 		n      int
 	)
-	err := db.WithTx(ctx, h.pool, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock($1)`, t.LockKey).Scan(&locked); err != nil || !locked {
-			return err
-		}
-		var err error
-		if t.RunOutsideTx != nil {
+	var err error
+	if t.RunOutsideTx != nil {
+		// A run may outlast idle_in_transaction_session_timeout, so its lock must not be a transaction's.
+		locked, err = db.WithAdvisoryLock(ctx, h.pool, t.LockKey, func() error {
+			var err error
 			n, err = t.RunOutsideTx(ctx, h.pool, start)
-		} else {
+			return err
+		})
+	} else {
+		err = db.WithTx(ctx, h.pool, func(tx pgx.Tx) error {
+			if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock($1)`, t.LockKey).Scan(&locked); err != nil || !locked {
+				return err
+			}
+			var err error
 			n, err = t.Run(ctx, tx, start)
-		}
-		return err
-	})
+			return err
+		})
+	}
 	result := resultOK
 	switch {
 	case err != nil:
