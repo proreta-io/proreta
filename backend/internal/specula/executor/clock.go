@@ -13,7 +13,8 @@ type Clock interface {
 
 type realClock struct{}
 
-func (realClock) Now() time.Time                         { return time.Now().UTC() }
+// Now keeps the monotonic reading, which serverClock relies on; callers convert with UTC() to print.
+func (realClock) Now() time.Time                         { return time.Now() }
 func (realClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
 
 // serverClock is the local clock corrected by the last offset to the server's clock. Between two
