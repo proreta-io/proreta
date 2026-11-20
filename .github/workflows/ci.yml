@@ -183,6 +183,7 @@ jobs:
               - '.github/workflows/ci.yml'
             images:
               - 'Dockerfile'
+              - 'Dockerfile.specula'
               - '.dockerignore'
               - 'backend/**'
               - 'web/**'
@@ -289,7 +290,7 @@ jobs:
           version: v2.15.0
           working-directory: backend
 
-  # Builds both images as the release does (amd64 only, nothing pushed), so a broken Dockerfile or
+  # Builds the images as the release does (amd64 only, nothing pushed), so a broken Dockerfile or
   # .dockerignore fails the pull request instead of the tag build.
   images:
     name: image (${{ matrix.name }})
@@ -309,6 +310,9 @@ jobs:
           - name: web
             context: web
             file: web/Dockerfile
+          - name: specula
+            context: .
+            file: Dockerfile.specula
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

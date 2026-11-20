@@ -460,8 +460,8 @@ helm template specula "$sp_chart" -n specula "${sp_args[@]}" --set serviceMonito
 helm package "$sp_chart" --version 1.2.3 --app-version 1.2.3 -d "$out/specula-pkg" >/dev/null
 tar -xzOf "$out/specula-pkg/proreta-specula-1.2.3.tgz" proreta-specula/LICENSE | cmp -s LICENSE - || { echo "FAIL: packaged Specula chart has no LICENSE equal to the repository LICENSE" >&2; exit 1; }
 helm template specula "$out/specula-pkg/proreta-specula-1.2.3.tgz" -n specula --set proreta.url=https://proreta.example.com --set token.existingSecret=specula-token >"$out/specula-packaged.yaml"
-grep -q 'image: "ghcr.io/proreta-io/proreta-backend:1.2.3"' "$out/specula-packaged.yaml" || { echo "FAIL: packaged Specula chart does not use appVersion 1.2.3" >&2; exit 1; }
-helm template specula "$sp_chart" -n specula --set image.digest=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --set proreta.url=https://proreta.example.com --set token.existingSecret=specula-token | grep -qF 'image: "ghcr.io/proreta-io/proreta-backend@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' || { echo "FAIL: Specula chart ignores image.digest" >&2; exit 1; }
+grep -q 'image: "ghcr.io/proreta-io/proreta-specula:1.2.3"' "$out/specula-packaged.yaml" || { echo "FAIL: packaged Specula chart does not use appVersion 1.2.3" >&2; exit 1; }
+helm template specula "$sp_chart" -n specula --set image.digest=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa --set proreta.url=https://proreta.example.com --set token.existingSecret=specula-token | grep -qF 'image: "ghcr.io/proreta-io/proreta-specula@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' || { echo "FAIL: Specula chart ignores image.digest" >&2; exit 1; }
 python3 - "$out/specula.yaml" "$out/specula-custom.yaml" "$out/specula-nostate.yaml" <<'PY'
 import sys, yaml
 for path in sys.argv[1:]:
@@ -473,7 +473,7 @@ for path in sys.argv[1:]:
     assert spec["automountServiceAccountToken"] is False, "the Specula pod mounts an API token"
     assert spec["securityContext"]["runAsNonRoot"] is True, "not non-root"
     assert sc["readOnlyRootFilesystem"] is True and sc["allowPrivilegeEscalation"] is False and sc["capabilities"]["drop"] == ["ALL"], "container hardening missing"
-    assert c["command"] == ["/app/specula"], c["command"]
+    assert "command" not in c, c["command"]
     env = {e["name"]: e for e in c["env"]}
     ref = env["PRORETA_SPECULA_TOKEN"]["valueFrom"]["secretKeyRef"]
     assert ref == {"name": "specula-token", "key": "token"}, ref

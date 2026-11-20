@@ -94,6 +94,10 @@ jobs:
             image: ghcr.io/proreta-io/proreta-web
             context: web
             file: web/Dockerfile
+          - name: specula
+            image: ghcr.io/proreta-io/proreta-specula
+            context: .
+            file: Dockerfile.specula
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -220,7 +224,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          for img in proreta-backend proreta-web; do
+          for img in proreta-backend proreta-web proreta-specula; do
             out=$(docker buildx imagetools inspect "ghcr.io/proreta-io/${img}:${version}")
             for platform in linux/amd64 linux/arm64; do
               grep -q "Platform:.*${platform}" <<<"$out" || { echo "::error::${img}:${version} has no ${platform}"; exit 1; }
@@ -248,6 +252,6 @@ jobs:
           if [ -f "$notes" ]; then
             flags+=(--notes-file "$notes")
           else
-            flags+=(--notes "Release ${version}. Images ghcr.io/proreta-io/proreta-backend:${version} and proreta-web:${version}, charts oci://ghcr.io/proreta-io/charts/proreta and proreta-specula at version ${version}. See docs/release-notes/ in this tag and docs/install.md.")
+            flags+=(--notes "Release ${version}. Images ghcr.io/proreta-io/proreta-backend:${version}, proreta-web:${version} and proreta-specula:${version}, charts oci://ghcr.io/proreta-io/charts/proreta and proreta-specula at version ${version}. See docs/release-notes/ in this tag and docs/install.md.")
           fi
           gh release create "$GITHUB_REF_NAME" --verify-tag --title "Proreta ${version}" "${flags[@]}"

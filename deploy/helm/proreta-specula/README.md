@@ -32,7 +32,7 @@ The pods must reach `proreta.url` over HTTPS and the services you want to check.
 | `specula.pollInterval` | `5s` | How often a pod asks for work (1s to 1m). |
 | `specula.logLevel`, `specula.adminPort` | `info`, `9090` | Logging and the health/metrics port. |
 | `serviceMonitor.enabled`, `.interval`, `.path`, `.labels` | `false`, `30s`, `/metrics`, `{}` | A Service and a Prometheus Operator ServiceMonitor for the admin port (needs the Operator CRDs) |
-| `image.repository`, `image.tag` | `ghcr.io/proreta-io/proreta-backend`, chart appVersion | The image holds `/app/specula`. Set `image.tag` when installing from a git checkout. |
+| `image.repository`, `image.tag` | `ghcr.io/proreta-io/proreta-specula`, chart appVersion | The image holds only the executor binary. Set `image.tag` when installing from a git checkout. |
 | `env` | `[]` | Extra environment variables, for example `HTTPS_PROXY` for the call to Proreta. Checks never use a proxy. |
 | `resources`, `nodeSelector`, `tolerations`, `affinity`, `podAnnotations`, `podLabels`, `imagePullSecrets` | | Usual Kubernetes settings. |
 

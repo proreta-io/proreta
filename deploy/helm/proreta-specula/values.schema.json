@@ -21,7 +21,7 @@
         "repository": {
           "type": "string",
           "minLength": 1,
-          "description": "the backend image; it contains /app/specula"
+          "description": "the Specula executor image (ghcr.io/proreta-io/proreta-specula)"
         },
         "digest": {
           "type": "string",

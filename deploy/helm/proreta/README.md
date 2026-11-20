@@ -37,7 +37,7 @@ helm upgrade --install proreta oci://ghcr.io/proreta-io/charts/proreta --version
   change marked `CHANGE`. Copy it and pass it with `-f`. CI renders the chart with it.
 - `values.schema.json` strict validation with a title and description per key: Helm rejects a values file with an
   unknown key (for example a typo such as `database.hots`) or a malformed value and names the key.
-- Images: `ghcr.io/proreta-io/proreta-backend` and `ghcr.io/proreta-io/proreta-web`, tagged `X.Y.Z` for releases and
+- Images: `ghcr.io/proreta-io/proreta-backend` and `ghcr.io/proreta-io/proreta-web` (the Specula executor has its own chart and image, `proreta-specula`), tagged `X.Y.Z` for releases and
   `sha-<7 hex>` for builds of `main` (`.github/workflows/release.yml`).
 
 ## Values reference

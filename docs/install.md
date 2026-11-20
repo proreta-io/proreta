@@ -32,7 +32,7 @@ Contents: [Prerequisites](#prerequisites) · [Install](#install) · [After insta
 - TLS: the default `database.sslmode` is `require` (encrypted, certificate not verified). For production set `verify-full` (checks the certificate chain and that it is issued for `database.host`). Managed servers (RDS, Aurora, Cloud SQL, Azure) sign with a CA that is not in the image's system store: create a Secret with the CA bundle, for example `kubectl -n proreta create secret generic db-ca --from-file=ca.crt=./global-bundle.pem`, and set `database.tlsCA.existingSecret: db-ca` (`database.tlsCA.key` if the key is not `ca.crt`). The chart mounts it in every pod and Job that connects and sets `PGSSLROOTCERT`, so the application, the migration and the bootstrap all verify the server. Use `disable` only for a server without TLS, for example a throwaway test database.
 
 ### Images
-`ghcr.io/proreta-io/proreta-backend` (api, worker, jobs, status pages, migrations, bootstrap) and `ghcr.io/proreta-io/proreta-web` (the web app, nginx), both `amd64` and `arm64`. Release tags are `X.Y.Z` (no `v`), plus `X.Y` (and `X` from major version 1 on); builds of `main` are `sha-<7 hex>`. If you build them from a fork, GitHub creates the packages as private: make them public or set `imagePullSecrets`.
+`ghcr.io/proreta-io/proreta-backend` (api, worker, jobs, status pages, migrations, bootstrap) `ghcr.io/proreta-io/proreta-web` (the web app, nginx) and `ghcr.io/proreta-io/proreta-specula` (the Specula executor, one static binary, for a customer network), all `amd64` and `arm64`. Release tags are `X.Y.Z` (no `v`), plus `X.Y` (and `X` from major version 1 on); builds of `main` are `sha-<7 hex>`. If you build them from a fork, GitHub creates the packages as private: make them public or set `imagePullSecrets`.
 
 ## Install
 
@@ -156,10 +156,11 @@ Every release image and chart carries a signed build provenance attestation that
 VERSION=X.Y.Z
 gh attestation verify "oci://ghcr.io/proreta-io/proreta-backend:$VERSION" --owner proreta-io
 gh attestation verify "oci://ghcr.io/proreta-io/proreta-web:$VERSION" --owner proreta-io
+gh attestation verify "oci://ghcr.io/proreta-io/proreta-specula:$VERSION" --owner proreta-io
 helm pull oci://ghcr.io/proreta-io/charts/proreta --version "$VERSION"
 gh attestation verify "proreta-$VERSION.tgz" --owner proreta-io
 ```
-The same works for the `proreta-specula` chart. Tags can be moved by anyone who can write to the registry, so to install exactly what you verified, pin the images by digest: `docker buildx imagetools inspect ghcr.io/proreta-io/proreta-backend:$VERSION` prints the `Digest:`; set it as `image.digest` (and the web image's as `web.image.digest`) in `my-values.yaml`. The digest takes precedence over the tag.
+The same works for the `proreta-specula` chart (its image is `proreta-specula`, not `proreta-backend`). Tags can be moved by anyone who can write to the registry, so to install exactly what you verified, pin the images by digest: `docker buildx imagetools inspect ghcr.io/proreta-io/proreta-backend:$VERSION` prints the `Digest:`; set it as `image.digest` (and the web image's as `web.image.digest`) in `my-values.yaml`. The digest takes precedence over the tag.
 
 ### Installing with Argo CD
 The chart works under Argo CD with the same order as Helm: the ServiceAccounts, Roles, bootstrap Jobs and the migration Job are hooks ordered by sync waves, the workloads come last. Tested with Argo CD 3.x, Envoy Gateway and Amazon RDS (PostgreSQL 16), from the git source below; installing from the OCI registry as an Argo CD source was not tested (it needs the registry registered in Argo CD as a Helm repository with OCI enabled).
