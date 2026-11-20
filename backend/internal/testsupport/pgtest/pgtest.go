@@ -64,6 +64,10 @@ func AdminConfig(t testing.TB) *pgx.ConnConfig {
 	t.Helper()
 	raw := os.Getenv(EnvAdminURL)
 	if raw == "" {
+		// A renamed variable or a removed service must not turn the suite green by skipping it.
+		if os.Getenv("CI") == "true" {
+			t.Fatalf("%s is not set in CI; integration tests must run", EnvAdminURL)
+		}
 		t.Skipf("%s is not set; skipping integration test", EnvAdminURL)
 	}
 	cfg, err := pgx.ParseConfig(raw)
@@ -139,6 +143,19 @@ func bootstrap(ctx context.Context, t testing.TB, admin *pgx.ConnConfig, name st
 	})
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
+	}
+	// Roles are cluster-wide and test packages run concurrently, so the production connection limits
+	// would count connections of unrelated packages. The test that asserts the limits calls
+	// dbbootstrap.Run itself.
+	conn, err := pgx.ConnectConfig(ctx, admin)
+	if err != nil {
+		t.Fatalf("connect admin: %v", err)
+	}
+	defer func() { _ = conn.Close(context.Background()) }()
+	for _, role := range []string{dbbootstrap.OwnerRole, dbbootstrap.APIRole, dbbootstrap.WorkerRole, dbbootstrap.StatuspageRole} {
+		if _, err := conn.Exec(ctx, "ALTER ROLE "+pgx.Identifier{role}.Sanitize()+" CONNECTION LIMIT -1"); err != nil {
+			t.Fatalf("lift connection limit of %s: %v", role, err)
+		}
 	}
 	data, _, _ := secrets.Get(ctx, "test", "proreta-db")
 	return &Env{
