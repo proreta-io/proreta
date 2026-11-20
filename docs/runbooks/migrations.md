@@ -31,13 +31,14 @@ If the server hosts other databases, restoring a snapshot means a new instance a
 The test releases before the first stable release were built from a chain of 42 migrations that this one file replaces. No upgrade path from them is provided: an installation of such a release must be reinstalled on a new, empty database (take out the data you need first, for example with `pg_dump` of the tables you care about). Pointing the new image at an old database does not corrupt it: the old database has a newer migration version than the baseline, so the migration Job stops (goose reports the missing migration) and api, worker and jobs refuse to start (`database at migration N, binary knows up to M`).
 
 ### Rules from the first release on
-- The baseline is never edited once a release has shipped it.
+- The baseline is never edited once a release has shipped it. `backend/migrations/released.sha256` pins the SHA-256 of every migration of a published release; `TestReleasedMigrationsUnchanged` (unit, runs in CI) fails on an edit, a rename or a removal of a pinned file and on a new migration with an older timestamp than a pinned one. When you cut a release tag, append the line of each migration the release ships for the first time (the command is in the file header) and merge it before tagging; never change or delete a line.
 - Every later change is a new file with a UTC timestamp later than the baseline and than every migration already merged, forward-only, expand/contract (see above), as described in [Adding a migration](#adding-a-migration).
 - Compatibility between consecutive releases is binding: the previous release must keep working on the new schema during a rollout, and a contract step waits for the release after the one that stopped using the old shape.
 
 `definerAllowList` and `extraPolicies` in `backend/migrations/integration_test.go` list the current definer functions and owner policies; the snapshot in `backend/migrations/testdata/schema.sql` shows every table, column, constraint, index, policy, trigger, function and grant.
 
 ## What the tests enforce
+- `TestReleasedMigrationsUnchanged` (unit, no database): the pin file described under the rules from the first release on.
 - `TestMigrationFiles` (unit, no database): name `YYYYMMDDHHMMSS_snake_case.sql` with a valid UTC timestamp and no duplicate, no `+goose Down`, the first statement after `+goose Up` is `SET LOCAL lock_timeout = '5s';` (`SET lock_timeout = '5s';` in a `NO TRANSACTION` migration). CI also checks file naming in the repo-hygiene job.
 - `TestIntegrationMigrateFromScratchAndRerun`: all migrations apply to an empty database created by `dbbootstrap` and a second run is a no-op.
 - `TestIntegrationSchemaLint` (schema lint), on the migrated database:

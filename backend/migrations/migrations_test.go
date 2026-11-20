@@ -2,8 +2,11 @@ package migrations
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -90,5 +93,48 @@ func TestLatest(t *testing.T) {
 	got, err := Latest()
 	if err != nil || !strings.HasPrefix(newest, fmt.Sprint(got)+"_") {
 		t.Fatalf("Latest() = %d, %v; newest file %s", got, err, newest)
+	}
+}
+
+// TestReleasedMigrationsUnchanged pins the migrations of published releases (released.sha256):
+// an installed database never reruns them, so an edit would silently split fresh and installed
+// schemas. A migration that is not pinned must also sort after every pinned one, or goose rejects
+// it as out of order on installed databases.
+func TestReleasedMigrationsUnchanged(t *testing.T) {
+	raw, err := os.ReadFile("released.sha256")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned := map[string]bool{}
+	newest := ""
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		f := strings.Fields(line)
+		if len(f) != 2 {
+			t.Fatalf("released.sha256: want '<sha256>  <file>', got %q", line)
+		}
+		body, err := fs.ReadFile(FS, f[1])
+		if err != nil {
+			t.Errorf("%s is pinned as released but is missing: a released migration is never renamed or removed", f[1])
+			continue
+		}
+		sum := sha256.Sum256(body)
+		if hex.EncodeToString(sum[:]) != f[0] {
+			t.Errorf("%s was edited after its release: put the change in a new migration", f[1])
+		}
+		pinned[f[1]] = true
+		newest = max(newest, f[1])
+	}
+	entries, err := fs.ReadDir(FS, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if !pinned[e.Name()] && e.Name() < newest {
+			t.Errorf("%s is older than the released %s: use a newer timestamp", e.Name(), newest)
+		}
 	}
 }
