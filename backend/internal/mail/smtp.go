@@ -158,7 +158,8 @@ func classify(ctx context.Context, kind string, err error) *SendError {
 	var tp *textproto.Error
 	if errors.As(err, &tp) {
 		se := &SendError{Kind: kind, Code: tp.Code}
-		se.Permanent = tp.Code >= 500 && (kind == KindRecipient || kind == KindRejected)
+		// 535 is a wrong login: retrying cannot help, the administrator has to fix the settings.
+		se.Permanent = tp.Code >= 500 && (kind == KindRecipient || kind == KindRejected || (kind == KindAuth && tp.Code == 535))
 		return se
 	}
 	return &SendError{Kind: kind}
