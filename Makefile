@@ -45,7 +45,7 @@ lint:
 
 build:
 	cd $(BACKEND) && CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/ \
-		./cmd/api ./cmd/worker ./cmd/jobs ./cmd/migrate ./cmd/proretactl ./cmd/statuspage
+		./cmd/api ./cmd/worker ./cmd/jobs ./cmd/migrate ./cmd/proretactl ./cmd/statuspage ./cmd/speculagw ./cmd/specula
 
 tidy:
 	cd $(BACKEND) && go mod tidy
