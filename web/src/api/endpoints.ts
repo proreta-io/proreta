@@ -432,7 +432,7 @@ export const resetAdminUserPassword = (userId: string) =>
     }),
   );
 
-export type AdminUserStatusFilter = "active" | "disabled";
+export type AdminUserStatusFilter = "active" | "disabled" | "deleted";
 
 export const listAdminAllUsers = (
   query: string,
@@ -484,6 +484,10 @@ export const getAdminUser = (userId: string) =>
 /** Refuses sign-in and deletes all of the user's sessions. */
 export const disableAdminUser = (userId: string) =>
   unwrap(client.POST("/api/v1/admin/users/{userId}/disable", userPath(userId)));
+
+/** Erases the person and keeps a tombstone; cannot be undone. */
+export const deleteAdminUser = (userId: string) =>
+  unwrap(client.DELETE("/api/v1/admin/users/{userId}", userPath(userId)));
 
 export const enableAdminUser = (userId: string) =>
   unwrap(client.POST("/api/v1/admin/users/{userId}/enable", userPath(userId)));

@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useRef, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError, errorMessage, errorMeta } from "../../api/client";
 import {
+  deleteAdminUser,
   disableAdminUser,
   enableAdminUser,
   getAdminUser,
@@ -21,6 +22,8 @@ import {
   ConfirmDialog,
   EmptyNote,
   ErrorState,
+  Field,
+  Input,
   Loading,
   Metric,
   MetricStrip,
@@ -94,9 +97,10 @@ function UserInfo({ detail }: { detail: AdminUserDetail }) {
   const toast = useToast();
   const me = useAuth().session?.user.id;
   const [confirm, setConfirm] = useState<
-    "disable" | "enable" | "revoke" | "grant-admin" | "revoke-admin" | null
+    "disable" | "enable" | "revoke" | "grant-admin" | "revoke-admin" | "delete" | null
   >(null);
   const disabled = user.status === "disabled";
+  const deleted = user.status === "deleted";
   const revokeBlocked = user.isSystemAdmin
     ? "The system admin is configured by the deployment and cannot be revoked here."
     : user.id === me
@@ -173,26 +177,38 @@ function UserInfo({ detail }: { detail: AdminUserDetail }) {
               )}
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" onClick={() => setConfirm("revoke")}>
-              Sign out everywhere
-            </Button>
-            {disabled ? (
-              <Button variant="secondary" onClick={() => setConfirm("enable")}>
-                Enable
+          {!deleted && (
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" onClick={() => setConfirm("revoke")}>
+                Sign out everywhere
               </Button>
-            ) : (
-              !user.isSystemAdmin && (
-                <Button variant="ghost-destructive" onClick={() => setConfirm("disable")}>
-                  Disable
+              {disabled ? (
+                <Button variant="secondary" onClick={() => setConfirm("enable")}>
+                  Enable
                 </Button>
-              )
-            )}
-          </div>
+              ) : (
+                !user.isSystemAdmin && (
+                  <Button variant="ghost-destructive" onClick={() => setConfirm("disable")}>
+                    Disable
+                  </Button>
+                )
+              )}
+              {!user.isSystemAdmin && (
+                <Button variant="ghost-destructive" onClick={() => setConfirm("delete")}>
+                  Delete account
+                </Button>
+              )}
+            </div>
+          )}
         </div>
         {user.isSystemAdmin && (
           <p className="max-w-[420px] text-caption text-muted-foreground">
-            The system admin cannot be disabled here.
+            The system admin cannot be disabled or deleted here.
+          </p>
+        )}
+        {deleted && (
+          <p className="max-w-[420px] text-caption text-muted-foreground">
+            This account was deleted. Only the record is kept, so that history keeps pointing at it.
           </p>
         )}
       </div>
@@ -332,6 +348,7 @@ function UserInfo({ detail }: { detail: AdminUserDetail }) {
           </p>
         </ConfirmDialog>
       )}
+      {confirm === "delete" && <DeleteDialog user={user} onClose={() => setConfirm(null)} />}
       {confirm === "enable" && (
         <ConfirmDialog
           title={`Enable ${user.login}?`}
@@ -390,5 +407,62 @@ function UserInfo({ detail }: { detail: AdminUserDetail }) {
         </ConfirmDialog>
       )}
     </section>
+  );
+}
+
+/** Deleting is irreversible: the address has to be typed. The guard refusals come back as plain problem details. */
+function DeleteDialog({ user, onClose }: { user: AdminUserDetail["user"]; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const toast = useToast();
+  const field = useRef<HTMLInputElement>(null);
+  const [typed, setTyped] = useState("");
+  const matches = typed.trim().toLowerCase() === user.login.toLowerCase();
+
+  const mutation = useMutation({
+    mutationFn: () => deleteAdminUser(user.id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["admin"] });
+      toast("Account deleted");
+      onClose();
+      void navigate("/admin/users");
+    },
+  });
+
+  return (
+    <ConfirmDialog
+      title={`Delete the account ${user.login}?`}
+      confirmLabel="Delete account"
+      busy={mutation.isPending}
+      initialFocus={field}
+      onCancel={onClose}
+      onConfirm={() => {
+        if (matches) mutation.mutate();
+      }}
+    >
+      <p>
+        This cannot be undone. The person is signed out, removed from every organization and
+        project, and loses the password and linked Google or GitHub sign-ins. The address becomes
+        free, so the person can register again as a new account with none of the old data. The
+        record stays as a deleted user, so audit history keeps pointing at it. Disable the user
+        instead to keep the account.
+      </p>
+      <Field label={`Type ${user.login} to confirm`}>
+        {(control) => (
+          <Input
+            {...control}
+            ref={field}
+            value={typed}
+            autoComplete="off"
+            onChange={(e) => setTyped(e.target.value)}
+          />
+        )}
+      </Field>
+      {mutation.isError && (
+        <p role="alert" className="text-caption text-down">
+          {errorMessage(mutation.error)}
+        </p>
+      )}
+    </ConfirmDialog>
   );
 }

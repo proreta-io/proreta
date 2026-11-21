@@ -1984,7 +1984,8 @@ export interface paths {
     /**
      * Users of all organizations
      * @description Every user of the installation, newest first. `query` matches the email or the display
-     *     name; `status` keeps only `active` or `disabled` users. `organizationCount` is the number
+     *     name; `status` keeps only `active`, `disabled` or `deleted` users. Without `status`, deleted
+     *     users are left out. `organizationCount` is the number
      *     of memberships, deleted organizations included. Platform admins only.
      */
     get: operations["adminListAllUsers"];
@@ -2014,7 +2015,25 @@ export interface paths {
     get: operations["adminGetUser"];
     put?: never;
     post?: never;
-    delete?: never;
+    /**
+     * Delete a user account
+     * @description Erases the person and keeps the row as a tombstone: the sessions, the memberships in every
+     *     organization (deleted ones included), the project memberships, the linked sign-in identities
+     *     and the pending verification and reset links are deleted, the display name, the password and
+     *     the verified time are cleared and the email address is replaced by a placeholder, so the
+     *     person can register again with the address as a new account without any history. Records
+     *     the user created (invitations, sign-in domains, Specula agents) and audit rows keep
+     *     pointing at the tombstone, which has status `deleted`. The label of invitations the user
+     *     accepted is cleared. Cannot be undone; disabling is the reversible alternative.
+     *
+     *     Refused: the system admin (409 `urn:proreta:problem:system-admin`), any other platform
+     *     admin, which includes oneself (409 `urn:proreta:problem:platform-admin`; revoke the flag
+     *     first) and an account that is the only active owner of an organization (409
+     *     `urn:proreta:problem:last-owner`). A user who is already deleted answers 204 and changes
+     *     nothing. Audited as `admin.user.deleted` (`sessionsRevoked`, `membershipsRemoved`,
+     *     `identitiesRemoved`), in the user's last used organization. Platform admins only.
+     */
+    delete: operations["adminDeleteUser"];
     options?: never;
     head?: never;
     patch?: never;
@@ -3785,7 +3804,7 @@ export interface components {
       id: string;
       login: string;
       /** @enum {string} */
-      status: "active" | "disabled";
+      status: "active" | "disabled" | "deleted";
       /** @description The organization role; null for a person who belongs to the organization only through projects */
       role: components["schemas"]["MembershipRole"] | null;
       /** Format: date-time */
@@ -3799,8 +3818,11 @@ export interface components {
       /** @description The email address (the system admin's login is not an address) */
       login: string;
       displayName: string;
-      /** @enum {string} */
-      status: "active" | "disabled";
+      /**
+       * @description `deleted` is a tombstone left by deleting the account; the login is a placeholder
+       * @enum {string}
+       */
+      status: "active" | "disabled" | "deleted";
       isPlatformAdmin: boolean;
       /** @description The configured system admin, which cannot be revoked or disabled */
       isSystemAdmin: boolean;
@@ -4644,7 +4666,8 @@ export interface components {
      *     | `urn:proreta:problem:plan-in-use` | 409 | An organization, a deleted one too, is still on the plan |
      *     | `urn:proreta:problem:protected-organization` | 409 | The default organization, or the admin's own, cannot be suspended or deleted |
      *     | `urn:proreta:problem:organization-deleted` | 409 | A deleted organization cannot be changed |
-     *     | `urn:proreta:problem:system-admin` | 409 | The system admin's membership cannot be changed through the API, nor can it be disabled or revoked; the password of a platform admin cannot be reset by another admin |
+     *     | `urn:proreta:problem:system-admin` | 409 | The system admin's membership cannot be changed through the API, nor can it be disabled, deleted or revoked; the password of a platform admin cannot be reset by another admin |
+     *     | `urn:proreta:problem:platform-admin` | 409 | A platform admin cannot be deleted; revoke the flag first |
      *     | `urn:proreta:problem:last-platform-admin` | 409 | The platform-admin flag of the last active platform admin cannot be revoked |
      *     | `urn:proreta:problem:invitation-accepted` | 409 | The invitation was already used |
      *     | `urn:proreta:problem:already-member` | 409 | The user is already a member of the organization |
@@ -7706,8 +7729,8 @@ export interface operations {
       query?: {
         /** @description Case-insensitive substring to search for; empty lists everything */
         query?: components["parameters"]["AdminQuery"];
-        /** @description Only users with this status; omit for all */
-        status?: "active" | "disabled";
+        /** @description Only users with this status; omit for all except deleted ones */
+        status?: "active" | "disabled" | "deleted";
         /** @description Page size */
         limit?: components["parameters"]["Limit"];
         /** @description Number of items to skip */
@@ -7760,6 +7783,36 @@ export interface operations {
       401: components["responses"]["Unauthorized"];
       403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
+      default: components["responses"]["Error"];
+    };
+  };
+  adminDeleteUser: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description The `csrfToken` of the session (from login or `GET /api/v1/auth/me`) */
+        "X-CSRF-Token": components["parameters"]["CsrfToken"];
+      };
+      path: {
+        /** @description User id; a value that is not a UUID is answered with 400 */
+        userId: components["parameters"]["AdminUserId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      403: components["responses"]["Forbidden"];
+      404: components["responses"]["NotFound"];
+      409: components["responses"]["Conflict"];
       default: components["responses"]["Error"];
     };
   };

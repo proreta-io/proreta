@@ -28,7 +28,7 @@ import { adminTitle } from "./AdminOverview";
 import { UserStatusBadge } from "./UserStatusBadge";
 
 const parseStatus = (value: string | null): AdminUserStatusFilter | "" =>
-  value === "active" || value === "disabled" ? value : "";
+  value === "active" || value === "disabled" || value === "deleted" ? value : "";
 
 /** Users of all organizations with search, a status filter and pagination; the state lives in the URL. */
 export default function AdminUsers() {
@@ -93,9 +93,10 @@ export default function AdminUsers() {
           value={status}
           onChange={(e) => update({ status: parseStatus(e.target.value), offset: 0 })}
         >
-          <option value="">All statuses</option>
+          <option value="">All but deleted</option>
           <option value="active">Active</option>
           <option value="disabled">Disabled</option>
+          <option value="deleted">Deleted</option>
         </Select>
       </form>
 
