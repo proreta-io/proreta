@@ -32,7 +32,7 @@ const speculaItem = (name: string, status: string, over: Record<string, unknown>
   lastSeenAt: ago(0.2),
   createdAt: ago(60 * 24 * 20),
   revokedAt: null,
-  capabilities: ["schedule/1", "tcp"],
+  capabilities: ["schedule/1", "schedule/2", "tcp"],
   scheduleIssuedAt: null,
   bufferDepth: null,
   oldestUnsentAt: null,
@@ -1026,6 +1026,34 @@ const routes: Route[] = [
           speculaItem("Lab (old executor)", "online", { hostname: "lab-1", capabilities: [] }),
         ],
       }),
+  ],
+  [
+    "GET",
+    "/api/v1/specula/:id/slot-losses",
+    ({ params, query }) => {
+      const losses: Record<string, [string, string, number][]> = {
+        "office-network": [
+          ["missed", "busy", 1200],
+          ["dropped", "tooOld", 3],
+        ],
+        warehouse: [],
+        "branch-office": [
+          ["missed", "scheduleExpired", 840],
+          ["dropped", "bufferAge", 96],
+        ],
+      };
+      const totals = (losses[params.id!] ?? []).map(([kind, reason, count]) => ({
+        kind,
+        reason,
+        count,
+      }));
+      return ok({
+        range: query.get("range") ?? "24h",
+        reporting: params.id! in losses,
+        totals,
+        buckets: [],
+      });
+    },
   ],
   ["GET", "/api/v1/status-pages", () => ok({ items: [statusPage] })],
   ["GET", "/api/v1/status-pages/:id/components", () => ok({ items: [] })],
