@@ -53,6 +53,7 @@ const (
 	problemAccountSuspended   = "urn:proreta:problem:account-suspended"
 	problemProtectedOrg       = "urn:proreta:problem:protected-organization"
 	problemSystemAdmin        = "urn:proreta:problem:system-admin"
+	problemPlatformAdmin      = "urn:proreta:problem:platform-admin"
 	problemLastPlatformAdmin  = "urn:proreta:problem:last-platform-admin"
 	problemOrgDeleted         = "urn:proreta:problem:organization-deleted"
 	problemInvitationInvalid  = "urn:proreta:problem:invitation-invalid"
@@ -210,6 +211,9 @@ func writeError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 	case errors.Is(err, admin.ErrSystemAdminRevoke):
 		p.Type, p.Title, p.Status = problemSystemAdmin, "The system administrator cannot be revoked", http.StatusConflict
 		p.Detail = "The system administrator is configured by PRORETA_ADMIN_LOGIN and always keeps platform admin access."
+	case errors.Is(err, admin.ErrPlatformAdmin):
+		p.Type, p.Title, p.Status = problemPlatformAdmin, "A platform administrator cannot be deleted", http.StatusConflict
+		p.Detail = "Revoke platform admin access first, then delete the account."
 	case errors.Is(err, admin.ErrLastPlatformAdmin):
 		p.Type, p.Title, p.Status = problemLastPlatformAdmin, "The last platform administrator cannot be revoked", http.StatusConflict
 		p.Detail = "Grant platform admin access to another active user first."

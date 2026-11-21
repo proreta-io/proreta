@@ -143,8 +143,8 @@ func adminCalls(t *testing.T, tenantID, userID string) []struct{ method, path, b
 				strings.NewReplacer("{tenantId}", tenantID, "{organizationId}", tenantID, "{userId}", userID, "{invitationId}", userID, "{projectId}", userID, "{domainId}", userID, "{speculaId}", userID, "{key}", "capped").Replace(path), body})
 		}
 	}
-	if len(out) != 55 {
-		t.Fatalf("%d admin operations in the spec, want 55", len(out))
+	if len(out) != 56 {
+		t.Fatalf("%d admin operations in the spec, want 56", len(out))
 	}
 	return out
 }
@@ -733,5 +733,82 @@ func TestIntegrationAdminPlans(t *testing.T) {
 		if n := countRows(t, env, `SELECT count(*) FROM audit_log WHERE action = '`+action+`'`); n != want {
 			t.Errorf("%s audit rows = %d, want %d", action, n, want)
 		}
+	}
+}
+
+// Deleting an account erases the person and keeps a tombstone: the old session and password stop
+// working, the address registers again as a new account, the tombstone is hidden from the default
+// list and the guards answer their problem types.
+func TestIntegrationAdminDeleteUser(t *testing.T) {
+	env := pgtest.New(t, pgtest.DBName("apiadmindeleteuser"))
+	c := newAdminServer(t, env, &lockedBuffer{})
+	const email = "alice@gone.example"
+	userCookie, _, reg := c.register(email)
+	tenant := reg.body["organization"].(map[string]any)["id"].(string)
+	user := reg.body["user"].(map[string]any)["id"].(string)
+	adminCookie, adminCSRF := c.login()
+	ah := withCSRF(adminCookie, adminCSRF)
+	problem := func(r response) any { return r.body["type"] }
+
+	if r := c.do(http.MethodDelete, "/api/v1/admin/users/"+user, "", ah); r.code != http.StatusConflict || problem(r) != "urn:proreta:problem:last-owner" {
+		t.Fatalf("delete the only owner: %d %s", r.code, r.raw)
+	}
+	adminID := c.do(http.MethodGet, "/api/v1/auth/me", "", adminCookie).body["user"].(map[string]any)["id"].(string)
+	if r := c.do(http.MethodDelete, "/api/v1/admin/users/"+adminID, "", ah); r.code != http.StatusConflict || problem(r) != "urn:proreta:problem:system-admin" {
+		t.Fatalf("delete the system admin: %d %s", r.code, r.raw)
+	}
+	if r := c.do(http.MethodDelete, "/api/v1/admin/users/01920000-0000-7000-8000-0000000000ff", "", ah); r.code != http.StatusNotFound {
+		t.Fatalf("delete an unknown user: %d %s", r.code, r.raw)
+	}
+	// A deleted organization does not need an owner.
+	if r := c.do(http.MethodDelete, "/api/v1/admin/organizations/"+tenant, "", ah); r.code != http.StatusNoContent {
+		t.Fatalf("delete the organization: %d %s", r.code, r.raw)
+	}
+	if r := c.do(http.MethodDelete, "/api/v1/admin/users/"+user, "", ah); r.code != http.StatusNoContent {
+		t.Fatalf("delete the user: %d %s", r.code, r.raw)
+	}
+	if r := c.do(http.MethodDelete, "/api/v1/admin/users/"+user, "", ah); r.code != http.StatusNoContent {
+		t.Fatalf("delete the user twice: %d %s", r.code, r.raw)
+	}
+	if n := countRows(t, env, `SELECT count(*) FROM audit_log WHERE action = 'admin.user.deleted'`); n != 1 {
+		t.Fatalf("audit rows = %d, want 1", n)
+	}
+
+	if r := c.do(http.MethodGet, "/api/v1/monitors", "", userCookie); r.code != http.StatusUnauthorized {
+		t.Fatalf("old session after the deletion: %d", r.code)
+	}
+	if r := c.do(http.MethodPost, "/api/v1/auth/login", `{"login":"`+email+`","password":"`+ownerPassword+`"}`, nil); r.code != http.StatusUnauthorized {
+		t.Fatalf("old password after the deletion: %d %s", r.code, r.raw)
+	}
+	listed := func(query string) (found bool, status, login string) {
+		t.Helper()
+		r := c.do(http.MethodGet, "/api/v1/admin/users"+query, "", ah)
+		if r.code != http.StatusOK {
+			t.Fatalf("list users%s: %d %s", query, r.code, r.raw)
+		}
+		for _, it := range r.body["items"].([]any) {
+			if m := it.(map[string]any); m["id"] == user {
+				return true, m["status"].(string), m["login"].(string)
+			}
+		}
+		return false, "", ""
+	}
+	if found, _, _ := listed(""); found {
+		t.Fatal("the tombstone is listed by default")
+	}
+	if found, status, login := listed("?status=deleted"); !found || status != "deleted" || login != "deleted-"+user+"@deleted.invalid" {
+		t.Fatalf("tombstone in the deleted list: %v %s %s", found, status, login)
+	}
+	if r := c.do(http.MethodPost, "/api/v1/admin/users/"+user+"/enable", "", ah); r.code != http.StatusNotFound {
+		t.Fatalf("enable the tombstone: %d %s", r.code, r.raw)
+	}
+
+	// The address is free again, the placeholder domain is not.
+	_, _, again := c.register(email)
+	if again.body["user"].(map[string]any)["id"] == user {
+		t.Fatal("re-registration reused the old account")
+	}
+	if r := c.do(http.MethodPost, "/api/v1/auth/register", registerBody("x@deleted.invalid", ownerPassword), map[string]string{"X-Forwarded-For": "198.51.100.21"}); r.code != http.StatusUnprocessableEntity {
+		t.Fatalf("register a placeholder address: %d %s", r.code, r.raw)
 	}
 }

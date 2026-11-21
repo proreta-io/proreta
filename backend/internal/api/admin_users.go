@@ -58,6 +58,17 @@ func (s *server) AdminGetUser(ctx context.Context, req gen.AdminGetUserRequestOb
 	return gen.AdminGetUser200JSONResponse(toAdminUserDetail(d)), nil
 }
 
+func (s *server) AdminDeleteUser(ctx context.Context, req gen.AdminDeleteUserRequestObject) (gen.AdminDeleteUserResponseObject, error) {
+	a, err := s.adminActor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.admin.DeleteAccount(ctx, a, req.UserId); err != nil {
+		return nil, err
+	}
+	return gen.AdminDeleteUser204Response{}, nil
+}
+
 func (s *server) AdminDisableUser(ctx context.Context, req gen.AdminDisableUserRequestObject) (gen.AdminDisableUserResponseObject, error) {
 	a, err := s.adminActor(ctx)
 	if err != nil {

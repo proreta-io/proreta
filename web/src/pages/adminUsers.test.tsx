@@ -179,7 +179,7 @@ describe("admin user details", () => {
     });
     renderApp("/admin/users/u-1");
     expect(
-      await screen.findByText("The system admin cannot be disabled here."),
+      await screen.findByText("The system admin cannot be disabled or deleted here."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Disable" })).toBeNull();
   });
@@ -217,6 +217,77 @@ describe("admin user details", () => {
       within(screen.getByRole("dialog")).getByRole("button", { name: "Disable user" }),
     );
     expect(await screen.findByText("Not here.")).toBeInTheDocument();
+  });
+});
+
+describe("admin user: delete account", () => {
+  const openDialog = async () => {
+    await userEvent.click(await screen.findByRole("button", { name: "Delete account" }));
+    return screen.getByRole("dialog");
+  };
+
+  it("needs the address typed, then deletes and returns to the list", async () => {
+    const fetchMock = mockApi({
+      ...asAdmin,
+      "GET /api/v1/admin/users/u-1": () => json(detail()),
+      "GET /api/v1/admin/users": () => json({ items: [], total: 0, limit: 25, offset: 0 }),
+      "DELETE /api/v1/admin/users/u-1": () => new Response(null, { status: 204 }),
+    });
+    renderApp("/admin/users/u-1");
+    const dialog = await openDialog();
+    const confirm = within(dialog).getByRole("button", { name: "Delete account" });
+    await userEvent.click(confirm);
+    expect(requests(fetchMock, "DELETE", "/api/v1/admin/users/u-1")).toHaveLength(0);
+    await userEvent.type(
+      within(dialog).getByLabelText("Type alice@alpha.example to confirm"),
+      "alice@alpha.example",
+    );
+    await userEvent.click(confirm);
+    expect(await screen.findByText("Account deleted")).toBeInTheDocument();
+    expect(requests(fetchMock, "DELETE", "/api/v1/admin/users/u-1")).toHaveLength(1);
+    expect(await screen.findByRole("heading", { name: "Users" })).toBeInTheDocument();
+  });
+
+  it("shows the refusal of a guard", async () => {
+    mockApi({
+      ...asAdmin,
+      "GET /api/v1/admin/users/u-1": () => json(detail()),
+      "DELETE /api/v1/admin/users/u-1": () =>
+        problem(409, "Conflict", {
+          type: "urn:proreta:problem:last-owner",
+          detail: "The user is the only owner of an organization.",
+        }),
+    });
+    renderApp("/admin/users/u-1");
+    const dialog = await openDialog();
+    await userEvent.type(
+      within(dialog).getByLabelText("Type alice@alpha.example to confirm"),
+      "alice@alpha.example",
+    );
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete account" }));
+    expect(
+      await within(dialog).findByText("The user is the only owner of an organization."),
+    ).toBeInTheDocument();
+  });
+
+  it("is not offered for the system admin or a deleted account", async () => {
+    mockApi({
+      ...asAdmin,
+      "GET /api/v1/admin/users/u-1": () => json(detail({ isSystemAdmin: true })),
+    });
+    const first = renderApp("/admin/users/u-1");
+    await screen.findByText(/cannot be disabled or deleted here/);
+    expect(screen.queryByRole("button", { name: "Delete account" })).not.toBeInTheDocument();
+    first.unmount();
+    mockApi({
+      ...asAdmin,
+      "GET /api/v1/admin/users/u-1": () =>
+        json(detail({ status: "deleted", login: "deleted-u-1@deleted.invalid" })),
+    });
+    renderApp("/admin/users/u-1");
+    expect(await screen.findByText("Deleted user")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Delete account" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Disable" })).not.toBeInTheDocument();
   });
 });
 

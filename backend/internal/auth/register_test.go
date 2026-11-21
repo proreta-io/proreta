@@ -30,6 +30,7 @@ func TestNormalizeEmail(t *testing.T) {
 	for _, in := range []string{
 		"", "a@", "@example.com", "ab", "owner", "owner@example", "owner@@example.com", "a@b@example.com",
 		"owner@.example.com", "owner@example.com.", "owner@example..com",
+		"deleted-1@deleted.invalid", "x@Deleted.Invalid",
 		"o wner@example.com", "owner@exa mple.com", "owner\n@example.com", "owner@example.com\x00",
 		"üser@example.com", "owner@exämple.com", "Kelvin@example.com", "o'brien@example.com", "a!b@example.com",
 		strings.Repeat("a", 64) + "@" + strings.Repeat("d", 186) + ".com", // 255 characters

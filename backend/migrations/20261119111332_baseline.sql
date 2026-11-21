@@ -205,9 +205,11 @@ CREATE TABLE users (
     configured_password_hash text,
     password_must_change boolean DEFAULT false NOT NULL,
     is_system_admin boolean DEFAULT false NOT NULL,
+    deleted_at timestamptz,
+    CONSTRAINT users_deleted_pair CHECK (((status = 'deleted'::text) = (deleted_at IS NOT NULL))),
     CONSTRAINT users_display_name_check CHECK ((length(display_name) <= 200)),
     CONSTRAINT users_email_check CHECK (((length((email)::text) >= 3) AND (length((email)::text) <= 320))),
-    CONSTRAINT users_status_check CHECK ((status = ANY (ARRAY['active'::text, 'disabled'::text]))),
+    CONSTRAINT users_status_check CHECK ((status = ANY (ARRAY['active'::text, 'disabled'::text, 'deleted'::text]))),
     CONSTRAINT users_system_admin_is_platform_admin CHECK ((is_platform_admin OR (NOT is_system_admin))),
     CONSTRAINT users_email_key UNIQUE (email),
     CONSTRAINT users_pkey PRIMARY KEY (id)
@@ -2669,6 +2671,83 @@ REVOKE ALL ON FUNCTION admin_delete_tenant(uuid,uuid,uuid,inet) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION admin_delete_tenant(uuid,uuid,uuid,inet) TO proreta_api;
 
 -- +goose StatementBegin
+CREATE FUNCTION admin_delete_user(p_actor uuid, p_user_id uuid, p_audit_id uuid, p_ip inet) RETURNS TABLE(changed boolean, sessions_revoked integer, memberships_removed integer, identities_removed integer)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+#variable_conflict use_column
+DECLARE
+    caller   text := current_setting('app.tenant_id', true);
+    v_status text;
+    v_admin  boolean;
+    v_system boolean;
+    v_tenant uuid;
+    t        uuid;
+    n        integer;
+    v_sessions   integer;
+    v_members    integer := 0;
+    v_identities integer;
+BEGIN
+    PERFORM admin_require_platform_admin(p_actor);
+    SELECT u.status, u.is_platform_admin, u.is_system_admin INTO v_status, v_admin, v_system
+    FROM users AS u WHERE u.id = p_user_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'admin: user not found' USING ERRCODE = 'PRA02';
+    END IF;
+    IF v_status = 'deleted' THEN
+        RETURN QUERY SELECT false, 0, 0, 0;
+        RETURN;
+    END IF;
+    IF v_system THEN
+        RAISE EXCEPTION 'admin: the system admin cannot be deleted' USING ERRCODE = 'PRA07';
+    END IF;
+    -- also covers deleting oneself: the actor is a platform admin
+    IF v_admin THEN
+        RAISE EXCEPTION 'admin: revoke platform admin before deleting the user' USING ERRCODE = 'PRA36';
+    END IF;
+    -- an organization must keep an active owner (the predicate of admin_set_user_status)
+    IF EXISTS (
+        SELECT 1 FROM memberships AS m JOIN tenants AS tn ON tn.id = m.tenant_id
+        WHERE m.user_id = p_user_id AND m.role = 'owner' AND tn.deleted_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM memberships AS o JOIN users AS ou ON ou.id = o.user_id
+                          WHERE o.tenant_id = m.tenant_id AND o.role = 'owner' AND o.user_id <> p_user_id AND ou.status = 'active')) THEN
+        RAISE EXCEPTION 'admin: the user is the only active owner of an organization' USING ERRCODE = 'PRA35';
+    END IF;
+    -- the audit tenant is read while the memberships still exist
+    v_tenant := admin_user_audit_tenant(p_user_id);
+    SELECT count(*)::integer INTO v_sessions FROM sessions AS s WHERE s.user_id = p_user_id AND s.expires_at > now();
+    PERFORM auth_revoke_user_sessions(p_user_id);
+    -- tenant tables are row-level secured: one tenant at a time, deleted organizations included
+    FOR t IN SELECT m.tenant_id FROM memberships AS m WHERE m.user_id = p_user_id
+             UNION SELECT i.tenant_id FROM invitations AS i WHERE i.accepted_by = p_user_id LOOP
+        PERFORM set_config('app.tenant_id', t::text, true);
+        DELETE FROM project_members AS pm WHERE pm.tenant_id = t AND pm.user_id = p_user_id;
+        -- the label of an accepted invitation names a person
+        UPDATE invitations AS i SET label = '' WHERE i.tenant_id = t AND i.accepted_by = p_user_id AND i.label <> '';
+        DELETE FROM memberships AS m WHERE m.tenant_id = t AND m.user_id = p_user_id;
+        GET DIAGNOSTICS n = ROW_COUNT;
+        v_members := v_members + n;
+    END LOOP;
+    PERFORM set_config('app.tenant_id', COALESCE(caller, ''), true);
+    DELETE FROM auth_identities AS ai WHERE ai.user_id = p_user_id;
+    GET DIAGNOSTICS v_identities = ROW_COUNT;
+    DELETE FROM email_verifications AS ev WHERE ev.user_id = p_user_id;
+    DELETE FROM password_resets AS pr WHERE pr.user_id = p_user_id;
+    UPDATE users
+    SET email = 'deleted-' || p_user_id::text || '@deleted.invalid', display_name = '', password_hash = NULL,
+        configured_password_hash = NULL, email_verified_at = NULL, password_changed_at = NULL, password_must_change = false,
+        status = 'deleted', deleted_at = now(), updated_at = now()
+    WHERE id = p_user_id;
+    PERFORM admin_audit(v_tenant, p_actor, p_audit_id, 'admin.user.deleted', 'user', p_user_id::text,
+                        jsonb_build_object('sessionsRevoked', v_sessions, 'membershipsRemoved', v_members, 'identitiesRemoved', v_identities), p_ip);
+    RETURN QUERY SELECT true, v_sessions, v_members, v_identities;
+END
+$$;
+-- +goose StatementEnd
+REVOKE ALL ON FUNCTION admin_delete_user(uuid,uuid,uuid,inet) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION admin_delete_user(uuid,uuid,uuid,inet) TO proreta_api;
+
+-- +goose StatementBegin
 CREATE FUNCTION admin_get_tenant(p_actor uuid, p_tenant_id uuid) RETURNS TABLE(id uuid, slug text, name text, plan_key text, plan_name text, status text, created_at timestamp with time zone, deleted_at timestamp with time zone, user_count integer, monitor_count integer, heartbeat_count integer)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
     SET search_path TO 'public', 'pg_temp'
@@ -2728,7 +2807,7 @@ DECLARE
     st text := COALESCE(p_status, '');
 BEGIN
     PERFORM admin_require_platform_admin(p_actor);
-    IF st NOT IN ('', 'active', 'disabled') THEN
+    IF st NOT IN ('', 'active', 'disabled', 'deleted') THEN
         RAISE EXCEPTION 'admin: invalid status' USING ERRCODE = 'PRA04';
     END IF;
     RETURN QUERY
@@ -2737,7 +2816,7 @@ BEGIN
            (SELECT count(*)::integer FROM memberships AS m WHERE m.user_id = u.id),
            (count(*) OVER ())::integer
     FROM users AS u
-    WHERE (st = '' OR u.status = st)
+    WHERE (u.status = st OR (st = '' AND u.status <> 'deleted'))
       AND (q = '' OR strpos(lower(u.email::text), q) > 0 OR strpos(lower(u.display_name), q) > 0)
     ORDER BY u.created_at DESC, u.id
     LIMIT least(greatest(COALESCE(p_limit, 25), 1), 100)
@@ -3258,7 +3337,8 @@ BEGIN
         RAISE EXCEPTION 'admin: invalid status' USING ERRCODE = 'PRA04';
     END IF;
     SELECT u.status, u.is_system_admin INTO v_status, v_system FROM users AS u WHERE u.id = p_user_id FOR UPDATE;
-    IF NOT FOUND THEN
+    -- a deleted account is gone for the panel, it cannot be enabled again
+    IF NOT FOUND OR v_status = 'deleted' THEN
         RAISE EXCEPTION 'admin: user not found' USING ERRCODE = 'PRA02';
     END IF;
     IF v_status = p_status THEN

@@ -17,7 +17,7 @@ The Admin Area is a separate shell, not a page of the application. It has its ow
 
 Guard rails: the system admin cannot be revoked (409 `system-admin`), and the last active platform admin cannot be revoked (409 `last-platform-admin`). Disabling the only active owner of an organization is refused (409 `last-owner`), and so is adding a disabled account as an organization's only owner. The panel also refuses to reset the password of any platform admin, so one admin cannot take over another's account; a granted admin resets its password like any user (**Forgot your password?**, or by changing it under Profile). Disabling a granted admin is allowed and ends its sessions; the system admin cannot be disabled. An admin cannot suspend or delete an organization it is a member of, granted admins included.
 
-Audit rows (`entity_type` `user`, no email in the metadata, written to the user's last used organization or `default`): `admin.user.platform_admin_granted` and `admin.user.platform_admin_revoked`.
+Audit rows (`entity_type` `user`, no email in the metadata, written to the user's last used organization or `default`): `admin.user.platform_admin_granted` and `admin.user.platform_admin_revoked`. Deleting an account is a separate action, see "Delete an account".
 
 ## What the panel does
 | Action | Where | Effect | Audit row (in the target organization) |
@@ -33,6 +33,7 @@ Audit rows (`entity_type` `user`, no email in the metadata, written to the user'
 | User details | `/admin/users/<id>` | The user's organizations with role, joined date and organization status, and the number of open sessions. Each organization links to its details | none |
 | Disable a user | user details | The user cannot sign in (password, OAuth or invitation) and all of the user's sessions in every organization are deleted at once. Memberships and data stay. Disabling a user who is already disabled does nothing | `admin.user.disabled` (`sessionsRevoked`) |
 | Enable a user | user details | The user can sign in again; sessions deleted by the disable stay deleted. Enabling a user who is already active does nothing | `admin.user.enabled` |
+| Delete an account | user details, **Delete account** (confirm by typing the address) | Erases the person and cannot be undone; see "Delete an account". Deleting an account that is already deleted does nothing | `admin.user.deleted` (`sessionsRevoked`, `membershipsRemoved`, `identitiesRemoved`) |
 | Grant or revoke platform admin | user details, Platform admin | See "Who is the platform admin". The user list marks admins | `admin.user.platform_admin_granted` / `admin.user.platform_admin_revoked` |
 | Sign a user out everywhere | user details | Deletes all of the user's sessions in every organization; the account keeps working. Shows how many open sessions were ended | `admin.user.sessions_revoked` (`sessionsRevoked`), only when at least one open session was ended |
 | Add a person to an organization | organization details, Members | An existing account is added by email, or a member gets another role (owner, maintainer, member or viewer); a member can be removed, which ends their sessions in that organization. See "Add a person to an organization" | `admin.member.added` (`role`), `admin.member.role_changed` (`from`, `to`), `admin.member.removed` (`role`) |
@@ -53,6 +54,18 @@ Audit rows (`entity_type` `user`, no email in the metadata, written to the user'
 | Specula | organization details, Specula | Lists every Specula, revoked ones included; registers one (the token is shown once, the plan limit applies), renames it or changes the projects that may use it, or revokes it | `admin.specula.created` (`allProjects`), `admin.specula.updated` (`fields`), `admin.specula.revoked` |
 
 Guard rails (enforced in the database, not only in the UI): the `default` organization cannot be suspended or deleted, the admin cannot suspend or delete an organization it is a member of, a deleted organization cannot be changed (sign-in domains and Specula included; its settings stay readable), and the password of a platform admin cannot be reset in the panel (409 `system-admin`). For members: the last active owner of an organization cannot be demoted or removed (409 `last-owner`), the system admin's membership of `default` cannot be changed or removed and the system admin cannot be added to another organization (409 `system-admin`), and adding a member respects the plan's member limit (409 `plan-limit-reached`). Project changes use the same rules as the organization's own owners (caps, slugs, empty-project delete) and are audited only as the `admin.*` actions above, in the organization concerned, with the admin as actor; a deleted organization's projects can be read but not changed. `proreta_admin_actions_total{action}` counts the changes ([observability](observability.md)).
+
+## Delete an account
+Use it to free an email address, for example for a person who was removed from every organization and wants to start again, or at a person's request. Disable the account instead if you might want it back: deleting cannot be undone. Nothing is deleted automatically, not even when the last membership is removed.
+
+The user page has **Delete account**; the dialog asks you to type the address. The API is `DELETE /api/v1/admin/users/{userId}` (204).
+
+- **Erased:** all sessions, the memberships in every organization (deleted ones too), the project memberships, the linked sign-in identities (Google, GitHub) and the pending verification and password-reset links. The display name, the password, the verified time and the address are cleared.
+- **Kept as a tombstone:** the user row stays, with status `deleted`, an empty name and a placeholder address (`deleted-<id>@deleted.invalid`), so audit rows and records the person created (invitations, sign-in domains, Specula agents) keep pointing at someone. The panel shows it as a deleted user. The list hides deleted users; the status filter **Deleted** shows them. The label of invitations the person accepted is cleared. Audit rows are permanent and keep the client IP of the person's earlier actions.
+- **The person can register again** with the same address (or sign in with the same provider account) as a new account: new id, no memberships, none of the old data. An invitation to the address works as for any new person.
+- **Refused:** the system admin (409 `system-admin`); any other platform admin, including yourself (409 `platform-admin`: revoke the flag first, see "Who is the platform admin"); an account that is the only active owner of an organization (409 `last-owner`: add or promote another owner, or delete the organization, first; owners who are disabled do not count). A deleted account cannot be enabled again.
+
+Mail already queued for the old address is not recalled; it expires on its own.
 
 ## Create an organization
 Use it to give a team its own organization without opening self-registration. Open `/admin/organizations` and choose **New organization**:

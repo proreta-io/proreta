@@ -89,7 +89,7 @@ var adminOperations = []string{"adminGetStats", "adminListOrganizations", "admin
 	"adminDeleteEmailSettings", "adminUpdateEmailFeatures", "adminSendTestEmail",
 	"adminGetRegistration", "adminUpdateRegistration", "adminGetRetentionSettings", "adminUpdateRetentionSettings",
 	"adminListPlans", "adminCreatePlan", "adminGetPlan", "adminUpdatePlan", "adminDeletePlan",
-	"adminListAllUsers", "adminGetUser", "adminDisableUser", "adminEnableUser", "adminRevokeUserSessions", "adminSetPlatformAdmin",
+	"adminListAllUsers", "adminGetUser", "adminDisableUser", "adminEnableUser", "adminDeleteUser", "adminRevokeUserSessions", "adminSetPlatformAdmin",
 	"adminListOrganizationMembers", "adminAddOrganizationMember", "adminSetOrganizationMember", "adminRemoveOrganizationMember",
 	"adminListOrganizationInvitations", "adminCreateOrganizationInvitation", "adminRevokeOrganizationInvitation",
 	"adminListOrganizationProjects", "adminCreateOrganizationProject", "adminUpdateOrganizationProject", "adminDeleteOrganizationProject",

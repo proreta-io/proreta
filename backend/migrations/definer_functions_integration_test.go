@@ -81,6 +81,7 @@ var definerCalls = map[string]string{
 	"admin_get_user":              `SELECT * FROM admin_get_user(gen_random_uuid(), gen_random_uuid())`,
 	"admin_list_user_memberships": `SELECT * FROM admin_list_user_memberships(gen_random_uuid(), gen_random_uuid())`,
 	"admin_set_user_status":       `SELECT * FROM admin_set_user_status(gen_random_uuid(), gen_random_uuid(), 'disabled', gen_random_uuid(), NULL)`,
+	"admin_delete_user":           `SELECT * FROM admin_delete_user(gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), NULL)`,
 	"admin_revoke_user_sessions":  `SELECT admin_revoke_user_sessions(gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), NULL)`,
 	"admin_set_platform_admin":    `SELECT admin_set_platform_admin(gen_random_uuid(), gen_random_uuid(), true, gen_random_uuid(), NULL)`,
 	// org_delete_tenant refuses (PRO02) without a tenant in the transaction.
