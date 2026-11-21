@@ -1,0 +1,8 @@
+{
+  "name": "proreta-ci-spectral",
+  "private": true,
+  "description": "OpenAPI linter for CI, locked by package-lock.json",
+  "dependencies": {
+    "@stoplight/spectral-cli": "6.11.1"
+  }
+}
