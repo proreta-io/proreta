@@ -1664,6 +1664,36 @@
         }
       }
     },
+    "prometheusRule": {
+      "type": "object",
+      "title": "PrometheusRule",
+      "description": "optional Prometheus Operator PrometheusRule with the base alert rules",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "title": "PrometheusRule enabled",
+          "description": "render the PrometheusRule (needs the Prometheus Operator CRDs)"
+        },
+        "labels": {
+          "type": "object",
+          "title": "extra labels",
+          "description": "extra labels on the PrometheusRule, for the ruleSelector of your Prometheus",
+          "additionalProperties": {"type": "string"}
+        },
+        "interval": {
+          "type": "string",
+          "title": "evaluation interval",
+          "description": "evaluation interval of the rule group, for example 1m; empty keeps the ruler default",
+          "pattern": "^([0-9]+(ms|s|m|h|d|w|y))*$"
+        },
+        "jobSelector": {
+          "type": "string",
+          "title": "job label regex",
+          "description": "regex of the job label of Proreta's scrape targets for ProretaTargetDown; empty matches the metrics Services of this release"
+        }
+      }
+    },
     "serviceMonitor": {
       "type": "object",
       "title": "ServiceMonitor",

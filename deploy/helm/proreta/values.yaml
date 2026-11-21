@@ -447,6 +447,18 @@ serviceMonitor:
   path: /metrics
   labels: {}
 
+# PrometheusRule with the six base alert rules (needs the Prometheus Operator CRDs; the VictoriaMetrics
+# operator can convert it). The rules come from alerts/proreta-rules.yaml in this chart, a plain
+# rule-groups file you can also copy into your own alerts repository. jobSelector is the regex of the
+# job label of Proreta's scrape targets used by ProretaTargetDown; empty matches the metrics Services
+# of this release (the job name a ServiceMonitor gives them). labels are for a ruleSelector of your
+# Prometheus; interval overrides the evaluation interval of the group.
+prometheusRule:
+  enabled: false
+  labels: {}
+  interval: ""
+  jobSelector: ""
+
 # PodDisruptionBudget per component (api, worker, web, statuspage, speculagw) that runs more than one
 # replica, so a node drain evicts one pod at a time. Components with one replica get none: a budget
 # there would block every drain. Turn it off if your platform manages budgets itself.

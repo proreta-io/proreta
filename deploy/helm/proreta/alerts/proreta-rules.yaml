@@ -1,0 +1,97 @@
+# Base alert rules for Proreta, in the plain Prometheus rule-groups format. The same file works
+# unchanged with Prometheus, vmalert (VictoriaMetrics) and any other ruler that reads this format;
+# copy it into your own alerts repository and adapt it. The chart can also render it as a
+# PrometheusRule (prometheusRule.enabled).
+#
+# ADAPT BEFORE USE: the ProretaTargetDown rule selects Proreta's scrape targets with the job label
+# regex job=~"proreta.*". The job label depends on how you scrape (a Prometheus Operator
+# ServiceMonitor uses the Service name, for example "<release>-proreta-api-metrics"; a
+# VictoriaMetrics VMServiceScrape or a static config gives other names). Change that one regex to
+# match every Proreta process you scrape and nothing else. The other rules use Proreta metric names
+# only and need no selector.
+#
+# Thresholds and windows are first guesses; the other suggested rules are in
+# docs/runbooks/observability.md. Metric names are listed in that page too.
+groups:
+  - name: proreta
+    rules:
+      - alert: ProretaTargetDown
+        expr: up{job=~"proreta.*"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Proreta metrics target {{ $labels.job }} {{ $labels.instance }} is down"
+          description: >-
+            Prometheus cannot scrape {{ $labels.instance }} (job {{ $labels.job }}) for 5 minutes.
+            Check that the pod runs and is ready, that the admin port (default 9090) is reachable
+            from the scraper (network policy, monitoringNamespace) and that the job selector in
+            this rule matches your scrape job names.
+
+      - alert: ProretaChecksStalled
+        # `or vector(0)` also fires when the worker series is gone altogether. It fires too on an
+        # installation that has no active monitor at all: nothing is being checked there either.
+        expr: (sum(rate(proreta_worker_checks_total[5m])) or vector(0)) == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Proreta is not running any checks
+          description: >-
+            No check has been recorded by any worker for 5 minutes. Check that the worker pods run
+            and are ready, their logs (claim and write errors) and the database. If no monitor is
+            active, silence this alert until one is.
+
+      - alert: ProretaHousekeepingStale
+        # compute_rollups runs every 5 minutes, evaluate_heartbeats every 30 seconds.
+        expr: >-
+          (time() - max by (task) (proreta_jobs_housekeeping_last_success_timestamp_seconds{task="compute_rollups"}) > 1800)
+          or
+          (time() - max by (task) (proreta_jobs_housekeeping_last_success_timestamp_seconds{task="evaluate_heartbeats"}) > 300)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Proreta housekeeping task {{ $labels.task }} has stopped succeeding"
+          description: >-
+            The jobs process has not completed {{ $labels.task }} for longer than expected. For
+            evaluate_heartbeats a missed heartbeat opens no incident and pings resolve none; for
+            compute_rollups uptime figures and retention fall behind. Check the jobs pod and its
+            logs, and the database.
+
+      - alert: ProretaOutboxBacklog
+        expr: max(proreta_jobs_outbox_pending) > 50
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Proreta alert notifications are piling up
+          description: >-
+            More than 50 notifications have waited in the outbox for 10 minutes. Alerts are not
+            leaving: check that the jobs pod runs, whether Slack or the webhook target is down or
+            rate limiting, and the jobs logs.
+
+      - alert: ProretaDeliveriesFailing
+        expr: sum(increase(proreta_jobs_deliveries_total{result="failed"}[1h])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Proreta gave up delivering a notification
+          description: >-
+            At least one notification was given up in the last hour, after its retries or because
+            its channel is unusable. Check the notification channels in the dashboard (a revoked
+            Slack webhook, a changed URL) and the jobs logs.
+
+      - alert: ProretaApiErrors
+        expr: >-
+          sum(rate(proreta_http_requests_total{code=~"5.."}[5m]))
+          / sum(rate(proreta_http_requests_total[5m])) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: More than 5% of Proreta API requests fail with a 5xx
+          description: >-
+            The API has answered more than 5% of its requests with a server error for 10 minutes.
+            Check the api logs (filter on the status field) and the database.

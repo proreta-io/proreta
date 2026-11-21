@@ -121,6 +121,7 @@ not contain `proreta` (`fullnameOverride` replaces it).
 | `networkPolicy.gatewayNamespace` | `""` | Namespace of the Gateway's proxy pods; empty: `httpRoute.parentRef.namespace`, else the release namespace. |
 | `networkPolicy.monitoringNamespace` | `monitoring` | Namespace allowed to scrape the admin port. |
 | `serviceMonitor.enabled`, `.interval`, `.path`, `.labels` | `false`, `30s`, `/metrics`, `{}` | Prometheus Operator ServiceMonitor. |
+| `prometheusRule.enabled`, `.labels`, `.interval`, `.jobSelector` | `false`, `{}`, `""`, `""` | Prometheus Operator PrometheusRule with the six base alert rules of `alerts/proreta-rules.yaml`; `jobSelector` is the job label regex for `ProretaTargetDown`, empty: the metrics Services of the release. See [self-monitoring](../../../docs/runbooks/self-monitoring.md). |
 | `pdb.enabled`, `.maxUnavailable` | `true`, `1` | One PodDisruptionBudget per component (api, worker, web, statuspage, speculagw) that runs more than one replica; none for a single replica, where it would block every node drain. |
 | `topologySpread.enabled`, `.topologyKey`, `.maxSkew`, `.whenUnsatisfiable` | `true`, `kubernetes.io/hostname`, `1`, `ScheduleAnyway` | Spread the replicas of each component over nodes; `ScheduleAnyway` only prefers it, so a single-node cluster still works. |
 
@@ -224,7 +225,7 @@ Only the migrate Job reads `owner_url`.
   requests stay around 0.5Gi. Sizing and scaling per component: [docs/install.md](../../../docs/install.md#sizing).
   `jobs.replicas` may only be 0 or 1.
 - No Service is of type `LoadBalancer` or `NodePort`: traffic enters through your Gateway only.
-- Optional and off: `serviceMonitor` (needs the Prometheus Operator CRDs), `networkPolicy`. On by default: `pdb` (components with more than one replica) and `topologySpread` (`ScheduleAnyway`).
+- Optional and off: `serviceMonitor` and `prometheusRule` (need the Prometheus Operator CRDs), `networkPolicy`. On by default: `pdb` (components with more than one replica) and `topologySpread` (`ScheduleAnyway`).
 - Routing: `/api` goes to the api (60 s request timeout), `/status` to the statuspage, `/` to the web when `web.enabled`.
 
 ## Secrets
