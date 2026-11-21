@@ -228,6 +228,10 @@ func (s *Service) registerInvited(ctx context.Context, email string, in Register
 		// Used, revoked or expired, or the tenant suspended, between the lookup and the transaction.
 		s.registrations.WithLabelValues("invalid_invitation").Inc()
 		return LoginResult{}, err
+	case errors.Is(err, ErrInvitationEmailMismatch):
+		// Not a success: it counts against the per-IP and per-invitation limits like a wrong password.
+		s.registrations.WithLabelValues("invitation_email_mismatch").Inc()
+		return LoginResult{}, err
 	case errors.Is(err, ErrRateLimited):
 		s.registrations.WithLabelValues("rate_limited").Inc()
 		return LoginResult{}, err
@@ -309,7 +313,7 @@ func (s *Service) joinExistingAccount(ctx context.Context, row authdb.GetUserByE
 			// BootstrapAdmin refuses to start when the admin belongs to another tenant.
 			return ErrAlreadyMember
 		}
-		role, err := s.joinInvited(ctx, tx, target.tenantID, row.ID, hashToken(in.InviteToken), in.IP)
+		role, err := s.joinInvited(ctx, tx, target.tenantID, row.ID, hashToken(in.InviteToken), email, in.IP)
 		if err != nil {
 			return err
 		}
@@ -349,7 +353,7 @@ func (s *Service) createInvitedAccount(ctx context.Context, email, passwordHash 
 		if err := s.issueVerification(ctx, tx, q, userID, email); err != nil {
 			return err
 		}
-		role, err := s.joinInvited(ctx, tx, tenantID, userID, hashToken(in.InviteToken), in.IP)
+		role, err := s.joinInvited(ctx, tx, tenantID, userID, hashToken(in.InviteToken), email, in.IP)
 		if err != nil {
 			return err
 		}

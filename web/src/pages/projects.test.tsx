@@ -277,6 +277,7 @@ describe("project invitations", () => {
     acceptedBy: null,
     acceptedAt: null,
     revokedAt: null,
+    emailBound: false,
     ...over,
   });
 
@@ -329,7 +330,7 @@ describe("project invitations", () => {
     expect(
       await screen.findByDisplayValue("https://proreta.example.com/invite#SECRET"),
     ).toBeInTheDocument();
-    expect(bodies).toEqual([{ role: "viewer", projectId: "w" }]);
+    expect(bodies).toEqual([{ role: "viewer", projectId: "w", expiresIn: "7d" }]);
 
     await userEvent.click(screen.getByRole("button", { name: "Revoke the invitation Carol" }));
     await userEvent.click(

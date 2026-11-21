@@ -35,11 +35,11 @@ func TestIntegrationAdminDeleteUser(t *testing.T) {
 		`INSERT INTO email_verifications (token_hash, user_id, email, expires_at) VALUES (sha256('ev'::bytea), '`+userVictim+`', '`+victimEmail+`', now() + interval '1 day')`,
 		`INSERT INTO password_resets (token_hash, user_id, email, expires_at) VALUES (sha256('pr'::bytea), '`+userVictim+`', '`+victimEmail+`', now() + interval '1 day')`,
 		// The victim created things that must keep resolving, and accepted an invitation in an
-		// organization it is no longer a member of (the label names the person).
+		// organization it is no longer a member of (the label and the bound address's hash name the person).
 		`INSERT INTO invitations (id, tenant_id, role, token_hash, created_by, created_at, expires_at) VALUES
 		 (gen_random_uuid(), '`+tenantA+`', 'viewer', sha256('i1'::bytea), '`+userVictim+`', now() - interval '1 hour', now() + interval '1 day')`,
-		`INSERT INTO invitations (id, tenant_id, role, token_hash, created_by, created_at, expires_at, accepted_at, accepted_by, label)
-		 VALUES (gen_random_uuid(), '`+tenantDef+`', 'viewer', sha256('i2'::bytea), '`+userPlatform+`', now() - interval '2 hours', now() + interval '1 day', now(), '`+userVictim+`', 'Vic Tim')`,
+		`INSERT INTO invitations (id, tenant_id, role, token_hash, created_by, created_at, expires_at, accepted_at, accepted_by, label, email_hash)
+		 VALUES (gen_random_uuid(), '`+tenantDef+`', 'viewer', sha256('i2'::bytea), '`+userPlatform+`', now() - interval '2 hours', now() + interval '1 day', now(), '`+userVictim+`', 'Vic Tim', sha256('victim'::bytea))`,
 		`INSERT INTO org_auth_domains (id, tenant_id, domain, created_by) VALUES (gen_random_uuid(), '`+tenantA+`', 'victim.example', '`+userVictim+`')`,
 		`INSERT INTO specula_agents (tenant_id, id, name, token_hash, location_id, created_by)
 		 VALUES ('`+tenantA+`', gen_random_uuid(), 'Lab', decode(repeat('cd', 32), 'hex'), (SELECT id FROM probe_locations WHERE code = 'del-lab'), '`+userVictim+`')`,
@@ -119,8 +119,8 @@ func TestIntegrationAdminDeleteUser(t *testing.T) {
 				t.Errorf("%s still has %d rows of the user", tbl, n)
 			}
 		}
-		if n := count(`SELECT count(*) FROM invitations WHERE accepted_by = $1 AND label = ''`, userVictim); n != 1 {
-			t.Errorf("accepted invitation with a cleared label: %d, want 1", n)
+		if n := count(`SELECT count(*) FROM invitations WHERE accepted_by = $1 AND label = '' AND email_hash IS NULL`, userVictim); n != 1 {
+			t.Errorf("accepted invitation with a cleared label and address hash: %d, want 1", n)
 		}
 		// Every reference still resolves to the tombstone.
 		for name, q := range map[string]string{

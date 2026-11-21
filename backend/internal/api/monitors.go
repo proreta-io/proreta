@@ -204,7 +204,7 @@ func (s *server) GetMonitorStats(ctx context.Context, req gen.GetMonitorStatsReq
 	if err != nil {
 		return nil, err
 	}
-	rng := gen.N24h
+	rng := gen.StatsRangeN24h
 	if req.Params.Range != nil {
 		rng = *req.Params.Range
 	}

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { ApiError, errorMessage } from "../../api/client";
+import { errorMessage } from "../../api/client";
 import {
   createAdminInvitation,
   listAdminInvitations,
@@ -10,13 +10,11 @@ import {
   type Invitation,
   type InvitationRole,
 } from "../../api/endpoints";
-import { useAuth } from "../../auth/AuthProvider";
 import { useToast } from "../../components/Toasts";
 import {
   Alert,
   Badge,
   Button,
-  Checkbox,
   ConfirmDialog,
   CopyField,
   EmptyNote,
@@ -33,7 +31,11 @@ import {
   type BadgeTone,
 } from "../../components/ui";
 import { formatDate, formatDateTime } from "../../lib/format";
-import { useEmailEnabled } from "../../lib/oauth";
+import {
+  linkNote,
+  useInvitationOptions,
+  type LinkChoices,
+} from "../../components/InvitationOptions";
 import { ROLE_DESCRIPTIONS, ROLE_LABELS } from "../../lib/roles";
 
 const INVITATION_ROLES: InvitationRole[] = ["maintainer", "member", "viewer"];
@@ -50,6 +52,7 @@ interface CreatedLink {
   url: string;
   role: InvitationRole;
   emailedTo?: string;
+  choices: LinkChoices;
 }
 
 function absoluteLink(url: string) {
@@ -62,7 +65,6 @@ export default function AdminOrganizationInvitations({
 }: {
   organization: AdminOrganization;
 }) {
-  const auth = useAuth();
   const queryClient = useQueryClient();
   const toast = useToast();
   const deleted = organization.deletedAt !== null;
@@ -70,14 +72,10 @@ export default function AdminOrganizationInvitations({
     queryKey: queryKeys.adminInvitations(organization.id),
     queryFn: () => listAdminInvitations(organization.id),
   });
-  const emailEnabled = useEmailEnabled();
+  const options = useInvitationOptions();
   const [dialog, setDialog] = useState(false);
   const [role, setRole] = useState<InvitationRole>("member");
   const [label, setLabel] = useState("");
-  const [email, setEmail] = useState("");
-  const [sendChoice, setSendChoice] = useState<boolean | undefined>();
-  const sendByEmail = sendChoice ?? auth.session?.emailInvitations === true;
-  const [emailError, setEmailError] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [created, setCreated] = useState<CreatedLink | null>(null);
   const [revoking, setRevoking] = useState<Invitation | null>(null);
@@ -87,13 +85,7 @@ export default function AdminOrganizationInvitations({
   }
 
   const create = useMutation({
-    mutationFn: () =>
-      createAdminInvitation(
-        organization.id,
-        role,
-        label.trim(),
-        emailEnabled && sendByEmail ? email.trim() : "",
-      ),
+    mutationFn: () => createAdminInvitation(organization.id, role, label.trim(), options.request()),
     // The answer holds the secret link: it must not stay in the query cache.
     gcTime: 0,
     onSuccess: (res) => {
@@ -101,18 +93,16 @@ export default function AdminOrganizationInvitations({
       setCreated({
         url: absoluteLink(res.inviteUrl),
         role: res.invitation.role,
-        emailedTo: res.emailQueued ? email.trim().toLowerCase() : undefined,
+        emailedTo: res.emailQueued ? options.address.toLowerCase() : undefined,
+        choices: options.choices(),
       });
       setLabel("");
-      setEmail("");
-      setSendChoice(undefined);
+      options.reset();
       create.reset();
       refresh();
     },
     onError: (err) => {
-      const fieldMessage = err instanceof ApiError ? err.fieldErrorMap().email : undefined;
-      if (fieldMessage) setEmailError(fieldMessage);
-      else setError(errorMessage(err));
+      if (!options.fail(err)) setError(errorMessage(err));
     },
   });
 
@@ -135,8 +125,9 @@ export default function AdminOrganizationInvitations({
         Invitations
       </h2>
       <p className="max-w-[640px] text-[13px] text-muted-foreground">
-        For a person without an account. A link joins one person with the role you choose, works
-        once and for 7 days. An owner is made by adding the account or promoting after they join.
+        For a person without an account. A link joins one person with the role you choose and works
+        once, for the time you pick. An owner is made by adding the account or promoting after they
+        join.
       </p>
 
       {created ? (
@@ -155,8 +146,8 @@ export default function AdminOrganizationInvitations({
           )}
           <CopyField label="Invitation link" value={created.url} copyLabel="Copy link" />
           <p className="text-muted-foreground">
-            Anyone with this link can join as {ROLE_LABELS[created.role].toLowerCase()} until it is
-            used, revoked or 7 days pass. It is shown only now; Proreta keeps only a hash of it.
+            {linkNote(ROLE_LABELS[created.role].toLowerCase(), created.choices)} It is shown only
+            now; Proreta keeps only a hash of it.
           </p>
           <div>
             <Button variant="secondary" onClick={() => setCreated(null)}>
@@ -171,7 +162,7 @@ export default function AdminOrganizationInvitations({
               variant="secondary"
               onClick={() => {
                 setError(undefined);
-                setEmailError(undefined);
+                options.clearError();
                 setDialog(true);
               }}
             >
@@ -217,6 +208,7 @@ export default function AdminOrganizationInvitations({
                   <span className="block text-caption text-muted-foreground">
                     by {inv.createdBy}
                     {inv.acceptedBy ? ` · joined: ${inv.acceptedBy}` : ""}
+                    {inv.emailBound ? " · for one address" : ""}
                   </span>
                 </Td>
                 <Td>{ROLE_LABELS[inv.role]}</Td>
@@ -248,11 +240,7 @@ export default function AdminOrganizationInvitations({
       {dialog && (
         <ConfirmDialog
           title="Invite someone"
-          confirmLabel={
-            emailEnabled && sendByEmail && email.trim()
-              ? "Create link and send email"
-              : "Create link"
-          }
+          confirmLabel={options.mails ? "Create link and send email" : "Create link"}
           confirmVariant="primary"
           busy={create.isPending}
           onCancel={() => setDialog(false)}
@@ -278,35 +266,7 @@ export default function AdminOrganizationInvitations({
                 </Select>
               )}
             </Field>
-            {emailEnabled && (
-              <>
-                <Field
-                  label="Email the link to (optional)"
-                  hint="You still get the link here, and anyone who has it can join."
-                  error={emailError}
-                >
-                  {(c) => (
-                    <Input
-                      {...c}
-                      type="email"
-                      autoComplete="off"
-                      maxLength={254}
-                      value={email}
-                      onChange={(e) => {
-                        setEmail(e.target.value);
-                        setEmailError(undefined);
-                      }}
-                    />
-                  )}
-                </Field>
-                <Checkbox
-                  label="Send by email"
-                  description="Proreta emails the link to this address when you create it."
-                  checked={sendByEmail}
-                  onChange={(e) => setSendChoice(e.target.checked)}
-                />
-              </>
-            )}
+            {options.fields}
             <Field label="Note (optional)" hint="For you only, for example the person's name.">
               {(c) => (
                 <Input

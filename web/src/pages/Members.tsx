@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ApiError, errorMessage } from "../api/client";
+import { errorMessage } from "../api/client";
 import {
   createInvitation,
   deleteOrganization,
@@ -14,14 +14,13 @@ import {
   type MembershipRole,
 } from "../api/endpoints";
 import { useAuth } from "../auth/AuthProvider";
-import { useEmailEnabled } from "../lib/oauth";
+import { linkNote, useInvitationOptions, type LinkChoices } from "../components/InvitationOptions";
 import PeopleTable from "../components/PeopleTable";
 import { useToast } from "../components/Toasts";
 import {
   Alert,
   Badge,
   Button,
-  Checkbox,
   ConfirmDialog,
   CopyField,
   EmptyNote,
@@ -153,6 +152,7 @@ interface CreatedLink {
   role: InvitationRole;
   /** The address the link was queued to, when the admin gave one. */
   emailedTo?: string;
+  choices: LinkChoices;
 }
 
 function Invitations() {
@@ -166,12 +166,7 @@ function Invitations() {
   const [dialog, setDialog] = useState(false);
   const [role, setRole] = useState<InvitationRole>("member");
   const [label, setLabel] = useState("");
-  const emailEnabled = useEmailEnabled();
-  const [email, setEmail] = useState("");
-  // Until the person touches the box it follows the platform admin's default.
-  const [sendChoice, setSendChoice] = useState<boolean | undefined>();
-  const sendByEmail = sendChoice ?? auth.session?.emailInvitations === true;
-  const [emailError, setEmailError] = useState<string | undefined>();
+  const options = useInvitationOptions();
   const [created, setCreated] = useState<CreatedLink | null>(null);
   const [error, setError] = useState<string | undefined>();
   const [revoking, setRevoking] = useState<Invitation | null>(null);
@@ -180,8 +175,7 @@ function Invitations() {
   );
 
   const create = useMutation({
-    mutationFn: () =>
-      createInvitation(role, label.trim(), emailEnabled && sendByEmail ? email.trim() : ""),
+    mutationFn: () => createInvitation(role, label.trim(), options.request()),
     // The answer holds the secret link: it must not stay in the query cache.
     gcTime: 0,
     onSuccess: (res) => {
@@ -189,19 +183,17 @@ function Invitations() {
       setCreated({
         url: absoluteLink(res.inviteUrl),
         role: res.invitation.role,
-        emailedTo: res.emailQueued ? email.trim().toLowerCase() : undefined,
+        emailedTo: res.emailQueued ? options.address.toLowerCase() : undefined,
+        choices: options.choices(),
       });
       setLabel("");
-      setEmail("");
-      setSendChoice(undefined);
+      options.reset();
       create.reset();
       void queryClient.invalidateQueries({ queryKey: queryKeys.invitations });
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
     },
     onError: (err) => {
-      const fieldMessage = err instanceof ApiError ? err.fieldErrorMap().email : undefined;
-      if (fieldMessage) setEmailError(fieldMessage);
-      else setError(errorMessage(err));
+      if (!options.fail(err)) setError(errorMessage(err));
     },
   });
 
@@ -237,8 +229,7 @@ function Invitations() {
           )}
           <CopyField label="Invitation link" value={created.url} copyLabel="Copy link" />
           <p className="text-muted-foreground">
-            Anyone with this link can join as {ROLE_LABELS[created.role].toLowerCase()} until it is
-            used, revoked or 7 days pass, whatever email address they use.{" "}
+            {linkNote(ROLE_LABELS[created.role].toLowerCase(), created.choices)}{" "}
             {created.emailedTo
               ? "Do not share it further."
               : "Send it over a channel you trust, not a public chat."}{" "}
@@ -255,7 +246,7 @@ function Invitations() {
           <Button
             onClick={() => {
               setError(undefined);
-              setEmailError(undefined);
+              options.clearError();
               setDialog(true);
             }}
           >
@@ -300,6 +291,7 @@ function Invitations() {
                   <span className="block text-caption text-muted-foreground">
                     by {inv.createdBy}
                     {inv.acceptedBy ? ` · joined: ${inv.acceptedBy}` : ""}
+                    {inv.emailBound ? " · for one address" : ""}
                   </span>
                 </Td>
                 <Td>
@@ -338,11 +330,7 @@ function Invitations() {
       {dialog && (
         <ConfirmDialog
           title="Invite someone"
-          confirmLabel={
-            emailEnabled && sendByEmail && email.trim()
-              ? "Create link and send email"
-              : "Create link"
-          }
+          confirmLabel={options.mails ? "Create link and send email" : "Create link"}
           confirmVariant="primary"
           busy={create.isPending}
           onCancel={() => setDialog(false)}
@@ -368,35 +356,7 @@ function Invitations() {
                 </Select>
               )}
             </Field>
-            {emailEnabled && (
-              <>
-                <Field
-                  label="Email the link to (optional)"
-                  hint="You still get the link here, and anyone who has it can join."
-                  error={emailError}
-                >
-                  {(c) => (
-                    <Input
-                      {...c}
-                      type="email"
-                      autoComplete="off"
-                      maxLength={254}
-                      value={email}
-                      onChange={(e) => {
-                        setEmail(e.target.value);
-                        setEmailError(undefined);
-                      }}
-                    />
-                  )}
-                </Field>
-                <Checkbox
-                  label="Send by email"
-                  description="Proreta emails the link to this address when you create it."
-                  checked={sendByEmail}
-                  onChange={(e) => setSendChoice(e.target.checked)}
-                />
-              </>
-            )}
+            {options.fields}
             <Field label="Note (optional)" hint="For you only, for example the person's name.">
               {(c) => (
                 <Input

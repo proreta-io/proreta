@@ -80,7 +80,7 @@ func TestIntegrationInvitationEmail(t *testing.T) {
 	if inv.Label != "guest@example.org" {
 		t.Fatalf("label = %q, want the address", inv.Label)
 	}
-	// Nothing about the address is stored besides the label the admin sees, and the audit row has none.
+	// Nothing about the address is stored besides the label the admin sees (and the hash a bound link has, none here), and the audit row has none.
 	var meta string
 	if err := e.admin.QueryRow(e.ctx, `SELECT metadata::text FROM audit_log WHERE action = 'member.invited'`).Scan(&meta); err != nil {
 		t.Fatal(err)
@@ -90,7 +90,7 @@ func TestIntegrationInvitationEmail(t *testing.T) {
 		t.Fatalf("audit metadata = %s (%v)", meta, err)
 	}
 	var cols string
-	if err := e.admin.QueryRow(e.ctx, `SELECT coalesce(string_agg(column_name, ','), '') FROM information_schema.columns WHERE table_name = 'invitations' AND column_name LIKE '%mail%'`).Scan(&cols); err != nil || cols != "" {
+	if err := e.admin.QueryRow(e.ctx, `SELECT coalesce(string_agg(column_name, ','), '') FROM information_schema.columns WHERE table_name = 'invitations' AND column_name LIKE '%mail%' AND column_name <> 'email_hash'`).Scan(&cols); err != nil || cols != "" {
 		t.Fatalf("invitations has email columns: %q %v", cols, err)
 	}
 

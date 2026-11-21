@@ -31,21 +31,22 @@ const oauthCookiePath = "/api/v1/auth/oauth/"
 // Callback outcomes: the error codes of the /login and /profile redirects. They are the only
 // thing the browser learns; provider text is never reflected.
 const (
-	oauthCancelled         = "cancelled"
-	oauthFailed            = "failed"
-	oauthStateInvalid      = "state_invalid"
-	oauthEmailUnverified   = "email_unverified"
-	oauthEmailUnusable     = "email_unusable"
-	oauthNotInvited        = "not_invited"
-	oauthAccountExists     = "account_exists"
-	oauthInvitationInvalid = "invitation_invalid"
-	oauthAlreadyMember     = "already_member"
-	oauthPlanLimit         = "plan_limit"
-	oauthSuspended         = "suspended"
-	oauthRateLimited       = "rate_limited"
-	oauthIdentityInUse     = "identity_in_use"
-	oauthAlreadyLinked     = "already_linked"
-	oauthSessionExpired    = "session_expired"
+	oauthCancelled          = "cancelled"
+	oauthFailed             = "failed"
+	oauthStateInvalid       = "state_invalid"
+	oauthEmailUnverified    = "email_unverified"
+	oauthEmailUnusable      = "email_unusable"
+	oauthNotInvited         = "not_invited"
+	oauthAccountExists      = "account_exists"
+	oauthInvitationInvalid  = "invitation_invalid"
+	oauthAlreadyMember      = "already_member"
+	oauthInvitationMismatch = "invitation_email_mismatch"
+	oauthPlanLimit          = "plan_limit"
+	oauthSuspended          = "suspended"
+	oauthRateLimited        = "rate_limited"
+	oauthIdentityInUse      = "identity_in_use"
+	oauthAlreadyLinked      = "already_linked"
+	oauthSessionExpired     = "session_expired"
 )
 
 func (s *server) GetAuthProviders(ctx context.Context, _ gen.GetAuthProvidersRequestObject) (gen.GetAuthProvidersResponseObject, error) {
@@ -234,6 +235,8 @@ func oauthErrorCode(err error) (string, bool) {
 		return oauthEmailUnusable, true
 	case errors.Is(err, auth.ErrInvitationInvalid):
 		return oauthInvitationInvalid, true
+	case errors.Is(err, auth.ErrInvitationEmailMismatch):
+		return oauthInvitationMismatch, true
 	case errors.Is(err, auth.ErrAlreadyMember):
 		return oauthAlreadyMember, true
 	case errors.As(err, &limit):

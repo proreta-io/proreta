@@ -234,6 +234,7 @@ const invitations: (S["Invitation"] & { orgId: string })[] = [
     acceptedBy: null,
     acceptedAt: null,
     revokedAt: null,
+    emailBound: false,
   },
   {
     orgId: "o-acme",
@@ -249,6 +250,7 @@ const invitations: (S["Invitation"] & { orgId: string })[] = [
     acceptedBy: null,
     acceptedAt: null,
     revokedAt: null,
+    emailBound: false,
   },
   {
     orgId: "o-acme",
@@ -264,6 +266,7 @@ const invitations: (S["Invitation"] & { orgId: string })[] = [
     acceptedBy: "alexandra.fitzgerald-montgomery.infrastructure@acme-operations-group.example.com",
     acceptedAt: day(9),
     revokedAt: null,
+    emailBound: false,
   },
   {
     orgId: "o-acme",
@@ -279,6 +282,7 @@ const invitations: (S["Invitation"] & { orgId: string })[] = [
     acceptedBy: null,
     acceptedAt: null,
     revokedAt: null,
+    emailBound: false,
   },
 ];
 

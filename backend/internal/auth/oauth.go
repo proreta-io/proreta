@@ -296,12 +296,14 @@ func (s *Service) oauthJoinInvitation(ctx context.Context, in OAuthLoginInput, u
 				return refuse(ErrAlreadyMember, "already_member", target.tenantID, &userID)
 			}
 		}
-		role, err := s.joinInvited(ctx, tx, target.tenantID, userID, in.InviteHash, in.IP)
+		role, err := s.joinInvited(ctx, tx, target.tenantID, userID, in.InviteHash, in.Identity.Email, in.IP)
 		if err != nil {
 			var limit *plans.LimitError
 			switch {
 			case errors.Is(err, ErrInvitationInvalid):
 				return refuse(err, "invitation_invalid", target.tenantID, nilIf(created, userID))
+			case errors.Is(err, ErrInvitationEmailMismatch):
+				return refuse(err, "invitation_email_mismatch", target.tenantID, nilIf(created, userID))
 			case errors.Is(err, ErrAlreadyMember):
 				return refuse(err, "already_member", target.tenantID, &userID)
 			case errors.As(err, &limit):

@@ -129,11 +129,11 @@ func (s *server) GetSpeculaSlotLosses(ctx context.Context, req gen.GetSpeculaSlo
 	if !visibleSpecula(access, sp) {
 		return nil, specula.ErrNotFound
 	}
-	rng := gen.N24h
+	rng := gen.StatsRangeN24h
 	if req.Params.Range != nil {
 		rng = *req.Params.Range
 	}
-	span := map[gen.StatsRange]time.Duration{gen.N24h: 24 * time.Hour, gen.N7d: 7 * 24 * time.Hour, gen.N30d: 30 * 24 * time.Hour}[rng]
+	span := map[gen.StatsRange]time.Duration{gen.StatsRangeN24h: 24 * time.Hour, gen.StatsRangeN7d: 7 * 24 * time.Hour, gen.StatsRangeN30d: 30 * 24 * time.Hour}[rng]
 	totals, buckets, err := s.specula.SlotLosses(ctx, p.TenantID, sp.ID, time.Now().Add(-span))
 	if err != nil {
 		return nil, err

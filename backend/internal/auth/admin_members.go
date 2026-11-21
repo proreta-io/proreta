@@ -231,7 +231,7 @@ func (s *Service) AddFirstOwnerTx(ctx context.Context, tx pgx.Tx, a Actor, email
 		return nil, nil, "", "", fmt.Errorf("find user: %w", err)
 	}
 	in := InvitationInput{Role: RoleOwner, Label: email, SendEmail: new(bool)}
-	label, _, err := s.validateInvitation(ctx, in)
+	plan, err := s.validateInvitation(ctx, in)
 	if err != nil {
 		return nil, nil, "", "", err
 	}
@@ -239,8 +239,8 @@ func (s *Service) AddFirstOwnerTx(ctx context.Context, tx pgx.Tx, a Actor, email
 		return nil, nil, "", "", err
 	}
 	now := s.clock.Now()
-	i := Invitation{ID: uuidv7.New(), Role: in.Role, Label: label, Status: InvitationOpen, CreatedAt: now, ExpiresAt: now.Add(InvitationTTL)}
-	if err := s.insertInvitation(ctx, tx, a, in, &i, token, ""); err != nil {
+	i := Invitation{ID: uuidv7.New(), Role: in.Role, Label: plan.label, Status: InvitationOpen, CreatedAt: now, ExpiresAt: now.Add(plan.ttl)}
+	if err := s.insertInvitation(ctx, tx, a, in, &i, token, plan); err != nil {
 		return nil, nil, "", "", err
 	}
 	return nil, &i, token, ActionAdminInvitationCreated, nil

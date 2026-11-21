@@ -63,6 +63,7 @@ const invitation = (over: Partial<Invitation> = {}): Invitation => ({
   acceptedBy: null,
   acceptedAt: null,
   revokedAt: null,
+  emailBound: false,
   ...over,
 });
 
@@ -274,6 +275,7 @@ describe("admin organization invitations", () => {
     expect(await requests(fetchMock, "POST", `${base}/invitations`)[0]!.json()).toEqual({
       role: "member",
       label: "Dan",
+      expiresIn: "7d",
     });
     await userEvent.click(screen.getByRole("button", { name: "I sent it, hide the link" }));
     expect(screen.queryByLabelText("Invitation link")).toBeNull();
@@ -310,10 +312,10 @@ describe("admin organization invitations", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Invite someone" }));
     const dialog = await screen.findByRole("dialog", { name: "Invite someone" });
     await userEvent.type(
-      await within(dialog).findByLabelText("Email the link to (optional)"),
+      await within(dialog).findByLabelText("Email address (optional)"),
       "guest@example.org",
     );
-    await userEvent.click(within(dialog).getByRole("checkbox", { name: "Send by email" }));
+    await userEvent.click(within(dialog).getByRole("checkbox", { name: "Send the link by email" }));
     await userEvent.click(
       within(dialog).getByRole("button", { name: "Create link and send email" }),
     );
@@ -322,6 +324,7 @@ describe("admin organization invitations", () => {
       role: "member",
       email: "guest@example.org",
       sendEmail: true,
+      expiresIn: "7d",
     });
   });
 });

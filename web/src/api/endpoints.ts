@@ -52,6 +52,12 @@ export type MembershipRole = Schemas["MembershipRole"];
 export type Member = Schemas["Member"];
 export type Invitation = Schemas["Invitation"];
 export type InvitationRole = Schemas["InvitationRole"];
+export type InvitationExpiry = Schemas["InvitationExpiry"];
+/** How a new invitation is delivered and how long it works: the optional fields of the create request. */
+export type InvitationOptions = Pick<
+  Schemas["InvitationCreate"],
+  "email" | "sendEmail" | "bindToEmail" | "expiresIn"
+>;
 export type InvitationPreview = Schemas["InvitationPreview"];
 export type Project = Schemas["Project"];
 export type ProjectMember = Schemas["ProjectMember"];
@@ -404,7 +410,7 @@ export const createAdminInvitation = (
   organizationId: string,
   role: InvitationRole,
   label: string,
-  email = "",
+  options: InvitationOptions = {},
 ) =>
   unwrap(
     client.POST("/api/v1/admin/organizations/{organizationId}/invitations", {
@@ -412,7 +418,7 @@ export const createAdminInvitation = (
       body: {
         role,
         ...(label ? { label } : {}),
-        ...(email ? { email, sendEmail: true } : {}),
+        ...options,
       },
     }),
   );
@@ -582,18 +588,16 @@ export const listInvitations = (projectId?: string) =>
 export const createInvitation = (
   role: InvitationRole,
   label: string,
-  email = "",
+  options: InvitationOptions = {},
   projectId?: string,
 ) =>
   unwrap(
     client.POST("/api/v1/invitations", {
-      // An address is only sent when the box "Send by email" is checked, so it always asks for
-      // the email explicitly.
       body: {
         role,
         ...(projectId ? { projectId } : {}),
         ...(label ? { label } : {}),
-        ...(email ? { email, sendEmail: true } : {}),
+        ...options,
       },
     }),
   );

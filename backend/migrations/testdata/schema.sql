@@ -137,6 +137,7 @@ invitations.9 accepted_at timestamp with time zone
 invitations.10 accepted_by uuid
 invitations.11 revoked_at timestamp with time zone
 invitations.12 project_id uuid
+invitations.13 email_hash bytea
 mail_outbox.1 id uuid not null
 mail_outbox.2 kind text not null
 mail_outbox.3 payload bytea not null
@@ -475,7 +476,9 @@ incidents incidents_tenant_id_id_key UNIQUE (tenant_id, id)
 invitations invitations_accepted_by_fkey FOREIGN KEY (accepted_by) REFERENCES users(id)
 invitations invitations_accepted_pair CHECK (((accepted_at IS NULL) = (accepted_by IS NULL)))
 invitations invitations_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id)
+invitations invitations_email_hash_check CHECK (((email_hash IS NULL) OR (length(email_hash) = 32)))
 invitations invitations_expiry CHECK ((expires_at > created_at))
+invitations invitations_expiry_max CHECK ((expires_at <= (created_at + '30 days'::interval)))
 invitations invitations_label_check CHECK ((length(label) <= 80))
 invitations invitations_pkey PRIMARY KEY (id)
 invitations invitations_project_fk FOREIGN KEY (tenant_id, project_id) REFERENCES projects(tenant_id, id)
@@ -1140,8 +1143,8 @@ BEGIN
              UNION SELECT i.tenant_id FROM invitations AS i WHERE i.accepted_by = p_user_id LOOP
         PERFORM set_config('app.tenant_id', t::text, true);
         DELETE FROM project_members AS pm WHERE pm.tenant_id = t AND pm.user_id = p_user_id;
-        -- the label of an accepted invitation names a person
-        UPDATE invitations AS i SET label = '' WHERE i.tenant_id = t AND i.accepted_by = p_user_id AND i.label <> '';
+        -- the label and the address hash of an accepted invitation name a person
+        UPDATE invitations AS i SET label = '', email_hash = NULL WHERE i.tenant_id = t AND i.accepted_by = p_user_id AND (i.label <> '' OR i.email_hash IS NOT NULL);
         DELETE FROM memberships AS m WHERE m.tenant_id = t AND m.user_id = p_user_id;
         GET DIAGNOSTICS n = ROW_COUNT;
         v_members := v_members + n;
@@ -2152,12 +2155,12 @@ AS $function$
       AND t.deleted_at IS NULL
 $function$
 CREATE OR REPLACE FUNCTION public.auth_invitation_lookup(p_token_hash bytea)
- RETURNS TABLE(invitation_id uuid, tenant_id uuid, tenant_name text, role text, expires_at timestamp with time zone, project_id uuid, project_name text)
+ RETURNS TABLE(invitation_id uuid, tenant_id uuid, tenant_name text, role text, expires_at timestamp with time zone, project_id uuid, project_name text, email_bound boolean)
  LANGUAGE sql
  STABLE SECURITY DEFINER
  SET search_path TO 'public', 'pg_temp'
 AS $function$
-    SELECT i.id, i.tenant_id, t.name, i.role, i.expires_at, i.project_id, p.name
+    SELECT i.id, i.tenant_id, t.name, i.role, i.expires_at, i.project_id, p.name, (i.email_hash IS NOT NULL)
     FROM invitations AS i
     JOIN tenants AS t ON t.id = i.tenant_id
     LEFT JOIN projects AS p ON p.tenant_id = i.tenant_id AND p.id = i.project_id
