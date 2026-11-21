@@ -150,6 +150,7 @@ CREATE TABLE sessions (
     last_seen_at timestamptz DEFAULT now() NOT NULL,
     ip inet,
     user_agent text,
+    opened_with_password boolean DEFAULT false NOT NULL,
     CONSTRAINT sessions_token_hash_check CHECK ((length(token_hash) = 32)),
     CONSTRAINT sessions_user_agent_check CHECK ((length(user_agent) <= 512)),
     CONSTRAINT sessions_pkey PRIMARY KEY (id),

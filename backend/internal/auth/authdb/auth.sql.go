@@ -96,22 +96,30 @@ func (q *Queries) GetMembershipRole(ctx context.Context, arg GetMembershipRolePa
 }
 
 const getPasswordMustChange = `-- name: GetPasswordMustChange :one
-SELECT password_must_change, email
-FROM users
-WHERE id = $1
+SELECT u.password_must_change, u.email, s.opened_with_password
+FROM users AS u
+JOIN sessions AS s ON s.user_id = u.id
+WHERE u.id = $1 AND s.id = $2
 `
+
+type GetPasswordMustChangeParams struct {
+	ID        uuid.UUID
+	SessionID uuid.UUID
+}
 
 type GetPasswordMustChangeRow struct {
 	PasswordMustChange bool
 	Email              string
+	OpenedWithPassword bool
 }
 
 // Read for every authenticated request: while it is true the api answers only the session and
-// password-change operations.
-func (q *Queries) GetPasswordMustChange(ctx context.Context, id uuid.UUID) (GetPasswordMustChangeRow, error) {
-	row := q.db.QueryRow(ctx, getPasswordMustChange, id)
+// password-change operations. opened_with_password: only a session opened with the password is
+// forced (a provider sign-in did not use the temporary one).
+func (q *Queries) GetPasswordMustChange(ctx context.Context, arg GetPasswordMustChangeParams) (GetPasswordMustChangeRow, error) {
+	row := q.db.QueryRow(ctx, getPasswordMustChange, arg.ID, arg.SessionID)
 	var i GetPasswordMustChangeRow
-	err := row.Scan(&i.PasswordMustChange, &i.Email)
+	err := row.Scan(&i.PasswordMustChange, &i.Email, &i.OpenedWithPassword)
 	return i, err
 }
 
@@ -236,20 +244,21 @@ func (q *Queries) InsertMembership(ctx context.Context, arg InsertMembershipPara
 }
 
 const insertSession = `-- name: InsertSession :exec
-INSERT INTO sessions (id, user_id, tenant_id, token_hash, csrf_token, created_at, expires_at, last_seen_at, ip, user_agent)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $6, $8, $9)
+INSERT INTO sessions (id, user_id, tenant_id, token_hash, csrf_token, created_at, expires_at, last_seen_at, ip, user_agent, opened_with_password)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $6, $8, $9, $10)
 `
 
 type InsertSessionParams struct {
-	ID        uuid.UUID
-	UserID    uuid.UUID
-	TenantID  uuid.UUID
-	TokenHash []byte
-	CsrfToken string
-	CreatedAt time.Time
-	ExpiresAt time.Time
-	Ip        *netip.Addr
-	UserAgent *string
+	ID                 uuid.UUID
+	UserID             uuid.UUID
+	TenantID           uuid.UUID
+	TokenHash          []byte
+	CsrfToken          string
+	CreatedAt          time.Time
+	ExpiresAt          time.Time
+	Ip                 *netip.Addr
+	UserAgent          *string
+	OpenedWithPassword bool
 }
 
 func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) error {
@@ -263,6 +272,7 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) er
 		arg.ExpiresAt,
 		arg.Ip,
 		arg.UserAgent,
+		arg.OpenedWithPassword,
 	)
 	return err
 }

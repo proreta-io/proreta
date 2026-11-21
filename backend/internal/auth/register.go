@@ -159,7 +159,7 @@ func (s *Service) createAccount(ctx context.Context, email, passwordHash string,
 		}); err != nil {
 			return err
 		}
-		sess, err := s.insertSession(ctx, q, tenantID, userID, in.IP, in.UserAgent)
+		sess, err := s.insertSession(ctx, q, tenantID, userID, in.IP, in.UserAgent, true)
 		if err != nil {
 			return err
 		}
@@ -317,12 +317,12 @@ func (s *Service) joinExistingAccount(ctx context.Context, row authdb.GetUserByE
 		if err != nil {
 			return err
 		}
-		sess, err := s.insertSession(ctx, q, target.tenantID, row.ID, in.IP, in.UserAgent)
+		sess, err := s.insertSession(ctx, q, target.tenantID, row.ID, in.IP, in.UserAgent, true)
 		if err != nil {
 			return err
 		}
 		res = LoginResult{Token: sess.token, SessionInfo: SessionInfo{
-			User: User{ID: row.ID, Login: row.Email, DisplayName: row.DisplayName, MustChangePassword: s.mustChange(row.PasswordMustChange, row.Email), EmailVerified: row.EmailVerifiedAt != nil}, Tenant: t, Role: role,
+			User: User{ID: row.ID, Login: row.Email, DisplayName: row.DisplayName, MustChangePassword: s.mustChange(row.PasswordMustChange, row.Email, true), EmailVerified: row.EmailVerifiedAt != nil}, Tenant: t, Role: role,
 			CSRFToken: sess.csrf, ExpiresAt: sess.expiresAt,
 		}}
 		return nil
@@ -367,7 +367,7 @@ func (s *Service) createInvitedAccount(ctx context.Context, email, passwordHash 
 		}); err != nil {
 			return err
 		}
-		sess, err := s.insertSession(ctx, q, tenantID, userID, in.IP, in.UserAgent)
+		sess, err := s.insertSession(ctx, q, tenantID, userID, in.IP, in.UserAgent, true)
 		if err != nil {
 			return err
 		}
