@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Proreta Specula API
-  version: 1.0.0
+  version: 1.1.0
   contact:
     name: Proreta maintainers
     url: https://github.com/proreta-io/proreta
@@ -33,8 +33,15 @@ info:
     *Versioning rule.* A `schedule/1` request or response never gains a field: both sides reject
     unknown fields (an older gateway answers a `hello` or `reports` with an unknown field with
     `400`, and an executor retries a `400` on `reports` for ever, because it keeps its buffer). A
-    new field needs a new capability (`schedule/2`), announced in `hello` and offered in `modes`.
-    Upgrade the gateway first.
+    new field needs a new capability, announced in `hello` and offered in `modes`. Upgrade the
+    gateway first.
+
+    *Schedule mode, version 2* (`schedule/2`) is `schedule/1` plus the cumulative counters of missed
+    and dropped slots in `hello` (`slotCounters`): same endpoints, same schedule, same reports. An
+    executor announces `schedule/1` and `schedule/2` together; a gateway that knows `schedule/2`
+    offers it next to `schedule/1`, an older one offers `schedule/1` only. The executor sends
+    `slotCounters` only after a `hello` was answered with `schedule/2` among the `modes`, and when
+    a `hello` with them is answered `400` it drops them for the run and stays in schedule mode.
 servers:
   - url: https://proreta.example.com
     description: Example installation; the executor calls the address of its Proreta
@@ -198,13 +205,40 @@ components:
           type: array
           maxItems: 16
           items: {type: string, maxLength: 32}
-          description: "What this executor can do: `tcp` (runs tcp checks), `schedule/1` (schedule mode). Absent means none: pull mode, http jobs only. An older server rejects a `hello` with fields it does not know (400); send them only after a plain `hello` succeeded and `schedule` answered 200."
+          description: "What this executor can do: `tcp` (runs tcp checks), `schedule/1` (schedule mode), `schedule/2` (schedule/1 plus `slotCounters`; announce it only together with `schedule/1`). Absent means none: pull mode, http jobs only. An older server rejects a `hello` with fields it does not know (400); send them only after a plain `hello` succeeded and `schedule` answered 200."
         instanceId: {type: string, maxLength: 64, description: "Random per process; two ids from one token within minutes mean two executors share it"}
         scheduleIssuedAt: {type: string, format: date-time, description: "`issuedAt` of the schedule in use"}
         bufferDepth: {type: integer, minimum: 0, description: "Results waiting to be sent"}
         oldestUnsentAt: {type: string, format: date-time, description: "Slot of the oldest result waiting to be sent"}
         bufferDegraded: {type: boolean, description: "The result buffer is in memory only (no usable state directory)"}
         clockOffsetMs: {type: integer, format: int64, minimum: -1000000000000, maximum: 1000000000000, description: "The server's time minus the executor's corrected clock in milliseconds, as last measured (positive: the executor's clock is behind). Absent before the first measurement; an older server rejects it like the other fields."}
+        slotCounters:
+          $ref: "#/components/schemas/SlotCounters"
+    SlotCounters:
+      type: object
+      additionalProperties: false
+      required: [missed, dropped]
+      description: "Slots the executor never checked and results it gave up on, cumulative since the process started (a lost or repeated `hello` changes nothing). Send only when the latest answer offered `schedule/2`, and only with `schedule/2` announced in the same `hello`. The gateway turns them into the difference to the previous `hello` of the same `instanceId`; a counter that went down or a new `instanceId` counts from zero."
+      properties:
+        missed:
+          type: object
+          additionalProperties: false
+          required: [busy, late, scheduleExpired]
+          properties:
+            busy: {type: integer, format: int64, minimum: 0, maximum: 1000000000000000, description: "Slot passed while the previous check of the same monitor was still running"}
+            late: {type: integer, format: int64, minimum: 0, maximum: 1000000000000000, description: "Slot passed while the process was stalled for a whole interval"}
+            scheduleExpired: {type: integer, format: int64, minimum: 0, maximum: 1000000000000000, description: "Slot not checked because the schedule had run out"}
+        dropped:
+          type: object
+          additionalProperties: false
+          required: [bufferSize, bufferAge, rejected, superseded, tooOld, unreadable]
+          properties:
+            bufferSize: {type: integer, format: int64, minimum: 0, maximum: 1000000000000000, description: "Results dropped because the buffer reached its size limit (or, in memory only, its count limit)"}
+            bufferAge: {type: integer, format: int64, minimum: 0, maximum: 1000000000000000, description: "Results dropped because they outlived the buffer's age limit"}
+            rejected: {type: integer, format: int64, minimum: 0, maximum: 1000000000000000, description: "Results the gateway refused for good (outcome `rejected`), or the executor could not send"}
+            superseded: {type: integer, format: int64, minimum: 0, maximum: 1000000000000000, description: "Results the gateway discarded because the slot is no longer the monitor's (outcome `superseded`)"}
+            tooOld: {type: integer, format: int64, minimum: 0, maximum: 1000000000000000, description: "Results older than the backlog the gateway accepts (outcome `expired`)"}
+            unreadable: {type: integer, format: int64, minimum: 0, maximum: 1000000000000000, description: "Results in a buffer segment that could not be read"}
     HelloResponse:
       type: object
       required: [serverTime]
@@ -212,7 +246,7 @@ components:
         serverTime: {type: string, format: date-time}
         modes:
           type: array
-          items: {type: string, enum: [pull, schedule/1]}
+          items: {type: string, enum: [pull, schedule/1, schedule/2]}
           description: Modes this server offers; absent on an older server (pull only)
         scheduleVersion: {type: string, description: "Current `version` of this location's schedule; fetch the schedule when it differs from the one in use"}
     ClaimRequest:

@@ -134,6 +134,29 @@ func TestIntegrationRetention(t *testing.T) {
 		}
 	})
 
+	t.Run("specula slot losses", func(t *testing.T) {
+		specula := uuid.NewString()
+		pgtest.MustExec(t, admin, `INSERT INTO specula_agents (tenant_id, id, name, token_hash, location_id)
+			VALUES ('`+tenantA+`', '`+specula+`', 'Prod', decode(repeat('ab', 32), 'hex'), (SELECT id FROM probe_locations LIMIT 1))`)
+		for _, age := range []string{"100 days", "91 days", "89 days", "1 hour"} {
+			pgtest.MustExec(t, admin, `INSERT INTO specula_slot_losses (tenant_id, specula_id, hour, kind, reason, count)
+				VALUES ('`+tenantA+`', '`+specula+`', date_trunc('hour', now() - interval '`+age+`', 'UTC'), 'missed', 'busy', 3)`)
+		}
+		if _, err := worker.Exec(ctx, `SELECT purge_specula_slot_losses(0)`); sqlState(err) != "22023" {
+			t.Fatalf("retention below the minimum: err = %v, want 22023", err)
+		}
+		if _, err := api.Exec(ctx, `SELECT purge_specula_slot_losses(90)`); err == nil || !strings.Contains(err.Error(), "permission denied") {
+			t.Fatalf("api purge: err = %v, want permission denied", err)
+		}
+		var n int
+		if err := worker.QueryRow(ctx, `SELECT purge_specula_slot_losses(90)`).Scan(&n); err != nil || n != 2 {
+			t.Fatalf("purged %d, err %v; want the 100 and 91 days old rows", n, err)
+		}
+		if got := count(`SELECT count(*) FROM specula_slot_losses`); got != 2 {
+			t.Fatalf("rows left = %d, want 2", got)
+		}
+	})
+
 	t.Run("settings", func(t *testing.T) {
 		overrides := func() (d, m *int) {
 			t.Helper()

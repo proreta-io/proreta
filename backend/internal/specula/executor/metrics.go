@@ -142,3 +142,21 @@ func b2f(b bool) float64 {
 	}
 	return 0
 }
+
+// slotCounters are the cumulative counters of missed and dropped slots, as sent in a schedule/2
+// hello. They read the same sources as the metrics above; a buffer memory drop counts as a buffer
+// size drop, and results the reporter gave up on (too large alone, unusable answer) as rejected.
+func (e *Executor) slotCounters() wire.SlotCounters {
+	var st BufferStats
+	if e.buf != nil {
+		st = e.buf.Stats()
+	}
+	rs := e.rep.Stats()
+	return wire.SlotCounters{
+		Missed: wire.MissedCounters{Busy: e.sched.n.missedBusy.Load(), Late: e.sched.n.missedLate.Load(), ScheduleExpired: e.sched.n.missedExpired.Load()},
+		Dropped: wire.DroppedCounters{
+			BufferSize: st.Drops[dropSize] + st.Drops[dropMemory], BufferAge: st.Drops[dropAge], Unreadable: st.Drops[dropBad],
+			Rejected: rs.Dropped + rs.Outcomes[wire.OutcomeRejected], Superseded: rs.Outcomes[wire.OutcomeSuperseded], TooOld: rs.Outcomes[wire.OutcomeExpired],
+		},
+	}
+}

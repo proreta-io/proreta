@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -230,8 +231,8 @@ func TestHelloAnnouncesTCPAndFallsBackOnAnOlderGateway(t *testing.T) {
 		g.mu.Lock()
 		first, last := g.helloReq[0], g.helloReq[len(g.helloReq)-1]
 		g.mu.Unlock()
-		if len(first.Capabilities) != 2 || first.Capabilities[0] != wire.CapTCP || first.Capabilities[1] != wire.CapSchedule {
-			t.Fatalf("old=%t: first hello %+v must announce tcp and schedule/1", old, first)
+		if !slices.Equal(first.Capabilities, []string{wire.CapTCP, wire.CapSchedule, wire.CapSchedule2}) {
+			t.Fatalf("old=%t: first hello %+v must announce tcp, schedule/1 and schedule/2", old, first)
 		}
 		if old && len(last.Capabilities) != 0 {
 			t.Fatalf("an older gateway must get a plain hello: %+v", last)

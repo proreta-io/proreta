@@ -1,14 +1,17 @@
 package executor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -43,6 +46,11 @@ type schedGateway struct {
 	schedCalls  atomic.Int32
 	claims      atomic.Int32
 	oldHello    bool
+	// legacyHello makes the hello strict like the gateway of the previous protocol version: a body
+	// with a field of schedule/2 answers 400, and only schedule/1 is offered. v2 offers schedule/2
+	// to an executor that announced it.
+	legacyHello bool
+	v2          bool
 
 	// /reports
 	stored         map[string]wire.Report // monitor/slot -> report
@@ -54,6 +62,20 @@ type schedGateway struct {
 	override       map[int64]string // outcome by slot, not stored
 	commitThenFail int              // store the next n batches, then answer 503
 	noReports      bool
+}
+
+// legacyHelloRequest is HelloRequest as the previous protocol version defined it, copied here so
+// that the fake of an older gateway does not follow the wire package.
+type legacyHelloRequest struct {
+	Version          string     `json:"version"`
+	Hostname         string     `json:"hostname"`
+	Capabilities     []string   `json:"capabilities,omitempty"`
+	InstanceID       string     `json:"instanceId,omitempty"`
+	ScheduleIssuedAt *time.Time `json:"scheduleIssuedAt,omitempty"`
+	BufferDepth      *int       `json:"bufferDepth,omitempty"`
+	OldestUnsentAt   *time.Time `json:"oldestUnsentAt,omitempty"`
+	BufferDegraded   *bool      `json:"bufferDegraded,omitempty"`
+	ClockOffsetMs    *int64     `json:"clockOffsetMs,omitempty"`
 }
 
 func key(id uuid.UUID, slot int64) string { return id.String() + "/" + strconv.FormatInt(slot, 10) }
@@ -146,13 +168,26 @@ func (g *schedGateway) handler() http.Handler {
 		switch r.URL.Path {
 		case wire.PathHello:
 			var in wire.HelloRequest
-			_ = json.NewDecoder(r.Body).Decode(&in)
+			raw, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(raw, &in)
 			g.helloReqs = append(g.helloReqs, in)
 			if g.oldHello && len(in.Capabilities) > 0 {
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
-			out := wire.HelloResponse{ServerTime: g.serverNow(), Modes: g.modes, ScheduleVersion: g.version}
+			if g.legacyHello {
+				dec := json.NewDecoder(bytes.NewReader(raw))
+				dec.DisallowUnknownFields()
+				if dec.Decode(&legacyHelloRequest{}) != nil {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+			}
+			modes := g.modes
+			if g.v2 && slices.Contains(in.Capabilities, wire.CapSchedule2) && slices.Contains(modes, wire.ModeSchedule) {
+				modes = append(slices.Clone(modes), wire.ModeSchedule2)
+			}
+			out := wire.HelloResponse{ServerTime: g.serverNow(), Modes: modes, ScheduleVersion: g.version}
 			_ = json.NewEncoder(w).Encode(out)
 		case wire.PathSchedule:
 			g.schedCalls.Add(1)
@@ -374,7 +409,7 @@ func TestAnnouncesCapabilitiesAndInstance(t *testing.T) {
 	h.gw.mu.Lock()
 	defer h.gw.mu.Unlock()
 	first := h.gw.helloReqs[0]
-	if len(first.Capabilities) != 2 || first.Capabilities[0] != wire.CapTCP || first.Capabilities[1] != wire.CapSchedule || first.InstanceID == "" {
+	if !slices.Equal(first.Capabilities, []string{wire.CapTCP, wire.CapSchedule, wire.CapSchedule2}) || first.InstanceID == "" || first.SlotCounters != nil {
 		t.Fatalf("hello %+v", first)
 	}
 }

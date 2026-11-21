@@ -1281,6 +1281,36 @@ REVOKE ALL ON FUNCTION purge_result_rollups(integer) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION purge_result_rollups(integer) TO proreta_worker;
 
 -- +goose StatementBegin
+CREATE FUNCTION purge_specula_slot_losses(p_days integer) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+DECLARE
+    v_n integer;
+BEGIN
+    IF p_days IS NULL OR p_days < 1 THEN
+        RAISE EXCEPTION 'purge: slot loss retention below the minimum' USING ERRCODE = '22023';
+    END IF;
+    WITH gone AS (
+        DELETE FROM specula_slot_losses AS l
+        WHERE l.ctid IN (
+            SELECT e.ctid FROM specula_slot_losses AS e
+            WHERE e.hour < now() - make_interval(days => p_days)
+            ORDER BY e.hour
+            LIMIT 1000
+            FOR UPDATE SKIP LOCKED
+        )
+        RETURNING 1
+    )
+    SELECT count(*)::integer INTO v_n FROM gone;
+    RETURN v_n;
+END
+$$;
+-- +goose StatementEnd
+REVOKE ALL ON FUNCTION purge_specula_slot_losses(integer) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION purge_specula_slot_losses(integer) TO proreta_worker;
+
+-- +goose StatementBegin
 CREATE FUNCTION rollup_drain_dirty(p_max integer) RETURNS TABLE(processed integer, remaining bigint)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'public', 'pg_temp'
@@ -3411,6 +3441,7 @@ CREATE TABLE specula_agents (
     clock_offset_ms bigint,
     last_hello_at timestamptz,
     duplicate_instance_at timestamptz,
+    slot_counters jsonb,
     CONSTRAINT specula_agents_buffer_depth_check CHECK ((buffer_depth >= 0)),
     CONSTRAINT specula_agents_capabilities_check CHECK ((cardinality(capabilities) <= 16)),
     CONSTRAINT specula_agents_hostname_check CHECK ((length(hostname) <= 253)),
@@ -3450,11 +3481,37 @@ CREATE POLICY tenant_isolation ON specula_projects USING ((tenant_id = (NULLIF(c
 REVOKE ALL ON specula_projects FROM proreta_api, proreta_worker;
 GRANT SELECT, INSERT, DELETE ON specula_projects TO proreta_api;
 
+CREATE TABLE specula_slot_losses (
+    tenant_id uuid NOT NULL,
+    specula_id uuid NOT NULL,
+    hour timestamptz NOT NULL,
+    kind text NOT NULL,
+    reason text NOT NULL,
+    count bigint NOT NULL,
+    updated_at timestamptz DEFAULT now() NOT NULL,
+    CONSTRAINT specula_slot_losses_count_check CHECK ((count > 0)),
+    CONSTRAINT specula_slot_losses_hour_check CHECK ((hour = date_trunc('hour'::text, hour, 'UTC'::text))),
+    CONSTRAINT specula_slot_losses_kind_check CHECK ((kind = ANY (ARRAY['missed'::text, 'dropped'::text]))),
+    CONSTRAINT specula_slot_losses_reason_check CHECK ((((kind = 'missed'::text) AND (reason = ANY (ARRAY['busy'::text, 'late'::text, 'scheduleExpired'::text]))) OR ((kind = 'dropped'::text) AND (reason = ANY (ARRAY['bufferSize'::text, 'bufferAge'::text, 'rejected'::text, 'superseded'::text, 'tooOld'::text, 'unreadable'::text]))))),
+    CONSTRAINT specula_slot_losses_pkey PRIMARY KEY (tenant_id, specula_id, hour, kind, reason)
+);
+
+ALTER TABLE ONLY specula_slot_losses FORCE ROW LEVEL SECURITY;
+CREATE INDEX specula_slot_losses_hour_idx ON specula_slot_losses USING btree (hour);
+ALTER TABLE specula_slot_losses ENABLE ROW LEVEL SECURITY;
+CREATE POLICY owner_slot_losses ON specula_slot_losses TO proreta_owner USING (true) WITH CHECK (true);
+CREATE POLICY tenant_isolation ON specula_slot_losses USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
+REVOKE ALL ON specula_slot_losses FROM proreta_api, proreta_worker;
+GRANT SELECT ON specula_slot_losses TO proreta_api;
+
 ALTER TABLE ONLY incidents
     ADD CONSTRAINT incidents_specula_fkey FOREIGN KEY (tenant_id, specula_id) REFERENCES specula_agents(tenant_id, id);
 
 ALTER TABLE ONLY notification_deliveries
     ADD CONSTRAINT notification_deliveries_specula_fkey FOREIGN KEY (tenant_id, specula_id) REFERENCES specula_agents(tenant_id, id);
+
+ALTER TABLE ONLY specula_slot_losses
+    ADD CONSTRAINT specula_slot_losses_specula_fkey FOREIGN KEY (tenant_id, specula_id) REFERENCES specula_agents(tenant_id, id);
 
 ALTER TABLE ONLY specula_agents
     ADD CONSTRAINT specula_agents_created_by_fkey FOREIGN KEY (created_by) REFERENCES users(id);
@@ -3669,6 +3726,7 @@ CREATE FUNCTION specula_hello(p_specula_id uuid, p_version text, p_hostname text
             hostname = left(p_hostname, 253),
             capabilities = coalesce(p_capabilities, '{}'),
             instance_id = left(p_instance_id, 64),
+            slot_counters = CASE WHEN a.instance_id IS NOT DISTINCT FROM left(p_instance_id, 64) THEN a.slot_counters END,
             schedule_issued_at = p_schedule_issued_at,
             buffer_depth = p_buffer_depth,
             oldest_unsent_at = p_oldest_unsent_at,
@@ -3686,6 +3744,46 @@ $$;
 -- +goose StatementEnd
 REVOKE ALL ON FUNCTION specula_hello(uuid,text,text,text[],text,timestamp with time zone,integer,timestamp with time zone,boolean,bigint) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION specula_hello(uuid,text,text,text[],text,timestamp with time zone,integer,timestamp with time zone,boolean,bigint) TO proreta_worker;
+
+-- +goose StatementBegin
+CREATE FUNCTION specula_record_slot_losses(p_specula_id uuid, p_counters jsonb) RETURNS TABLE(kind text, reason text, delta bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+#variable_conflict use_column
+DECLARE
+    a specula_agents%ROWTYPE;
+BEGIN
+    -- Called right after specula_hello in the same transaction, which has the row locked and has
+    -- already cleared slot_counters when the instance id changed: what is stored belongs to this process.
+    SELECT * INTO a FROM specula_agents AS s WHERE s.id = p_specula_id AND s.revoked_at IS NULL FOR UPDATE;
+    IF NOT FOUND THEN
+        RETURN;
+    END IF;
+    RETURN QUERY
+    WITH d AS (
+        SELECT m.kind, m.reason,
+               CASE WHEN o.v IS NOT NULL AND c.v >= o.v THEN c.v - o.v ELSE c.v END AS delta
+        FROM (VALUES ('missed', 'busy'), ('missed', 'late'), ('missed', 'scheduleExpired'),
+                     ('dropped', 'bufferSize'), ('dropped', 'bufferAge'), ('dropped', 'rejected'),
+                     ('dropped', 'superseded'), ('dropped', 'tooOld'), ('dropped', 'unreadable')) AS m(kind, reason)
+        CROSS JOIN LATERAL (SELECT coalesce((p_counters ->> m.reason)::bigint, 0) AS v) AS c
+        CROSS JOIN LATERAL (SELECT (a.slot_counters ->> m.reason)::bigint AS v) AS o
+    ), ins AS (
+        INSERT INTO specula_slot_losses AS l (tenant_id, specula_id, hour, kind, reason, count)
+        SELECT a.tenant_id, a.id, date_trunc('hour', now(), 'UTC'), d.kind, d.reason, d.delta FROM d WHERE d.delta > 0
+        ON CONFLICT (tenant_id, specula_id, hour, kind, reason)
+        DO UPDATE SET count = l.count + excluded.count, updated_at = now()
+        RETURNING 1
+    ), upd AS (
+        UPDATE specula_agents AS s SET slot_counters = p_counters WHERE s.id = a.id RETURNING 1
+    )
+    SELECT d.kind, d.reason, d.delta FROM d WHERE d.delta > 0;
+END
+$$;
+-- +goose StatementEnd
+REVOKE ALL ON FUNCTION specula_record_slot_losses(uuid,jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION specula_record_slot_losses(uuid,jsonb) TO proreta_worker;
 
 -- +goose StatementBegin
 CREATE FUNCTION specula_mark_unreachable(p_after interval DEFAULT '00:03:00'::interval) RETURNS integer

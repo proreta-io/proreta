@@ -16,6 +16,7 @@ type metrics struct {
 	scheduleBuild      prometheus.Histogram
 	scheduleUnreadable prometheus.Counter
 	duplicateInstance  prometheus.Counter
+	slotLosses         *prometheus.CounterVec
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -58,10 +59,13 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 		duplicateInstance: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "proreta_specula_duplicate_instance_total", Help: "Hellos whose instance id differs from the stored one, sent less than 3 minutes after the stored one's hello: two executors share a token.",
 		}),
+		slotLosses: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "proreta_specula_slot_losses_total", Help: "Slots the executors reported as never checked (kind missed) or results they gave up on (kind dropped), by reason; the growth between two hellos of the same process.",
+		}, []string{"kind", "reason"}),
 	}
 	if reg != nil {
 		reg.MustRegister(m.unauthorized, m.limited, m.jobs, m.results, m.tokenLimited,
-			m.reports, m.reportAge, m.lateReports, m.scheduleRequests, m.scheduleBuild, m.scheduleUnreadable, m.duplicateInstance)
+			m.reports, m.reportAge, m.lateReports, m.scheduleRequests, m.scheduleBuild, m.scheduleUnreadable, m.duplicateInstance, m.slotLosses)
 	}
 	return m
 }

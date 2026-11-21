@@ -37,6 +37,7 @@ rollup_state kind=r owner=proreta_owner rls=true force=false acl=proreta_owner=a
 sessions kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arwd/proreta_owner,proreta_owner=arwdDxt/proreta_owner
 specula_agents kind=r owner=proreta_owner rls=true force=true acl=proreta_api=ar/proreta_owner,proreta_owner=arwdDxt/proreta_owner
 specula_projects kind=r owner=proreta_owner rls=true force=true acl=proreta_api=ard/proreta_owner,proreta_owner=arwdDxt/proreta_owner
+specula_slot_losses kind=r owner=proreta_owner rls=true force=true acl=proreta_api=r/proreta_owner,proreta_owner=arwdDxt/proreta_owner
 status_page_components kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arwd/proreta_owner,proreta_owner=arwdDxt/proreta_owner,proreta_worker=rd/proreta_owner
 status_page_domains kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arw/proreta_owner,proreta_owner=arwdDxt/proreta_owner
 status_page_released_slugs kind=r owner=proreta_owner rls=true force=true acl=proreta_api=arw/proreta_owner,proreta_owner=arwdDxt/proreta_owner
@@ -330,10 +331,18 @@ specula_agents.19 buffer_degraded boolean not null default false
 specula_agents.20 clock_offset_ms bigint
 specula_agents.21 last_hello_at timestamp with time zone
 specula_agents.22 duplicate_instance_at timestamp with time zone
+specula_agents.23 slot_counters jsonb
 specula_projects.1 tenant_id uuid not null
 specula_projects.2 specula_id uuid not null
 specula_projects.3 project_id uuid not null
 specula_projects.4 created_at timestamp with time zone not null default now()
+specula_slot_losses.1 tenant_id uuid not null
+specula_slot_losses.2 specula_id uuid not null
+specula_slot_losses.3 hour timestamp with time zone not null
+specula_slot_losses.4 kind text not null
+specula_slot_losses.5 reason text not null
+specula_slot_losses.6 count bigint not null
+specula_slot_losses.7 updated_at timestamp with time zone not null default now()
 status_page_components.1 id uuid not null
 status_page_components.2 tenant_id uuid not null
 status_page_components.3 page_id uuid not null
@@ -636,6 +645,12 @@ specula_agents specula_agents_version_check CHECK ((length(version) <= 64))
 specula_projects specula_projects_pkey PRIMARY KEY (specula_id, project_id)
 specula_projects specula_projects_tenant_id_project_id_fkey FOREIGN KEY (tenant_id, project_id) REFERENCES projects(tenant_id, id)
 specula_projects specula_projects_tenant_id_specula_id_fkey FOREIGN KEY (tenant_id, specula_id) REFERENCES specula_agents(tenant_id, id)
+specula_slot_losses specula_slot_losses_count_check CHECK ((count > 0))
+specula_slot_losses specula_slot_losses_hour_check CHECK ((hour = date_trunc('hour'::text, hour, 'UTC'::text)))
+specula_slot_losses specula_slot_losses_kind_check CHECK ((kind = ANY (ARRAY['missed'::text, 'dropped'::text])))
+specula_slot_losses specula_slot_losses_pkey PRIMARY KEY (tenant_id, specula_id, hour, kind, reason)
+specula_slot_losses specula_slot_losses_reason_check CHECK ((((kind = 'missed'::text) AND (reason = ANY (ARRAY['busy'::text, 'late'::text, 'scheduleExpired'::text]))) OR ((kind = 'dropped'::text) AND (reason = ANY (ARRAY['bufferSize'::text, 'bufferAge'::text, 'rejected'::text, 'superseded'::text, 'tooOld'::text, 'unreadable'::text])))))
+specula_slot_losses specula_slot_losses_specula_fkey FOREIGN KEY (tenant_id, specula_id) REFERENCES specula_agents(tenant_id, id)
 status_page_components status_page_components_group_name_check CHECK (((group_name IS NULL) OR ((char_length(group_name) >= 1) AND (char_length(group_name) <= 60))))
 status_page_components status_page_components_page_id_monitor_id_key UNIQUE (page_id, monitor_id)
 status_page_components status_page_components_page_id_position_key UNIQUE (page_id, "position")
@@ -782,6 +797,8 @@ CREATE UNIQUE INDEX specula_agents_name_idx ON public.specula_agents USING btree
 CREATE UNIQUE INDEX specula_agents_pkey ON public.specula_agents USING btree (tenant_id, id)
 CREATE UNIQUE INDEX specula_agents_token_hash_key ON public.specula_agents USING btree (token_hash)
 CREATE UNIQUE INDEX specula_projects_pkey ON public.specula_projects USING btree (specula_id, project_id)
+CREATE INDEX specula_slot_losses_hour_idx ON public.specula_slot_losses USING btree (hour)
+CREATE UNIQUE INDEX specula_slot_losses_pkey ON public.specula_slot_losses USING btree (tenant_id, specula_id, hour, kind, reason)
 CREATE INDEX status_page_components_monitor_idx ON public.status_page_components USING btree (tenant_id, monitor_id)
 CREATE UNIQUE INDEX status_page_components_page_id_monitor_id_key ON public.status_page_components USING btree (page_id, monitor_id)
 CREATE UNIQUE INDEX status_page_components_page_id_position_key ON public.status_page_components USING btree (page_id, "position")
@@ -859,6 +876,8 @@ specula_agents owner_specula cmd=* permissive=true to=proreta_owner using true c
 specula_agents tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
 specula_projects owner_specula_read cmd=r permissive=true to=proreta_owner using true
 specula_projects tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
+specula_slot_losses owner_slot_losses cmd=* permissive=true to=proreta_owner using true check true
+specula_slot_losses tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
 status_page_components tenant_isolation cmd=* permissive=true to=public using (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid) check (tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)
 status_page_domains owner_domain_read cmd=r permissive=true to=proreta_owner using true
 status_page_domains owner_domain_update cmd=w permissive=true to=proreta_owner using true check true
@@ -955,6 +974,7 @@ purge_mail_outbox(interval) owner=proreta_owner definer=true acl=proreta_owner=X
 purge_notification_deliveries(integer) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 purge_password_resets() owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 purge_result_rollups(integer) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+purge_specula_slot_losses(integer) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 reset_monitor_runtime(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 rollup_drain_dirty(integer) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 rollup_mark_dirty(timestamp with time zone) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
@@ -965,6 +985,7 @@ specula_epoch_close(uuid,uuid,uuid) owner=proreta_owner definer=true acl=proreta
 specula_epoch_open(uuid,uuid,uuid) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner
 specula_hello(uuid,text,text,text[],text,timestamp with time zone,integer,timestamp with time zone,boolean,bigint) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_mark_unreachable(interval) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
+specula_record_slot_losses(uuid,jsonb) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_revoke(uuid) owner=proreta_owner definer=true acl=proreta_api=X/proreta_owner,proreta_owner=X/proreta_owner
 specula_schedule(uuid,uuid) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
 specula_status_counts(interval) owner=proreta_owner definer=true acl=proreta_owner=X/proreta_owner,proreta_worker=X/proreta_owner
@@ -3120,6 +3141,33 @@ BEGIN
     RETURN v_n;
 END
 $function$
+CREATE OR REPLACE FUNCTION public.purge_specula_slot_losses(p_days integer)
+ RETURNS integer
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+    v_n integer;
+BEGIN
+    IF p_days IS NULL OR p_days < 1 THEN
+        RAISE EXCEPTION 'purge: slot loss retention below the minimum' USING ERRCODE = '22023';
+    END IF;
+    WITH gone AS (
+        DELETE FROM specula_slot_losses AS l
+        WHERE l.ctid IN (
+            SELECT e.ctid FROM specula_slot_losses AS e
+            WHERE e.hour < now() - make_interval(days => p_days)
+            ORDER BY e.hour
+            LIMIT 1000
+            FOR UPDATE SKIP LOCKED
+        )
+        RETURNING 1
+    )
+    SELECT count(*)::integer INTO v_n FROM gone;
+    RETURN v_n;
+END
+$function$
 CREATE OR REPLACE FUNCTION public.reset_monitor_runtime(p_monitor_id uuid)
  RETURNS integer
  LANGUAGE plpgsql
@@ -3331,6 +3379,7 @@ AS $function$
             hostname = left(p_hostname, 253),
             capabilities = coalesce(p_capabilities, '{}'),
             instance_id = left(p_instance_id, 64),
+            slot_counters = CASE WHEN a.instance_id IS NOT DISTINCT FROM left(p_instance_id, 64) THEN a.slot_counters END,
             schedule_issued_at = p_schedule_issued_at,
             buffer_depth = p_buffer_depth,
             oldest_unsent_at = p_oldest_unsent_at,
@@ -3369,6 +3418,43 @@ AS $function$
         RETURNING 1
     )
     SELECT count(*)::integer FROM changed
+$function$
+CREATE OR REPLACE FUNCTION public.specula_record_slot_losses(p_specula_id uuid, p_counters jsonb)
+ RETURNS TABLE(kind text, reason text, delta bigint)
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+#variable_conflict use_column
+DECLARE
+    a specula_agents%ROWTYPE;
+BEGIN
+    -- Called right after specula_hello in the same transaction, which has the row locked and has
+    -- already cleared slot_counters when the instance id changed: what is stored belongs to this process.
+    SELECT * INTO a FROM specula_agents AS s WHERE s.id = p_specula_id AND s.revoked_at IS NULL FOR UPDATE;
+    IF NOT FOUND THEN
+        RETURN;
+    END IF;
+    RETURN QUERY
+    WITH d AS (
+        SELECT m.kind, m.reason,
+               CASE WHEN o.v IS NOT NULL AND c.v >= o.v THEN c.v - o.v ELSE c.v END AS delta
+        FROM (VALUES ('missed', 'busy'), ('missed', 'late'), ('missed', 'scheduleExpired'),
+                     ('dropped', 'bufferSize'), ('dropped', 'bufferAge'), ('dropped', 'rejected'),
+                     ('dropped', 'superseded'), ('dropped', 'tooOld'), ('dropped', 'unreadable')) AS m(kind, reason)
+        CROSS JOIN LATERAL (SELECT coalesce((p_counters ->> m.reason)::bigint, 0) AS v) AS c
+        CROSS JOIN LATERAL (SELECT (a.slot_counters ->> m.reason)::bigint AS v) AS o
+    ), ins AS (
+        INSERT INTO specula_slot_losses AS l (tenant_id, specula_id, hour, kind, reason, count)
+        SELECT a.tenant_id, a.id, date_trunc('hour', now(), 'UTC'), d.kind, d.reason, d.delta FROM d WHERE d.delta > 0
+        ON CONFLICT (tenant_id, specula_id, hour, kind, reason)
+        DO UPDATE SET count = l.count + excluded.count, updated_at = now()
+        RETURNING 1
+    ), upd AS (
+        UPDATE specula_agents AS s SET slot_counters = p_counters WHERE s.id = a.id RETURNING 1
+    )
+    SELECT d.kind, d.reason, d.delta FROM d WHERE d.delta > 0;
+END
 $function$
 CREATE OR REPLACE FUNCTION public.specula_revoke(p_id uuid)
  RETURNS boolean

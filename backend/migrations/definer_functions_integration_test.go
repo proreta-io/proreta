@@ -105,12 +105,14 @@ var definerCalls = map[string]string{
 	"status_page_domains_export":            `SELECT * FROM status_page_domains_export(false)`,
 	"auth_domain_lookup":                    `SELECT * FROM auth_domain_lookup('example.com')`,
 	// Specula: the in-function refusal without a tenant, an unknown token.
-	"specula_create":           `SELECT specula_create(gen_random_uuid(), 'x', '\x00', true, NULL, gen_random_uuid())`,
-	"specula_revoke":           `SELECT specula_revoke(gen_random_uuid())`,
-	"specula_authenticate":     `SELECT * FROM specula_authenticate('\x00')`,
-	"specula_hello":            `SELECT * FROM specula_hello(gen_random_uuid(), 'v', 'h', NULL::text[], 'i', NULL::timestamptz, 0, NULL::timestamptz, false, 0::bigint)`,
-	"monitor_set_location":     `SELECT monitor_set_location(gen_random_uuid(), gen_random_uuid())`,
-	"specula_mark_unreachable": `SELECT specula_mark_unreachable()`,
+	"specula_create":             `SELECT specula_create(gen_random_uuid(), 'x', '\x00', true, NULL, gen_random_uuid())`,
+	"specula_revoke":             `SELECT specula_revoke(gen_random_uuid())`,
+	"specula_authenticate":       `SELECT * FROM specula_authenticate('\x00')`,
+	"specula_hello":              `SELECT * FROM specula_hello(gen_random_uuid(), 'v', 'h', NULL::text[], 'i', NULL::timestamptz, 0, NULL::timestamptz, false, 0::bigint)`,
+	"monitor_set_location":       `SELECT monitor_set_location(gen_random_uuid(), gen_random_uuid())`,
+	"specula_mark_unreachable":   `SELECT specula_mark_unreachable()`,
+	"specula_record_slot_losses": `SELECT * FROM specula_record_slot_losses(gen_random_uuid(), '{}')`,
+	"purge_specula_slot_losses":  `SELECT purge_specula_slot_losses(90)`,
 	// Schedule mode: the schedule of an unknown Specula is empty, the hour mark of an open hour is
 	// ignored, the epoch functions find no monitor, the triggers are not callable.
 	"specula_schedule":                  `SELECT * FROM specula_schedule(gen_random_uuid(), gen_random_uuid())`,

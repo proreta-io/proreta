@@ -20,6 +20,15 @@ var schedule1Fields = map[string][]string{
 	"ReportsResponse":  {"scheduleVersion", "outcomes"},
 }
 
+// schedule2Added is what schedule/2 adds on top of schedule/1: a new field of an existing shape, or
+// a new shape. Its fields are frozen from now on in the same way (a schedule/3 is the next step).
+var schedule2Added = map[string][]string{
+	"HelloRequest":    {"slotCounters"},
+	"SlotCounters":    {"missed", "dropped"},
+	"MissedCounters":  {"busy", "late", "scheduleExpired"},
+	"DroppedCounters": {"bufferSize", "bufferAge", "rejected", "superseded", "tooOld", "unreadable"},
+}
+
 // A schedule/1 request or response never gains a field: both sides reject unknown fields (an older
 // gateway answers 400, and a 400 on /reports is retried for ever), so the new field needs a new
 // capability (schedule/2) and the gateway is upgraded first.
@@ -30,16 +39,26 @@ func TestSchedule1FieldsAreFrozen(t *testing.T) {
 		"Schedule": reflect.TypeFor[Schedule](), "Report": reflect.TypeFor[Report](),
 		"ReportsRequest": reflect.TypeFor[ReportsRequest](), "ReportOutcome": reflect.TypeFor[ReportOutcome](),
 		"ReportsResponse": reflect.TypeFor[ReportsResponse](),
+		"SlotCounters":    reflect.TypeFor[SlotCounters](), "MissedCounters": reflect.TypeFor[MissedCounters](),
+		"DroppedCounters": reflect.TypeFor[DroppedCounters](),
 	}
 	for name, typ := range types {
 		var got []string
 		for f := range typ.Fields() {
 			got = append(got, strings.Split(f.Tag.Get("json"), ",")[0])
 		}
-		if !slices.Equal(got, schedule1Fields[name]) {
+		want := append(slices.Clone(schedule1Fields[name]), schedule2Added[name]...)
+		if !slices.Equal(got, want) {
 			t.Errorf("%s fields are %v, recorded %v.\nA schedule/1 request or response never gains, loses or renames a field: an older peer rejects it "+
 				"(a 400 on /reports is retried for ever). A change needs a new capability (schedule/2), the gateway upgraded first; "+
-				"then record the new set here and in docs/runbooks/specula.md.", name, got, schedule1Fields[name])
+				"then record the new set here and in docs/runbooks/specula.md.", name, got, want)
 		}
+	}
+}
+
+// The capability and mode names are part of the same contract.
+func TestScheduleNames(t *testing.T) {
+	if CapSchedule != "schedule/1" || CapSchedule2 != "schedule/2" || ModeSchedule != "schedule/1" || ModeSchedule2 != "schedule/2" {
+		t.Error("capability and mode names are frozen; a new capability is a new name")
 	}
 }

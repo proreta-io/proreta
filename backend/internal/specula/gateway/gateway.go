@@ -219,6 +219,17 @@ func (g *Handler) hello(w http.ResponseWriter, r *http.Request) {
 		BufferDepth: in.BufferDepth, BufferDegraded: in.BufferDegraded != nil && *in.BufferDegraded,
 		ClockOffsetMs: in.ClockOffsetMs,
 	}
+	if sc := in.SlotCounters; sc != nil {
+		if !slices.Contains(caps, wire.CapSchedule2) {
+			problem(w, r, http.StatusBadRequest, "bad-request", "slotCounters needs the schedule/2 capability")
+			return
+		}
+		if !sc.Valid() {
+			problem(w, r, http.StatusBadRequest, "bad-request", "slotCounters values must be between 0 and 1e15")
+			return
+		}
+		hello.SlotCounters = sc.Values()
+	}
 	if hello.BufferDepth != nil && *hello.BufferDepth < 0 {
 		problem(w, r, http.StatusBadRequest, "bad-request", "bufferDepth must not be negative")
 		return
@@ -227,7 +238,7 @@ func (g *Handler) hello(w http.ResponseWriter, r *http.Request) {
 		problem(w, r, http.StatusBadRequest, "bad-request", "clockOffsetMs is out of range")
 		return
 	}
-	duplicate, err := specula.Hello(r.Context(), g.d.Pool, id.SpeculaID, hello)
+	duplicate, losses, err := specula.Hello(r.Context(), g.d.Pool, id.SpeculaID, hello)
 	if err != nil {
 		if errors.Is(err, specula.ErrUnauthorized) {
 			g.unauthorized(w, r)
@@ -239,6 +250,9 @@ func (g *Handler) hello(w http.ResponseWriter, r *http.Request) {
 	if duplicate {
 		g.metrics.duplicateInstance.Inc()
 	}
+	for _, l := range losses {
+		g.metrics.slotLosses.WithLabelValues(l.Kind, l.Reason).Add(float64(l.Count))
+	}
 	// The mode of the location is what this hello announced; an executor that announces nothing
 	// stays in pull mode.
 	mode := wire.ModePull
@@ -246,6 +260,9 @@ func (g *Handler) hello(w http.ResponseWriter, r *http.Request) {
 		mode = wire.ModeSchedule
 	}
 	resp := wire.HelloResponse{ServerTime: g.d.Clock.Now().UTC(), Modes: []string{mode}}
+	if mode == wire.ModeSchedule && slices.Contains(caps, wire.CapSchedule2) {
+		resp.Modes = append(resp.Modes, wire.ModeSchedule2)
+	}
 	if mode == wire.ModeSchedule {
 		// No version when the schedule is over the cap or cannot be built: the executor then
 		// finds out at its next schedule fetch.
