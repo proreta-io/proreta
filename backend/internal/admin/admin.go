@@ -80,6 +80,8 @@ var (
 	ErrSystemAdmin = errors.New("admin: the system admin changes its own password")
 	// ErrSystemAdminRevoke means the system admin's platform-admin flag cannot be revoked.
 	ErrSystemAdminRevoke = errors.New("admin: the system admin cannot be revoked")
+	// ErrPlatformAdmin means a platform admin cannot be deleted; the flag is revoked first.
+	ErrPlatformAdmin = errors.New("admin: a platform admin cannot be deleted")
 	// ErrLastPlatformAdmin means the revocation would leave no active platform admin.
 	ErrLastPlatformAdmin = errors.New("admin: the last platform admin cannot be revoked")
 	// ErrTenantDeleted means the tenant is deleted and cannot be changed any more.
@@ -526,6 +528,8 @@ func mapError(op string, err error) error {
 			return &validation.Error{Fields: []validation.FieldError{{Field: "rollupMonths", Message: "must be between 4 and 60 months"}}}
 		case "PRA18":
 			return &validation.Error{Fields: []validation.FieldError{{Field: "reason", Message: "is required, at most 500 characters"}}}
+		case "PRA36":
+			return ErrPlatformAdmin
 		case "PRA35":
 			return auth.ErrLastOwner
 		case "PRA30":

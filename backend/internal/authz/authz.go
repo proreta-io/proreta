@@ -427,6 +427,7 @@ var operations = map[string]Permission{
 	"admingetuser":                         PlatformAdmin,
 	"admindisableuser":                     PlatformAdmin,
 	"adminenableuser":                      PlatformAdmin,
+	"admindeleteuser":                      PlatformAdmin,
 	"adminrevokeusersessions":              PlatformAdmin,
 	"adminsetplatformadmin":                PlatformAdmin,
 	"admingetemailsettings":                PlatformAdmin,

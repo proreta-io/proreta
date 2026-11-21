@@ -469,6 +469,10 @@ func normalizeEmail(raw string) (string, string) {
 	if !strings.Contains(domain, ".") || strings.HasPrefix(domain, ".") || strings.HasSuffix(domain, ".") || strings.Contains(domain, "..") {
 		return "", "must have a domain such as example.com after the @"
 	}
+	// The placeholder address of a deleted account (admin_delete_user) must never belong to a person.
+	if domain == "deleted.invalid" {
+		return "", "this address cannot be used"
+	}
 	return s, ""
 }
 

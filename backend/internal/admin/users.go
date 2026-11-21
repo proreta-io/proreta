@@ -16,6 +16,7 @@ import (
 const (
 	ActionUserDisabled        = "admin.user.disabled"
 	ActionUserEnabled         = "admin.user.enabled"
+	ActionUserDeleted         = "admin.user.deleted"
 	ActionUserSessionsRevoked = "admin.user.sessions_revoked"
 )
 
@@ -23,6 +24,7 @@ const (
 const (
 	UserActive   = "active"
 	UserDisabled = "disabled"
+	UserDeleted  = "deleted"
 )
 
 // Account is a user across organizations as the admin sees it.
@@ -69,12 +71,12 @@ func (a *Account) dest() []any {
 }
 
 // ListAccounts returns a page of all users, newest first. Query matches the email or the display
-// name; status (empty for any) keeps only active or disabled users.
+// name; status keeps only active, disabled or deleted users, and empty leaves out deleted ones.
 func (s *Service) ListAccounts(ctx context.Context, actor Actor, page Page, status string) (AccountList, error) {
 	page = page.normalized()
-	if status != "" && status != UserActive && status != UserDisabled {
+	if status != "" && status != UserActive && status != UserDisabled && status != UserDeleted {
 		var verr validation.Error
-		verr.Add("status", "must be active or disabled")
+		verr.Add("status", "must be active, disabled or deleted")
 		return AccountList{}, verr.Err()
 	}
 	list := AccountList{Items: []Account{}}
@@ -185,4 +187,24 @@ func (s *Service) RevokeAccountSessions(ctx context.Context, actor Actor, id uui
 		s.recorded(ctx, ActionUserSessionsRevoked, "target_user_id", id, "sessions_revoked", n)
 	}
 	return n, nil
+}
+
+// DeleteAccount erases a user and keeps the row as a tombstone (see admin_delete_user). The
+// system admin, another platform admin and the only active owner of an organization are refused
+// (ErrSystemAdmin, ErrPlatformAdmin, auth.ErrLastOwner). Deleting a deleted user changes nothing
+// and writes no audit row.
+func (s *Service) DeleteAccount(ctx context.Context, actor Actor, id uuid.UUID) error {
+	var changed bool
+	var sessions, members, identities int
+	err := db.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT changed, sessions_revoked, memberships_removed, identities_removed FROM admin_delete_user($1, $2, $3, $4)`,
+			actor.UserID, id, uuidv7.New(), actor.ip()).Scan(&changed, &sessions, &members, &identities)
+	})
+	if err != nil {
+		return mapError("delete user", err)
+	}
+	if changed {
+		s.recorded(ctx, ActionUserDeleted, "target_user_id", id, "sessions_revoked", sessions, "memberships_removed", members, "identities_removed", identities)
+	}
+	return nil
 }

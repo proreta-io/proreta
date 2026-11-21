@@ -93,6 +93,7 @@ Operations marked `public` need no session. Operations marked `platform admin` a
 | `AdminDisableStatusPageDomain` | `POST /api/v1/admin/status-page-domains/{domainId}/disable` | `platform admin` |
 | `AdminEnableStatusPageDomain` | `POST /api/v1/admin/status-page-domains/{domainId}/enable` | `platform admin` |
 | `AdminListAllUsers` | `GET /api/v1/admin/users` | `platform admin` |
+| `AdminDeleteUser` | `DELETE /api/v1/admin/users/{userId}` | `platform admin` |
 | `AdminGetUser` | `GET /api/v1/admin/users/{userId}` | `platform admin` |
 | `AdminDisableUser` | `POST /api/v1/admin/users/{userId}/disable` | `platform admin` |
 | `AdminEnableUser` | `POST /api/v1/admin/users/{userId}/enable` | `platform admin` |

@@ -51,7 +51,7 @@ func TestPageNormalized(t *testing.T) {
 func TestMapError(t *testing.T) {
 	for code, want := range map[string]error{
 		"PRA01": ErrForbidden, "PRA02": ErrNotFound, "PRA05": ErrProtectedTenant,
-		"PRA06": ErrOwnTenant, "PRA07": ErrSystemAdmin, "PRA08": ErrTenantDeleted, "PRA14": ErrLastPlatformAdmin,
+		"PRA06": ErrOwnTenant, "PRA07": ErrSystemAdmin, "PRA08": ErrTenantDeleted, "PRA14": ErrLastPlatformAdmin, "PRA36": ErrPlatformAdmin,
 	} {
 		if got := mapError("op", &pgconn.PgError{Code: code}); !errors.Is(got, want) {
 			t.Errorf("%s: %v, want %v", code, got, want)
