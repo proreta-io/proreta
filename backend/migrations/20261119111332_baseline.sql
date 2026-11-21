@@ -2406,8 +2406,12 @@ CREATE TABLE invitations (
     accepted_by uuid,
     revoked_at timestamptz,
     project_id uuid,
+    -- SHA-256 of the normalised address the link is bound to; NULL means anyone with the link can use it
+    email_hash bytea,
     CONSTRAINT invitations_accepted_pair CHECK (((accepted_at IS NULL) = (accepted_by IS NULL))),
+    CONSTRAINT invitations_email_hash_check CHECK (((email_hash IS NULL) OR (length(email_hash) = 32))),
     CONSTRAINT invitations_expiry CHECK ((expires_at > created_at)),
+    CONSTRAINT invitations_expiry_max CHECK ((expires_at <= (created_at + '30 days'::interval))),
     CONSTRAINT invitations_label_check CHECK ((length(label) <= 80)),
     CONSTRAINT invitations_role_check CHECK ((role = ANY (ARRAY['owner'::text, 'maintainer'::text, 'member'::text, 'viewer'::text]))),
     CONSTRAINT invitations_single_outcome CHECK (((accepted_at IS NULL) OR (revoked_at IS NULL))),
@@ -2486,11 +2490,11 @@ REVOKE ALL ON FUNCTION auth_domain_lookup(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION auth_domain_lookup(text) TO proreta_api;
 
 -- +goose StatementBegin
-CREATE FUNCTION auth_invitation_lookup(p_token_hash bytea) RETURNS TABLE(invitation_id uuid, tenant_id uuid, tenant_name text, role text, expires_at timestamp with time zone, project_id uuid, project_name text)
+CREATE FUNCTION auth_invitation_lookup(p_token_hash bytea) RETURNS TABLE(invitation_id uuid, tenant_id uuid, tenant_name text, role text, expires_at timestamp with time zone, project_id uuid, project_name text, email_bound boolean)
     LANGUAGE sql STABLE SECURITY DEFINER
     SET search_path TO 'public', 'pg_temp'
     AS $$
-    SELECT i.id, i.tenant_id, t.name, i.role, i.expires_at, i.project_id, p.name
+    SELECT i.id, i.tenant_id, t.name, i.role, i.expires_at, i.project_id, p.name, (i.email_hash IS NOT NULL)
     FROM invitations AS i
     JOIN tenants AS t ON t.id = i.tenant_id
     LEFT JOIN projects AS p ON p.tenant_id = i.tenant_id AND p.id = i.project_id
@@ -2693,8 +2697,8 @@ BEGIN
              UNION SELECT i.tenant_id FROM invitations AS i WHERE i.accepted_by = p_user_id LOOP
         PERFORM set_config('app.tenant_id', t::text, true);
         DELETE FROM project_members AS pm WHERE pm.tenant_id = t AND pm.user_id = p_user_id;
-        -- the label of an accepted invitation names a person
-        UPDATE invitations AS i SET label = '' WHERE i.tenant_id = t AND i.accepted_by = p_user_id AND i.label <> '';
+        -- the label and the address hash of an accepted invitation name a person
+        UPDATE invitations AS i SET label = '', email_hash = NULL WHERE i.tenant_id = t AND i.accepted_by = p_user_id AND (i.label <> '' OR i.email_hash IS NOT NULL);
         DELETE FROM memberships AS m WHERE m.tenant_id = t AND m.user_id = p_user_id;
         GET DIAGNOSTICS n = ROW_COUNT;
         v_members := v_members + n;

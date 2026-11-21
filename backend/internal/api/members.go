@@ -208,11 +208,19 @@ func (s *server) CreateInvitation(ctx context.Context, req gen.CreateInvitationR
 	if req.Body.Email != nil {
 		email = *req.Body.Email
 	}
-	inv, token, emailed, err := s.auth.CreateInvitationFor(ctx, a, auth.InvitationInput{Role: string(req.Body.Role), ProjectID: req.Body.ProjectId, Label: label, Email: email, SendEmail: req.Body.SendEmail})
+	inv, token, emailed, err := s.auth.CreateInvitationFor(ctx, a, auth.InvitationInput{Role: string(req.Body.Role), ProjectID: req.Body.ProjectId, Label: label, Email: email, SendEmail: req.Body.SendEmail, BindToEmail: req.Body.BindToEmail != nil && *req.Body.BindToEmail, Expiry: expiryOf(req.Body.ExpiresIn)})
 	if err != nil {
 		return nil, err
 	}
 	return gen.CreateInvitation201JSONResponse{Invitation: toInvitation(inv, true), InviteUrl: s.cfg.PublicURL + "/invite#" + token, EmailQueued: emailed}, nil
+}
+
+// expiryOf is the chosen expiry ("" when none, which means the default).
+func expiryOf(e *gen.InvitationExpiry) string {
+	if e == nil {
+		return ""
+	}
+	return string(*e)
 }
 
 // organizationInvitationRole refuses owner for an invitation into the organization (the shared role
@@ -241,7 +249,7 @@ func (s *server) LookupInvitation(ctx context.Context, req gen.LookupInvitationR
 	if err != nil {
 		return nil, err
 	}
-	return gen.LookupInvitation200JSONResponse{OrganizationName: pv.OrganizationName, ProjectName: pv.ProjectName, Role: gen.InvitationRole(pv.Role), ExpiresAt: pv.ExpiresAt}, nil
+	return gen.LookupInvitation200JSONResponse{OrganizationName: pv.OrganizationName, ProjectName: pv.ProjectName, Role: gen.InvitationRole(pv.Role), ExpiresAt: pv.ExpiresAt, EmailBound: pv.EmailBound}, nil
 }
 
 func (s *server) AcceptInvitation(ctx context.Context, req gen.AcceptInvitationRequestObject) (gen.AcceptInvitationResponseObject, error) {
@@ -328,7 +336,7 @@ func toInvitation(i auth.Invitation, showLogins bool) gen.Invitation {
 	}
 	return gen.Invitation{Id: i.ID, Role: gen.InvitationRole(i.Role), ProjectId: i.ProjectID, ProjectName: i.ProjectName, Label: i.Label, Status: gen.InvitationStatus(i.Status),
 		CreatedAt: i.CreatedAt, ExpiresAt: i.ExpiresAt, CreatedBy: i.CreatedBy, AcceptedBy: i.AcceptedBy,
-		AcceptedAt: i.AcceptedAt, RevokedAt: i.RevokedAt}
+		AcceptedAt: i.AcceptedAt, RevokedAt: i.RevokedAt, EmailBound: i.EmailBound}
 }
 
 // loginFor is the login of a member as a caller may see it: nil unless showLogin.

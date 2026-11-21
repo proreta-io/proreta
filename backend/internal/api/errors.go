@@ -35,49 +35,50 @@ import (
 
 // Problem types (RFC 9457 "type" members).
 const (
-	problemBadRequest         = "urn:proreta:problem:bad-request"
-	problemUnauthenticated    = "urn:proreta:problem:unauthenticated"
-	problemInvalidCredentials = "urn:proreta:problem:invalid-credentials" //nolint:gosec // G101: problem type URN, not a credential
-	problemCSRF               = "urn:proreta:problem:csrf"
-	problemRateLimited        = "urn:proreta:problem:rate-limited"
-	problemNotFound           = "urn:proreta:problem:not-found"
-	problemMethodNotAllowed   = "urn:proreta:problem:method-not-allowed"
-	problemValidation         = "urn:proreta:problem:validation"
-	problemPlanLimitReached   = "urn:proreta:problem:plan-limit-reached"
-	problemNotHeartbeat       = "urn:proreta:problem:not-a-heartbeat"
-	problemEmailTaken         = "urn:proreta:problem:email-taken"
-	problemRegistrationOff    = "urn:proreta:problem:registration-disabled"
-	problemChannelFailed      = "urn:proreta:problem:channel-delivery-failed"
-	problemUnavailable        = "urn:proreta:problem:unavailable"
-	problemForbidden          = "urn:proreta:problem:forbidden"
-	problemAccountSuspended   = "urn:proreta:problem:account-suspended"
-	problemProtectedOrg       = "urn:proreta:problem:protected-organization"
-	problemSystemAdmin        = "urn:proreta:problem:system-admin"
-	problemPlatformAdmin      = "urn:proreta:problem:platform-admin"
-	problemLastPlatformAdmin  = "urn:proreta:problem:last-platform-admin"
-	problemOrgDeleted         = "urn:proreta:problem:organization-deleted"
-	problemInvitationInvalid  = "urn:proreta:problem:invitation-invalid"
-	problemInvitationAccepted = "urn:proreta:problem:invitation-accepted"
-	problemAlreadyMember      = "urn:proreta:problem:already-member"
-	problemLastOwner          = "urn:proreta:problem:last-owner"
-	problemSlugTaken          = "urn:proreta:problem:slug-taken"
-	problemProjectNotEmpty    = "urn:proreta:problem:project-not-empty"
-	problemDefaultProject     = "urn:proreta:problem:default-project"
-	problemPasswordLoginOff   = "urn:proreta:problem:password-login-disabled" //nolint:gosec // G101: problem type URN, not a credential
-	problemLastLoginMethod    = "urn:proreta:problem:last-login-method"
-	problemNoPassword         = "urn:proreta:problem:no-password" //nolint:gosec // G101: problem type URN, not a credential
-	problemDomainNotVerified  = "urn:proreta:problem:domain-not-verified"
-	problemDomainTaken        = "urn:proreta:problem:domain-taken"
-	problemDomainNotAllowed   = "urn:proreta:problem:domain-not-allowed"
-	problemPasswordChange     = "urn:proreta:problem:password-change-required" //nolint:gosec // G101: problem type URN, not a credential
-	problemInternal           = "urn:proreta:problem:internal"
-	problemFeatureUnavailable = "urn:proreta:problem:feature-unavailable"
-	problemEmailConflict      = "urn:proreta:problem:email-settings-conflict"
-	problemSystemPlan         = "urn:proreta:problem:system-plan"
-	problemPlanInUse          = "urn:proreta:problem:plan-in-use"
-	problemDomainForbidden    = "urn:proreta:problem:domain-forbidden"
-	problemDomainUnavailable  = "urn:proreta:problem:domain-unavailable"
-	problemCustomDomainsOff   = "urn:proreta:problem:custom-domains-disabled"
+	problemBadRequest              = "urn:proreta:problem:bad-request"
+	problemUnauthenticated         = "urn:proreta:problem:unauthenticated"
+	problemInvalidCredentials      = "urn:proreta:problem:invalid-credentials" //nolint:gosec // G101: problem type URN, not a credential
+	problemCSRF                    = "urn:proreta:problem:csrf"
+	problemRateLimited             = "urn:proreta:problem:rate-limited"
+	problemNotFound                = "urn:proreta:problem:not-found"
+	problemMethodNotAllowed        = "urn:proreta:problem:method-not-allowed"
+	problemValidation              = "urn:proreta:problem:validation"
+	problemPlanLimitReached        = "urn:proreta:problem:plan-limit-reached"
+	problemNotHeartbeat            = "urn:proreta:problem:not-a-heartbeat"
+	problemEmailTaken              = "urn:proreta:problem:email-taken"
+	problemRegistrationOff         = "urn:proreta:problem:registration-disabled"
+	problemChannelFailed           = "urn:proreta:problem:channel-delivery-failed"
+	problemUnavailable             = "urn:proreta:problem:unavailable"
+	problemForbidden               = "urn:proreta:problem:forbidden"
+	problemAccountSuspended        = "urn:proreta:problem:account-suspended"
+	problemProtectedOrg            = "urn:proreta:problem:protected-organization"
+	problemSystemAdmin             = "urn:proreta:problem:system-admin"
+	problemPlatformAdmin           = "urn:proreta:problem:platform-admin"
+	problemLastPlatformAdmin       = "urn:proreta:problem:last-platform-admin"
+	problemOrgDeleted              = "urn:proreta:problem:organization-deleted"
+	problemInvitationInvalid       = "urn:proreta:problem:invitation-invalid"
+	problemInvitationAccepted      = "urn:proreta:problem:invitation-accepted"
+	problemAlreadyMember           = "urn:proreta:problem:already-member"
+	problemInvitationEmailMismatch = "urn:proreta:problem:invitation-email-mismatch"
+	problemLastOwner               = "urn:proreta:problem:last-owner"
+	problemSlugTaken               = "urn:proreta:problem:slug-taken"
+	problemProjectNotEmpty         = "urn:proreta:problem:project-not-empty"
+	problemDefaultProject          = "urn:proreta:problem:default-project"
+	problemPasswordLoginOff        = "urn:proreta:problem:password-login-disabled" //nolint:gosec // G101: problem type URN, not a credential
+	problemLastLoginMethod         = "urn:proreta:problem:last-login-method"
+	problemNoPassword              = "urn:proreta:problem:no-password" //nolint:gosec // G101: problem type URN, not a credential
+	problemDomainNotVerified       = "urn:proreta:problem:domain-not-verified"
+	problemDomainTaken             = "urn:proreta:problem:domain-taken"
+	problemDomainNotAllowed        = "urn:proreta:problem:domain-not-allowed"
+	problemPasswordChange          = "urn:proreta:problem:password-change-required" //nolint:gosec // G101: problem type URN, not a credential
+	problemInternal                = "urn:proreta:problem:internal"
+	problemFeatureUnavailable      = "urn:proreta:problem:feature-unavailable"
+	problemEmailConflict           = "urn:proreta:problem:email-settings-conflict"
+	problemSystemPlan              = "urn:proreta:problem:system-plan"
+	problemPlanInUse               = "urn:proreta:problem:plan-in-use"
+	problemDomainForbidden         = "urn:proreta:problem:domain-forbidden"
+	problemDomainUnavailable       = "urn:proreta:problem:domain-unavailable"
+	problemCustomDomainsOff        = "urn:proreta:problem:custom-domains-disabled"
 )
 
 // badRequestError is a request the handler itself rejected (the validator catches most).
@@ -184,6 +185,10 @@ func writeError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 	case errors.Is(err, auth.ErrInvitationAccepted):
 		p.Type, p.Title, p.Status = problemInvitationAccepted, "The invitation was already used", http.StatusConflict
 		p.Detail = "Remove the member instead."
+	case errors.Is(err, auth.ErrInvitationEmailMismatch):
+		// Never says which address was expected.
+		p.Type, p.Title, p.Status = problemInvitationEmailMismatch, "This invitation is for another email address", http.StatusConflict
+		p.Detail = "Use the email address the invitation was sent to, or ask for a new link."
 	case errors.Is(err, auth.ErrAlreadyMember):
 		p.Type, p.Title, p.Status = problemAlreadyMember, "Already a member", http.StatusConflict
 		p.Detail = "You are already a member of this organization, or your account cannot join other organizations."

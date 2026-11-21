@@ -50,14 +50,14 @@ ORDER BY m.created_at, m.user_id
 LIMIT sqlc.narg(max_rows)::int;
 
 -- name: InsertInvitation :exec
-INSERT INTO invitations (id, tenant_id, role, label, token_hash, created_by, created_at, expires_at, project_id)
-VALUES (@id, @tenant_id, @role, @label, @token_hash, @created_by, @created_at, @expires_at, @project_id);
+INSERT INTO invitations (id, tenant_id, role, label, token_hash, created_by, created_at, expires_at, project_id, email_hash)
+VALUES (@id, @tenant_id, @role, @label, @token_hash, @created_by, @created_at, @expires_at, @project_id, @email_hash);
 
 -- name: ListInvitations :many
 -- An invitation of a deleted project is shown as closed (project_deleted). With all_projects false
 -- only the invitations of the listed projects are returned. Reads projects, owned by
 -- internal/projects, read-only.
-SELECT i.id, i.role, i.label, i.created_at, i.expires_at, i.accepted_at, i.revoked_at,
+SELECT i.id, i.role, i.label, i.created_at, i.expires_at, i.accepted_at, i.revoked_at, (i.email_hash IS NOT NULL)::boolean AS email_bound,
        c.email AS created_by_login, a.email AS accepted_by_login,
        i.project_id, p.name AS project_name, (p.deleted_at IS NOT NULL)::boolean AS project_deleted
 FROM invitations AS i
@@ -71,7 +71,7 @@ ORDER BY i.created_at DESC, i.id DESC
 LIMIT 200;
 
 -- name: LockInvitationByHash :one
-SELECT id, role, expires_at, accepted_at, revoked_at, project_id
+SELECT id, role, expires_at, accepted_at, revoked_at, project_id, email_hash
 FROM invitations
 WHERE tenant_id = @tenant_id AND token_hash = @token_hash
 FOR UPDATE;

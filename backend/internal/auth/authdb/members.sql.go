@@ -51,8 +51,8 @@ func (q *Queries) DeleteMembership(ctx context.Context, arg DeleteMembershipPara
 }
 
 const insertInvitation = `-- name: InsertInvitation :exec
-INSERT INTO invitations (id, tenant_id, role, label, token_hash, created_by, created_at, expires_at, project_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+INSERT INTO invitations (id, tenant_id, role, label, token_hash, created_by, created_at, expires_at, project_id, email_hash)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 `
 
 type InsertInvitationParams struct {
@@ -65,6 +65,7 @@ type InsertInvitationParams struct {
 	CreatedAt time.Time
 	ExpiresAt time.Time
 	ProjectID *uuid.UUID
+	EmailHash []byte
 }
 
 func (q *Queries) InsertInvitation(ctx context.Context, arg InsertInvitationParams) error {
@@ -78,12 +79,13 @@ func (q *Queries) InsertInvitation(ctx context.Context, arg InsertInvitationPara
 		arg.CreatedAt,
 		arg.ExpiresAt,
 		arg.ProjectID,
+		arg.EmailHash,
 	)
 	return err
 }
 
 const listInvitations = `-- name: ListInvitations :many
-SELECT i.id, i.role, i.label, i.created_at, i.expires_at, i.accepted_at, i.revoked_at,
+SELECT i.id, i.role, i.label, i.created_at, i.expires_at, i.accepted_at, i.revoked_at, (i.email_hash IS NOT NULL)::boolean AS email_bound,
        c.email AS created_by_login, a.email AS accepted_by_login,
        i.project_id, p.name AS project_name, (p.deleted_at IS NOT NULL)::boolean AS project_deleted
 FROM invitations AS i
@@ -112,6 +114,7 @@ type ListInvitationsRow struct {
 	ExpiresAt       time.Time
 	AcceptedAt      *time.Time
 	RevokedAt       *time.Time
+	EmailBound      bool
 	CreatedByLogin  string
 	AcceptedByLogin *string
 	ProjectID       *uuid.UUID
@@ -144,6 +147,7 @@ func (q *Queries) ListInvitations(ctx context.Context, arg ListInvitationsParams
 			&i.ExpiresAt,
 			&i.AcceptedAt,
 			&i.RevokedAt,
+			&i.EmailBound,
 			&i.CreatedByLogin,
 			&i.AcceptedByLogin,
 			&i.ProjectID,
@@ -331,7 +335,7 @@ func (q *Queries) LockInvitation(ctx context.Context, arg LockInvitationParams) 
 }
 
 const lockInvitationByHash = `-- name: LockInvitationByHash :one
-SELECT id, role, expires_at, accepted_at, revoked_at, project_id
+SELECT id, role, expires_at, accepted_at, revoked_at, project_id, email_hash
 FROM invitations
 WHERE tenant_id = $1 AND token_hash = $2
 FOR UPDATE
@@ -349,6 +353,7 @@ type LockInvitationByHashRow struct {
 	AcceptedAt *time.Time
 	RevokedAt  *time.Time
 	ProjectID  *uuid.UUID
+	EmailHash  []byte
 }
 
 func (q *Queries) LockInvitationByHash(ctx context.Context, arg LockInvitationByHashParams) (LockInvitationByHashRow, error) {
@@ -361,6 +366,7 @@ func (q *Queries) LockInvitationByHash(ctx context.Context, arg LockInvitationBy
 		&i.AcceptedAt,
 		&i.RevokedAt,
 		&i.ProjectID,
+		&i.EmailHash,
 	)
 	return i, err
 }

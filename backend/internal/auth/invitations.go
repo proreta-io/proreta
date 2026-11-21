@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -24,8 +26,20 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/tenants"
 )
 
-// InvitationTTL is how long an invitation link works.
+// InvitationTTL is how long an invitation link works when the creator does not choose.
 const InvitationTTL = 7 * 24 * time.Hour
+
+// invitationExpiries are the lifetimes a creator may choose (InvitationInput.Expiry), with the
+// words the invitation mail uses. Nothing longer: the database allows 30 days at most.
+var invitationExpiries = map[string]struct {
+	ttl  time.Duration
+	text string
+}{
+	"1h":  {time.Hour, "1 hour"},
+	"1d":  {24 * time.Hour, "1 day"},
+	"7d":  {InvitationTTL, "7 days"},
+	"30d": {30 * 24 * time.Hour, "30 days"},
+}
 
 const maxInvitationLabel = 80
 
@@ -48,6 +62,10 @@ var (
 	// ErrAlreadyMember means the user already belongs to the inviting organization, or is the
 	// platform admin, who must stay a member of the default tenant only.
 	ErrAlreadyMember = errors.New("auth: already a member")
+	// ErrInvitationEmailMismatch means the invitation is bound to an address and the address
+	// offered (typed, provider-verified or the account's own) is another one. The error does not
+	// say which address was expected.
+	ErrInvitationEmailMismatch = errors.New("auth: invitation is bound to another email address")
 )
 
 // Invitation is an invitation as maintainers see it; the token is never part of it. For a
@@ -61,10 +79,12 @@ type Invitation struct {
 	Status      string
 	CreatedAt   time.Time
 	ExpiresAt   time.Time
-	CreatedBy   string
-	AcceptedBy  *string
-	AcceptedAt  *time.Time
-	RevokedAt   *time.Time
+	// EmailBound is true when only one address can use the link. The address is never kept, only its hash.
+	EmailBound bool
+	CreatedBy  string
+	AcceptedBy *string
+	AcceptedAt *time.Time
+	RevokedAt  *time.Time
 }
 
 // InvitationPreview is what the link page shows before accepting.
@@ -74,6 +94,7 @@ type InvitationPreview struct {
 	Role        string
 	ProjectName *string
 	ExpiresAt   time.Time
+	EmailBound  bool
 }
 
 // invitationState is invitationStatus for a listed invitation: one into a project that was deleted
@@ -105,13 +126,51 @@ type InvitationInput struct {
 	// ProjectID makes it a project invitation: Role is then the role in that project and the
 	// person gets no organization role.
 	ProjectID *uuid.UUID
-	// Email, when set, is the address the link is also sent to. It is not stored and the
-	// invitation is not bound to it: the link stays a bearer secret that anyone holding it can
-	// use. Needs a tested mail server (a validation error on email otherwise).
+	// Email, when set, is the address the link is sent to (see SendEmail) and the address it is
+	// bound to (see BindToEmail). It is never stored. Sending needs a tested mail server (a
+	// validation error on email otherwise).
 	Email string
 	// SendEmail says whether to send it. Nil means "yes when Email is set", as before the
-	// option existed; false ignores Email; true needs an Email.
+	// option existed, except that nothing is sent when BindToEmail is set; false ignores the
+	// mailing; true needs an Email.
 	SendEmail *bool
+	// BindToEmail makes the link usable only by the owner of Email (a validation error on
+	// bindToEmail without an Email). Independent of sending it.
+	BindToEmail bool
+	// Expiry is one of "1h", "1d", "7d" and "30d"; empty means "7d".
+	Expiry string
+}
+
+// invitationPlan is a validated InvitationInput.
+type invitationPlan struct {
+	label string
+	// to is the normalised address to mail the link to, "" when nothing is sent.
+	to string
+	// emailHash is the hash of the address the link is bound to, nil when it is not bound.
+	emailHash []byte
+	ttl       time.Duration
+	// ttlText is the lifetime in words, for the mail.
+	ttlText string
+}
+
+// hashEmail is the stored form of an address an invitation is bound to: the SHA-256 of the
+// normalised address (normalizeEmail), so no address is kept.
+func hashEmail(normalised string) []byte {
+	sum := sha256.Sum256([]byte(normalised))
+	return sum[:]
+}
+
+// checkInvitationEmail is nil for an invitation that is not bound (bound is nil) and for an
+// address that matches the bound one, otherwise ErrInvitationEmailMismatch.
+func checkInvitationEmail(bound []byte, addr string) error {
+	if bound == nil {
+		return nil
+	}
+	norm, msg := normalizeEmail(addr)
+	if msg != "" || subtle.ConstantTimeCompare(bound, hashEmail(norm)) != 1 {
+		return ErrInvitationEmailMismatch
+	}
+	return nil
 }
 
 // Limits on invitation emails, per organization and per api replica: a maintainer must not be able
@@ -139,12 +198,13 @@ func (s *Service) CreateInvitation(ctx context.Context, a Actor, role, label str
 // so the maintainer can hand the link over as before. When the label is empty and the address is
 // short enough, the address becomes the label, so the invitations list says who was invited.
 func (s *Service) CreateInvitationFor(ctx context.Context, a Actor, in InvitationInput) (inv Invitation, token string, emailed bool, err error) {
-	label, to, err := s.validateInvitation(ctx, in)
+	p, err := s.validateInvitation(ctx, in)
 	if err != nil {
 		return Invitation{}, "", false, err
 	}
-	if to != "" && label == "" && utf8.RuneCountInString(to) <= maxInvitationLabel {
-		label = to
+	to := p.to
+	if to != "" && p.label == "" && utf8.RuneCountInString(to) <= maxInvitationLabel {
+		p.label = to
 	}
 	if token, err = newToken(); err != nil {
 		return Invitation{}, "", false, err
@@ -155,9 +215,9 @@ func (s *Service) CreateInvitationFor(ctx context.Context, a Actor, in Invitatio
 		}
 	}
 	now := s.clock.Now()
-	inv = Invitation{ID: uuidv7.New(), Role: in.Role, ProjectID: in.ProjectID, Label: label, Status: InvitationOpen, CreatedAt: now, ExpiresAt: now.Add(InvitationTTL)}
+	inv = Invitation{ID: uuidv7.New(), Role: in.Role, ProjectID: in.ProjectID, Label: p.label, Status: InvitationOpen, CreatedAt: now, ExpiresAt: now.Add(p.ttl), EmailBound: p.emailHash != nil}
 	err = db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
-		return s.insertInvitation(ctx, tx, a, in, &inv, token, to)
+		return s.insertInvitation(ctx, tx, a, in, &inv, token, p)
 	})
 	if err != nil {
 		if to != "" {
@@ -173,42 +233,70 @@ func (s *Service) CreateInvitationFor(ctx context.Context, a Actor, in Invitatio
 	return inv, token, to != "", nil
 }
 
-// validateInvitation checks the input and returns the trimmed label and the normalised address to
-// mail the link to ("" when no mail is sent). All field problems are reported together, in the
-// order label, email, role.
-func (s *Service) validateInvitation(ctx context.Context, in InvitationInput) (label, to string, err error) {
-	label = strings.TrimSpace(in.Label)
+// validateInvitation checks the input and returns it as an invitationPlan. All field problems are
+// reported together, in the order label, expiresIn, email, bindToEmail, role.
+func (s *Service) validateInvitation(ctx context.Context, in InvitationInput) (invitationPlan, error) {
+	p := invitationPlan{label: strings.TrimSpace(in.Label)}
+	label := p.label
 	var verr validation.Error
 	if utf8.RuneCountInString(label) > maxInvitationLabel {
 		verr.Add("label", fmt.Sprintf("must be at most %d characters", maxInvitationLabel))
 	}
-	sendMail := strings.TrimSpace(in.Email) != ""
+	expiry := in.Expiry
+	if expiry == "" {
+		expiry = "7d"
+	}
+	if c, ok := invitationExpiries[expiry]; ok {
+		p.ttl, p.ttlText = c.ttl, c.text
+	} else {
+		verr.Add("expiresIn", `must be "1h", "1d", "7d" or "30d"`)
+	}
+	haveEmail := strings.TrimSpace(in.Email) != ""
+	// Binding without an explicit sendEmail sends nothing, so an installation without mail can bind.
+	sendMail := haveEmail && !in.BindToEmail
 	if in.SendEmail != nil {
 		sendMail = *in.SendEmail
+	}
+	addr, addrMsg := "", ""
+	if haveEmail {
+		addr, addrMsg = normalizeEmail(in.Email)
 	}
 	if sendMail {
 		if !s.mail.Features(ctx).Enabled {
 			verr.Add("email", invitationMailDisabledMessage)
-		} else if strings.TrimSpace(in.Email) == "" {
+		} else if !haveEmail {
 			verr.Add("email", "is required to send the invitation by email")
-		} else if addr, msg := normalizeEmail(in.Email); msg != "" {
-			verr.Add("email", msg)
+		} else if addrMsg != "" {
+			verr.Add("email", addrMsg)
 		} else {
-			to = addr
+			p.to = addr
+		}
+	}
+	if in.BindToEmail {
+		switch {
+		case !haveEmail:
+			verr.Add("bindToEmail", "needs an email: the address the link is for")
+		case addrMsg != "":
+			if !sendMail {
+				verr.Add("email", addrMsg)
+			}
+		default:
+			p.emailHash = hashEmail(addr)
 		}
 	}
 	if in.ProjectID != nil && !authz.Valid(authz.Role(in.Role)) {
 		verr.Add("role", `must be "owner", "maintainer", "member" or "viewer"`)
 	}
 	if err := verr.Err(); err != nil {
-		return "", "", err
+		return invitationPlan{}, err
 	}
-	return label, to, nil
+	p.label = label
+	return p, nil
 }
 
 // insertInvitation runs inside the tenant transaction: permissions, then the member quota, then the
 // row, the optional mail and the audit entry. It fills inv.CreatedBy and inv.ProjectName.
-func (s *Service) insertInvitation(ctx context.Context, tx pgx.Tx, a Actor, in InvitationInput, inv *Invitation, token, to string) error {
+func (s *Service) insertInvitation(ctx context.Context, tx pgx.Tx, a Actor, in InvitationInput, inv *Invitation, token string, p invitationPlan) error {
 	q := authdb.New(tx)
 	projectName, err := checkInvitePermission(ctx, tx, q, a, in, inv)
 	if err != nil {
@@ -225,18 +313,18 @@ func (s *Service) insertInvitation(ctx context.Context, tx pgx.Tx, a Actor, in I
 	inv.CreatedBy = u.Email
 	if err := q.InsertInvitation(ctx, authdb.InsertInvitationParams{
 		ID: inv.ID, TenantID: a.TenantID, Role: inv.Role, Label: inv.Label, TokenHash: hashToken(token),
-		CreatedBy: a.UserID, CreatedAt: inv.CreatedAt, ExpiresAt: inv.ExpiresAt, ProjectID: in.ProjectID,
+		CreatedBy: a.UserID, CreatedAt: inv.CreatedAt, ExpiresAt: inv.ExpiresAt, ProjectID: in.ProjectID, EmailHash: p.emailHash,
 	}); err != nil {
 		return fmt.Errorf("insert invitation: %w", err)
 	}
-	if to != "" {
-		if err := s.queueInvitationMail(ctx, tx, a, in, *inv, token, to, projectName, u.DisplayName); err != nil {
+	if p.to != "" {
+		if err := s.queueInvitationMail(ctx, tx, a, in, *inv, token, p, projectName, u.DisplayName); err != nil {
 			return err
 		}
 	}
 	return audit.Record(ctx, tx, audit.Entry{
 		TenantID: a.TenantID, ActorUserID: &a.UserID, Action: a.action(ActionMemberInvited),
-		EntityType: "invitation", EntityID: inv.ID.String(), IP: a.IP, Metadata: invitationAuditMeta(a, in, *inv, to != ""),
+		EntityType: "invitation", EntityID: inv.ID.String(), IP: a.IP, Metadata: invitationAuditMeta(a, in, *inv, p.to != ""),
 	})
 }
 
@@ -271,18 +359,18 @@ func checkInvitePermission(ctx context.Context, tx pgx.Tx, q *authdb.Queries, a 
 }
 
 // queueInvitationMail queues the link mail in the invitation's transaction.
-func (s *Service) queueInvitationMail(ctx context.Context, tx pgx.Tx, a Actor, in InvitationInput, inv Invitation, token, to, projectName, inviter string) error {
+func (s *Service) queueInvitationMail(ctx context.Context, tx pgx.Tx, a Actor, in InvitationInput, inv Invitation, token string, p invitationPlan, projectName, inviter string) error {
 	t, err := tenants.Get(ctx, tx, a.TenantID)
 	if err != nil {
 		return err
 	}
 	// Only this organization's name and the inviter's display name go into the message:
 	// the inviter's login is an address and is not shared with the invitee.
-	params := map[string]string{"token": token, "org": t.Name, "role": inv.Role, "inviter": inviter, "expires": "7 days"}
+	params := map[string]string{"token": token, "org": t.Name, "role": inv.Role, "inviter": inviter, "expires": p.ttlText}
 	if in.ProjectID != nil {
 		params["project"] = projectName
 	}
-	return s.mail.Enqueue(ctx, tx, mail.Request{Kind: mail.KindInvitation, To: to, ExpiresAt: inv.ExpiresAt, Params: params})
+	return s.mail.Enqueue(ctx, tx, mail.Request{Kind: mail.KindInvitation, To: p.to, ExpiresAt: inv.ExpiresAt, Params: params})
 }
 
 // invitationAuditMeta is the metadata of the audit entry: the platform admin's entry always says
@@ -293,6 +381,9 @@ func invitationAuditMeta(a Actor, in InvitationInput, inv Invitation, emailed bo
 		if in.ProjectID != nil {
 			meta["projectId"] = in.ProjectID.String()
 		}
+		if inv.EmailBound {
+			meta["emailBound"] = true
+		}
 		return meta
 	}
 	meta := map[string]any{"role": inv.Role, "expiresAt": inv.ExpiresAt.UTC().Format(time.RFC3339)}
@@ -301,6 +392,9 @@ func invitationAuditMeta(a Actor, in InvitationInput, inv Invitation, emailed bo
 	}
 	if emailed {
 		meta["emailed"] = true
+	}
+	if inv.EmailBound {
+		meta["emailBound"] = true
 	}
 	return meta
 }
@@ -354,7 +448,7 @@ func (s *Service) ListInvitationsIn(ctx context.Context, tenantID uuid.UUID, sco
 		out = make([]Invitation, len(rows))
 		for i, r := range rows {
 			out[i] = Invitation{ID: r.ID, Role: r.Role, Label: r.Label, CreatedAt: r.CreatedAt, ExpiresAt: r.ExpiresAt,
-				CreatedBy: r.CreatedByLogin, AcceptedBy: r.AcceptedByLogin, AcceptedAt: r.AcceptedAt, RevokedAt: r.RevokedAt,
+				EmailBound: r.EmailBound, CreatedBy: r.CreatedByLogin, AcceptedBy: r.AcceptedByLogin, AcceptedAt: r.AcceptedAt, RevokedAt: r.RevokedAt,
 				ProjectID: r.ProjectID, ProjectName: r.ProjectName,
 				Status: invitationState(now, r.ExpiresAt, r.AcceptedAt, r.RevokedAt, r.ProjectDeleted)}
 		}
@@ -486,8 +580,8 @@ func (s *Service) lookupInvitation(ctx context.Context, token string) (invitatio
 func (s *Service) lookupInvitationHash(ctx context.Context, tokenHash []byte) (invitationTarget, error) {
 	var t invitationTarget
 	err := db.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT invitation_id, tenant_id, tenant_name, role, expires_at, project_id, project_name FROM auth_invitation_lookup($1)`,
-			tokenHash).Scan(&t.invitationID, &t.tenantID, &t.preview.OrganizationName, &t.preview.Role, &t.preview.ExpiresAt, &t.projectID, &t.preview.ProjectName)
+		return tx.QueryRow(ctx, `SELECT invitation_id, tenant_id, tenant_name, role, expires_at, project_id, project_name, email_bound FROM auth_invitation_lookup($1)`,
+			tokenHash).Scan(&t.invitationID, &t.tenantID, &t.preview.OrganizationName, &t.preview.Role, &t.preview.ExpiresAt, &t.projectID, &t.preview.ProjectName, &t.preview.EmailBound)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return invitationTarget{}, ErrInvitationInvalid
@@ -542,7 +636,11 @@ func (s *Service) CheckInvitation(ctx context.Context, token string, ip netip.Ad
 // already has an organization role (ErrAlreadyMember); a person who belongs through projects only gets it. A project invitation gives no organization role: a new
 // person joins with none, a person who already belongs keeps what they have, and either gets the
 // invited role in the project unless they hold an equal or higher one there.
-func (s *Service) joinInvited(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID, tokenHash []byte, ip netip.Addr) (string, error) {
+//
+// addr is the address the person proves or claims (typed, provider-verified, or the account's
+// own); an invitation bound to another address is ErrInvitationEmailMismatch before anything
+// changes.
+func (s *Service) joinInvited(ctx context.Context, tx pgx.Tx, tenantID, userID uuid.UUID, tokenHash []byte, addr string, ip netip.Addr) (string, error) {
 	if err := plans.Lock(ctx, tx, tenantID); err != nil {
 		if errors.Is(err, tenants.ErrNotFound) {
 			return "", ErrInvitationInvalid
@@ -566,6 +664,9 @@ func (s *Service) joinInvited(ctx context.Context, tx pgx.Tx, tenantID, userID u
 	now := s.clock.Now()
 	if invitationStatus(now, inv.ExpiresAt, inv.AcceptedAt, inv.RevokedAt) != InvitationOpen {
 		return "", ErrInvitationInvalid
+	}
+	if err := checkInvitationEmail(inv.EmailHash, addr); err != nil {
+		return "", err
 	}
 	current, err := q.GetMembershipRole(ctx, authdb.GetMembershipRoleParams{TenantID: tenantID, UserID: userID})
 	member := err == nil
@@ -644,7 +745,7 @@ func (s *Service) AcceptInvitation(ctx context.Context, p Principal, token strin
 			// BootstrapAdmin refuses to start when the admin belongs to another tenant.
 			return ErrAlreadyMember
 		}
-		role, err := s.joinInvited(ctx, tx, t.tenantID, p.UserID, hashToken(token), ip)
+		role, err := s.joinInvited(ctx, tx, t.tenantID, p.UserID, hashToken(token), u.Email, ip)
 		if err != nil {
 			return err
 		}
@@ -665,7 +766,8 @@ func (s *Service) AcceptInvitation(ctx context.Context, p Principal, token strin
 	if err != nil {
 		var limit *plans.LimitError
 		switch {
-		case errors.Is(err, ErrInvitationInvalid):
+		case errors.Is(err, ErrInvitationInvalid), errors.Is(err, ErrInvitationEmailMismatch):
+			// Counted against the per-IP limit: a wrong address is a guess at the invited one.
 			return LoginResult{}, err
 		case errors.Is(err, ErrAlreadyMember), errors.Is(err, ErrUnauthenticated), errors.As(err, &limit):
 			// A real invitation: the attempt does not count as guessing.
