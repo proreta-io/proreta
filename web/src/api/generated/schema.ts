@@ -105,7 +105,9 @@ export interface paths {
      *     the password must be that account's password (checked like a login): the account joins the
      *     organization and is signed in there; a wrong password is 401
      *     `urn:proreta:problem:invalid-credentials` (the same answer as a failed login) and leaves the
-     *     invitation open. Failed attempts count per client IP, per invitation and per login. Every attempt that reaches the password hash
+     *     invitation open. An invitation bound to an address (`emailBound`) accepts only that
+     *     address, otherwise 409 `urn:proreta:problem:invitation-email-mismatch`, also counted as a
+     *     failed attempt. Failed attempts count per client IP, per invitation and per login. Every attempt that reaches the password hash
      *     counts against the per-client-IP limit of the login, and hashing shares the login's
      *     bounded queue (429 with Retry-After). No CSRF token is needed (there is no session yet).
      */
@@ -451,7 +453,7 @@ export interface paths {
      *
      *     Sign-in errors redirect to `/login?error=<code>`, with one of `cancelled`, `failed`,
      *     `state_invalid`, `email_unverified`, `email_unusable`, `not_invited`, `account_exists`,
-     *     `invitation_invalid`, `already_member`, `plan_limit`, `suspended`, `rate_limited`; link
+     *     `invitation_invalid`, `invitation_email_mismatch`, `already_member`, `plan_limit`, `suspended`, `rate_limited`; link
      *     errors add `identity_in_use`, `already_linked` and `session_expired`. Provider error text
      *     is never reflected. Every outcome is audited (`auth.oauth_login_succeeded`, `auth.oauth_login_failed`,
      *     `auth.identity_linked`). Failed callbacks count against the login's per-client-IP limit.
@@ -1292,7 +1294,8 @@ export interface paths {
      *     gets no organization role, and an owner or maintainer of the project may do it (404 when the
      *     caller has no role in the project, 403 when the role does not allow it). An existing member
      *     who accepts only gets the project role, unless they already hold an equal or higher one there.
-     *     It expires after 7 days. The answer carries `inviteUrl` with
+     *     It expires after `expiresIn` (1 hour, 1 day, 7 days by default, or 30 days; never longer).
+     *     The answer carries `inviteUrl` with
      *     the secret token in the URL fragment; it is shown only here (only its SHA-256 is stored)
      *     and must be handed over like a password. With `email` (and `sendEmail` not false) the same
      *     link is also emailed to that address (see below); the link is shown either way. Open invitations count
@@ -1310,11 +1313,21 @@ export interface paths {
      *     transaction as the invitation, so it exists exactly when the invitation does, and is
      *     delivered a moment later by the background jobs process (`emailQueued` only means it was
      *     queued, not that the mailbox accepted it). It names this organization, the project when
-     *     there is one, the role and the inviter's display name, nothing else. The address is not stored and the invitation is
-     *     not bound to it: whoever holds the link can use it, with any email address, exactly as
-     *     without email. When `label` is empty and the address is at most 80 characters, the
-     *     address becomes the label. Limited to 30 invitation emails per organization per hour and
-     *     3 per recipient per day (429 with Retry-After).
+     *     there is one, the role, the inviter's display name and when the link expires, nothing else.
+     *     Mailing the link does not bind it: unless `bindToEmail` is set, whoever holds the link can
+     *     use it, with any email address. When `label` is empty and the address is at most 80
+     *     characters, the address becomes the label. Limited to 30 invitation emails per organization
+     *     per hour and 3 per recipient per day (429 with Retry-After).
+     *
+     *     **Binding.** `bindToEmail: true` makes the link usable only by the owner of `email` (422 on
+     *     `bindToEmail` without an `email`). It works with or without mail, also on an installation
+     *     without a mail server; with `bindToEmail` and no `sendEmail` nothing is mailed, send
+     *     explicitly with `sendEmail: true` to mail and bind. Only a hash of the address is stored,
+     *     never the address. With a sign-in provider the provider-verified email must match (a hard
+     *     control). With a password the typed email must match, which is a soft control: nothing
+     *     proves the person owns the address, and a holder of the link who knows it can still
+     *     register it. A different address is 409 `urn:proreta:problem:invitation-email-mismatch`
+     *     and changes nothing. `emailBound` on the invitation says whether a link is bound.
      */
     post: operations["createInvitation"];
     delete?: never;
@@ -1362,7 +1375,8 @@ export interface paths {
     /**
      * What an invitation link offers
      * @description Public (no session): the organization name, the project name when the invitation is into a
-     *     project, the role and the expiry of an open invitation, for the invitation page. The token travels in the body, never in a URL, so proxies do not log it.
+     *     project, the role, the expiry and whether it is bound to one address (`emailBound`, never
+     *     the address) of an open invitation, for the invitation page. The token travels in the body, never in a URL, so proxies do not log it.
      *     Unknown, expired, used and revoked tokens get the same 404
      *     `urn:proreta:problem:invitation-invalid`. Each 404 counts against a per-client-IP limit
      *     (429 with Retry-After).
@@ -1394,7 +1408,8 @@ export interface paths {
      *     `urn:proreta:problem:already-member` when the user is already a member (organization invitations
      *     only), or when the user is the system admin (who belongs to the default organization only); 409
      *     `urn:proreta:problem:plan-limit-reached` when the organization's member limit was lowered
-     *     below its members. Audited as `member.joined`. Any role.
+     *     below its members; 409 `urn:proreta:problem:invitation-email-mismatch` when the invitation is
+     *     bound to another address than the user's login. Audited as `member.joined`. Any role.
      */
     post: operations["acceptInvitation"];
     delete?: never;
@@ -2408,7 +2423,8 @@ export interface paths {
     put?: never;
     /**
      * Invite someone to an organization
-     * @description For a person without an account. Same rules and the same email option as
+     * @description For a person without an account. Same rules, the same email option and the same `expiresIn`
+     *     and `bindToEmail` as
      *     `POST /api/v1/invitations` (roles `maintainer`, `member`, `viewer`; the link is in the answer
      *     only and is never logged or audited; `email` is sent only when the installation has a tested
      *     mail server and the invitations switch is on). Open invitations count toward the plan's
@@ -4166,6 +4182,8 @@ export interface components {
       createdAt: string;
       /** Format: date-time */
       expiresAt: string;
+      /** @description Only one email address can use the link (set at creation with `bindToEmail`); the address is never shown */
+      emailBound: boolean;
       /** @description Login of the member who created it; empty for callers without an organization owner or maintainer role */
       createdBy: string;
       /** @description Login of the user who joined with it; always null for callers without an organization owner or maintainer role */
@@ -4178,6 +4196,12 @@ export interface components {
     InvitationList: {
       items: components["schemas"]["Invitation"][];
     };
+    /**
+     * @description How long the link works, from creation (1 hour, 1 day, 7 days, 30 days); nothing longer
+     * @default 7d
+     * @enum {string}
+     */
+    InvitationExpiry: "1h" | "1d" | "7d" | "30d";
     InvitationCreate: {
       role: components["schemas"]["InvitationRole"];
       /**
@@ -4188,15 +4212,24 @@ export interface components {
       /** @description An optional note for yourself, for example the person's name */
       label?: string;
       /**
-       * @description Also email the link to this address (letters a-z, digits and `. _ + - @`, the
-       *     registration rules). Needs `emailEnabled`; not stored, not binding.
+       * @description The address to email the link to (letters a-z, digits and `. _ + - @`, the
+       *     registration rules), and the address the link is bound to with `bindToEmail`. Mailing
+       *     needs `emailEnabled`. The address itself is not stored.
        */
       email?: string;
       /**
-       * @description Whether to email the link to `email`. Omitted: yes when `email` is given. `false`
-       *     ignores `email`; `true` requires it.
+       * @description Whether to email the link to `email`. Omitted: yes when `email` is given, except that
+       *     with `bindToEmail` nothing is sent unless this is `true`. `false` ignores the mailing;
+       *     `true` requires `email` and a mail server.
        */
       sendEmail?: boolean;
+      /**
+       * @description Only the owner of `email` can use the link; needs `email` (422 otherwise). Independent
+       *     of sending it. A hash of the address is stored, never the address.
+       * @default false
+       */
+      bindToEmail?: boolean;
+      expiresIn?: components["schemas"]["InvitationExpiry"];
     };
     InvitationCreated: {
       invitation: components["schemas"]["Invitation"];
@@ -4232,6 +4265,8 @@ export interface components {
       role: components["schemas"]["InvitationRole"];
       /** Format: date-time */
       expiresAt: string;
+      /** @description The link is for one email address only; the address is not shown */
+      emailBound: boolean;
     };
     /**
      * @description A direct role in one project; the same four roles as in the organization
@@ -4660,6 +4695,7 @@ export interface components {
      *     | `urn:proreta:problem:method-not-allowed` | 405 | The path exists, the method does not |
      *     | `urn:proreta:problem:not-a-heartbeat` | 409 | The operation exists only for heartbeat monitors |
      *     | `urn:proreta:problem:email-taken` | 409 | The email is already registered |
+     *     | `urn:proreta:problem:invitation-email-mismatch` | 409 | The invitation is bound to another email address than the one used |
      *     | `urn:proreta:problem:email-settings-conflict` | 409 | The email settings do not allow this now: no server configured, no successful test of the current settings, or a test already pending |
      *     | `urn:proreta:problem:plan-limit-reached` | 409 | The plan allows no more of a resource; carries `limit` and `max` |
      *     | `urn:proreta:problem:system-plan` | 409 | The seeded plan (Internal) cannot be deleted |
@@ -4999,8 +5035,9 @@ export interface operations {
         };
       };
       /**
-       * @description The email is already registered (`urn:proreta:problem:email-taken`), or the invited
-       *     organization has reached its member limit (`urn:proreta:problem:plan-limit-reached`)
+       * @description The email is already registered (`urn:proreta:problem:email-taken`), the invited
+       *     organization has reached its member limit (`urn:proreta:problem:plan-limit-reached`),
+       *     or the invitation is bound to another address (`urn:proreta:problem:invitation-email-mismatch`)
        */
       409: {
         headers: {

@@ -33,6 +33,7 @@ const invitation = (over: Partial<Invitation> = {}): Invitation => ({
   acceptedBy: null,
   acceptedAt: null,
   revokedAt: null,
+  emailBound: false,
   ...over,
 });
 
@@ -325,7 +326,7 @@ describe("members page", () => {
     expect(link).toHaveValue("https://proreta.example.com/invite#SECRET-TOKEN");
     expect(screen.getByText("Copy it now: it is shown only once.")).toBeInTheDocument();
     const sent = requests(fetchMock, "POST", "/api/v1/invitations")[0]!;
-    expect(await sent.clone().json()).toEqual({ role: "maintainer" });
+    expect(await sent.clone().json()).toEqual({ role: "maintainer", expiresIn: "7d" });
     await userEvent.click(screen.getByRole("button", { name: "I sent it, hide the link" }));
     expect(screen.queryByDisplayValue(/SECRET-TOKEN/)).toBeNull();
 
@@ -383,14 +384,126 @@ describe("members page", () => {
       "GET /api/v1/invitations": () => json({ items: [] }),
     });
 
-    it("offers the address field and the checkbox only when the installation sends email", async () => {
+    it("offers sending only when the installation sends email, binding and expiry always", async () => {
       mockApi({ ...base(), ...providers(false) });
       renderApp("/members");
       await userEvent.click(await screen.findByRole("button", { name: "Invite someone" }));
       const dialog = await screen.findByRole("dialog", { name: "Invite someone" });
       expect(within(dialog).getByLabelText("Note (optional)")).toBeInTheDocument();
-      expect(within(dialog).queryByLabelText("Email the link to (optional)")).toBeNull();
-      expect(within(dialog).queryByRole("checkbox", { name: "Send by email" })).toBeNull();
+      expect(within(dialog).getByLabelText("Email address (optional)")).toBeInTheDocument();
+      expect(within(dialog).queryByRole("checkbox", { name: "Send the link by email" })).toBeNull();
+      expect(
+        within(dialog).getByRole("checkbox", { name: "Only this address can use the link" }),
+      ).not.toBeChecked();
+      const expiry = within(dialog).getByLabelText("How long the link works");
+      expect(
+        within(expiry)
+          .getAllByRole("option")
+          .map((o) => o.textContent),
+      ).toEqual(["1 hour", "1 day", "7 days", "30 days"]);
+      expect(expiry).toHaveValue("7d");
+    });
+
+    it("binds the link to the address without sending it, and with another expiry", async () => {
+      const fetchMock = mockApi({
+        ...base(),
+        ...providers(false),
+        "POST /api/v1/invitations": () =>
+          json(
+            {
+              invitation: invitation({ id: "i4", emailBound: true }),
+              inviteUrl: "https://proreta.example.com/invite#BOUND",
+              emailQueued: false,
+            },
+            201,
+          ),
+      });
+      renderApp("/members");
+      await userEvent.click(await screen.findByRole("button", { name: "Invite someone" }));
+      const dialog = await screen.findByRole("dialog", { name: "Invite someone" });
+      await userEvent.selectOptions(within(dialog).getByLabelText("How long the link works"), "1d");
+      await userEvent.type(
+        within(dialog).getByLabelText("Email address (optional)"),
+        "guest@example.org",
+      );
+      await userEvent.click(
+        within(dialog).getByRole("checkbox", { name: "Only this address can use the link" }),
+      );
+      await userEvent.click(within(dialog).getByRole("button", { name: "Create link" }));
+      expect(
+        await screen.findByText(/Only the owner of the address it is for/),
+      ).toBeInTheDocument();
+      const sent = requests(fetchMock, "POST", "/api/v1/invitations")[0]!;
+      expect(await sent.clone().json()).toEqual({
+        role: "member",
+        email: "guest@example.org",
+        sendEmail: false,
+        bindToEmail: true,
+        expiresIn: "1d",
+      });
+    });
+
+    it("sends and binds when both boxes are checked", async () => {
+      const fetchMock = mockApi({
+        ...base(),
+        ...providers(true),
+        "POST /api/v1/invitations": () =>
+          json(
+            {
+              invitation: invitation({ id: "i5", emailBound: true }),
+              inviteUrl: "https://proreta.example.com/invite#BOTH",
+              emailQueued: true,
+            },
+            201,
+          ),
+      });
+      renderApp("/members");
+      await userEvent.click(await screen.findByRole("button", { name: "Invite someone" }));
+      const dialog = await screen.findByRole("dialog", { name: "Invite someone" });
+      await userEvent.type(
+        await within(dialog).findByLabelText("Email address (optional)"),
+        "guest@example.org",
+      );
+      await userEvent.click(
+        within(dialog).getByRole("checkbox", { name: "Send the link by email" }),
+      );
+      await userEvent.click(
+        within(dialog).getByRole("checkbox", { name: "Only this address can use the link" }),
+      );
+      await userEvent.click(
+        within(dialog).getByRole("button", { name: "Create link and send email" }),
+      );
+      await screen.findByLabelText("Invitation link");
+      const sent = requests(fetchMock, "POST", "/api/v1/invitations")[0]!;
+      expect(await sent.clone().json()).toEqual({
+        role: "member",
+        email: "guest@example.org",
+        sendEmail: true,
+        bindToEmail: true,
+        expiresIn: "7d",
+      });
+    });
+
+    it("shows the complaint about binding without an address", async () => {
+      mockApi({
+        ...base(),
+        ...providers(false),
+        "POST /api/v1/invitations": () =>
+          problem(422, "Validation failed", {
+            type: "urn:proreta:problem:validation",
+            fieldErrors: [
+              { field: "bindToEmail", message: "needs an email: the address the link is for" },
+            ],
+          }),
+      });
+      renderApp("/members");
+      await userEvent.click(await screen.findByRole("button", { name: "Invite someone" }));
+      const dialog = await screen.findByRole("dialog", { name: "Invite someone" });
+      await userEvent.click(
+        within(dialog).getByRole("checkbox", { name: "Only this address can use the link" }),
+      );
+      await userEvent.click(within(dialog).getByRole("button", { name: "Create link" }));
+      expect(await within(dialog).findByText(/needs an email/)).toBeInTheDocument();
     });
 
     it("leaves the box unchecked unless the maintainer made emailing the default", async () => {
@@ -399,7 +512,7 @@ describe("members page", () => {
       await userEvent.click(await screen.findByRole("button", { name: "Invite someone" }));
       const dialog = await screen.findByRole("dialog", { name: "Invite someone" });
       expect(
-        await within(dialog).findByRole("checkbox", { name: "Send by email" }),
+        await within(dialog).findByRole("checkbox", { name: "Send the link by email" }),
       ).not.toBeChecked();
     });
 
@@ -412,7 +525,9 @@ describe("members page", () => {
       renderApp("/members");
       await userEvent.click(await screen.findByRole("button", { name: "Invite someone" }));
       const dialog = await screen.findByRole("dialog", { name: "Invite someone" });
-      expect(await within(dialog).findByRole("checkbox", { name: "Send by email" })).toBeChecked();
+      expect(
+        await within(dialog).findByRole("checkbox", { name: "Send the link by email" }),
+      ).toBeChecked();
     });
 
     it("does not send the address when the box is unchecked", async () => {
@@ -433,13 +548,18 @@ describe("members page", () => {
       await userEvent.click(await screen.findByRole("button", { name: "Invite someone" }));
       const dialog = await screen.findByRole("dialog", { name: "Invite someone" });
       await userEvent.type(
-        await within(dialog).findByLabelText("Email the link to (optional)"),
+        await within(dialog).findByLabelText("Email address (optional)"),
         "guest@example.org",
       );
       await userEvent.click(within(dialog).getByRole("button", { name: "Create link" }));
       expect(await screen.findByLabelText("Invitation link")).toBeInTheDocument();
       const sent = requests(fetchMock, "POST", "/api/v1/invitations")[0]!;
-      expect(await sent.clone().json()).toEqual({ role: "member" });
+      expect(await sent.clone().json()).toEqual({
+        role: "member",
+        email: "guest@example.org",
+        sendEmail: false,
+        expiresIn: "7d",
+      });
     });
 
     it("sends the address, still shows the link and says where the email goes", async () => {
@@ -460,10 +580,12 @@ describe("members page", () => {
       await userEvent.click(await screen.findByRole("button", { name: "Invite someone" }));
       const dialog = await screen.findByRole("dialog", { name: "Invite someone" });
       await userEvent.type(
-        await within(dialog).findByLabelText("Email the link to (optional)"),
+        await within(dialog).findByLabelText("Email address (optional)"),
         "Guest@Example.org",
       );
-      await userEvent.click(within(dialog).getByRole("checkbox", { name: "Send by email" }));
+      await userEvent.click(
+        within(dialog).getByRole("checkbox", { name: "Send the link by email" }),
+      );
       await userEvent.click(
         within(dialog).getByRole("button", { name: "Create link and send email" }),
       );
@@ -477,6 +599,7 @@ describe("members page", () => {
         role: "member",
         email: "Guest@Example.org",
         sendEmail: true,
+        expiresIn: "7d",
       });
     });
 
@@ -494,10 +617,12 @@ describe("members page", () => {
       await userEvent.click(await screen.findByRole("button", { name: "Invite someone" }));
       const dialog = await screen.findByRole("dialog", { name: "Invite someone" });
       await userEvent.type(
-        await within(dialog).findByLabelText("Email the link to (optional)"),
+        await within(dialog).findByLabelText("Email address (optional)"),
         "nobody",
       );
-      await userEvent.click(within(dialog).getByRole("checkbox", { name: "Send by email" }));
+      await userEvent.click(
+        within(dialog).getByRole("checkbox", { name: "Send the link by email" }),
+      );
       await userEvent.click(
         within(dialog).getByRole("button", { name: "Create link and send email" }),
       );
@@ -796,6 +921,27 @@ describe("invitation page: new account and invalid links", () => {
     expect(await screen.findByRole("heading", { name: "Join Acme" })).toBeInTheDocument();
     expect(screen.getByText("Storefront")).toBeInTheDocument();
     expect(screen.getByText(/in this project only/)).toBeInTheDocument();
+  });
+
+  it("says a bound link is for one address and explains a mismatch", async () => {
+    const fetchMock = mockApi({
+      "GET /api/v1/auth/me": () => problem(401, "Not authenticated"),
+      "POST /api/v1/invitations/lookup": () => json({ ...preview, emailBound: true }),
+      "POST /api/v1/auth/register": () =>
+        problem(409, "This invitation is for another email address", {
+          type: "urn:proreta:problem:invitation-email-mismatch",
+        }),
+    });
+    renderApp("/invite#TOKEN-123");
+    expect(await screen.findByText(/It is for one email address only/)).toBeInTheDocument();
+    await userEvent.type(await screen.findByLabelText("Email"), "other@example.com");
+    await userEvent.type(screen.getByLabelText("Password"), "a long passphrase");
+    await userEvent.type(screen.getByLabelText("Confirm password"), "a long passphrase");
+    await userEvent.click(screen.getByRole("button", { name: "Create account and join" }));
+    expect(
+      await screen.findByText(/This invitation is for another email address/),
+    ).toBeInTheDocument();
+    expect(requests(fetchMock, "POST", "/api/v1/auth/register")).toHaveLength(1);
   });
 
   it("joins as the signed-in user", async () => {

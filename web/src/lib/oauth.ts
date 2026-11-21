@@ -92,6 +92,8 @@ const MESSAGES: Record<string, string> = {
     "An account with this email already exists. Sign in with its password, then link the provider on your profile page.",
   invitation_invalid: "The invitation was used, revoked or expired. Ask for a new link.",
   already_member: "This account is already a member of that organization.",
+  invitation_email_mismatch:
+    "This invitation is for another email address. Sign in with the address it was sent to, or ask for a new link.",
   plan_limit: "The organization has reached its member limit. Ask its administrator.",
   suspended: "This account's organization is suspended. Contact the administrator of this Proreta.",
   rate_limited: "Too many sign-in attempts. Try again in a few minutes.",

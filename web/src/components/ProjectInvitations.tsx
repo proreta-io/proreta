@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { ApiError, errorMessage } from "../api/client";
+import { errorMessage } from "../api/client";
 import {
   createInvitation,
   listInvitations,
@@ -10,9 +10,8 @@ import {
   type InvitationRole,
   type Project,
 } from "../api/endpoints";
-import { useAuth } from "../auth/AuthProvider";
 import { absoluteLink } from "../lib/inviteLink";
-import { useEmailEnabled } from "../lib/oauth";
+import { linkNote, useInvitationOptions, type LinkChoices } from "./InvitationOptions";
 import { assignableRoles, ROLE_DESCRIPTIONS, ROLE_LABELS } from "../lib/roles";
 import { formatDate, formatDateTime } from "../lib/format";
 import { useToast } from "./Toasts";
@@ -20,7 +19,6 @@ import {
   Alert,
   Badge,
   Button,
-  Checkbox,
   ConfirmDialog,
   CopyField,
   EmptyNote,
@@ -48,6 +46,7 @@ interface CreatedLink {
   url: string;
   role: InvitationRole;
   emailedTo?: string;
+  choices: LinkChoices;
 }
 
 /**
@@ -56,20 +55,15 @@ interface CreatedLink {
  * state and not in the query cache.
  */
 export default function ProjectInvitations({ project }: { project: Project }) {
-  const auth = useAuth();
   const queryClient = useQueryClient();
   const toast = useToast();
   const key = queryKeys.projectInvitations(project.id);
   const invitations = useQuery({ queryKey: key, queryFn: () => listInvitations(project.id) });
   const roles = assignableRoles(project.role);
-  const emailEnabled = useEmailEnabled();
+  const options = useInvitationOptions();
   const [dialog, setDialog] = useState(false);
   const [role, setRole] = useState<InvitationRole>("member");
   const [label, setLabel] = useState("");
-  const [email, setEmail] = useState("");
-  const [sendChoice, setSendChoice] = useState<boolean | undefined>();
-  const sendByEmail = sendChoice ?? auth.session?.emailInvitations === true;
-  const [emailError, setEmailError] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [created, setCreated] = useState<CreatedLink | null>(null);
   const [revoking, setRevoking] = useState<Invitation | null>(null);
@@ -80,31 +74,23 @@ export default function ProjectInvitations({ project }: { project: Project }) {
     void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
   };
   const create = useMutation({
-    mutationFn: () =>
-      createInvitation(
-        role,
-        label.trim(),
-        emailEnabled && sendByEmail ? email.trim() : "",
-        project.id,
-      ),
+    mutationFn: () => createInvitation(role, label.trim(), options.request(), project.id),
     gcTime: 0,
     onSuccess: (res) => {
       setDialog(false);
       setCreated({
         url: absoluteLink(res.inviteUrl),
         role: res.invitation.role,
-        emailedTo: res.emailQueued ? email.trim().toLowerCase() : undefined,
+        emailedTo: res.emailQueued ? options.address.toLowerCase() : undefined,
+        choices: options.choices(),
       });
       setLabel("");
-      setEmail("");
-      setSendChoice(undefined);
+      options.reset();
       create.reset();
       refresh();
     },
     onError: (err) => {
-      const fieldMessage = err instanceof ApiError ? err.fieldErrorMap().email : undefined;
-      if (fieldMessage) setEmailError(fieldMessage);
-      else setError(errorMessage(err));
+      if (!options.fail(err)) setError(errorMessage(err));
     },
   });
   const revoke = useMutation({
@@ -148,9 +134,11 @@ export default function ProjectInvitations({ project }: { project: Project }) {
           )}
           <CopyField label="Invitation link" value={created.url} copyLabel="Copy link" />
           <p className="text-muted-foreground">
-            Anyone with this link can join {project.name} as{" "}
-            {ROLE_LABELS[created.role].toLowerCase()} until it is used, revoked or 7 days pass. Send
-            it over a channel you trust. Proreta keeps only a hash of it.
+            {linkNote(
+              `${ROLE_LABELS[created.role].toLowerCase()} in ${project.name}`,
+              created.choices,
+            )}{" "}
+            Send it over a channel you trust. Proreta keeps only a hash of it.
           </p>
           <div>
             <Button variant="secondary" onClick={() => setCreated(null)}>
@@ -164,7 +152,7 @@ export default function ProjectInvitations({ project }: { project: Project }) {
             variant="secondary"
             onClick={() => {
               setError(undefined);
-              setEmailError(undefined);
+              options.clearError();
               setDialog(true);
             }}
           >
@@ -205,6 +193,7 @@ export default function ProjectInvitations({ project }: { project: Project }) {
                   <span className="block text-caption text-muted-foreground">
                     by {inv.createdBy}
                     {inv.acceptedBy ? ` · joined: ${inv.acceptedBy}` : ""}
+                    {inv.emailBound ? " · for one address" : ""}
                   </span>
                 </Td>
                 <Td>{ROLE_LABELS[inv.role]}</Td>
@@ -236,11 +225,7 @@ export default function ProjectInvitations({ project }: { project: Project }) {
       {dialog && (
         <ConfirmDialog
           title={`Invite someone to ${project.name}`}
-          confirmLabel={
-            emailEnabled && sendByEmail && email.trim()
-              ? "Create link and send email"
-              : "Create link"
-          }
+          confirmLabel={options.mails ? "Create link and send email" : "Create link"}
           confirmVariant="primary"
           busy={create.isPending}
           onCancel={() => setDialog(false)}
@@ -266,35 +251,7 @@ export default function ProjectInvitations({ project }: { project: Project }) {
                 </Select>
               )}
             </Field>
-            {emailEnabled && (
-              <>
-                <Field
-                  label="Email the link to (optional)"
-                  hint="You still get the link here, and anyone who has it can join."
-                  error={emailError}
-                >
-                  {(c) => (
-                    <Input
-                      {...c}
-                      type="email"
-                      autoComplete="off"
-                      maxLength={254}
-                      value={email}
-                      onChange={(e) => {
-                        setEmail(e.target.value);
-                        setEmailError(undefined);
-                      }}
-                    />
-                  )}
-                </Field>
-                <Checkbox
-                  label="Send by email"
-                  description="Proreta emails the link to this address when you create it."
-                  checked={sendByEmail}
-                  onChange={(e) => setSendChoice(e.target.checked)}
-                />
-              </>
-            )}
+            {options.fields}
             <Field label="Note (optional)" hint="For you only, for example the person's name.">
               {(c) => (
                 <Input

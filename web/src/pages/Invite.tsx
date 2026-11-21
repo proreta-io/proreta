@@ -5,6 +5,7 @@ import {
   ALREADY_MEMBER_PROBLEM_TYPE,
   ApiError,
   errorMessage,
+  INVITATION_EMAIL_MISMATCH_PROBLEM_TYPE,
   INVITATION_INVALID_PROBLEM_TYPE,
 } from "../api/client";
 import { lookupInvitation, queryKeys, type InvitationPreview } from "../api/endpoints";
@@ -94,6 +95,9 @@ export default function Invite() {
   );
 }
 
+const MISMATCH_TEXT =
+  "This invitation is for another email address. Use the address it was sent to, or ask for a new link.";
+
 function Invalid({
   title = "This invitation link is not valid.",
   text,
@@ -133,6 +137,7 @@ function Offer({ preview }: { preview: InvitationPreview }) {
         </>
       )}{" "}
       The link works until {formatDateTime(preview.expiresAt)}.
+      {preview.emailBound && " It is for one email address only: use the address it was sent to."}
     </p>
   );
 }
@@ -167,6 +172,8 @@ function AcceptAsUser({
         setError(
           "You are already a member of this organization, or your account cannot join others. Switch organizations from the top bar instead.",
         );
+      } else if (err instanceof ApiError && err.type === INVITATION_EMAIL_MISMATCH_PROBLEM_TYPE) {
+        setError(MISMATCH_TEXT);
       } else {
         setError(errorMessage(err));
       }
@@ -407,6 +414,8 @@ function ExistingAccount({
         setError("Wrong email or password. Try again.");
       } else if (err instanceof ApiError && err.type === INVITATION_INVALID_PROBLEM_TYPE) {
         setError("The invitation was used, revoked or expired meanwhile. Ask for a new link.");
+      } else if (err instanceof ApiError && err.type === INVITATION_EMAIL_MISMATCH_PROBLEM_TYPE) {
+        setError(MISMATCH_TEXT);
       } else if (err instanceof ApiError && err.type === ALREADY_MEMBER_PROBLEM_TYPE) {
         setError(
           "This account is already a member, or cannot join other organizations. Sign in instead.",
