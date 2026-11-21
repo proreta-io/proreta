@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/proreta-io/proreta/backend/internal/specula/wire"
 )
 
 // metrics holds the one metric that is observed as it happens; the rest is read at scrape time.
@@ -36,6 +38,7 @@ var (
 	descSchedAge  = prometheus.NewDesc("specula_schedule_age_seconds", "Time since the schedule in use was issued; absent while there is none.", nil, nil)
 	descSchedLoad = prometheus.NewDesc("specula_schedule_loaded", "1 when a schedule is in use, 0 while none was fetched yet.", nil, nil)
 	descExpired   = prometheus.NewDesc("specula_schedule_expired_monitors", "Monitors that are not checked because the schedule expired.", nil, nil)
+	descOutcomes  = prometheus.NewDesc("specula_report_outcomes_total", "Gateway answers for reported results, by outcome.", []string{"outcome"}, nil)
 	descMissed    = prometheus.NewDesc("specula_missed_slots_total", "Slots without a check.", []string{"reason"}, nil)
 	descInflight  = prometheus.NewDesc("specula_replay_inflight", "Results in the batch being reported now; 0 when idle.", nil, nil)
 	descClockOffs = prometheus.NewDesc("specula_clock_offset_seconds", "Proreta's time minus the local time at the last hello.", nil, nil)
@@ -43,6 +46,10 @@ var (
 
 // dropReasons are always exported, so rate() works before the first drop.
 var dropReasons = []string{dropSize, dropAge, dropMemory, dropBad, dropRefused}
+
+// reportOutcomes are always exported, so rate() works before the first one. Outcomes the gateway
+// answers beyond these still count as refused below.
+var reportOutcomes = []string{wire.OutcomeRecorded, wire.OutcomeDuplicate, wire.OutcomeRejected, wire.OutcomeSuperseded, wire.OutcomeExpired}
 
 // oldestTTL bounds how often a scrape may read the buffer for the oldest slot; the age is then
 // computed from the cached slot, so it stays exact to within the slot moving on (at most this long).
@@ -71,7 +78,7 @@ func (c *collector) oldest(now time.Time, depth int) int64 {
 }
 
 func (c *collector) Describe(ch chan<- *prometheus.Desc) {
-	for _, d := range []*prometheus.Desc{descResults, descBytes, descOldest, descDegraded, descDropped, descCorrupt, descSchedAge, descSchedLoad, descExpired, descMissed, descInflight, descClockOffs} {
+	for _, d := range []*prometheus.Desc{descResults, descBytes, descOldest, descDegraded, descDropped, descCorrupt, descSchedAge, descSchedLoad, descExpired, descOutcomes, descMissed, descInflight, descClockOffs} {
 		ch <- d
 	}
 	c.e.met.lateness.Describe(ch)
@@ -102,9 +109,13 @@ func (c *collector) Collect(ch chan<- prometheus.Metric) {
 	for _, r := range dropReasons {
 		n := st.Drops[r]
 		if r == dropRefused {
-			n = rs.Dropped
+			// final answers other than recorded and duplicate: the result is gone for good
+			n = rs.Dropped + rs.Outcomes[wire.OutcomeRejected] + rs.Outcomes[wire.OutcomeSuperseded] + rs.Outcomes[wire.OutcomeExpired]
 		}
 		ctr(descDropped, n, r)
+	}
+	for _, o := range reportOutcomes {
+		ctr(descOutcomes, rs.Outcomes[o], o)
 	}
 	ctr(descCorrupt, st.Corrupt+st.Quarantined)
 	issued := e.sched.issuedAt()

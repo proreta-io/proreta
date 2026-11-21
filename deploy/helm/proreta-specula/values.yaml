@@ -47,6 +47,14 @@ state:
   mountPath: /var/lib/specula       # PRORETA_SPECULA_STATE_DIR
   # Room for the buffer (256 MiB by default) plus the schedule; the pod is evicted above it.
   sizeLimit: 512Mi
+  # Keep the state on a volume that outlives the pod. Give the name of a PersistentVolumeClaim
+  # that you created in the release namespace (at least 1Gi; the chart does not create one, so
+  # that helm uninstall never deletes your data). The buffer, the cached schedule and the instance
+  # id then survive a rollout, an eviction or a drain. Supported: a ReadWriteOnce claim together
+  # with the Recreate strategy and one replica, which keep a single writer. ReadWriteMany is not
+  # supported. Empty keeps the emptyDir above; sizeLimit does not apply to a claim.
+  persistence:
+    existingClaim: ""
 
 specula:
   concurrency: 20          # PRORETA_SPECULA_CONCURRENCY, checks in flight per pod

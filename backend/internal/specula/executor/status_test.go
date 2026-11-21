@@ -86,7 +86,7 @@ func TestMetricsShowBufferAndScheduleState(t *testing.T) {
 	for _, mf := range mfs {
 		series[mf.GetName()] = len(mf.Metric)
 	}
-	if series["specula_slot_lateness_seconds"] != 1 || series["specula_results_dropped_total"] != len(dropReasons) || series["specula_missed_slots_total"] != 3 {
+	if series["specula_slot_lateness_seconds"] != 1 || series["specula_results_dropped_total"] != len(dropReasons) || series["specula_missed_slots_total"] != 3 || series["specula_report_outcomes_total"] != len(reportOutcomes) {
 		t.Fatalf("series %v", series)
 	}
 }

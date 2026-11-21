@@ -111,6 +111,17 @@
           "type": "string",
           "pattern": "^[1-9][0-9]*(Mi|Gi)$",
           "description": "size limit of the emptyDir that holds the state, at least the buffer limit plus room for the schedule"
+        },
+        "persistence": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "existingClaim": {
+              "type": "string",
+              "pattern": "^([a-z0-9]([-a-z0-9.]*[a-z0-9])?)?$",
+              "description": "name of a ReadWriteOnce PersistentVolumeClaim in the release namespace to keep the state on, instead of the emptyDir; empty keeps the emptyDir"
+            }
+          }
         }
       },
       "required": [
