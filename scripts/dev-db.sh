@@ -41,7 +41,7 @@ admin_pw=$(openssl rand -hex 16)
 mkdir -p "$dev"
 chmod 700 "$dev"
 
-docker run -d --name "$name" -e POSTGRES_PASSWORD="$admin_pw" -p "127.0.0.1:$port:5432" postgres:16 >/dev/null
+docker run -d --name "$name" -e POSTGRES_PASSWORD="$admin_pw" -p "127.0.0.1:$port:5432" postgres:16@sha256:3950ad7c3148ca2175ef1b6c36c9efbf78957ae8fbe8b3a5d7c35af50500382f >/dev/null
 echo "waiting for PostgreSQL on 127.0.0.1:$port"
 for _ in $(seq 1 60); do
   # The image restarts once after initialising; wait for a query to work over TCP.

@@ -211,7 +211,9 @@ jobs:
       contents: read
     services:
       postgres:
-        image: postgres:16
+        # postgres 16 minor 16.15, multi-arch index digest. Dependabot does not scan
+        # workflow service images: refresh by hand, see "Database image pin" in docs/development.md
+        image: postgres:16@sha256:3950ad7c3148ca2175ef1b6c36c9efbf78957ae8fbe8b3a5d7c35af50500382f
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
