@@ -28,6 +28,7 @@ Operator and contributor documentation for Proreta.
 | [Custom status page domains](runbooks/custom-domains.md) | Status pages on a customer's own host: turning it on, TLS in front, DNS records and states, the TLS permission endpoint, `proretactl status-domains list`, the admin switch, troubleshooting |
 | [Heartbeats with Alertmanager](runbooks/heartbeat-alertmanager.md) | Watchdog heartbeats for Prometheus Alertmanager |
 | [Observability](runbooks/observability.md) | Metrics, logs and suggested alert rules |
+| [Self-monitoring](runbooks/self-monitoring.md) | The six shipped alert rules for Prometheus or vmalert, using them from your own alerts repository, the optional chart template, watching Proreta and Alertmanager both ways |
 
 ## Releases
 - [Release notes](release-notes/): what is new, breaking changes and known limitations (one file per release, named by its version)

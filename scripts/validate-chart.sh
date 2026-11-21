@@ -70,7 +70,8 @@ combos=(
   "example-oauth|-f $example $tag $oauth_secret --set oauth.google.enabled=true --set oauth.github.enabled=true --set oauth.allowedDomains[0]=example.com --set oauth.allowedDomains[1]=example.org"
   "example-oauth-eso|-f $example $tag $eso --set oauth.google.enabled=true --set oauth.github.enabled=true"
   "example-oauth-only|-f $example $tag $oauth_secret --set oauth.google.enabled=true --set config.passwordLoginEnabled=false"
-  "example-all-optional|-f $example $tag --set statuspage.enabled=true --set serviceMonitor.enabled=true --set networkPolicy.enabled=true --set config.blockedCIDRs[0]=100.64.0.0/10 --set config.blockedCIDRs[1]=198.18.0.0/15 --set worker.location=eu-west"
+  "example-all-optional|-f $example $tag --set statuspage.enabled=true --set serviceMonitor.enabled=true --set prometheusRule.enabled=true --set networkPolicy.enabled=true --set config.blockedCIDRs[0]=100.64.0.0/10 --set config.blockedCIDRs[1]=198.18.0.0/15 --set worker.location=eu-west"
+  "example-prometheusrule|-f $example $tag --set prometheusRule.enabled=true --set prometheusRule.interval=1m --set prometheusRule.labels.release=prometheus --set prometheusRule.jobSelector=proreta-.*"
   "example-oauth-existing-default-name|-f $example $tag --set secrets.oauth.existingSecret=proreta-oauth --set oauth.google.enabled=true"
   "example-presync|-f $example $tag --set database.bootstrap.enabled=false --set migration.hookPhase=PreSync"
   "example-no-section-name|-f $example $tag --set httpRoute.parentRef.sectionName="
@@ -554,6 +555,49 @@ grep -q 'whenUnsatisfiable: ScheduleAnyway' "$out/defaults.yaml" || { echo "FAIL
 renders+=("$out/pdb-single.yaml" "$out/pdb-more.yaml" "$out/pdb-off.yaml")
 echo ok
 
+echo "== PrometheusRule: one source file, off by default, rules complete, metric names real"
+python3 - "$chart/alerts/proreta-rules.yaml" docs/runbooks/observability.md "$out/example.yaml" "$out/example-prometheusrule.yaml" "$out/example-all-optional.yaml" <<'PY'
+import re, sys, yaml
+src, runbook, default, custom, allopt = sys.argv[1:]
+rules_doc = yaml.safe_load(open(src))
+rules = [r for g in rules_doc["groups"] for r in g["rules"]]
+assert [r["alert"] for r in rules] == ["ProretaTargetDown", "ProretaChecksStalled", "ProretaHousekeepingStale", "ProretaOutboxBacklog", "ProretaDeliveriesFailing", "ProretaApiErrors"], [r["alert"] for r in rules]
+documented = set(re.findall(r"`((?:proreta|specula)_[a-z0-9_]+)`", open(runbook).read()))
+documented |= {m + suffix for m in documented for suffix in ("_bucket", "_sum", "_count")} | {"up"}
+for r in rules:
+    for key in ("alert", "expr", "for", "labels", "annotations"):
+        assert r.get(key), f"{r.get('alert')}: no {key}"
+    assert r["labels"].get("severity") in ("warning", "critical"), f"{r['alert']}: no severity"
+    for key in ("summary", "description"):
+        assert r["annotations"].get(key), f"{r['alert']}: no annotations.{key}"
+    expr = re.sub(r'"[^"]*"', '""', r["expr"])
+    for name in re.findall(r"\b((?:proreta|specula|up)[a-z0-9_]*)\b(?=\s*[{\[\)(]|\s|$)", expr):
+        if name.startswith(("proreta_", "specula_")) or name == "up":
+            assert name in documented, f"{r['alert']}: metric {name} is not in observability.md"
+assert sum(r["expr"].count('job=~"proreta.*"') for r in rules) == 1, "the job selector must appear exactly once"
+assert not [r for r in rules if 'job=~".*"' in r["expr"]], "catch-all job selector"
+def prom_rules(path):
+    return [d for d in yaml.safe_load_all(open(path)) if d and d["kind"] == "PrometheusRule"]
+assert not prom_rules(default), "PrometheusRule rendered by default"
+for path in (custom, allopt):
+    (pr,) = prom_rules(path)
+    got = [r for g in pr["spec"]["groups"] for r in g["rules"]]
+    assert len(got) == len(rules)
+    # Same rules as the file, except the job selector.
+    for a, b in zip(rules, got):
+        a = dict(a, expr=a["expr"].replace('job=~"proreta.*"', ""))
+        b = dict(b, expr=re.sub(r'job=~"[^"]*"', "", b["expr"]))
+        assert a == b, f"{a['alert']} differs from the source file"
+(pr,) = prom_rules(custom)
+assert pr["metadata"]["labels"]["release"] == "prometheus", "prometheusRule.labels not applied"
+assert pr["spec"]["groups"][0]["interval"] == "1m", "prometheusRule.interval not applied"
+assert pr["spec"]["groups"][0]["rules"][0]["expr"] == 'up{job=~"proreta-.*"} == 0', pr["spec"]["groups"][0]["rules"][0]["expr"]
+(pr,) = prom_rules(allopt)
+assert pr["spec"]["groups"][0]["rules"][0]["expr"] == 'up{job=~"proreta-.+-metrics"} == 0', "default job selector is not the metrics Services' name"
+assert "interval" not in pr["spec"]["groups"][0], "interval set without a value"
+print("ok")
+PY
+
 echo "== kubeconform"
 if ! command -v kubeconform >/dev/null 2>&1; then
   echo "kubeconform not installed: skipped (CI installs a pinned release)"
@@ -563,7 +607,7 @@ kc=(kubeconform -strict -summary -kubernetes-version "${KUBERNETES_VERSION:-1.31
 if [ -n "${CRD_SCHEMA_DIR:-}" ]; then
   kc+=(-schema-location default -schema-location "$CRD_SCHEMA_DIR/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json")
 else
-  echo "CRD_SCHEMA_DIR not set: skipping Gateway API (HTTPRoute), External Secrets (ExternalSecret) and Prometheus Operator (ServiceMonitor) kinds"
-  kc+=(-skip "HTTPRoute,ExternalSecret,ServiceMonitor")
+  echo "CRD_SCHEMA_DIR not set: skipping Gateway API (HTTPRoute), External Secrets (ExternalSecret) and Prometheus Operator (ServiceMonitor, PrometheusRule) kinds"
+  kc+=(-skip "HTTPRoute,ExternalSecret,ServiceMonitor,PrometheusRule")
 fi
 "${kc[@]}" "${renders[@]}"

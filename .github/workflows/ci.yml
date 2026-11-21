@@ -486,7 +486,7 @@ jobs:
           echo "${KUBECONFORM_SHA256}  $dir/kubeconform.tar.gz" | sha256sum --check --strict
           tar -xzf "$dir/kubeconform.tar.gz" -C "$dir" kubeconform
           echo "$dir" >> "$GITHUB_PATH"
-      # Schemas of the three CRD kinds the chart renders, from datreeio/CRDs-catalog (MIT) at a pinned
+      # Schemas of the four CRD kinds the chart renders, from datreeio/CRDs-catalog (MIT) at a pinned
       # commit, each checked against a SHA-256 so a changed file fails the job.
       - name: Fetch CRD schemas (pinned, checksum verified)
         env:
@@ -502,6 +502,7 @@ jobs:
           e5692e62edd9b8a14bd2527d0a732e174a649131aa4d47159737dc6527c59ca5 gateway.networking.k8s.io/httproute_v1.json
           7634aa711997c50e952970bc149fad4b2ac9e1fbc90047bc43e28e8c2682d570 external-secrets.io/externalsecret_v1.json
           78062f4c2364bf6056a8df40cfb7039936f836014aff2078c0c598dfce69c51e monitoring.coreos.com/servicemonitor_v1.json
+          a022de2e009b7693b5fc999a4e2f9a81ac948112149f7267e9316ebcb335cdcb monitoring.coreos.com/prometheusrule_v1.json
           EOF
           echo "CRD_SCHEMA_DIR=$dir" >> "$GITHUB_ENV"
       - name: Validate chart (helm lint, helm template, invariants, kubeconform)

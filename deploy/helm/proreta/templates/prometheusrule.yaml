@@ -1,0 +1,22 @@
+{{- if .Values.prometheusRule.enabled }}
+{{- /* Requires Prometheus Operator CRDs. The rules are the plain file alerts/proreta-rules.yaml, so the
+same file serves vmalert and a separate alerts repository. Only the job selector regex and the group
+interval are changed here; comments in the file are dropped by the round trip. */}}
+{{- $default := `job=~"proreta.*"` }}
+{{- $selector := .Values.prometheusRule.jobSelector | default (printf "%s-.+-metrics" (include "proreta.fullname" .)) }}
+{{- $doc := .Files.Get "alerts/proreta-rules.yaml" | replace $default (printf "job=~%s" ($selector | quote)) | fromYaml }}
+{{- range $g := $doc.groups }}
+{{- with $.Values.prometheusRule.interval }}{{ $_ := set $g "interval" . }}{{ end }}
+{{- end }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "proreta.fullname" . }}
+  labels:
+    {{- include "proreta.labels" (dict "ctx" . "component" "api") | nindent 4 }}
+    {{- with .Values.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- toYaml $doc | nindent 2 }}
+{{- end }}

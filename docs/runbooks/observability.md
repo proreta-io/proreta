@@ -1,6 +1,6 @@
 # Observability: metrics, logs and suggested alerts
 
-Every process (`api`, `worker`, `jobs`) serves Prometheus metrics at `GET /metrics` on the admin port (`PRORETA_ADMIN_ADDR`, default `:9090`), next to `/healthz` and `/readyz`. The admin port is never routed through the gateway. The chart can create a `ServiceMonitor` per component (`serviceMonitor.enabled`, needs the Prometheus Operator CRDs); the alert rules below are suggestions written as text, not shipped.
+Every process (`api`, `worker`, `jobs`) serves Prometheus metrics at `GET /metrics` on the admin port (`PRORETA_ADMIN_ADDR`, default `:9090`), next to `/healthz` and `/readyz`. The admin port is never routed through the gateway. The chart can create a `ServiceMonitor` per component (`serviceMonitor.enabled`, needs the Prometheus Operator CRDs); six of the alert rules below ship as a ready-made rules file ([self-monitoring](self-monitoring.md)); the rest are suggestions written as text.
 
 ## Label policy
 No metric is labelled per organization, monitor, incident, user, channel, URL, host, path, email, IP or token (`channel_type` is the bounded channel type, never a channel): label cardinality would grow with customers and the values would leak identifiers and URLs into the metrics stack. HTTP metrics use the chi route template (`/api/v1/monitors/{monitorId}`), never the raw path. `TestNoHighCardinalityOrSecretLabels` (`internal/platform/metrics`) scans the label names of every registered metric and fails on a forbidden one; `TestMetricsAreDocumented` fails when a `proreta_*` metric is missing from this page.
@@ -133,8 +133,8 @@ Other lines of a request carry the same `request_id` and `tenant_id`. The worker
 
 Never logged, by design and by test (`TestIntegrationRequestLogsCarryNoSecrets` in `internal/api`, the log assertions of `internal/e2e` and of the worker and jobs tests): passwords, session tokens, CSRF tokens, monitor URLs (they can carry credentials in the query), Slack and webhook URLs (rejected values included), raw paths and query strings, request and response bodies, and raw errors of the SSRF guard (they contain resolved addresses and the URL; only error kinds such as `blocked_address` or `timeout` are logged and stored).
 
-## Suggested alert rules (not deployed)
-Written in PromQL for any Prometheus-compatible stack with Alertmanager; thresholds are first guesses.
+## Suggested alert rules
+Written in PromQL for any Prometheus-compatible stack with Alertmanager; thresholds are first guesses. The repository ships six of them as `deploy/helm/proreta/alerts/proreta-rules.yaml` (`ProretaTargetDown`, `ProretaChecksStalled`, `ProretaHousekeepingStale` for `compute_rollups` and `evaluate_heartbeats`, `ProretaOutboxBacklog`, `ProretaDeliveriesFailing` and `ProretaApiErrors`, with slightly different windows than the table; see [self-monitoring](self-monitoring.md)). The rest of the table stays a list of suggestions that nothing deploys.
 
 | Alert | Expression (PromQL) | For | Why |
 |---|---|---|---|
