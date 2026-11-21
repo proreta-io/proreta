@@ -49,3 +49,12 @@ Stop the processes with Ctrl-C, then:
 ```sh
 make dev-db-down      # removes the container, its data and .dev/
 ```
+
+## Database image pin
+The CI database service (`services.postgres.image` in `.github/workflows/ci.yml`) and `scripts/dev-db.sh` use `postgres:16` pinned by the digest of its multi-arch image index. Dependabot's `docker` ecosystem reads Dockerfiles only, not workflow service images or shell scripts, so the digest is refreshed by hand: with each PostgreSQL 16 minor release and at least before every release tag, run
+
+```sh
+docker buildx imagetools inspect postgres:16
+```
+
+and put the top-level `Digest:` (the index, not a per-platform manifest) in both files, updating the `# postgres 16 minor` comment. The major version stays 16 until a deliberate upgrade.
