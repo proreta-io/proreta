@@ -94,7 +94,7 @@ func TestIntegrationAdminCreateOrganization(t *testing.T) {
 		}
 	})
 
-	t.Run("an owner that cannot be added releases its slug", func(t *testing.T) {
+	t.Run("an owner that cannot be added leaves nothing behind", func(t *testing.T) {
 		pgtest.MustExec(t, env.AdminConn(t), pgtest.CappedPlanSQL)
 		if _, err := env.AdminConn(t).Exec(t.Context(), `UPDATE plans SET limits = limits || '{"max_members":0}' WHERE key = 'capped'`); err != nil {
 			t.Fatal(err)
@@ -106,8 +106,11 @@ func TestIntegrationAdminCreateOrganization(t *testing.T) {
 		if n := countRows(t, env, `SELECT count(*) FROM tenants WHERE slug = 'full'`); n != 0 {
 			t.Fatalf("tenants still holding the slug: %d", n)
 		}
-		if n := countRows(t, env, `SELECT count(*) FROM tenants WHERE deleted_at IS NOT NULL AND slug <> 'full' AND name = 'Full'`); n != 1 {
-			t.Fatalf("discarded tenant rows: %d", n)
+		if n := countRows(t, env, `SELECT count(*) FROM tenants WHERE name = 'Full'`); n != 0 {
+			t.Fatalf("tenant rows left behind: %d", n)
+		}
+		if n := countRows(t, env, `SELECT count(*) FROM audit_log WHERE action = 'admin.organization.created' AND metadata->>'slug' = 'full'`); n != 0 {
+			t.Fatalf("audit rows left behind: %d", n)
 		}
 		// The slug is free again for a creation that works.
 		pgtest.MustExec(t, env.AdminConn(t), pgtest.CappedPlanSQL)
@@ -116,6 +119,25 @@ func TestIntegrationAdminCreateOrganization(t *testing.T) {
 		}
 		if r := c.do(http.MethodPost, path, `{"name":"Full","slug":"full","planKey":"capped","ownerEmail":"alice@alpha.example"}`, ah); r.code != http.StatusCreated {
 			t.Fatalf("retry with the same slug: %d %s", r.code, r.raw)
+		}
+	})
+
+	t.Run("the system admin cannot be the owner", func(t *testing.T) {
+		tenants, audits := countRows(t, env, `SELECT count(*) FROM tenants`), countRows(t, env, `SELECT count(*) FROM audit_log`)
+		// The login is not an address, so it gets one for this check only.
+		pgtest.MustExec(t, env.AdminConn(t), `UPDATE users SET email = 'root@platform.example' WHERE id = '`+adminID+`'`)
+		t.Cleanup(func() {
+			pgtest.MustExec(t, env.AdminConn(t), `UPDATE users SET email = 'admin' WHERE id = '`+adminID+`'`)
+		})
+		r := c.do(http.MethodPost, path, `{"name":"Sys","slug":"sys","ownerEmail":"root@platform.example"}`, ah)
+		if r.code != http.StatusConflict || !strings.Contains(r.raw, "system-admin") {
+			t.Fatalf("system admin as owner: %d %s", r.code, r.raw)
+		}
+		if n := countRows(t, env, `SELECT count(*) FROM tenants`); n != tenants {
+			t.Fatalf("tenants %d -> %d", tenants, n)
+		}
+		if n := countRows(t, env, `SELECT count(*) FROM audit_log`); n != audits {
+			t.Fatalf("audit rows %d -> %d", audits, n)
 		}
 	})
 

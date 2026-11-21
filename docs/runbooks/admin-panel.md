@@ -72,7 +72,7 @@ Use it to give a team its own organization without opening self-registration. Op
 1. Give the **name** (1 to 200 characters), optionally a **slug** (lowercase letters, digits and hyphens, up to 63; `default` is reserved and a slug already used, a deleted organization's included, is refused with 409 `slug-taken`; a random `t-...` one is chosen when empty) and the **plan** (any existing plan; `internal` is preselected).
 2. Give the **owner's email**. If that account exists it becomes the owner at once, and the person finds the organization in the organization switcher. If it does not, an invitation link is created instead and shown once; the person becomes the **owner** when they accept it (an owner link is created only here, by the platform admin). The link is not emailed from here. The platform admin's own account cannot be the owner (409 `system-admin`).
 
-The organization starts active with its Default project. The plan's member limit applies to the owner (409 `plan-limit-reached`); when the owner cannot be added nothing is left behind (the new organization is deleted again, so its slug stays taken). The API is `POST /api/v1/admin/organizations`.
+The organization starts active with its Default project. The plan's member limit applies to the owner (409 `plan-limit-reached`); the organization and its owner are created in one transaction, so when the owner cannot be added nothing is left behind and the slug stays free. The API is `POST /api/v1/admin/organizations`.
 
 ## Add a person to an organization
 Use it when nobody in an organization can add people any more (the only owner left, an owner is unreachable) or when a customer asks you to.

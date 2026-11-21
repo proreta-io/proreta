@@ -17,7 +17,7 @@ import (
 // adminDefiners are the definer functions of the platform admin panel.
 var adminDefiners = []string{
 	"auth_sync_platform_admin", "admin_list_tenants", "admin_get_tenant", "admin_set_tenant_plan",
-	"admin_set_tenant_status", "admin_delete_tenant", "admin_discard_new_tenant", "admin_list_users", "admin_reset_user_password", "admin_stats",
+	"admin_set_tenant_status", "admin_delete_tenant", "admin_list_users", "admin_reset_user_password", "admin_stats",
 	"admin_list_all_users", "admin_get_user", "admin_list_user_memberships", "admin_set_user_status", "admin_delete_user", "admin_revoke_user_sessions", "admin_set_platform_admin",
 }
 
@@ -182,7 +182,6 @@ func TestIntegrationAdminFunctions(t *testing.T) {
 			`SELECT admin_create_tenant($1, gen_random_uuid(), 'nope', 'Nope', 'capped', gen_random_uuid(), NULL)`,
 			`SELECT admin_set_tenant_status($1, '` + tenantB + `', 'suspended', gen_random_uuid(), NULL)`,
 			`SELECT admin_delete_tenant($1, '` + tenantB + `', gen_random_uuid(), NULL)`,
-			`SELECT admin_discard_new_tenant($1, '` + tenantB + `', gen_random_uuid(), NULL)`,
 			`SELECT * FROM admin_list_users($1, '` + tenantA + `', '', 25, 0)`,
 			`SELECT * FROM admin_reset_user_password($1, '` + userOwnerB + `', '` + fakeHash + `', gen_random_uuid(), NULL)`,
 			`SELECT admin_stats($1)`,
@@ -461,43 +460,25 @@ func TestIntegrationAdminFunctions(t *testing.T) {
 		}
 	})
 
-	t.Run("discard a new organization", func(t *testing.T) {
+	t.Run("a rolled back creation leaves no tenant, slug or audit row", func(t *testing.T) {
 		const fresh = "01920000-0000-7000-8000-0000000000f1"
-		create := func() bool {
-			return changed(`SELECT admin_create_tenant($1, $2, 'fresh', 'Fresh', 'internal', gen_random_uuid(), NULL)`, userPlatform, fresh)
+		tx, err := api.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
 		}
-		if !create() {
-			t.Fatal("create not reported")
+		var created bool
+		if err := tx.QueryRow(ctx, `SELECT admin_create_tenant($1, $2, 'fresh', 'Fresh', 'internal', gen_random_uuid(), NULL)`, userPlatform, fresh).Scan(&created); err != nil || !created {
+			t.Fatalf("create: %v %v", created, err)
 		}
-		wantState(exec(`SELECT admin_discard_new_tenant($1, $2, gen_random_uuid(), NULL)`, userOwnerA, fresh), "PRA01")
-		// An organization with a member, or an old one, is not undone.
-		pgtest.MustExec(t, admin, `INSERT INTO memberships (tenant_id, user_id, role) VALUES ('`+fresh+`', '`+userOwnerA+`', 'owner')`)
-		if changed(`SELECT admin_discard_new_tenant($1, $2, gen_random_uuid(), NULL)`, userPlatform, fresh) {
-			t.Fatal("an organization with a member was discarded")
+		if err := tx.Rollback(ctx); err != nil {
+			t.Fatal(err)
 		}
-		pgtest.MustExec(t, admin, `DELETE FROM memberships WHERE tenant_id = '`+fresh+`'`,
-			`UPDATE tenants SET created_at = now() - interval '1 hour' WHERE id = '`+fresh+`'`)
-		if changed(`SELECT admin_discard_new_tenant($1, $2, gen_random_uuid(), NULL)`, userPlatform, fresh) {
-			t.Fatal("an old organization was discarded")
+		var n int
+		if err := admin.QueryRow(ctx, `SELECT (SELECT count(*) FROM tenants WHERE id = $1 OR slug = 'fresh') + (SELECT count(*) FROM audit_log WHERE tenant_id = $1)`, fresh).Scan(&n); err != nil || n != 0 {
+			t.Fatalf("rows left behind: %d (err %v)", n, err)
 		}
-		pgtest.MustExec(t, admin, `UPDATE tenants SET created_at = now() WHERE id = '`+fresh+`'`)
-		if !changed(`SELECT admin_discard_new_tenant($1, $2, gen_random_uuid(), NULL)`, userPlatform, fresh) {
-			t.Fatal("discard not reported")
-		}
-		if changed(`SELECT admin_discard_new_tenant($1, $2, gen_random_uuid(), NULL)`, userPlatform, fresh) {
-			t.Fatal("second discard reported as a change")
-		}
-		var deleted bool
-		var slug string
-		if err := admin.QueryRow(ctx, `SELECT deleted_at IS NOT NULL, slug FROM tenants WHERE id = $1`, fresh).Scan(&deleted, &slug); err != nil || !deleted || slug == "fresh" {
-			t.Fatalf("discarded tenant: deleted=%v slug=%q err=%v", deleted, slug, err)
-		}
-		const again = "01920000-0000-7000-8000-0000000000f2"
-		if !changed(`SELECT admin_create_tenant($1, $2, 'fresh', 'Fresh', 'internal', gen_random_uuid(), NULL)`, userPlatform, again) {
-			t.Fatal("the released slug cannot be used again")
-		}
-		if changed(`SELECT admin_discard_new_tenant($1, $2, gen_random_uuid(), NULL)`, userPlatform, tenantDef) {
-			t.Fatal("the default organization was discarded")
+		if !changed(`SELECT admin_create_tenant($1, $2, 'fresh', 'Fresh', 'internal', gen_random_uuid(), NULL)`, userPlatform, fresh) {
+			t.Fatal("the slug cannot be used after the rollback")
 		}
 	})
 }
