@@ -1167,6 +1167,41 @@ export interface paths {
     patch: operations["updateSpecula"];
     trace?: never;
   };
+  "/api/v1/specula/{speculaId}/slot-losses": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Specula id; a value that is not a UUID is answered with 400 */
+        speculaId: components["parameters"]["SpeculaId"];
+      };
+      cookie?: never;
+    };
+    /**
+     * Checks a Specula missed or lost
+     * @description What the Specula reported, in its `hello`, about checks it never ran (`missed`) and results
+     *     it gave up on (`dropped`), summed by reason over the range ending now, with the hours that
+     *     had any. The numbers describe the Specula, not one monitor, and have the resolution of an
+     *     hour. `reporting` is false while the Specula does not announce the capability that carries
+     *     them (an executor from before it, or one that never said hello): no losses are then known,
+     *     which is not the same as none. A count of the seconds before a crash is lost with the
+     *     process. Same visibility as `getSpecula` (404 otherwise); a revoked Specula is read like any other.
+     *
+     *     Reasons of `missed`: `busy` (the previous check of the same monitor was still running),
+     *     `late` (the process was stalled for a whole interval), `scheduleExpired` (Proreta was
+     *     unreachable for longer than the schedule is valid). Reasons of `dropped`: `bufferSize` and
+     *     `bufferAge` (the buffer reached its limits), `rejected`, `superseded` and `tooOld` (Proreta
+     *     refused the result for good), `unreadable` (a buffer segment could not be read).
+     */
+    get: operations["getSpeculaSlotLosses"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/members": {
     parameters: {
       query?: never;
@@ -3493,6 +3528,44 @@ export interface components {
        * @example spc_n0t-a-real-token
        */
       token: string;
+    };
+    /** @enum {string} */
+    SlotLossReason:
+      | "busy"
+      | "late"
+      | "scheduleExpired"
+      | "bufferSize"
+      | "bufferAge"
+      | "rejected"
+      | "superseded"
+      | "tooOld"
+      | "unreadable";
+    SpeculaSlotLossTotal: {
+      /** @enum {string} */
+      kind: "missed" | "dropped";
+      reason: components["schemas"]["SlotLossReason"];
+      /** Format: int64 */
+      count: number;
+    };
+    SpeculaSlotLossBucket: {
+      /**
+       * Format: date-time
+       * @description Start of the UTC hour
+       */
+      hour: string;
+      /** Format: int64 */
+      missed: number;
+      /** Format: int64 */
+      dropped: number;
+    };
+    SpeculaSlotLosses: {
+      range: components["schemas"]["StatsRange"];
+      /** @description The Specula announces the capability that reports losses */
+      reporting: boolean;
+      /** @description One entry per kind and reason that had losses in the range, missed first */
+      totals: components["schemas"]["SpeculaSlotLossTotal"][];
+      /** @description The hours of the range that had losses, oldest first (at most 720) */
+      buckets: components["schemas"]["SpeculaSlotLossBucket"][];
     };
     SpeculaList: {
       items: components["schemas"]["Specula"][];
@@ -6371,6 +6444,36 @@ export interface operations {
       403: components["responses"]["Forbidden"];
       404: components["responses"]["NotFound"];
       422: components["responses"]["UnprocessableEntity"];
+      default: components["responses"]["Error"];
+    };
+  };
+  getSpeculaSlotLosses: {
+    parameters: {
+      query?: {
+        /** @description Time range ending now */
+        range?: components["schemas"]["StatsRange"];
+      };
+      header?: never;
+      path: {
+        /** @description Specula id; a value that is not a UUID is answered with 400 */
+        speculaId: components["parameters"]["SpeculaId"];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The losses in the range */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SpeculaSlotLosses"];
+        };
+      };
+      400: components["responses"]["BadRequest"];
+      401: components["responses"]["Unauthorized"];
+      404: components["responses"]["NotFound"];
       default: components["responses"]["Error"];
     };
   };

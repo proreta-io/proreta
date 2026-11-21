@@ -130,6 +130,7 @@ var roleCalls = map[string]struct {
 	"listSpecula":                {authz.Viewer, http.MethodGet, "/api/v1/specula", ""},
 	"createSpecula":              {authz.Maintainer, http.MethodPost, "/api/v1/specula", `{"name":"role matrix"}`},
 	"getSpecula":                 {authz.Viewer, http.MethodGet, "/api/v1/specula/{id}", ""},
+	"getSpeculaSlotLosses":       {authz.Viewer, http.MethodGet, "/api/v1/specula/{id}/slot-losses", ""},
 	"updateSpecula":              {authz.Maintainer, http.MethodPatch, "/api/v1/specula/{id}", `{"name":"x"}`},
 	"revokeSpecula":              {authz.Maintainer, http.MethodDelete, "/api/v1/specula/{id}", ""},
 	"listMembers":                {authz.Viewer, http.MethodGet, "/api/v1/members", ""},

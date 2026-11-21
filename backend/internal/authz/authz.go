@@ -339,6 +339,7 @@ var operations = map[string]Permission{
 	"listchannels":         "channel.read",
 	"listspecula":          "specula.read",
 	"getspecula":           "specula.read",
+	"getspeculaslotlosses": "specula.read",
 	"getchannel":           "channel.read",
 	// Everyone who belongs lists people; a person without an organization role gets only those
 	// who share a project (the service narrows the list).

@@ -34,7 +34,7 @@ var expectedMinimum = map[Role][]string{
 		"changePassword", "acceptInvitation", "leaveOrganization", "listIdentities", "unlinkIdentity",
 		"listMonitors", "getMonitor", "getMonitorStats", "listMonitorChecks", "listMonitorIncidents",
 		"listChannels", "getChannel", "listMembers", "listProjects", "getProject", "listProjectMembers",
-		"listStatusPages", "getStatusPage", "listStatusPageDomains", "listSpecula", "getSpecula",
+		"listStatusPages", "getStatusPage", "listStatusPageDomains", "listSpecula", "getSpecula", "getSpeculaSlotLosses",
 	},
 	Member: {
 		"createMonitor", "updateMonitor", "deleteMonitor", "pauseMonitor", "resumeMonitor",
