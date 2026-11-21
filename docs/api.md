@@ -9,7 +9,7 @@ Not breaking: a new operation, a new optional request parameter or field, a new 
 
 Errors stay `application/problem+json` (RFC 9457); clients match on the `type` URN, never on `title` or `detail`.
 
-The Specula API ([api/specula.yaml](../api/specula.yaml), the wire contract between the gateway and executors in customer networks) follows the same rules: executors of the previous minor release must keep working against a newer gateway. It is checked against the Go shapes by a test, not yet by `oasdiff` in CI.
+The Specula API ([api/specula.yaml](../api/specula.yaml), the wire contract between the gateway and executors in customer networks) follows the same rules: executors of the previous minor release must keep working against a newer gateway. It is checked against the Go shapes by a test, linted with spectral, and compared with `oasdiff breaking` against the base branch in CI, like the main contract.
 
 ## Making a breaking change
 It needs a written decision (an ADR in the maintainers' records) and an entry in [api/oasdiff-err-ignore.txt](../api/oasdiff-err-ignore.txt) with a comment naming it. The file is empty at 1.0. Prefer a new operation or a new version of the path over changing an existing one.

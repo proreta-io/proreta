@@ -39,6 +39,17 @@ jobs:
         run: bash scripts/check-todos.sh
       - name: No internal record references
         run: bash scripts/check-internal-refs.sh
+      - name: Actions pinned to a commit, no floating tool versions
+        run: |
+          set -euo pipefail
+          if grep -nE '^\s*(-\s+)?uses:\s' .github/workflows/*.yml | grep -vE 'uses:\s+\./' | grep -vE '@[0-9a-f]{40}(\s|$)'; then
+            echo "::error::a uses: reference is not pinned to a 40-character commit SHA"
+            exit 1
+          fi
+          if grep -nE '@lates[t]' .github/workflows/*.yml scripts/*.sh Makefile; then
+            echo "::error::a floating latest version is not a pin"
+            exit 1
+          fi
       - name: Install shellcheck (pinned, checksum verified)
         env:
           SHELLCHECK_VERSION: 0.11.0
@@ -359,7 +370,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Lint OpenAPI (spectral)
-        run: npx --yes @stoplight/spectral-cli@6.11.1 lint "$OPENAPI_SPEC" "$SPECULA_SPEC" --ruleset .github/spectral.yaml --fail-severity warn
+        run: |
+          set -euo pipefail
+          # Locked by scripts/spectral/package-lock.json (integrity hashes); npm ci fails on any mismatch.
+          npm ci --ignore-scripts --no-audit --no-fund --prefix scripts/spectral
+          scripts/spectral/node_modules/.bin/spectral lint "$OPENAPI_SPEC" "$SPECULA_SPEC" --ruleset .github/spectral.yaml --fail-severity warn
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         if: github.event_name == 'pull_request'
         with:
@@ -381,6 +396,7 @@ jobs:
           # (an operation that is stable on the base and experimental on the head shows up as removed).
           python3 scripts/strip-experimental.py "${RUNNER_TEMP}/base-full.yaml" > "${RUNNER_TEMP}/base-openapi.yaml"
           python3 scripts/strip-experimental.py "$OPENAPI_SPEC" > "${RUNNER_TEMP}/head-openapi.yaml"
+          # Pinned by version; the Go checksum database verifies the module.
           go install github.com/oasdiff/oasdiff@v1.37.0
           # Exceptions need an ADR and go into api/oasdiff-err-ignore.txt (empty from 1.0).
           "$(go env GOPATH)/bin/oasdiff" breaking "${RUNNER_TEMP}/base-openapi.yaml" "${RUNNER_TEMP}/head-openapi.yaml" --fail-on ERR \
@@ -450,8 +466,9 @@ jobs:
           version: ${{ env.HELM_VERSION }}
       - name: Install PyYAML (chart invariant checks)
         run: |
+          set -euo pipefail
           python3 -m venv "${RUNNER_TEMP}/venv"
-          "${RUNNER_TEMP}/venv/bin/pip" install --quiet pyyaml==6.0.2
+          "${RUNNER_TEMP}/venv/bin/pip" install --quiet --require-hashes -r scripts/requirements-ci.txt
           echo "${RUNNER_TEMP}/venv/bin" >> "$GITHUB_PATH"
       - name: Install kubeconform (pinned, checksum verified)
         env:
