@@ -18,7 +18,6 @@ export type SpeculaCreate = Schemas["SpeculaCreate"];
 export type SpeculaUpdate = Schemas["SpeculaUpdate"];
 export type SpeculaCreated = Schemas["SpeculaCreated"];
 export type SpeculaStatus = Schemas["SpeculaStatus"];
-export type SpeculaSlotLosses = Schemas["SpeculaSlotLosses"];
 export type SlotLossReason = Schemas["SlotLossReason"];
 export type MonitorLocationInput = Schemas["MonitorLocationInput"];
 export type Channel = Schemas["Channel"];
