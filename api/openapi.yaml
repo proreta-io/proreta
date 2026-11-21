@@ -38,8 +38,8 @@ info:
     - List endpoints answer an object with `items` (never a bare array) and document their caps;
       other lists may gain cursor pagination as optional parameters and response fields, without
       breaking existing clients.
-    - Operations marked `x-experimental: true` (the platform admin API and the status page domain
-      operations) may change in any release.
+    - Operations marked `x-experimental: true` (the platform admin API, the status page domain
+      operations and the Specula slot losses) may change in any release.
 
     Roles: the same four roles exist at two levels. A role on the organization applies to every
     project of it; a direct role on a project applies to that project only; the effective role in
@@ -2021,6 +2021,50 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/specula/{speculaId}/slot-losses:
+    parameters:
+      - $ref: "#/components/parameters/SpeculaId"
+    get:
+      operationId: getSpeculaSlotLosses
+      x-experimental: true
+      summary: Checks a Specula missed or lost
+      description: |
+        What the Specula reported, in its `hello`, about checks it never ran (`missed`) and results
+        it gave up on (`dropped`), summed by reason over the range ending now, with the hours that
+        had any. The numbers describe the Specula, not one monitor, and have the resolution of an
+        hour. `reporting` is false while the Specula does not announce the capability that carries
+        them (an executor from before it, or one that never said hello): no losses are then known,
+        which is not the same as none. A count of the seconds before a crash is lost with the
+        process. Same visibility as `getSpecula` (404 otherwise); a revoked Specula is read like any other.
+
+        Reasons of `missed`: `busy` (the previous check of the same monitor was still running),
+        `late` (the process was stalled for a whole interval), `scheduleExpired` (Proreta was
+        unreachable for longer than the schedule is valid). Reasons of `dropped`: `bufferSize` and
+        `bufferAge` (the buffer reached its limits), `rejected`, `superseded` and `tooOld` (Proreta
+        refused the result for good), `unreadable` (a buffer segment could not be read).
+      tags: [specula]
+      parameters:
+        - name: range
+          in: query
+          required: false
+          description: Time range ending now
+          schema:
+            $ref: "#/components/schemas/StatsRange"
+      responses:
+        "200":
+          description: The losses in the range
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpeculaSlotLosses"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
         default:
@@ -6271,6 +6315,60 @@ components:
           type: string
           description: Starts with `spc_`. Store it now; it cannot be read again.
           example: spc_n0t-a-real-token
+    SlotLossReason:
+      type: string
+      enum: [busy, late, scheduleExpired, bufferSize, bufferAge, rejected, superseded, tooOld, unreadable]
+    SpeculaSlotLossTotal:
+      type: object
+      additionalProperties: false
+      required: [kind, reason, count]
+      properties:
+        kind:
+          type: string
+          enum: [missed, dropped]
+        reason:
+          $ref: "#/components/schemas/SlotLossReason"
+        count:
+          type: integer
+          format: int64
+          minimum: 1
+    SpeculaSlotLossBucket:
+      type: object
+      additionalProperties: false
+      required: [hour, missed, dropped]
+      properties:
+        hour:
+          type: string
+          format: date-time
+          description: Start of the UTC hour
+        missed:
+          type: integer
+          format: int64
+          minimum: 0
+        dropped:
+          type: integer
+          format: int64
+          minimum: 0
+    SpeculaSlotLosses:
+      type: object
+      additionalProperties: false
+      required: [range, reporting, totals, buckets]
+      properties:
+        range:
+          $ref: "#/components/schemas/StatsRange"
+        reporting:
+          type: boolean
+          description: The Specula announces the capability that reports losses
+        totals:
+          type: array
+          description: One entry per kind and reason that had losses in the range, missed first
+          items:
+            $ref: "#/components/schemas/SpeculaSlotLossTotal"
+        buckets:
+          type: array
+          description: The hours of the range that had losses, oldest first (at most 720)
+          items:
+            $ref: "#/components/schemas/SpeculaSlotLossBucket"
     SpeculaList:
       type: object
       additionalProperties: false

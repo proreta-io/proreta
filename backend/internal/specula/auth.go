@@ -2,6 +2,7 @@ package specula
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -52,12 +53,20 @@ type HelloInput struct {
 	BufferDegraded    bool
 	// ClockOffsetMs is the server's time minus the executor's corrected clock; nil when unmeasured.
 	ClockOffsetMs *int64
+	// SlotCounters are the cumulative counters of a schedule/2 hello by reason name; nil when the hello had none.
+	SlotCounters map[string]int64
+}
+
+// Loss is how much a counter grew since the previous hello of the same process.
+type Loss struct {
+	Kind, Reason string
+	Count        int64
 }
 
 // Hello records what a Specula reports about itself. duplicate is true when this hello carried a
 // different instance id than the one stored, and the stored one said hello less than three
 // minutes ago: two executors share the token.
-func Hello(ctx context.Context, pool *db.Pool, id uuid.UUID, in HelloInput) (duplicate bool, err error) {
+func Hello(ctx context.Context, pool *db.Pool, id uuid.UUID, in HelloInput) (duplicate bool, losses []Loss, err error) {
 	var instance *string
 	if in.InstanceID != "" {
 		instance = &in.InstanceID
@@ -75,13 +84,29 @@ func Hello(ctx context.Context, pool *db.Pool, id uuid.UUID, in HelloInput) (dup
 		if !ok {
 			return ErrUnauthorized
 		}
-		return nil
+		if in.SlotCounters == nil {
+			return nil
+		}
+		// Same transaction, so the deltas and the hello's row update commit together.
+		raw, err := json.Marshal(in.SlotCounters)
+		if err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT kind, reason, delta FROM specula_record_slot_losses($1, $2)`, id, raw)
+		if err != nil {
+			return err
+		}
+		losses, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (Loss, error) {
+			var l Loss
+			return l, r.Scan(&l.Kind, &l.Reason, &l.Count)
+		})
+		return err
 	})
 	if errors.Is(err, ErrUnauthorized) {
-		return false, err
+		return false, nil, err
 	}
 	if err != nil {
-		return false, fmt.Errorf("specula: hello: %w", err)
+		return false, nil, fmt.Errorf("specula: hello: %w", err)
 	}
-	return duplicate, nil
+	return duplicate, losses, nil
 }

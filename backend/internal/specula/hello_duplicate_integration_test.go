@@ -31,7 +31,7 @@ func TestIntegrationHelloDuplicateInstanceAndClockOffset(t *testing.T) {
 	}
 	hello := func(instance string, offset *int64) bool {
 		t.Helper()
-		dup, err := specula.Hello(ctx, worker, s.ID, specula.HelloInput{Version: "v", Hostname: "h", InstanceID: instance, ClockOffsetMs: offset})
+		dup, _, err := specula.Hello(ctx, worker, s.ID, specula.HelloInput{Version: "v", Hostname: "h", InstanceID: instance, ClockOffsetMs: offset})
 		if err != nil {
 			t.Fatal(err)
 		}

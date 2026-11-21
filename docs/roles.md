@@ -165,6 +165,7 @@ Operations marked `public` need no session. Operations marked `platform admin` a
 | `RevokeSpecula` | `DELETE /api/v1/specula/{speculaId}` | `specula.manage` |
 | `GetSpecula` | `GET /api/v1/specula/{speculaId}` | `specula.read` |
 | `UpdateSpecula` | `PATCH /api/v1/specula/{speculaId}` | `specula.manage` |
+| `GetSpeculaSlotLosses` | `GET /api/v1/specula/{speculaId}/slot-losses` | `specula.read` |
 | `ListStatusPages` | `GET /api/v1/status-pages` | `statuspage.read` |
 | `CreateStatusPage` | `POST /api/v1/status-pages` | `statuspage.manage` |
 | `DeleteStatusPage` | `DELETE /api/v1/status-pages/{statusPageId}` | `statuspage.manage` |

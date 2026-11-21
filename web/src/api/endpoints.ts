@@ -18,6 +18,7 @@ export type SpeculaCreate = Schemas["SpeculaCreate"];
 export type SpeculaUpdate = Schemas["SpeculaUpdate"];
 export type SpeculaCreated = Schemas["SpeculaCreated"];
 export type SpeculaStatus = Schemas["SpeculaStatus"];
+export type SlotLossReason = Schemas["SlotLossReason"];
 export type MonitorLocationInput = Schemas["MonitorLocationInput"];
 export type Channel = Schemas["Channel"];
 export type ChannelCreate = Schemas["ChannelCreate"];
@@ -86,6 +87,7 @@ export const queryKeys = {
   checks: (id: string) => ["monitors", id, "checks"] as const,
   incidents: (id: string) => ["monitors", id, "incidents"] as const,
   specula: ["specula"] as const,
+  speculaLosses: (id: string, range: StatsRange) => ["specula", id, "slot-losses", range] as const,
   speculaFor: (projectId: string | undefined) => ["specula", "for", projectId ?? "all"] as const,
   channels: ["channels"] as const,
   channelsFor: (projectId: string | undefined) => ["channels", "for", projectId ?? "all"] as const,
@@ -285,6 +287,13 @@ export const listSpecula = (projectId?: string, includeRevoked = false) =>
   );
 
 const speculaPath = (speculaId: string) => ({ params: { path: { speculaId } } });
+
+export const getSpeculaSlotLosses = (speculaId: string, range: StatsRange) =>
+  unwrap(
+    client.GET("/api/v1/specula/{speculaId}/slot-losses", {
+      params: { path: { speculaId }, query: { range } },
+    }),
+  );
 
 export const createSpecula = (body: SpeculaCreate) =>
   unwrap(client.POST("/api/v1/specula", { body }));

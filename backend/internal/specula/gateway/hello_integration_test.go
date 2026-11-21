@@ -175,6 +175,47 @@ func TestIntegrationHelloCapabilities(t *testing.T) {
 		t.Errorf("clock offset out of range: %d", code)
 	}
 
+	// schedule/2: offered next to schedule/1 only to an executor that announced it, counters are
+	// recorded as deltas and counted in the metric; schedule/2 alone is not a schedule mode.
+	caps2 := []string{"tcp", "schedule/1", "schedule/2"}
+	if out := hello(wire.HelloRequest{Version: "0.4.0", Hostname: "pod", Capabilities: []string{"tcp", "schedule/1"}}); !slices.Equal(out.Modes, []string{wire.ModeSchedule}) {
+		t.Errorf("a schedule/1 executor is offered %v", out.Modes)
+	}
+	if out := hello(wire.HelloRequest{Version: "0.4.0", Hostname: "pod", Capabilities: []string{"tcp", "schedule/2"}}); !slices.Equal(out.Modes, []string{wire.ModePull}) {
+		t.Errorf("schedule/2 without schedule/1 is offered %v", out.Modes)
+	}
+	if out := hello(wire.HelloRequest{Version: "0.4.0", Hostname: "pod", Capabilities: caps2, InstanceID: "s2"}); !slices.Equal(out.Modes, []string{wire.ModeSchedule, wire.ModeSchedule2}) {
+		t.Errorf("a schedule/2 executor is offered %v", out.Modes)
+	}
+	counters := func(busy, tooOld int64) *wire.SlotCounters {
+		return &wire.SlotCounters{Missed: wire.MissedCounters{Busy: busy}, Dropped: wire.DroppedCounters{TooOld: tooOld}}
+	}
+	hello(wire.HelloRequest{Version: "0.4.0", Hostname: "pod", Capabilities: caps2, InstanceID: "s2", SlotCounters: counters(4, 1)})
+	hello(wire.HelloRequest{Version: "0.4.0", Hostname: "pod", Capabilities: caps2, InstanceID: "s2", SlotCounters: counters(7, 1)})
+	if n := metricValue(t, reg, "proreta_specula_slot_losses_total", "kind", "missed", "reason", "busy"); n != 7 {
+		t.Errorf("slot_losses_total missed/busy = %v, want 7", n)
+	}
+	if n := metricValue(t, reg, "proreta_specula_slot_losses_total", "kind", "dropped", "reason", "tooOld"); n != 1 {
+		t.Errorf("slot_losses_total dropped/tooOld = %v, want 1", n)
+	}
+	var rows int64
+	if err := admin.QueryRow(ctx, `SELECT sum(count) FROM specula_slot_losses WHERE specula_id = $1 AND reason = 'busy'`, s.ID).Scan(&rows); err != nil || rows != 7 {
+		t.Errorf("stored busy %d %v", rows, err)
+	}
+	for name, in := range map[string]any{
+		"counters without the capability": wire.HelloRequest{Version: "1", Capabilities: []string{"tcp", "schedule/1"}, SlotCounters: counters(1, 0)},
+		"a negative counter":              wire.HelloRequest{Version: "1", Capabilities: caps2, SlotCounters: counters(-1, 0)},
+		"a counter over the maximum":      wire.HelloRequest{Version: "1", Capabilities: caps2, SlotCounters: counters(wire.MaxSlotCounter+1, 0)},
+		"an unknown counter":              map[string]any{"version": "1", "hostname": "h", "capabilities": caps2, "slotCounters": map[string]any{"missed": map[string]any{"bogus": 1}, "dropped": map[string]any{}}},
+	} {
+		if code, _ := call(t, srv, token, "/hello", in); code != http.StatusBadRequest {
+			t.Errorf("%s: %d, want 400", name, code)
+		}
+	}
+	if code, _ := call(t, srv, token, "/hello", wire.HelloRequest{Version: "1", Capabilities: caps2, SlotCounters: counters(wire.MaxSlotCounter, 0)}); code != http.StatusOK {
+		t.Errorf("a counter at the maximum: %d", code)
+	}
+
 	// Bad values answer 400 and change nothing.
 	neg := -1
 	if code, _ := call(t, srv, token, "/hello", wire.HelloRequest{Version: "1", BufferDepth: &neg}); code != http.StatusBadRequest {

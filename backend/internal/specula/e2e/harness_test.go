@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -49,9 +50,12 @@ type link struct {
 	clk        *simClock
 	cut        atomic.Bool
 	noSchedule atomic.Bool // answers 404 on /schedule, as a gateway without it does
-	mu         sync.Mutex
-	claims     []string // bodies of the answers to /claim
-	hits       map[string]int
+	// previous behaves as the gateway of the previous protocol version on /hello: a field it does
+	// not know is a 400, and it offers schedule/1 at most.
+	previous atomic.Bool
+	mu       sync.Mutex
+	claims   []string // bodies of the answers to /claim
+	hits     map[string]int
 }
 
 type tee struct {
@@ -80,6 +84,10 @@ func newLink(t *testing.T, clk *simClock, h http.Handler) *link {
 			http.NotFound(w, r)
 			return
 		}
+		if l.previous.Load() && r.URL.Path == wire.PathHello {
+			serveAsPreviousVersion(w, r, h)
+			return
+		}
 		if r.URL.Path == wire.PathClaim {
 			tw := &tee{ResponseWriter: w}
 			h.ServeHTTP(tw, r)
@@ -92,6 +100,42 @@ func newLink(t *testing.T, clk *simClock, h http.Handler) *link {
 	}))
 	t.Cleanup(l.srv.Close)
 	return l
+}
+
+// previousHello is HelloRequest as the previous protocol version defined it, copied so that it does
+// not follow the wire package.
+type previousHello struct {
+	Version          string     `json:"version"`
+	Hostname         string     `json:"hostname"`
+	Capabilities     []string   `json:"capabilities,omitempty"`
+	InstanceID       string     `json:"instanceId,omitempty"`
+	ScheduleIssuedAt *time.Time `json:"scheduleIssuedAt,omitempty"`
+	BufferDepth      *int       `json:"bufferDepth,omitempty"`
+	OldestUnsentAt   *time.Time `json:"oldestUnsentAt,omitempty"`
+	BufferDegraded   *bool      `json:"bufferDegraded,omitempty"`
+	ClockOffsetMs    *int64     `json:"clockOffsetMs,omitempty"`
+}
+
+// serveAsPreviousVersion answers a hello like the previous gateway: strict decoding, no schedule/2.
+func serveAsPreviousVersion(w http.ResponseWriter, r *http.Request, h http.Handler) {
+	raw, _ := io.ReadAll(r.Body)
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if dec.Decode(&previousHello{}) != nil {
+		http.Error(w, "unknown field", http.StatusBadRequest)
+		return
+	}
+	r.Body = io.NopCloser(bytes.NewReader(raw))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	var out wire.HelloResponse
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &out) != nil {
+		w.WriteHeader(rec.Code)
+		_, _ = w.Write(rec.Body.Bytes())
+		return
+	}
+	out.Modes = slices.DeleteFunc(out.Modes, func(m string) bool { return m == wire.ModeSchedule2 })
+	_ = json.NewEncoder(w).Encode(out)
 }
 
 // prober answers checks from the failure windows of the test, by the simulated time.
@@ -239,6 +283,12 @@ func (r *recordedSlack) all() []string {
 // can still be corrected.
 func newEnv(t *testing.T, name string, back time.Duration, specs []monSpec) *env {
 	t.Helper()
+	return newEnvTTL(t, name, back, specs, 0)
+}
+
+// newEnvTTL is newEnv with a schedule that stays valid for ttl (zero: the default, 24 hours).
+func newEnvTTL(t *testing.T, name string, back time.Duration, specs []monSpec, ttl time.Duration) *env {
+	t.Helper()
 	ctx := context.Background()
 	pg := pgtest.New(t, pgtest.DBName(name))
 	e := &env{t: t, ctx: ctx, pg: pg, admin: pg.AdminConn(t), worker: pg.Conn(t, pg.WorkerURL), reg: prometheus.NewRegistry(), logs: &syncBuf{}}
@@ -313,7 +363,7 @@ func newEnv(t *testing.T, name string, back time.Duration, specs []monSpec) *env
 	e.prober = &prober{clk: e.clk, down: map[string][][2]time.Time{}}
 	h := gateway.New(gateway.Deps{
 		Pool: workerPool, Scheduler: sched, Recorder: checkresult.Recorder{Scheduler: sched, Incidents: inc, Clock: e.clk},
-		RequestKeys: e.keys, Clock: e.clk,
+		RequestKeys: e.keys, Clock: e.clk, ScheduleTTL: ttl,
 		Log: slog.New(slog.NewTextHandler(e.logs, &slog.HandlerOptions{Level: slog.LevelWarn})), Registerer: e.reg,
 	})
 	e.link = newLink(t, e.clk, h)

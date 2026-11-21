@@ -49,6 +49,7 @@ const (
 	lockPurgeResets      int64 = 0x7072_6f72_6574_000a
 	lockPurgeDeliveries  int64 = 0x7072_6f72_6574_000c
 	lockPurgeRollups     int64 = 0x7072_6f72_6574_000d
+	lockPurgeSlotLosses  int64 = 0x7072_6f72_6574_000e
 )
 
 // StatusPageEvery is how often the snapshots of published status pages are rebuilt;
@@ -89,6 +90,7 @@ func DefaultTasks(m *Metrics, log *slog.Logger, mon *monitors.Service) []Task {
 		{Name: "purge_mail_outbox", Every: time.Hour, LockKey: lockPurgeMail, Run: purgeMail},
 		{Name: "purge_notification_deliveries", Every: time.Hour, LockKey: lockPurgeDeliveries, Run: purgeRetained(m, "notification_deliveries", "purge_notification_deliveries", func(d, _ int) int { return d })},
 		{Name: "purge_result_rollups", Every: 6 * time.Hour, LockKey: lockPurgeRollups, Run: purgeRetained(m, "result_rollups_hourly", "purge_result_rollups", func(_, mo int) int { return mo })},
+		{Name: "purge_specula_slot_losses", Every: 6 * time.Hour, LockKey: lockPurgeSlotLosses, Run: purgeSlotLosses(m)},
 		{Name: "purge_email_verifications", Every: 24 * time.Hour, LockKey: lockPurgeVerifs, Run: scalar(`SELECT purge_email_verifications()`)},
 		{Name: "purge_password_resets", Every: 24 * time.Hour, LockKey: lockPurgeResets, Run: scalar(`SELECT purge_password_resets()`)},
 		{Name: "specula_mark_unreachable", Every: time.Minute, LockKey: lockSpeculaGone, Run: speculaOffline(m)},
@@ -222,6 +224,29 @@ func purgeRetained(m *Metrics, table, fn string, pick func(days, months int) int
 			}
 		}
 		m.purgedRows.WithLabelValues(table).Add(float64(total))
+		return total, nil
+	}
+}
+
+// SlotLossRetentionDays is how long the hourly counts of missed and dropped Specula slots are kept.
+const SlotLossRetentionDays = 90
+
+// purgeSlotLosses deletes, in batches of PurgeBatch, the hourly slot loss rows older than
+// SlotLossRetentionDays. The retention is fixed: the table has at most a few rows per Specula and hour.
+func purgeSlotLosses(m *Metrics) func(context.Context, pgx.Tx, time.Time) (int, error) {
+	return func(ctx context.Context, tx pgx.Tx, _ time.Time) (int, error) {
+		total := 0
+		defer func() { m.purgedRows.WithLabelValues("specula_slot_losses").Add(float64(total)) }()
+		for range PurgeMaxBatches {
+			var n int32
+			if err := tx.QueryRow(ctx, `SELECT purge_specula_slot_losses($1)`, SlotLossRetentionDays).Scan(&n); err != nil {
+				return total, err
+			}
+			total += int(n)
+			if n < PurgeBatch {
+				break
+			}
+		}
 		return total, nil
 	}
 }

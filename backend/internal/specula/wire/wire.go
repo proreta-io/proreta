@@ -31,12 +31,16 @@ const (
 const (
 	CapTCP      = "tcp"
 	CapSchedule = "schedule/1"
+	// CapSchedule2 is schedule/1 plus HelloRequest.SlotCounters.
+	CapSchedule2 = "schedule/2"
 )
 
 // Modes the server offers in HelloResponse.Modes.
 const (
 	ModePull     = "pull"
 	ModeSchedule = "schedule/1"
+	// ModeSchedule2 is offered next to ModeSchedule to an executor that announced CapSchedule2.
+	ModeSchedule2 = "schedule/2"
 )
 
 // HeaderScheduleValidUntil carries the extended validUntil of a 304 answer of /schedule.
@@ -56,6 +60,66 @@ type HelloRequest struct {
 	// ClockOffsetMs is the server's time minus the executor's corrected clock, as last measured;
 	// absent before the first measurement.
 	ClockOffsetMs *int64 `json:"clockOffsetMs,omitempty"`
+	// SlotCounters is sent only with CapSchedule2 (schedule/2), after a hello answered with ModeSchedule2.
+	SlotCounters *SlotCounters `json:"slotCounters,omitempty"`
+}
+
+// MaxSlotCounter bounds every counter; a hello beyond it is a 400.
+const MaxSlotCounter = 1_000_000_000_000_000
+
+// SlotCounters are cumulative since the executor process started. Missed slots were never
+// checked; dropped results were checked and then given up on.
+type SlotCounters struct {
+	Missed  MissedCounters  `json:"missed"`
+	Dropped DroppedCounters `json:"dropped"`
+}
+
+// MissedCounters count slots that were never checked.
+type MissedCounters struct {
+	Busy            int64 `json:"busy"`
+	Late            int64 `json:"late"`
+	ScheduleExpired int64 `json:"scheduleExpired"`
+}
+
+// DroppedCounters count results given up on.
+type DroppedCounters struct {
+	BufferSize int64 `json:"bufferSize"`
+	BufferAge  int64 `json:"bufferAge"`
+	Rejected   int64 `json:"rejected"`
+	Superseded int64 `json:"superseded"`
+	TooOld     int64 `json:"tooOld"`
+	Unreadable int64 `json:"unreadable"`
+}
+
+// Kinds and reasons of SlotCounters, as stored and as served by the customer API.
+const (
+	LossMissed  = "missed"
+	LossDropped = "dropped"
+)
+
+// LossReasons lists the nine reasons by kind, in the order the API shows them.
+var LossReasons = map[string][]string{
+	LossMissed:  {"busy", "late", "scheduleExpired"},
+	LossDropped: {"bufferSize", "bufferAge", "rejected", "superseded", "tooOld", "unreadable"},
+}
+
+// Values returns the counters by reason name.
+func (c SlotCounters) Values() map[string]int64 {
+	return map[string]int64{
+		"busy": c.Missed.Busy, "late": c.Missed.Late, "scheduleExpired": c.Missed.ScheduleExpired,
+		"bufferSize": c.Dropped.BufferSize, "bufferAge": c.Dropped.BufferAge, "rejected": c.Dropped.Rejected,
+		"superseded": c.Dropped.Superseded, "tooOld": c.Dropped.TooOld, "unreadable": c.Dropped.Unreadable,
+	}
+}
+
+// Valid reports whether every counter is within 0..MaxSlotCounter.
+func (c SlotCounters) Valid() bool {
+	for _, v := range c.Values() {
+		if v < 0 || v > MaxSlotCounter {
+			return false
+		}
+	}
+	return true
 }
 
 // MaxClockOffsetMs bounds ClockOffsetMs (about 31 years); a hello beyond it is a 400.

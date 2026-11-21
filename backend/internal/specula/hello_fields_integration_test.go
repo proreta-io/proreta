@@ -33,7 +33,7 @@ func TestIntegrationHelloFieldsReadBack(t *testing.T) {
 		Version: "v1", Hostname: "h", Capabilities: []string{"schedule", "tcp"},
 		ScheduleIssuedAt: &issued, BufferDepth: &depth, OldestUnsentAt: &oldest, BufferDegraded: true,
 	}
-	if _, err := specula.Hello(ctx, env.Pool(t, env.WorkerURL, 4), s.ID, in); err != nil {
+	if _, _, err := specula.Hello(ctx, env.Pool(t, env.WorkerURL, 4), s.ID, in); err != nil {
 		t.Fatal(err)
 	}
 	got, err := svc.Get(ctx, a.TenantID, s.ID)

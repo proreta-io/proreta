@@ -1,5 +1,11 @@
 import { ApiError, errorMessage } from "../api/client";
-import type { Project, Specula, SpeculaCreate, SpeculaStatus } from "../api/endpoints";
+import type {
+  Project,
+  SlotLossReason,
+  Specula,
+  SpeculaCreate,
+  SpeculaStatus,
+} from "../api/endpoints";
 import { formatAgo, formatDuration } from "./format";
 
 export const SPECULA_NAME_MAX = 80;
@@ -138,3 +144,43 @@ export function executorNotes(s: Specula, now: number): string[] {
   }
   return notes;
 }
+
+/** What each reason of a missed or dropped check means, and what to do about it. */
+export const LOSS_REASONS: Record<SlotLossReason, { label: string; hint: string }> = {
+  busy: {
+    label: "Still busy",
+    hint: "The Specula was still running earlier checks. Raise its concurrency or lengthen the intervals.",
+  },
+  late: {
+    label: "Stalled",
+    hint: "The process was stalled for a whole interval. Check the CPU and memory of its host.",
+  },
+  scheduleExpired: {
+    label: "Schedule expired",
+    hint: "The Specula could not reach Proreta for longer than its schedule is valid. Check the network between them.",
+  },
+  bufferSize: {
+    label: "Buffer full",
+    hint: "Results were dropped because the buffer reached its size limit. Give it more room or fix the link to Proreta.",
+  },
+  bufferAge: {
+    label: "Buffer too old",
+    hint: "Results were dropped because they waited longer than the buffer keeps them. Fix the link to Proreta.",
+  },
+  rejected: {
+    label: "Refused",
+    hint: "Proreta refused the result for good. Check the clock of the host.",
+  },
+  superseded: {
+    label: "Monitor changed",
+    hint: "The monitor was edited, paused or moved while its results were waiting.",
+  },
+  tooOld: {
+    label: "Too old",
+    hint: "Proreta refused the result because it was older than the backlog it accepts. Check the clock of the host.",
+  },
+  unreadable: {
+    label: "Unreadable",
+    hint: "Results were dropped because part of the buffer could not be read. Check the executor's state directory.",
+  },
+};

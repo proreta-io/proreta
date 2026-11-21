@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -10,6 +11,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/authz"
 	"github.com/proreta-io/proreta/backend/internal/platform/httpx"
 	"github.com/proreta-io/proreta/backend/internal/specula"
+	"github.com/proreta-io/proreta/backend/internal/specula/wire"
 )
 
 func (s *server) speculaActor(ctx context.Context) (specula.Actor, error) {
@@ -109,6 +111,44 @@ func (s *server) GetSpecula(ctx context.Context, req gen.GetSpeculaRequestObject
 		return nil, specula.ErrNotFound
 	}
 	return gen.GetSpecula200JSONResponse(toSpecula(sp, canManageSpecula(access), time.Now())), nil
+}
+
+func (s *server) GetSpeculaSlotLosses(ctx context.Context, req gen.GetSpeculaSlotLossesRequestObject) (gen.GetSpeculaSlotLossesResponseObject, error) {
+	p, err := s.principal(ctx)
+	if err != nil {
+		return nil, err
+	}
+	access, err := s.access(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sp, err := s.specula.Get(ctx, p.TenantID, req.SpeculaId)
+	if err != nil {
+		return nil, err
+	}
+	if !visibleSpecula(access, sp) {
+		return nil, specula.ErrNotFound
+	}
+	rng := gen.N24h
+	if req.Params.Range != nil {
+		rng = *req.Params.Range
+	}
+	span := map[gen.StatsRange]time.Duration{gen.N24h: 24 * time.Hour, gen.N7d: 7 * 24 * time.Hour, gen.N30d: 30 * 24 * time.Hour}[rng]
+	totals, buckets, err := s.specula.SlotLosses(ctx, p.TenantID, sp.ID, time.Now().Add(-span))
+	if err != nil {
+		return nil, err
+	}
+	out := gen.SpeculaSlotLosses{
+		Range: rng, Reporting: slices.Contains(sp.Capabilities, wire.CapSchedule2),
+		Totals: make([]gen.SpeculaSlotLossTotal, 0, len(totals)), Buckets: make([]gen.SpeculaSlotLossBucket, 0, len(buckets)),
+	}
+	for _, t := range totals {
+		out.Totals = append(out.Totals, gen.SpeculaSlotLossTotal{Kind: gen.SpeculaSlotLossTotalKind(t.Kind), Reason: gen.SlotLossReason(t.Reason), Count: t.Count})
+	}
+	for _, b := range buckets {
+		out.Buckets = append(out.Buckets, gen.SpeculaSlotLossBucket{Hour: b.Hour, Missed: b.Missed, Dropped: b.Dropped})
+	}
+	return gen.GetSpeculaSlotLosses200JSONResponse(out), nil
 }
 
 func (s *server) CreateSpecula(ctx context.Context, req gen.CreateSpeculaRequestObject) (gen.CreateSpeculaResponseObject, error) {

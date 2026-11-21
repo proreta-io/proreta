@@ -82,6 +82,9 @@ type Executor struct {
 	// plainHello is set when the gateway rejected a hello with capabilities (an older gateway,
 	// which hands out tcp jobs without them). Only the goroutine that says hello touches it.
 	plainHello bool
+	// noCounters is set when a hello with slotCounters was answered 400 (a gateway downgraded
+	// mid-run): the counters stay off for the run, and the mode does not change. Same goroutine as plainHello.
+	noCounters bool
 	// pullOnly is set when the gateway does not serve a schedule: stop announcing schedule/1.
 	pullOnly atomic.Bool
 	modes    atomic.Pointer[[]string] // modes of the last hello answer
@@ -352,7 +355,7 @@ func (e *Executor) hello(ctx context.Context) error {
 	if !e.plainHello {
 		req.Capabilities = []string{wire.CapTCP}
 		if !e.pullOnly.Load() {
-			req.Capabilities = append(req.Capabilities, wire.CapSchedule)
+			req.Capabilities = append(req.Capabilities, wire.CapSchedule, wire.CapSchedule2)
 			req.InstanceID = e.instanceID
 			req.ScheduleIssuedAt = e.sched.issuedAt()
 			if off, ok := e.clk.Measured(); ok {
@@ -367,10 +370,23 @@ func (e *Executor) hello(ctx context.Context) error {
 					req.OldestUnsentAt = &t
 				}
 			}
+			// Only after a hello was answered with schedule/2: an older gateway rejects the field.
+			if modes := e.modes.Load(); !e.noCounters && modes != nil && hasMode(*modes, wire.ModeSchedule2) {
+				c := e.slotCounters()
+				req.SlotCounters = &c
+			}
 		}
 	}
 	sent := e.cfg.Clock.Now()
 	code, err := e.call(ctx, "/hello", req, &out)
+	if code == http.StatusBadRequest && req.SlotCounters != nil {
+		// Never a change of mode: the same hello without the counters, schedule/1 still announced.
+		e.noCounters = true
+		e.cfg.Log.Warn("the gateway rejected the slot counters; not sending them any more until restart")
+		req.SlotCounters = nil
+		sent = e.cfg.Clock.Now()
+		code, err = e.call(ctx, "/hello", req, &out)
+	}
 	if code == http.StatusBadRequest && !e.plainHello {
 		e.plainHello = true
 		sent = e.cfg.Clock.Now()

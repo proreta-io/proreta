@@ -3,6 +3,7 @@ import { useState, type SubmitEvent } from "react";
 import { errorMessage, errorMeta } from "../api/client";
 import {
   createSpecula,
+  getSpeculaSlotLosses,
   listSpecula,
   queryKeys,
   revokeSpecula,
@@ -11,6 +12,7 @@ import {
   type SpeculaCreate,
   type SpeculaCreated,
   type SpeculaUpdate,
+  type StatsRange,
 } from "../api/endpoints";
 import { useToast } from "../components/Toasts";
 import {
@@ -40,6 +42,7 @@ import {
   clockSkew,
   emptySpeculaForm,
   executorNotes,
+  LOSS_REASONS,
   mapSpeculaErrors,
   runSettings,
   sharedWith,
@@ -188,7 +191,95 @@ export default function SpeculaPage() {
           }}
         />
       )}
+
+      {items.some((s) => s.status !== "revoked") && (
+        <SlotLosses items={items.filter((s) => s.status !== "revoked")} />
+      )}
     </section>
+  );
+}
+
+const LOSS_RANGES: { value: StatsRange; label: string }[] = [
+  { value: "24h", label: "24 hours" },
+  { value: "7d", label: "7 days" },
+  { value: "30d", label: "30 days" },
+];
+
+/** Checks the Specula never ran or gave up on, by reason, as the executors reported them. */
+function SlotLosses({ items }: { items: Specula[] }) {
+  const [range, setRange] = useState<StatsRange>("24h");
+  return (
+    <section aria-labelledby="slot-losses-heading" className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 id="slot-losses-heading" className="text-lead font-semibold">
+          Missed and lost checks
+        </h2>
+        <Segmented
+          label="Time range"
+          name="lossRange"
+          size="small"
+          value={range}
+          onChange={setRange}
+          options={LOSS_RANGES}
+        />
+      </div>
+      <p className="text-muted-foreground">
+        What each Specula says it did not check or had to throw away. The numbers describe the
+        Specula, not one monitor, by the hour.
+      </p>
+      {items.map((s) => (
+        <SpeculaLosses key={s.id} specula={s} range={range} />
+      ))}
+    </section>
+  );
+}
+
+function SpeculaLosses({ specula, range }: { specula: Specula; range: StatsRange }) {
+  const losses = useQuery({
+    queryKey: queryKeys.speculaLosses(specula.id, range),
+    queryFn: () => getSpeculaSlotLosses(specula.id, range),
+  });
+  return (
+    <div
+      className="flex flex-col gap-2"
+      role="group"
+      aria-label={`Missed checks of ${specula.name}`}
+    >
+      <h3 className="text-[14px] font-semibold break-words">{specula.name}</h3>
+      {losses.isPending ? (
+        <Loading label="Loading missed checks…">
+          <Skeleton className="w-1/2" />
+        </Loading>
+      ) : losses.isError ? (
+        <ErrorState
+          title="Cannot load missed checks"
+          detail={errorMessage(losses.error)}
+          meta={errorMeta(losses.error)}
+          onRetry={() => void losses.refetch()}
+        />
+      ) : !losses.data.reporting ? (
+        <EmptyNote>This Specula does not report missed checks. Upgrade it.</EmptyNote>
+      ) : losses.data.totals.length === 0 ? (
+        <EmptyNote>No missed or lost checks in this range.</EmptyNote>
+      ) : (
+        <ul className="m-0 flex list-none flex-col gap-2 p-0">
+          {losses.data.totals.map((t) => (
+            <li key={`${t.kind}-${t.reason}`} className="flex flex-col">
+              <span>
+                <span className="font-medium">{LOSS_REASONS[t.reason].label}</span>
+                {" · "}
+                {t.kind === "missed" ? "not checked" : "checked, then dropped"}
+                {": "}
+                <span className="font-mono">{t.count.toLocaleString("en-US")}</span>
+              </span>
+              <span className="text-caption text-muted-foreground">
+                {LOSS_REASONS[t.reason].hint}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

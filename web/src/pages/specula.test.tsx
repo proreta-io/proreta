@@ -252,7 +252,7 @@ describe("Specula page", () => {
       "GET /api/v1/specula": () => json({ items: [specula()] }),
     });
     renderApp("/specula");
-    expect(await screen.findByText("Prod cluster")).toBeInTheDocument();
+    expect(within(await screen.findByRole("table")).getByText("Prod cluster")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Register a Specula" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Edit Prod cluster" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Revoke Prod cluster" })).not.toBeInTheDocument();
@@ -292,5 +292,71 @@ describe("Specula page", () => {
       await screen.findByText(/Your plan allows 1 Specula, and the limit is reached/),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Register a Specula" })).toBeDisabled();
+  });
+
+  describe("missed and lost checks", () => {
+    const losses = (over: Record<string, unknown> = {}) => ({
+      range: "24h",
+      reporting: true,
+      totals: [
+        { kind: "missed", reason: "busy", count: 1200 },
+        { kind: "dropped", reason: "tooOld", count: 3 },
+      ],
+      buckets: [],
+      ...over,
+    });
+
+    it("shows the totals by reason with what to do, and reloads for another range", async () => {
+      const ranges: (string | null)[] = [];
+      mockApi({
+        ...signedIn,
+        "GET /api/v1/projects": () => json(projects),
+        "GET /api/v1/specula": () => json({ items: [specula()] }),
+        "GET /api/v1/specula/s1/slot-losses": (req) => {
+          const range = new URL(req.url).searchParams.get("range");
+          ranges.push(range);
+          return json(losses({ range }));
+        },
+      });
+      renderApp("/specula");
+      const block = await screen.findByRole("group", { name: "Missed checks of Prod cluster" });
+      expect(await within(block).findByText(/Still busy/)).toBeInTheDocument();
+      expect(within(block).getByText("1,200")).toBeInTheDocument();
+      expect(within(block).getByText(/raise its concurrency/i)).toBeInTheDocument();
+      expect(within(block).getByText(/Too old/)).toBeInTheDocument();
+      expect(within(block).getByText(/checked, then dropped/)).toBeInTheDocument();
+      await userEvent.click(screen.getByRole("radio", { name: "7 days" }));
+      await waitFor(() => expect(ranges).toEqual(["24h", "7d"]));
+    });
+
+    it("says so when the Specula does not report, and when nothing was lost", async () => {
+      mockApi({
+        ...signedIn,
+        "GET /api/v1/projects": () => json(projects),
+        "GET /api/v1/specula": () =>
+          json({ items: [specula(), specula({ id: "s2", name: "Lab" })] }),
+        "GET /api/v1/specula/s1/slot-losses": () => json(losses({ reporting: false, totals: [] })),
+        "GET /api/v1/specula/s2/slot-losses": () => json(losses({ totals: [] })),
+      });
+      renderApp("/specula");
+      expect(
+        await screen.findByText("This Specula does not report missed checks. Upgrade it."),
+      ).toBeInTheDocument();
+      expect(
+        await screen.findByText("No missed or lost checks in this range."),
+      ).toBeInTheDocument();
+    });
+
+    it("keeps the rest of the page when one Specula's numbers cannot be loaded", async () => {
+      mockApi({
+        ...signedIn,
+        "GET /api/v1/projects": () => json(projects),
+        "GET /api/v1/specula": () => json({ items: [specula()] }),
+        "GET /api/v1/specula/s1/slot-losses": () => problem(500, "boom"),
+      });
+      renderApp("/specula");
+      expect(await screen.findByText("Cannot load missed checks")).toBeInTheDocument();
+      expect(screen.getByRole("table")).toBeInTheDocument();
+    });
   });
 });

@@ -31,7 +31,7 @@ func TestIntegrationMigrateFromScratchAndRerun(t *testing.T) {
 	}
 	want := "audit_log,auth_identities,check_results,email_settings,email_verifications,heartbeat_tokens,incident_monitors,incidents,invitations,mail_outbox,memberships,monitor_channels,monitor_location_state," +
 		"monitor_locations,monitor_schedule_epochs,monitor_state,monitors,notification_channels,notification_deliveries,org_auth_domains,password_resets,plans,platform_settings,probe_locations,project_members,projects,result_rollups_hourly,rollup_dirty_hours,rollup_state,sessions," +
-		"specula_agents,specula_projects,status_page_components,status_page_domains,status_page_released_slugs,status_page_snapshots,status_pages,tenants,users"
+		"specula_agents,specula_projects,specula_slot_losses,status_page_components,status_page_domains,status_page_released_slugs,status_page_snapshots,status_pages,tenants,users"
 	if got := strings.Join(tables, ","); got != want {
 		t.Fatalf("tables = %s, want %s", got, want)
 	}
@@ -76,6 +76,9 @@ var definerAllowList = map[string][]string{
 	"specula_revoke":       {"proreta_api"},
 	"specula_authenticate": {"proreta_worker"},
 	"specula_hello":        {"proreta_worker"},
+	// The deltas of a schedule/2 hello and their retention.
+	"specula_record_slot_losses": {"proreta_worker"},
+	"purge_specula_slot_losses":  {"proreta_worker"},
 	// Specula schedule mode: the schedule of one Specula, the hour marks of late results, and the
 	// epoch functions and triggers that only the monitor and state triggers call.
 	"specula_schedule":                  {"proreta_worker"},
@@ -234,6 +237,8 @@ var extraPolicies = map[string]struct {
 	// specula_authenticate, specula_hello, specula_revoke and the claim's access check.
 	"specula_agents.owner_specula":        {cmd: "*", roles: []string{"proreta_owner"}},
 	"specula_projects.owner_specula_read": {cmd: "r", roles: []string{"proreta_owner"}},
+	// specula_record_slot_losses and purge_specula_slot_losses.
+	"specula_slot_losses.owner_slot_losses": {cmd: "*", roles: []string{"proreta_owner"}},
 	// specula_epoch_open and specula_epoch_close, specula_schedule.
 	"monitor_schedule_epochs.owner_schedule_epochs": {cmd: "*", roles: []string{"proreta_owner"}},
 	// specula_mark_unreachable.

@@ -37,6 +37,9 @@ The pods must reach `proreta.url` over HTTPS and the services you want to check.
 | `env` | `[]` | Extra environment variables, for example `HTTPS_PROXY` for the call to Proreta. Checks never use a proxy. |
 | `resources`, `nodeSelector`, `tolerations`, `affinity`, `podAnnotations`, `podLabels`, `imagePullSecrets` | | Usual Kubernetes settings. |
 
+## Missed and lost checks
+The executor tells Proreta once a minute how many slots it never checked and how many results it dropped; Proreta shows them by reason on the Specula page. What each reason means and what to do is in the [Specula runbook](../../../docs/runbooks/specula.md#missed-and-lost-checks). Upgrade Proreta before the executor.
+
 ## State and what it survives
 The executor runs checks from a schedule it caches, and keeps results it cannot deliver in a buffer, both in the state directory. With the default `emptyDir` they survive a restart of the container (a crash, an out-of-memory kill) but **not the replacement of the pod** (an upgrade, an eviction, a node drain). If the pod is replaced while the link to Proreta is down, the buffered results and the cached schedule are lost and the executor checks nothing until it can reach Proreta again. A replacement is safe when the buffer is small, because the executor sends what it has when it is told to stop (up to 20 seconds); a replay that is still running when the pod stops loses its tail. A crash of the process loses nothing that was buffered; only a crash of the node loses up to about a second. Do not drain or reboot the executor's node while Proreta is unreachable, and if the executor and Proreta are restarted together (for example by one Argo CD sync), restart Proreta first, for example with sync waves. To keep the state across pod replacement, set `state.persistence.existingClaim` (below).
 

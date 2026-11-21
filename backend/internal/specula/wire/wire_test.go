@@ -29,6 +29,7 @@ func TestMatchesSpecification(t *testing.T) {
 		"ScheduledMonitor": reflect.TypeFor[ScheduledMonitor](), "Schedule": reflect.TypeFor[Schedule](),
 		"Report": reflect.TypeFor[Report](), "ReportsRequest": reflect.TypeFor[ReportsRequest](),
 		"ReportOutcome": reflect.TypeFor[ReportOutcome](), "ReportsResponse": reflect.TypeFor[ReportsResponse](),
+		"SlotCounters": reflect.TypeFor[SlotCounters](),
 	} {
 		ref := doc.Components.Schemas[name]
 		if ref == nil {
@@ -93,7 +94,7 @@ func TestSpecificationValues(t *testing.T) {
 	check("ReportOutcome.outcome", enumOf(prop("ReportOutcome", "outcome")),
 		[]string{OutcomeRecorded, OutcomeDuplicate, OutcomeSuperseded, OutcomeExpired, OutcomeRejected})
 	check("ScheduledMonitor.type", enumOf(prop("ScheduledMonitor", "type")), []string{TypeHTTP, TypeTCP})
-	check("HelloResponse.modes", enumOf(prop("HelloResponse", "modes").Value.Items), []string{ModePull, ModeSchedule})
+	check("HelloResponse.modes", enumOf(prop("HelloResponse", "modes").Value.Items), []string{ModePull, ModeSchedule, ModeSchedule2})
 	if doc.Paths.Find(PathSchedule).Get == nil || doc.Paths.Find(PathReports).Post == nil {
 		t.Error("schedule is a GET and reports a POST")
 	}
