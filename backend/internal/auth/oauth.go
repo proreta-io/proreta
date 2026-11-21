@@ -494,7 +494,7 @@ func (s *Service) oauthSession(ctx context.Context, tx pgx.Tx, in OAuthLoginInpu
 	if err != nil {
 		return LoginResult{}, fmt.Errorf("get user: %w", err)
 	}
-	sess, err := s.insertSession(ctx, q, t.ID, userID, in.IP, in.UserAgent)
+	sess, err := s.insertSession(ctx, q, t.ID, userID, in.IP, in.UserAgent, false)
 	if err != nil {
 		return LoginResult{}, err
 	}
@@ -509,7 +509,7 @@ func (s *Service) oauthSession(ctx context.Context, tx pgx.Tx, in OAuthLoginInpu
 		return LoginResult{}, err
 	}
 	return LoginResult{Token: sess.token, SessionInfo: SessionInfo{
-		User:   User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, IsPlatformAdmin: u.IsPlatformAdmin, IsSystemAdmin: u.IsSystemAdmin, MustChangePassword: s.mustChange(u.PasswordMustChange, u.Email), EmailVerified: u.EmailVerifiedAt != nil},
+		User:   User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, IsPlatformAdmin: u.IsPlatformAdmin, IsSystemAdmin: u.IsSystemAdmin, MustChangePassword: s.mustChange(u.PasswordMustChange, u.Email, false), EmailVerified: u.EmailVerifiedAt != nil},
 		Tenant: t, Role: role, CSRFToken: sess.csrf, ExpiresAt: sess.expiresAt,
 	}}, nil
 }
@@ -670,10 +670,11 @@ func (s *Service) ListIdentities(ctx context.Context, p Principal) (SignInMethod
 }
 
 // passwordAllowed reports whether a user with this login may sign in with a password.
-// mustChange: the flag counts only for a user who may sign in with a password; otherwise
+// mustChange: the flag counts only in a session opened with the password (a provider sign-in
+// did not use the temporary one) and only for a user who may sign in with a password; otherwise
 // changePassword is refused and the user would be locked out.
-func (s *Service) mustChange(flag bool, login string) bool {
-	return flag && s.passwordAllowed(login)
+func (s *Service) mustChange(flag bool, login string, viaPassword bool) bool {
+	return flag && viaPassword && s.passwordAllowed(login)
 }
 
 func (s *Service) passwordAllowed(login string) bool {

@@ -458,6 +458,8 @@ type Principal struct {
 	ExpiresAt time.Time
 	// MustChangePassword is read on every request, like Role.
 	MustChangePassword bool
+	// PasswordSession: the session was opened with the password, not by a provider sign-in.
+	PasswordSession bool
 }
 
 // Login verifies credentials and creates a session.
@@ -542,7 +544,7 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (LoginResult, error)
 			if t.Status != tenants.StatusActive {
 				return errSuspended
 			}
-			sess, err := s.insertSession(ctx, q, tenantID, user.ID, in.IP, in.UserAgent)
+			sess, err := s.insertSession(ctx, q, tenantID, user.ID, in.IP, in.UserAgent, true)
 			if err != nil {
 				return err
 			}
@@ -648,7 +650,7 @@ func (s *Service) checkPassword(ctx context.Context, login, password string) (*U
 	if row == nil {
 		return nil, uuid.Nil, credential{}, false, nil
 	}
-	u := &User{ID: row.ID, Login: row.Email, DisplayName: row.DisplayName, IsPlatformAdmin: row.IsPlatformAdmin, IsSystemAdmin: row.IsSystemAdmin, MustChangePassword: s.mustChange(row.PasswordMustChange, row.Email), EmailVerified: row.EmailVerifiedAt != nil}
+	u := &User{ID: row.ID, Login: row.Email, DisplayName: row.DisplayName, IsPlatformAdmin: row.IsPlatformAdmin, IsSystemAdmin: row.IsSystemAdmin, MustChangePassword: s.mustChange(row.PasswordMustChange, row.Email, true), EmailVerified: row.EmailVerifiedAt != nil}
 	ok := match && hash != s.dummy && row.Status == userStatusActive
 	var cred credential
 	if ok {
@@ -730,8 +732,9 @@ type session struct {
 }
 
 // insertSession creates a session of the membership (tenantID, userID) in the caller's tenant
-// transaction.
-func (s *Service) insertSession(ctx context.Context, q *authdb.Queries, tenantID, userID uuid.UUID, ip netip.Addr, userAgent string) (session, error) {
+// transaction. viaPassword: it was opened with the password (or inherits that from the session
+// that opened it), which is what the must-change-password rule looks at.
+func (s *Service) insertSession(ctx context.Context, q *authdb.Queries, tenantID, userID uuid.UUID, ip netip.Addr, userAgent string, viaPassword bool) (session, error) {
 	token, err := newToken()
 	if err != nil {
 		return session{}, err
@@ -743,7 +746,7 @@ func (s *Service) insertSession(ctx context.Context, q *authdb.Queries, tenantID
 	now := s.clock.Now()
 	params := authdb.InsertSessionParams{
 		ID: uuidv7.New(), UserID: userID, TenantID: tenantID, TokenHash: hashToken(token),
-		CsrfToken: csrf, CreatedAt: now, ExpiresAt: now.Add(s.ttl),
+		CsrfToken: csrf, CreatedAt: now, ExpiresAt: now.Add(s.ttl), OpenedWithPassword: viaPassword,
 	}
 	if ip.IsValid() {
 		params.Ip = &ip
@@ -806,14 +809,15 @@ func (s *Service) Authenticate(ctx context.Context, token string) (Principal, er
 			return fmt.Errorf("get membership: %w", err)
 		}
 		p.Role = role
-		flag, err := authdb.New(tx).GetPasswordMustChange(ctx, p.UserID)
+		flag, err := authdb.New(tx).GetPasswordMustChange(ctx, authdb.GetPasswordMustChangeParams{ID: p.UserID, SessionID: p.SessionID})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrUnauthenticated
 		}
 		if err != nil {
 			return fmt.Errorf("get password flag: %w", err)
 		}
-		p.MustChangePassword = s.mustChange(flag.PasswordMustChange, flag.Email)
+		p.PasswordSession = flag.OpenedWithPassword
+		p.MustChangePassword = s.mustChange(flag.PasswordMustChange, flag.Email, flag.OpenedWithPassword)
 		return nil
 	})
 	if errors.Is(err, ErrUnauthenticated) {
@@ -861,7 +865,7 @@ func (s *Service) Me(ctx context.Context, p Principal) (SessionInfo, error) {
 			return err
 		}
 		info = SessionInfo{
-			User:   User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, IsPlatformAdmin: u.IsPlatformAdmin, IsSystemAdmin: u.IsSystemAdmin, MustChangePassword: s.mustChange(u.PasswordMustChange, u.Email), EmailVerified: u.EmailVerifiedAt != nil},
+			User:   User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, IsPlatformAdmin: u.IsPlatformAdmin, IsSystemAdmin: u.IsSystemAdmin, MustChangePassword: s.mustChange(u.PasswordMustChange, u.Email, p.PasswordSession), EmailVerified: u.EmailVerifiedAt != nil},
 			Tenant: t, Role: role, CSRFToken: p.CSRFToken, ExpiresAt: p.ExpiresAt,
 		}
 		return nil

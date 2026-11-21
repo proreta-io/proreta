@@ -400,7 +400,7 @@ func (s *Service) SwitchOrganization(ctx context.Context, p Principal, tenantID 
 		if err != nil || u.Status != userStatusActive {
 			return ErrUnauthenticated
 		}
-		sess, err := s.insertSession(ctx, q, tenantID, p.UserID, ip, userAgent)
+		sess, err := s.insertSession(ctx, q, tenantID, p.UserID, ip, userAgent, p.PasswordSession)
 		if err != nil {
 			return err
 		}
@@ -412,7 +412,7 @@ func (s *Service) SwitchOrganization(ctx context.Context, p Principal, tenantID 
 			return err
 		}
 		res = LoginResult{Token: sess.token, SessionInfo: SessionInfo{
-			User:   User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, IsPlatformAdmin: u.IsPlatformAdmin, IsSystemAdmin: u.IsSystemAdmin, MustChangePassword: s.mustChange(u.PasswordMustChange, u.Email), EmailVerified: u.EmailVerifiedAt != nil},
+			User:   User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, IsPlatformAdmin: u.IsPlatformAdmin, IsSystemAdmin: u.IsSystemAdmin, MustChangePassword: s.mustChange(u.PasswordMustChange, u.Email, p.PasswordSession), EmailVerified: u.EmailVerifiedAt != nil},
 			Tenant: t, Role: role, CSRFToken: sess.csrf, ExpiresAt: sess.expiresAt,
 		}}
 		return nil

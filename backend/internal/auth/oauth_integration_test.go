@@ -754,16 +754,63 @@ func TestIntegrationMustChangeIgnoredWhilePasswordLoginIsOff(t *testing.T) {
 		t.Fatal("request: MustChangePassword = true while password login is off")
 	}
 
-	// The same row with password login on keeps the flag.
+	// With password login on, a password session of the same user is forced.
 	on := e.service(auth.Options{})
-	p, err := on.Authenticate(e.ctx, res.Token)
+	if p, err := on.Authenticate(e.ctx, res.Token); err != nil || p.MustChangePassword {
+		t.Fatalf("provider session with password login on: %v, flag = %v", err, p.MustChangePassword)
+	}
+}
+
+// A reset password is temporary: only a session opened with it is forced to replace it. A
+// provider sign-in of the same user is not, does not clear the flag, and can still change the
+// password; the password session is forced again, and changing the password clears the flag.
+func TestIntegrationMustChangeOnlyInPasswordSessions(t *testing.T) {
+	e := newOAuthEnv(t, "auth_oauth_mustchange_modes", auth.Options{})
+	const pwd, next = "a long enough password", "another long password"
+	reg, err := e.svc.Register(e.ctx, auth.RegisterInput{Email: "both@example.com", Password: pwd, IP: oauthIP})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !p.MustChangePassword {
-		t.Fatal("password login on: flag lost")
+	uid := reg.User.ID.String()
+	pgtest.MustExec(t, e.admin, `UPDATE users SET password_must_change = true WHERE id = '`+uid+`'`)
+
+	viaProvider, err := e.login(auth.OAuthLoginInput{Identity: google("g-both", "both@example.com", "")})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if res, err := on.OAuthLogin(e.ctx, auth.OAuthLoginInput{Identity: google("g-mc", "mc@example.com", ""), IP: oauthIP}); err != nil || !res.User.MustChangePassword {
-		t.Fatalf("password login on, sign-in: %v, flag = %v", err, res.User.MustChangePassword)
+	if viaProvider.User.MustChangePassword || e.principal(viaProvider).MustChangePassword {
+		t.Fatal("provider session forced to change the password")
+	}
+	if info, err := e.svc.Me(e.ctx, e.principal(viaProvider)); err != nil || info.User.MustChangePassword {
+		t.Fatalf("provider session, me: %v, flag = %v", err, info.User.MustChangePassword)
+	}
+	if e.count(`SELECT count(*) FROM users WHERE id = $1 AND password_must_change`, uid) != 1 {
+		t.Fatal("a provider sign-in cleared the flag")
+	}
+
+	viaPassword, err := e.svc.Login(e.ctx, auth.LoginInput{Login: "both@example.com", Password: pwd, IP: oauthIP})
+	if err != nil || !viaPassword.User.MustChangePassword || !e.principal(viaPassword).MustChangePassword {
+		t.Fatalf("password session: %v, flag = %v", err, viaPassword.User.MustChangePassword)
+	}
+	// Both sessions live at once, each with its own rule.
+	if e.principal(viaProvider).MustChangePassword || !e.principal(viaPassword).MustChangePassword {
+		t.Fatal("the rule of one session leaked into the other")
+	}
+	// Switching organization keeps how the session was opened.
+	if sw, err := e.svc.SwitchOrganization(e.ctx, e.principal(viaPassword), viaPassword.Tenant.ID, oauthIP, ""); err != nil || !sw.User.MustChangePassword || !e.principal(sw).MustChangePassword {
+		t.Fatalf("switched password session: %v", err)
+	}
+
+	// A provider session can change the password (the replacement session is a password one
+	// with the flag cleared).
+	changed, err := e.svc.ChangePassword(e.ctx, e.principal(viaProvider), auth.ChangePasswordInput{Current: pwd, New: next, IP: oauthIP})
+	if err != nil || changed.User.MustChangePassword || e.principal(changed).MustChangePassword {
+		t.Fatalf("change password in a provider session: %v", err)
+	}
+	if e.count(`SELECT count(*) FROM users WHERE id = $1 AND password_must_change`, uid) != 0 {
+		t.Fatal("flag not cleared by changePassword")
+	}
+	if res, err := e.svc.Login(e.ctx, auth.LoginInput{Login: "both@example.com", Password: next, IP: oauthIP}); err != nil || res.User.MustChangePassword {
+		t.Fatalf("login after the change: %v", err)
 	}
 }

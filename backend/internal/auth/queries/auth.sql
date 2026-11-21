@@ -19,10 +19,12 @@ WHERE id = @id;
 
 -- name: GetPasswordMustChange :one
 -- Read for every authenticated request: while it is true the api answers only the session and
--- password-change operations.
-SELECT password_must_change, email
-FROM users
-WHERE id = @id;
+-- password-change operations. opened_with_password: only a session opened with the password is
+-- forced (a provider sign-in did not use the temporary one).
+SELECT u.password_must_change, u.email, s.opened_with_password
+FROM users AS u
+JOIN sessions AS s ON s.user_id = u.id
+WHERE u.id = @id AND s.id = @session_id;
 
 -- name: InsertUserIfMissing :exec
 -- A user created from the Secret signs in with a password somebody else knows: it must change it.
@@ -79,8 +81,8 @@ FROM memberships
 WHERE tenant_id = @tenant_id AND user_id = @user_id;
 
 -- name: InsertSession :exec
-INSERT INTO sessions (id, user_id, tenant_id, token_hash, csrf_token, created_at, expires_at, last_seen_at, ip, user_agent)
-VALUES (@id, @user_id, @tenant_id, @token_hash, @csrf_token, @created_at, @expires_at, @created_at, @ip, @user_agent);
+INSERT INTO sessions (id, user_id, tenant_id, token_hash, csrf_token, created_at, expires_at, last_seen_at, ip, user_agent, opened_with_password)
+VALUES (@id, @user_id, @tenant_id, @token_hash, @csrf_token, @created_at, @expires_at, @created_at, @ip, @user_agent, @opened_with_password);
 
 -- name: TouchSession :exec
 UPDATE sessions

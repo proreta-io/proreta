@@ -307,6 +307,7 @@ sessions.7 expires_at timestamp with time zone not null
 sessions.8 last_seen_at timestamp with time zone not null default now()
 sessions.9 ip inet
 sessions.10 user_agent text
+sessions.11 opened_with_password boolean not null default false
 specula_agents.1 tenant_id uuid not null
 specula_agents.2 id uuid not null
 specula_agents.3 name text not null acl=proreta_api=w/proreta_owner

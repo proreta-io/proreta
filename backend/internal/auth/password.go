@@ -154,7 +154,7 @@ func (s *Service) ChangePassword(ctx context.Context, p Principal, in ChangePass
 		if err != nil {
 			return err
 		}
-		sess, err := s.insertSession(ctx, q, p.TenantID, p.UserID, in.IP, in.UserAgent)
+		sess, err := s.insertSession(ctx, q, p.TenantID, p.UserID, in.IP, in.UserAgent, true)
 		if err != nil {
 			return err
 		}

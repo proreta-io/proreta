@@ -613,12 +613,12 @@ func (s *Service) AcceptInvitation(ctx context.Context, p Principal, token strin
 		if err != nil {
 			return err
 		}
-		sess, err := s.insertSession(ctx, q, t.tenantID, p.UserID, ip, userAgent)
+		sess, err := s.insertSession(ctx, q, t.tenantID, p.UserID, ip, userAgent, p.PasswordSession)
 		if err != nil {
 			return err
 		}
 		res = LoginResult{Token: sess.token, SessionInfo: SessionInfo{
-			User: User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, MustChangePassword: s.mustChange(u.PasswordMustChange, u.Email), EmailVerified: u.EmailVerifiedAt != nil}, Tenant: tenant, Role: role,
+			User: User{ID: u.ID, Login: u.Email, DisplayName: u.DisplayName, MustChangePassword: s.mustChange(u.PasswordMustChange, u.Email, p.PasswordSession), EmailVerified: u.EmailVerifiedAt != nil}, Tenant: tenant, Role: role,
 			CSRFToken: sess.csrf, ExpiresAt: sess.expiresAt,
 		}}
 		return nil
