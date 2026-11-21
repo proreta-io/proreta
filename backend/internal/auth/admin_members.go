@@ -14,6 +14,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/authz"
 	"github.com/proreta-io/proreta/backend/internal/plans"
 	"github.com/proreta-io/proreta/backend/internal/platform/db"
+	"github.com/proreta-io/proreta/backend/internal/platform/uuidv7"
 )
 
 // Audit actions of the platform admin's member management. They replace the customer-facing
@@ -89,63 +90,9 @@ func (s *Service) SetMember(ctx context.Context, a Actor, userID uuid.UUID, role
 		return Member{}, "", authz.ErrForbidden
 	}
 	err = db.WithTenantTx(ctx, s.pool, a.TenantID, func(tx pgx.Tx) error {
-		actor, err := lockActorRole(ctx, tx, a)
-		if err != nil {
-			return err
-		}
-		q := authdb.New(tx)
-		_, err = q.GetMembershipRole(ctx, authdb.GetMembershipRoleParams{TenantID: a.TenantID, UserID: userID})
-		if err == nil {
-			var changed bool
-			m, changed, err = changeRole(ctx, tx, a, actor, userID, role)
-			action = ""
-			if changed {
-				action = ActionAdminMemberRoleChanged
-			}
-			return err
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("get membership: %w", err)
-		}
-		u, err := q.GetUserByID(ctx, userID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrUserNotFound
-		}
-		if err != nil {
-			return fmt.Errorf("get user: %w", err)
-		}
-		if u.IsSystemAdmin {
-			// BootstrapAdmin refuses to start when the admin belongs to another tenant.
-			return ErrSystemAdminMember
-		}
-		if role == RoleOwner && u.Status != "active" {
-			// A disabled account can join, but not as the organization's only usable owner.
-			n, err := q.CountOtherActiveOwners(ctx, authdb.CountOtherActiveOwnersParams{TenantID: a.TenantID, UserID: userID})
-			if err != nil {
-				return fmt.Errorf("count owners: %w", err)
-			}
-			if n == 0 {
-				return ErrLastOwner
-			}
-		}
-		if err := plans.CheckCreate(ctx, tx, a.TenantID, plans.ResourceMember); err != nil {
-			return err
-		}
-		if err := q.InsertMembership(ctx, authdb.InsertMembershipParams{TenantID: a.TenantID, UserID: userID, Role: role}); err != nil {
-			return fmt.Errorf("insert membership: %w", err)
-		}
-		row, err := q.LockMember(ctx, authdb.LockMemberParams{TenantID: a.TenantID, UserID: userID})
-		if err != nil {
-			return fmt.Errorf("read new member: %w", err)
-		}
-		m = Member{UserID: userID, Login: row.Email, DisplayName: row.DisplayName, Role: row.Role, JoinedAt: row.CreatedAt,
-			IsPlatformAdmin: row.IsPlatformAdmin, IsSystemAdmin: row.IsSystemAdmin, Status: row.Status}
-		action = ActionAdminMemberAdded
-		return audit.Record(ctx, tx, audit.Entry{
-			TenantID: a.TenantID, ActorUserID: &a.UserID, Action: action,
-			EntityType: "user", EntityID: userID.String(), IP: a.IP,
-			Metadata: map[string]any{"role": roleLabel(role)},
-		})
+		var err error
+		m, action, err = setMemberTx(ctx, tx, a, userID, role)
+		return err
 	})
 	if err != nil {
 		var limit *plans.LimitError
@@ -193,4 +140,108 @@ func wrapAdminMemberErr(op string, err error) error {
 // ValidateEmail normalizes an address by the registration rules; msg is empty when it is valid.
 func ValidateEmail(raw string) (addr, msg string) {
 	return normalizeEmail(raw)
+}
+
+// setMemberTx is SetMember inside the caller's tenant transaction (app.tenant_id already set).
+func setMemberTx(ctx context.Context, tx pgx.Tx, a Actor, userID uuid.UUID, role string) (m Member, action string, err error) {
+	actor, err := lockActorRole(ctx, tx, a)
+	if err != nil {
+		return m, action, err
+	}
+	q := authdb.New(tx)
+	_, err = q.GetMembershipRole(ctx, authdb.GetMembershipRoleParams{TenantID: a.TenantID, UserID: userID})
+	if err == nil {
+		var changed bool
+		m, changed, err = changeRole(ctx, tx, a, actor, userID, role)
+		action = ""
+		if changed {
+			action = ActionAdminMemberRoleChanged
+		}
+		return m, action, err
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return m, action, fmt.Errorf("get membership: %w", err)
+	}
+	u, err := q.GetUserByID(ctx, userID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return m, action, ErrUserNotFound
+	}
+	if err != nil {
+		return m, action, fmt.Errorf("get user: %w", err)
+	}
+	if u.IsSystemAdmin {
+		// BootstrapAdmin refuses to start when the admin belongs to another tenant.
+		return m, action, ErrSystemAdminMember
+	}
+	if role == RoleOwner && u.Status != "active" {
+		// A disabled account can join, but not as the organization's only usable owner.
+		n, err := q.CountOtherActiveOwners(ctx, authdb.CountOtherActiveOwnersParams{TenantID: a.TenantID, UserID: userID})
+		if err != nil {
+			return m, action, fmt.Errorf("count owners: %w", err)
+		}
+		if n == 0 {
+			return m, action, ErrLastOwner
+		}
+	}
+	if err := plans.CheckCreate(ctx, tx, a.TenantID, plans.ResourceMember); err != nil {
+		return m, action, err
+	}
+	if err := q.InsertMembership(ctx, authdb.InsertMembershipParams{TenantID: a.TenantID, UserID: userID, Role: role}); err != nil {
+		return m, action, fmt.Errorf("insert membership: %w", err)
+	}
+	row, err := q.LockMember(ctx, authdb.LockMemberParams{TenantID: a.TenantID, UserID: userID})
+	if err != nil {
+		return m, action, fmt.Errorf("read new member: %w", err)
+	}
+	m = Member{UserID: userID, Login: row.Email, DisplayName: row.DisplayName, Role: row.Role, JoinedAt: row.CreatedAt,
+		IsPlatformAdmin: row.IsPlatformAdmin, IsSystemAdmin: row.IsSystemAdmin, Status: row.Status}
+	action = ActionAdminMemberAdded
+	err = audit.Record(ctx, tx, audit.Entry{
+		TenantID: a.TenantID, ActorUserID: &a.UserID, Action: action,
+		EntityType: "user", EntityID: userID.String(), IP: a.IP,
+		Metadata: map[string]any{"role": roleLabel(role)},
+	})
+	return m, action, err
+}
+
+// AddFirstOwnerTx makes the account with the address the owner of a new organization, or
+// creates an owner invitation (link only, no email) when there is none, inside the caller's
+// tenant transaction (app.tenant_id set), so the creation of the organization and its owner
+// commit or roll back together. Exactly one of the member and the invitation is set. a must
+// come from PlatformActor; email is already validated.
+func (s *Service) AddFirstOwnerTx(ctx context.Context, tx pgx.Tx, a Actor, email string) (m *Member, inv *Invitation, token, action string, err error) {
+	if !a.platform {
+		return nil, nil, "", "", authz.ErrForbidden
+	}
+	defer func() {
+		var limit *plans.LimitError
+		if err != nil && !errors.As(err, &limit) {
+			err = wrapAdminMemberErr("add first owner", err)
+		}
+	}()
+	u, err := authdb.New(tx).GetUserByEmail(ctx, email)
+	switch {
+	case err == nil:
+		mm, act, err := setMemberTx(ctx, tx, a, u.ID, RoleOwner)
+		if err != nil {
+			return nil, nil, "", "", err
+		}
+		return &mm, nil, "", act, nil
+	case !errors.Is(err, pgx.ErrNoRows):
+		return nil, nil, "", "", fmt.Errorf("find user: %w", err)
+	}
+	in := InvitationInput{Role: RoleOwner, Label: email, SendEmail: new(bool)}
+	label, _, err := s.validateInvitation(ctx, in)
+	if err != nil {
+		return nil, nil, "", "", err
+	}
+	if token, err = newToken(); err != nil {
+		return nil, nil, "", "", err
+	}
+	now := s.clock.Now()
+	i := Invitation{ID: uuidv7.New(), Role: in.Role, Label: label, Status: InvitationOpen, CreatedAt: now, ExpiresAt: now.Add(InvitationTTL)}
+	if err := s.insertInvitation(ctx, tx, a, in, &i, token, ""); err != nil {
+		return nil, nil, "", "", err
+	}
+	return nil, &i, token, ActionAdminInvitationCreated, nil
 }
