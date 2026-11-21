@@ -148,6 +148,9 @@ Suggested alerts (PromQL, thresholds are first guesses; the schedule lasts 24 ho
 | Buffer in memory | `specula_buffer_degraded == 1` | 10m |
 | Checks skipped, executor too slow | `increase(specula_missed_slots_total{reason=~"late\|busy"}[15m]) > 0` | 0m |
 | Proreta refuses results | `increase(specula_report_outcomes_total{outcome=~"rejected\|expired"}[15m]) > 0` | 0m |
+| Unreadable buffer dropped | `increase(specula_results_dropped_total{reason="unreadable"}[15m]) > 0` | 0m |
+
+The last row means an unreadable buffer segment was dropped and its results are gone. With a persistent state volume, check that the volume is still mounted and healthy; with the default `emptyDir` this should never fire.
 
 `specula_missed_slots_total{reason="busy"}` counts slots skipped because the previous check of the same monitor was still running, `late` slots skipped because the executor was stalled for a whole interval. Both mean it cannot keep up: size `specula.concurrency` (chart default 20) against the number of monitors and their timeouts, roughly monitors times timeout divided by interval at the very most. `specula_report_outcomes_total{outcome}` counts what Proreta answered for each reported result (`recorded`, `duplicate`, `rejected`, `superseded`, `expired`); the last three are final and the results are discarded, and they are also counted in `specula_results_dropped_total{reason="refused"}`. `superseded` after you edited or moved a monitor is normal; `rejected` and `expired` are not. Proreta shows the same losses by reason, hour and Specula under [Missed and lost checks](#missed-and-lost-checks) without scraping the executor.
 
