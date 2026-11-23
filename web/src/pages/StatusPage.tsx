@@ -20,7 +20,7 @@ import {
   type Project,
   type StatusPageUpdate,
 } from "../api/endpoints";
-import MonitorPicker, { type PickedMonitor } from "../components/MonitorPicker";
+import MonitorPicker, { monitorTypeLabel, type PickedMonitor } from "../components/MonitorPicker";
 import { useToast } from "../components/Toasts";
 import {
   Alert,
@@ -80,28 +80,56 @@ function pageScope(page: Page, projects: Project[] | undefined): string {
 /** Public status pages: settings, components and a preview of the page chosen. */
 export default function StatusPageSettings() {
   const can = usePermissions();
-  const projects = useProjectScope().projects.data?.items;
+  const projectsQuery = useProjectScope().projects;
+  const projects = projectsQuery.data?.items;
   const pages = useQuery({ queryKey: queryKeys.statusPages, queryFn: () => listStatusPages() });
+  const usageQuery = useUsage();
+  const usage = usageQuery.data;
+  // Which page opens and where a new one goes depend on all of these: nothing is chosen before
+  // the first answers. Latched: a later refetch (a failed query refetching is "loading" again)
+  // must not take the page away.
+  const [ready, setReady] = useState(false);
+  if (!ready && pages.isSuccess && can.ready && !projectsQuery.isLoading && !usageQuery.isLoading) {
+    setReady(true);
+  }
   const [selected, setSelected] = useState<string>();
   const [adding, setAdding] = useState(false);
-  const [params, setParams] = useSearchParams();
-  const switcher = useProjectScope().projectId;
-  // ?project=<id> (the project's settings link) wins over the project switcher; ?project=all shows every page.
+  const [params] = useSearchParams();
+  // ?project=<id>: the project's settings link.
   const asked = params.get("project");
-  const projectFilter = asked === "all" ? undefined : (asked ?? switcher);
-  const all = pages.data?.items ?? [];
-  const items = projectFilter ? all.filter((p) => p.projectId === projectFilter) : all;
-  const page = items.find((p) => p.id === selected) ?? items[0];
-  const usage = useUsage().data;
+  // Every page the user sees, one pick away: those the user edits first, the organization's first
+  // among them, otherwise in the server's order (oldest first). The project switcher does not
+  // narrow it.
+  const rank = (p: Page) =>
+    (canManageStatusPageOf(can, p.projectId) ? 0 : 2) + (p.projectId ? 1 : 0);
+  const items = [...(pages.data?.items ?? [])].sort((a, b) => rank(a) - rank(b));
+  const page =
+    items.find((p) => p.id === selected) ??
+    items.find((p) => asked && p.projectId === asked) ??
+    items[0];
+  // The page shown stays shown, whatever pages a refetch brings.
+  if (page && ready && !items.some((p) => p.id === selected)) setSelected(page.id);
   // The plan limit applies to each project and to the organization separately; where the limit is
   // unknown (no usage permission) the server's 409 answers instead.
   const limit = usage?.limits.statusPages;
   const scopes = creatableScopes(can, projects).filter(
     (s) =>
-      (!projectFilter || s.value === projectFilter) &&
-      (limit === undefined || all.filter((p) => (p.projectId ?? "") === s.value).length < limit),
+      limit === undefined || items.filter((p) => (p.projectId ?? "") === s.value).length < limit,
   );
-  const filterName = projectFilter ? channelScopeLabel(projectFilter, projects) : undefined;
+  // A new page starts in the project of the settings link.
+  scopes.sort((a, b) => Number(b.value === asked) - Number(a.value === asked));
+  // Each settings link is followed once: its project's page, or the create form in that project.
+  const [followed, setFollowed] = useState<string | null>(null);
+  // A linked project that has no page and cannot get one now, named so the user knows why.
+  const [cannotCreate, setCannotCreate] = useState<string>();
+  if (asked && asked !== followed && ready) {
+    setFollowed(asked);
+    const target = items.find((p) => p.projectId === asked);
+    if (target) setSelected(target.id);
+    else if (scopes.some((s) => s.value === asked)) setAdding(true);
+    else setCannotCreate(asked);
+  }
+  if (adding && ready && scopes.length === 0) setAdding(false);
 
   return (
     <section className="flex flex-col gap-6">
@@ -118,15 +146,13 @@ export default function StatusPageSettings() {
           <p className="text-caption text-muted-foreground">{ROLE_HINTS.manageStatusPage}</p>
         )}
       </div>
-      {filterName && (
+      {cannotCreate && (
         <p className="text-caption text-muted-foreground">
-          Showing the pages of <span className="font-medium">{filterName}</span>.{" "}
-          <Button variant="ghost" size="small" onClick={() => setParams({ project: "all" })}>
-            Show every page
-          </Button>
+          {channelScopeLabel(cannotCreate, projects)} has no status page, and you cannot create one
+          there: its plan limit is reached, or your role does not allow it.
         </p>
       )}
-      {pages.isPending ? (
+      {pages.isPending || (pages.isSuccess && !ready) ? (
         <Loading label="Loading the status page…">
           <Skeleton className="w-2/3" />
           <Skeleton className="w-1/2" />
@@ -149,11 +175,7 @@ export default function StatusPageSettings() {
             onCancel={page ? () => setAdding(false) : undefined}
           />
         ) : (
-          <EmptyNote>
-            {filterName
-              ? `${filterName} has no status page you can see or create.`
-              : "There is no status page you can see yet."}
-          </EmptyNote>
+          <EmptyNote>There is no status page you can see yet.</EmptyNote>
         )
       ) : (
         <>
@@ -224,7 +246,10 @@ function CreatePage({
 }) {
   const queryClient = useQueryClient();
   const toast = useToast();
-  const [scope, setScope] = useState(scopes[0]!.value);
+  // The scopes can still change (projects or usage arriving): a choice no longer offered falls
+  // back to the first, so the select and the request agree.
+  const [chosen, setScope] = useState<string>();
+  const scope = scopes.some((s) => s.value === chosen) ? chosen! : scopes[0]!.value;
   const [title, setTitle] = useState("");
   const [slug, setSlug] = useState("");
   const [slugTouched, setSlugTouched] = useState(false);
@@ -234,6 +259,11 @@ function CreatePage({
     mutationFn: () =>
       createStatusPage({ title: title.trim(), slug, ...(scope ? { projectId: scope } : {}) }),
     onSuccess: (created) => {
+      // In the list at once, so the form does not show again until the refetch.
+      queryClient.setQueryData<Awaited<ReturnType<typeof listStatusPages>>>(
+        queryKeys.statusPages,
+        (old) => old && { ...old, items: [...old.items, created] },
+      );
       onDone(created.id);
       void queryClient.invalidateQueries({ queryKey: queryKeys.statusPages });
       void queryClient.invalidateQueries({ queryKey: queryKeys.usage });
@@ -266,7 +296,8 @@ function CreatePage({
     >
       <h2 className="text-lead font-semibold">Create the status page</h2>
       {formError && <Alert>{formError}</Alert>}
-      {scopes.length > 1 && (
+      {/* Shown even with one choice: the page may not go where the link came from. */}
+      {scopes.length > 0 && (
         <Field
           label="Belongs to"
           error={errors.projectId}
@@ -667,11 +698,23 @@ function ComponentEditor({ page, initial }: { page: Page; initial: StatusPageCom
   const [rows, setRows] = useState<Row[]>(() => toRows(initial));
   const [pick, setPick] = useState<PickedMonitor | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [added, setAdded] = useState<Map<string, string>>(new Map());
+  const [added, setAdded] = useState<Map<string, PickedMonitor>>(new Map());
+  const projects = useProjectScope().projects.data?.items;
+  // An organization page mixes projects: each monitor says which one it is from.
+  const projectOf =
+    !page.projectId && (projects?.length ?? 0) > 1
+      ? (id: string | null) => channelScopeLabel(id, projects)
+      : undefined;
+  const label = (m: { name: string; type: string; projectId: string | null }) =>
+    [m.name, monitorTypeLabel(m.type), projectOf?.(m.projectId)].filter(Boolean).join(" · ");
   const names = new Map<string, string>();
-  for (const c of initial) names.set(c.monitorId, `${c.monitorName} · ${c.monitorType}`);
+  for (const c of initial)
+    names.set(
+      c.monitorId,
+      label({ name: c.monitorName, type: c.monitorType, projectId: c.projectId }),
+    );
   // Monitors added in this session are not in `initial`: their names come from the picker.
-  for (const [id, name] of added) names.set(id, name);
+  for (const [id, m] of added) names.set(id, label(m));
   const used = new Set(rows.map((r) => r.monitorId));
   const dirty = JSON.stringify(rows) !== JSON.stringify(toRows(initial));
 
@@ -805,6 +848,7 @@ function ComponentEditor({ page, initial }: { page: Page; initial: StatusPageCom
           exclude={used}
           picked={pick}
           onPick={setPick}
+          projectOf={projectOf}
           className="sm:w-80"
         />
         <Button
@@ -814,7 +858,7 @@ function ComponentEditor({ page, initial }: { page: Page; initial: StatusPageCom
           onClick={() => {
             if (!pick) return;
             setRows([...rows, { monitorId: pick.id, publicName: "", groupName: "" }]);
-            setAdded(new Map(added).set(pick.id, `${pick.name} · ${pick.type}`));
+            setAdded(new Map(added).set(pick.id, pick));
             setPick(null);
           }}
         >

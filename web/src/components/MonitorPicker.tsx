@@ -8,7 +8,7 @@ import { cx, Field, Input } from "./ui";
 /** How many matches the list offers; typing narrows the rest on the server. */
 const SHOWN = 20;
 
-export type PickedMonitor = Pick<MonitorListItem, "id" | "name" | "type">;
+export type PickedMonitor = Pick<MonitorListItem, "id" | "name" | "type" | "projectId">;
 
 export const monitorTypeLabel = (type: string) =>
   type === "heartbeat" ? "heartbeat" : type === "tcp" ? "TCP" : "HTTPS";
@@ -25,6 +25,7 @@ export default function MonitorPicker({
   exclude,
   picked,
   onPick,
+  projectOf,
   className,
 }: {
   label: string;
@@ -33,6 +34,8 @@ export default function MonitorPicker({
   exclude: ReadonlySet<string>;
   picked: PickedMonitor | null;
   onPick: (monitor: PickedMonitor | null) => void;
+  /** The project's name of each match, when the monitors come from several projects. */
+  projectOf?: (projectId: string) => string;
   className?: string;
 }) {
   const listId = useId();
@@ -55,7 +58,7 @@ export default function MonitorPicker({
   const optionId = (i: number) => `${listId}-${i}`;
 
   function choose(m: PickedMonitor) {
-    onPick({ id: m.id, name: m.name, type: m.type });
+    onPick({ id: m.id, name: m.name, type: m.type, projectId: m.projectId });
     setText(`${m.name} (${monitorTypeLabel(m.type)})`);
     setOpen(false);
   }
@@ -136,8 +139,13 @@ export default function MonitorPicker({
                 )}
               >
                 <span className="min-w-0 truncate">{m.name}</span>
-                <span className="flex-none font-mono text-caption text-muted-foreground">
-                  {monitorTypeLabel(m.type)}
+                <span className="flex max-w-1/2 shrink-0 gap-1 text-caption text-muted-foreground">
+                  {projectOf && (
+                    <span className="min-w-0 truncate" title={projectOf(m.projectId)}>
+                      {projectOf(m.projectId)} ·
+                    </span>
+                  )}
+                  <span className="flex-none font-mono">{monitorTypeLabel(m.type)}</span>
                 </span>
               </li>
             ))}

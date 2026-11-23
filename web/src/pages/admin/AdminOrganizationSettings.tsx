@@ -17,7 +17,6 @@ import {
   type AdminOrganization,
   type AuthDomain,
   type AuthDomainRole,
-  type Specula,
   type SpeculaCreated,
 } from "../../api/endpoints";
 import { useToast } from "../../components/Toasts";
@@ -42,7 +41,13 @@ import { channelTypeLabel, eventsLabel, reminderLabel } from "../../lib/channels
 import { channelScopeLabel } from "../../lib/projects";
 import { ROLE_LABELS } from "../../lib/roles";
 import { emptySpeculaForm, valuesFromSpecula } from "../../lib/specula";
-import { SpeculaForm, SpeculaTable, TokenPanel, type SpeculaOps } from "../Specula";
+import {
+  SpeculaForm,
+  SpeculaTable,
+  TokenPanel,
+  useSpeculaEditing,
+  type SpeculaOps,
+} from "../Specula";
 
 /**
  * What the organization's owner sees under Settings, Channels, Status pages and Specula, for the
@@ -401,8 +406,9 @@ function SpeculaSection({
     queryFn: () => listAdminSpecula(organizationId),
   });
   const projects = useProjectNames(organizationId);
-  const [creating, setCreating] = useState(false);
-  const [editing, setEditing] = useState<Specula | null>(null);
+  const edit = useSpeculaEditing();
+  const creating = edit.creating;
+  const editing = edit.editing;
   const [created, setCreated] = useState<SpeculaCreated | null>(null);
   const ops: SpeculaOps = {
     create: (body) => createAdminSpecula(organizationId, body),
@@ -415,7 +421,7 @@ function SpeculaSection({
       {created && <TokenPanel created={created} onDone={() => setCreated(null)} />}
       {!readOnly && !created && !editing && !creating && (
         <div>
-          <Button variant="secondary" onClick={() => setCreating(true)}>
+          <Button variant="secondary" onClick={edit.startCreate}>
             Register a Specula
           </Button>
         </div>
@@ -426,11 +432,12 @@ function SpeculaSection({
           initial={emptySpeculaForm}
           projects={projects}
           ops={ops}
-          onCancel={() => setCreating(false)}
+          onCancel={edit.close}
           onSaved={(c) => {
-            setCreating(false);
+            edit.close();
             setCreated(c ?? null);
           }}
+          onDirty={edit.onDirty}
         />
       )}
       {editing && (
@@ -441,10 +448,13 @@ function SpeculaSection({
           initial={valuesFromSpecula(editing)}
           projects={projects}
           ops={ops}
-          onCancel={() => setEditing(null)}
-          onSaved={() => setEditing(null)}
+          onCancel={edit.close}
+          onSaved={edit.close}
+          focusKey={edit.focusKey}
+          onDirty={edit.onDirty}
         />
       )}
+      {edit.dialog}
       <Async query={specula} what="the Specula">
         {({ items }) =>
           items.length === 0 ? (
@@ -455,10 +465,7 @@ function SpeculaSection({
               projects={projects}
               manage={!readOnly}
               ops={ops}
-              onEdit={(s) => {
-                setCreating(false);
-                setEditing(s);
-              }}
+              onEdit={edit.request}
             />
           )
         }

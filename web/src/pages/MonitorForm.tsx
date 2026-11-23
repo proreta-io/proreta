@@ -1,6 +1,6 @@
-import { usePermissions } from "../lib/permissions";
+import { canManageChannelOf, usePermissions } from "../lib/permissions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useId, useState, type SubmitEvent, type ReactNode } from "react";
+import { useEffect, useId, useState, type SubmitEvent, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ApiError, errorMessage, errorMeta, planLimitMessage } from "../api/client";
 import {
@@ -500,6 +500,7 @@ function MonitorFormBody({
 
         {values.notificationsEnabled && (
           <ChannelPicker
+            projectId={values.projectId}
             projects={projects}
             channels={channels}
             selected={values.channelIds}
@@ -596,7 +597,10 @@ function ChannelPicker({
   selected,
   onChange,
   error,
+  projectId,
 }: {
+  /** The monitor's project: a channel added for it appears in this list. */
+  projectId: string;
   projects: Project[] | undefined;
   channels: {
     isPending: boolean;
@@ -608,6 +612,15 @@ function ChannelPicker({
   onChange: (ids: string[]) => void;
   error?: string;
 }) {
+  const can = usePermissions();
+  // A channel added in another window shows up when the user comes back; the query library only
+  // reloads on a tab switch.
+  const { refetch } = channels;
+  useEffect(() => {
+    const reload = () => void refetch();
+    window.addEventListener("focus", reload);
+    return () => window.removeEventListener("focus", reload);
+  }, [refetch]);
   if (channels.isPending) {
     return (
       <Loading label="Loading notification channels…">
@@ -630,11 +643,25 @@ function ChannelPicker({
   if (items.length === 0) {
     return (
       <p className="text-caption text-muted-foreground">
-        No notification channels yet: add one in{" "}
-        <Link to="/settings#channels-heading" className="underline underline-offset-3">
-          Settings
-        </Link>
-        .
+        No notification channels yet
+        {/* An organization-wide channel is offered to every project too. */}
+        {(projectId && canManageChannelOf(can, projectId)) || canManageChannelOf(can, null) ? (
+          <>
+            : add one in{" "}
+            {/* A new tab keeps this form; the list reloads when the user comes back to it. */}
+            <Link
+              to={`/channels${projectId ? `?project=${encodeURIComponent(projectId)}` : ""}`}
+              target="_blank"
+              rel="noopener"
+              className="underline underline-offset-3"
+            >
+              Channels (opens in a new tab)
+            </Link>
+            .
+          </>
+        ) : (
+          ". A maintainer of the project can add one."
+        )}
       </p>
     );
   }

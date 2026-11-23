@@ -2,11 +2,12 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {
   MonitorListItem,
+  Project,
   StatusPage,
   StatusPageComponent,
   StatusPageSnapshot,
 } from "../api/endpoints";
-import { json, mockApi, problem, renderApp, session } from "../test/utils";
+import { json, mockApi, permissionsBody, problem, renderApp, session } from "../test/utils";
 
 const as = (role: string) => ({
   "GET /api/v1/auth/me": () => json({ ...session, role }),
@@ -93,8 +94,8 @@ describe("status pages of projects", () => {
     });
     renderApp("/status-page");
     await userEvent.type(await screen.findByLabelText("Title"), "Web status");
-    // The only project it maintains is implied; there is no organization scope to choose.
-    expect(screen.queryByLabelText("Belongs to")).not.toBeInTheDocument();
+    // The only project it maintains is the only choice, and it is shown.
+    expect(screen.getByLabelText("Belongs to")).toHaveValue("p1");
     await userEvent.click(screen.getByRole("button", { name: "Create status page" }));
     expect(await screen.findByRole("button", { name: "Publish" })).toBeInTheDocument();
     expect(body).toEqual({ title: "Web status", slug: "web-status", projectId: "p1" });
@@ -418,29 +419,154 @@ describe("status page settings", () => {
       ).toEqual(["Organization", "Data"]);
     });
 
-    it("hides creation for a project at the limit and shows the create form for an empty one", async () => {
-      const mocks = {
+    it("lists every page and opens the organization's first", async () => {
+      mockApi({
         ...twoProjects,
         "GET /api/v1/usage": () => usage(1),
-        "GET /api/v1/status-pages": () => json({ items: [page({ projectId: "p1" })] }),
-      };
-      mockApi(mocks);
-      renderApp("/status-page?project=p1");
-      expect(await screen.findByText(/Showing the pages of/)).toHaveTextContent("Web");
-      expect(screen.queryByRole("button", { name: "New status page" })).not.toBeInTheDocument();
+        "GET /api/v1/status-pages": () =>
+          json({
+            items: [page({ id: "sp2", projectId: "p1", title: "Web page", slug: "web" }), page()],
+          }),
+      });
+      renderApp("/status-page");
+      expect(await screen.findByText(/Belongs to:/)).toHaveTextContent("Belongs to: Organization");
+      const select = screen.getByLabelText("Page", { selector: "select" });
+      expect(
+        within(select)
+          .getAllByRole("option")
+          .map((o) => o.textContent),
+      ).toEqual(["Acme status · Organization", "Web page · Web"]);
+      expect(screen.queryByText(/Showing the pages of/)).not.toBeInTheDocument();
     });
 
-    it("opens the create form of a project without a page", async () => {
+    it("starts a new page in the project of its settings link", async () => {
       mockApi({
         ...twoProjects,
         "GET /api/v1/usage": () => usage(1),
         "GET /api/v1/status-pages": () => json({ items: [page({ projectId: "p1" })] }),
       });
       renderApp("/status-page?project=p2");
-      expect(await screen.findByRole("button", { name: "Create status page" })).toBeInTheDocument();
-      expect(screen.queryByLabelText("Belongs to")).not.toBeInTheDocument();
-      await userEvent.click(screen.getByRole("button", { name: "Show every page" }));
+      // Data has no page: its create form opens; Cancel shows the pages there are.
+      expect(await screen.findByLabelText("Belongs to")).toHaveValue("p2");
+      await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
       expect(await screen.findByText(/Belongs to:/)).toHaveTextContent("Belongs to: Web");
+    });
+
+    it("keeps the page on screen when a refetch brings one preferred above it", async () => {
+      let items = [page({ projectId: "p1", title: "Web page" })];
+      mockApi({
+        ...twoProjects,
+        "GET /api/v1/usage": () => usage(5),
+        "GET /api/v1/status-pages": () => json({ items }),
+        "PATCH /api/v1/status-pages/sp": () => {
+          // Meanwhile someone created the organization's page.
+          items = [page({ id: "org", title: "Acme status" }), ...items];
+          return json({ ...items[1], published: true });
+        },
+      });
+      renderApp("/status-page");
+      expect(await screen.findByText(/Belongs to:/)).toHaveTextContent("Belongs to: Web");
+      await userEvent.click(screen.getByRole("button", { name: "Publish" }));
+      await screen.findByLabelText("Page", { selector: "select" });
+      expect(screen.getByText(/Belongs to:/)).toHaveTextContent("Belongs to: Web");
+    });
+
+    it("keeps every page whatever project the switcher picks", async () => {
+      mockApi({
+        ...twoProjects,
+        "GET /api/v1/usage": () => usage(5),
+        "GET /api/v1/status-pages": () =>
+          json({
+            items: [
+              page({ id: "sp2", projectId: "p2", title: "Data page", slug: "data" }),
+              page({ id: "org" }),
+            ],
+          }),
+      });
+      renderApp("/status-page");
+      // The organization's page first, though it is the newer one.
+      expect(await screen.findByText(/Belongs to:/)).toHaveTextContent("Belongs to: Organization");
+      await userEvent.selectOptions(
+        screen.getByRole("combobox", { name: "Project filter" }),
+        "Web",
+      );
+      expect(screen.getByText(/Belongs to:/)).toHaveTextContent("Belongs to: Organization");
+      expect(
+        within(screen.getByLabelText("Page", { selector: "select" }))
+          .getAllByRole("option")
+          .map((o) => o.textContent),
+      ).toEqual(["Acme status · Organization", "Data page · Data"]);
+    });
+
+    it("opens the page the user manages before the organization's it can only read", async () => {
+      mockApi({
+        ...as("member"),
+        "GET /api/v1/projects": () => json({ items: [project("p1", "Web", "maintainer")] }),
+        "GET /api/v1/usage": () => usage(5),
+        "GET /api/v1/status-pages": () =>
+          json({ items: [page({ id: "org" }), page({ projectId: "p1", title: "Web page" })] }),
+        "GET /api/v1/status-pages/sp/preview": () => json(snapshot()),
+        "GET /api/v1/status-pages/sp/components": () => json({ items: [] }),
+        "GET /api/v1/monitors": () => json({ items: [] }),
+      });
+      renderApp("/status-page");
+      expect(await screen.findByText(/Belongs to:/)).toHaveTextContent("Belongs to: Web");
+      expect(await screen.findByRole("button", { name: "Publish" })).toBeInTheDocument();
+    });
+
+    it("starts a new page in the linked project even when the projects arrive late", async () => {
+      let arrive = () => {};
+      const late = new Promise<void>((r) => (arrive = r));
+      const fetchMock = mockApi({
+        ...twoProjects,
+        "GET /api/v1/projects": async () => {
+          await late;
+          return json({
+            items: [project("p1", "Web", "maintainer"), project("p2", "Data", "maintainer")],
+          });
+        },
+        // Permissions answer first; the project list is slower.
+        "GET /api/v1/permissions": () =>
+          json(
+            permissionsBody("maintainer", [
+              project("p1", "Web", "maintainer"),
+              project("p2", "Data", "maintainer"),
+            ] as Project[]),
+          ),
+        "GET /api/v1/usage": () => usage(1),
+        "GET /api/v1/status-pages": () => json({ items: [] }),
+      });
+      renderApp("/status-page?project=p2");
+      // Everything but the projects has answered: still no form to submit into the organization by
+      // mistake.
+      await waitFor(() =>
+        expect(
+          fetchMock.mock.calls.filter(([r]) =>
+            ["/api/v1/status-pages", "/api/v1/usage", "/api/v1/permissions"].includes(
+              new URL(new Request(r).url).pathname,
+            ),
+          ),
+        ).toHaveLength(3),
+      );
+      await new Promise((r) => setTimeout(r, 100));
+      expect(screen.getByText("Loading the status page…")).toBeInTheDocument();
+      expect(screen.queryByLabelText("Belongs to")).not.toBeInTheDocument();
+      arrive();
+      expect(await screen.findByLabelText("Belongs to")).toHaveValue("p2");
+    });
+
+    it("says why a linked project without a page gets no create form", async () => {
+      mockApi({
+        ...twoProjects,
+        // A plan without room for another page anywhere.
+        "GET /api/v1/usage": () => usage(0),
+        "GET /api/v1/status-pages": () => json({ items: [page()] }),
+      });
+      renderApp("/status-page?project=p2");
+      expect(await screen.findByText(/has no status page/)).toHaveTextContent(
+        "Data has no status page, and you cannot create one there",
+      );
+      expect(screen.getByText(/Belongs to:/)).toHaveTextContent("Belongs to: Organization");
     });
 
     it("lists several pages of one project once the limit allows it", async () => {
@@ -462,7 +588,13 @@ describe("status page settings", () => {
           .getAllByRole("option")
           .map((o) => o.textContent),
       ).toEqual(["Web one · Web", "Web two · Web"]);
-      expect(screen.queryByRole("button", { name: "New status page" })).not.toBeInTheDocument();
+      // Web is full (limit 2): a new page goes to the organization or Data.
+      await userEvent.click(screen.getByRole("button", { name: "New status page" }));
+      expect(
+        within(await screen.findByLabelText("Belongs to"))
+          .getAllByRole("option")
+          .map((o) => o.textContent),
+      ).toEqual(["Organization", "Data"]);
     });
   });
 });

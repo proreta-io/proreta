@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type {
   Specula,
@@ -277,6 +277,59 @@ describe("monitors list", () => {
     expect(await screen.findByText("1 down monitor is hidden by this filter.")).toBeInTheDocument();
     await userEvent.keyboard("{Escape}");
     expect(filter).toHaveValue("");
+  });
+
+  it("finds the filter by the / key on any layout and starts the arrows with nothing focused", async () => {
+    mockApi({ ...signedIn, "GET /api/v1/monitors": serve });
+    renderApp("/");
+    const filter = await screen.findByLabelText("Filter by name or URL");
+    const links = within(screen.getByRole("table")).getAllByRole("link");
+    expect(document.body).toHaveFocus();
+    await userEvent.keyboard("{ArrowDown}");
+    expect(links[0]).toHaveFocus();
+    // The "/" key types "." on a Ukrainian layout; its code stays "Slash".
+    fireEvent.keyDown(links[0]!, { key: ".", code: "Slash" });
+    expect(filter).toHaveFocus();
+    expect(screen.queryByText("move")).not.toBeInTheDocument();
+
+    // "?" shares the key with "/": it is not taken.
+    filter.blur();
+    fireEvent.keyDown(document.body, { key: "?", code: "Slash", shiftKey: true });
+    expect(filter).not.toHaveFocus();
+    // Scrolled past the first row, ArrowDown scrolls the page as usual.
+    links[0]!.getBoundingClientRect = () => ({ top: -500, bottom: -480 }) as DOMRect;
+    expect(fireEvent.keyDown(document.body, { key: "ArrowDown" })).toBe(true);
+    expect(links[0]).not.toHaveFocus();
+  });
+
+  it("names each monitor's project when the list shows every project", async () => {
+    const proj = (id: string, name: string) => ({
+      id,
+      name,
+      slug: id,
+      isDefault: false,
+      allMembers: false,
+      role: "maintainer",
+      monitorCount: 1,
+      channelCount: 0,
+      createdAt: "2026-10-01T00:00:00Z",
+      updatedAt: "2026-10-01T00:00:00Z",
+    });
+    mockApi({
+      ...signedIn,
+      "GET /api/v1/projects": () =>
+        json({ items: [proj("p-default", "Default"), proj("p-web", "Web")] }),
+      "GET /api/v1/monitors": () =>
+        json({
+          summary: { up: 1, down: 0, paused: 0, unknown: 0 },
+          items: [listItem({ projectId: "p-web" })],
+        }),
+    });
+    renderApp("/");
+    await screen.findByRole("link", { name: "Website" });
+    const table = screen.getByRole("table");
+    expect(await within(table).findByRole("columnheader", { name: "Project" })).toBeInTheDocument();
+    expect(within(table).getAllByText("Web")).not.toHaveLength(0);
   });
 
   it("opens the details when a row is clicked", async () => {
@@ -706,6 +759,97 @@ describe("monitor form", () => {
     expect(await screen.findByText(/No notification channels yet/)).toBeInTheDocument();
     await userEvent.click(screen.getByLabelText("Notify Slack"));
     expect(screen.queryByText(/No notification channels yet/)).not.toBeInTheDocument();
+  });
+
+  it("links an empty channel list to Channels with the monitor's project, for those who may add one", async () => {
+    const proj = (role: string) => ({
+      id: "p-web",
+      name: "Web",
+      slug: "web",
+      isDefault: true,
+      allMembers: false,
+      role,
+      monitorCount: 0,
+      channelCount: 0,
+      createdAt: "2026-10-01T00:00:00Z",
+      updatedAt: "2026-10-01T00:00:00Z",
+    });
+    mockApi({
+      "GET /api/v1/auth/me": () => json({ ...session, role: null }),
+      "GET /api/v1/projects": () => json({ items: [proj("maintainer")] }),
+      "GET /api/v1/channels": () => json({ items: [] }),
+    });
+    const { unmount } = renderApp("/monitors/new");
+    const link = await screen.findByRole("link", { name: /Channels \(opens in a new tab\)/ });
+    expect(link).toHaveAttribute("href", "/channels?project=p-web");
+    expect(link).toHaveAttribute("target", "_blank");
+    unmount();
+
+    mockApi({
+      "GET /api/v1/auth/me": () => json({ ...session, role: null }),
+      "GET /api/v1/projects": () => json({ items: [proj("member")] }),
+      "GET /api/v1/channels": () => json({ items: [] }),
+    });
+    renderApp("/monitors/new");
+    expect(await screen.findByText(/A maintainer of the project can add one/)).toBeInTheDocument();
+  });
+
+  it("starts a new channel in the linked project only where the user may add one", async () => {
+    const proj = (id: string, name: string, role: string) => ({
+      id,
+      name,
+      slug: id,
+      isDefault: false,
+      allMembers: false,
+      role,
+      monitorCount: 0,
+      channelCount: 0,
+      createdAt: "2026-10-01T00:00:00Z",
+      updatedAt: "2026-10-01T00:00:00Z",
+    });
+    mockApi({
+      "GET /api/v1/auth/me": () => json({ ...session, role: null }),
+      "GET /api/v1/projects": () =>
+        json({
+          items: [
+            proj("p1", "Web", "maintainer"),
+            proj("p2", "Data", "viewer"),
+            proj("p3", "Ops", "maintainer"),
+          ],
+        }),
+      "GET /api/v1/channels": () => json({ items: [] }),
+      "POST /api/v1/channels": async (req) => {
+        sent = await req.json();
+        return json(channel({ name: "#web" }), 201);
+      },
+    });
+    let sent: unknown;
+    const { unmount } = renderApp("/channels?project=p3");
+    await userEvent.click(await screen.findByRole("button", { name: "Add channel" }));
+    expect(screen.getByLabelText("Project")).toHaveValue("p3");
+    unmount();
+    // Data is only viewed: the form falls back to a project it offers, and sends that one.
+    renderApp("/channels?project=p2");
+    await userEvent.click(await screen.findByRole("button", { name: "Add channel" }));
+    expect(screen.getByLabelText("Project")).toHaveValue("p1");
+    await userEvent.type(screen.getByLabelText("Name"), "#web");
+    await userEvent.type(
+      screen.getByLabelText("Slack webhook URL"),
+      "https://hooks.slack.com/services/T0/B0/secret",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Add channel" }));
+    await waitFor(() => expect(sent).toMatchObject({ projectId: "p1" }));
+  });
+
+  it("reloads an empty channel list when the window gets the focus back", async () => {
+    let items: Channel[] = [];
+    mockApi({ ...signedIn, "GET /api/v1/channels": () => json({ items }) });
+    renderApp("/monitors/new");
+    expect(await screen.findByText(/No notification channels yet/)).toBeInTheDocument();
+    items = [channel({ name: "#alerts" })];
+    fireEvent.focus(window);
+    expect(await screen.findByLabelText("#alerts")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Channels \(opens/ })).not.toBeInTheDocument();
   });
 
   it("drops a selected channel that was deleted before saving", async () => {

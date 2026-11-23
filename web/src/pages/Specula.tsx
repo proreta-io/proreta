@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type SubmitEvent } from "react";
+import { useEffect, useRef, useState, type SubmitEvent } from "react";
 import { errorMessage, errorMeta } from "../api/client";
 import {
   createSpecula,
@@ -99,8 +99,7 @@ export default function SpeculaPage() {
   const usage = useUsage().data;
   const limit = usage?.limits.specula;
   const full = limit !== undefined && usage!.usage.specula >= limit;
-  const [creating, setCreating] = useState(false);
-  const [editing, setEditing] = useState<Specula | null>(null);
+  const edit = useSpeculaEditing();
   const [created, setCreated] = useState<SpeculaCreated | null>(null);
   const items = list.data?.items ?? [];
 
@@ -119,23 +118,24 @@ export default function SpeculaPage() {
 
       {created && <TokenPanel created={created} onDone={() => setCreated(null)} />}
 
-      {manage && !created && !editing && (
+      {manage && !created && !edit.editing && (
         <div>
-          {creating ? (
+          {edit.creating ? (
             <SpeculaForm
               key="new"
               mode="create"
               initial={emptySpeculaForm}
               projects={projects.data?.items}
-              onCancel={() => setCreating(false)}
+              onCancel={edit.close}
               onSaved={(c) => {
-                setCreating(false);
+                edit.close();
                 setCreated(c ?? null);
               }}
+              onDirty={edit.onDirty}
             />
           ) : (
             <div className="flex flex-col items-start gap-2">
-              <Button disabled={full} onClick={() => setCreating(true)}>
+              <Button disabled={full} onClick={edit.startCreate}>
                 Register a Specula
               </Button>
               {limit !== undefined && (
@@ -150,17 +150,20 @@ export default function SpeculaPage() {
         </div>
       )}
 
-      {editing && (
+      {edit.editing && (
         <SpeculaForm
-          key={editing.id}
+          key={edit.editing.id}
           mode="edit"
-          id={editing.id}
-          initial={valuesFromSpecula(editing)}
+          id={edit.editing.id}
+          initial={valuesFromSpecula(edit.editing)}
           projects={projects.data?.items}
-          onCancel={() => setEditing(null)}
-          onSaved={() => setEditing(null)}
+          onCancel={edit.close}
+          onSaved={edit.close}
+          focusKey={edit.focusKey}
+          onDirty={edit.onDirty}
         />
       )}
+      {edit.dialog}
 
       {list.isPending ? (
         <Loading label="Loading Specula…">
@@ -185,10 +188,7 @@ export default function SpeculaPage() {
           items={items}
           projects={projects.data?.items}
           manage={manage}
-          onEdit={(s) => {
-            setCreating(false);
-            setEditing(s);
-          }}
+          onEdit={edit.request}
         />
       )}
 
@@ -283,6 +283,52 @@ function SpeculaLosses({ specula, range }: { specula: Specula; range: StatsRange
   );
 }
 
+/**
+ * The open Specula form: a new one, or the edit form of one. Opening another while the open form
+ * has unsaved changes asks first; asking again for the open one brings its form back into view.
+ */
+export function useSpeculaEditing() {
+  const [form, setForm] = useState<Specula | "new" | null>(null);
+  const [asks, setAsks] = useState(0);
+  const [dirty, setDirty] = useState(false);
+  const [pending, setPending] = useState<Specula | null>(null);
+  const editing = form === "new" ? null : form;
+  function open(s: Specula) {
+    if (editing?.id !== s.id) setDirty(false);
+    setForm(s);
+    setAsks((n) => n + 1);
+    setPending(null);
+  }
+  return {
+    editing,
+    creating: form === "new",
+    focusKey: asks,
+    onDirty: setDirty,
+    startCreate: () => {
+      setForm("new");
+      setDirty(false);
+    },
+    close: () => {
+      setForm(null);
+      setDirty(false);
+    },
+    request: (s: Specula) => {
+      if (form !== null && editing?.id !== s.id && dirty) setPending(s);
+      else open(s);
+    },
+    dialog: pending && form && (
+      <ConfirmDialog
+        title={form === "new" ? "Discard the new Specula?" : `Discard the changes to ${form.name}?`}
+        confirmLabel="Discard changes"
+        onConfirm={() => open(pending)}
+        onCancel={() => setPending(null)}
+      >
+        {`Editing ${pending.name} closes the form, and the changes are not saved.`}
+      </ConfirmDialog>
+    ),
+  };
+}
+
 export function SpeculaTable({
   items,
   projects,
@@ -334,7 +380,19 @@ export function SpeculaTable({
           {items.map((s) => (
             <Tr key={s.id}>
               <Td>
-                <span className="font-medium break-words">{s.name}</span>
+                {manage && s.status !== "revoked" ? (
+                  // A shortcut for the mouse: the Edit button is the one in the tab order.
+                  <Button
+                    variant="link"
+                    tabIndex={-1}
+                    className="text-left break-words"
+                    onClick={() => onEdit(s)}
+                  >
+                    {s.name}
+                  </Button>
+                ) : (
+                  <span className="font-medium break-words">{s.name}</span>
+                )}
                 {s.hostname && (
                   <span className="block font-mono text-caption text-muted-foreground max-sm:hidden">
                     {s.hostname}
@@ -424,6 +482,8 @@ export function SpeculaForm({
   projects,
   onCancel,
   onSaved,
+  focusKey,
+  onDirty,
   ops = ownerOps,
 }: {
   mode: "create" | "edit";
@@ -432,6 +492,10 @@ export function SpeculaForm({
   projects: ProjectChoice[] | undefined;
   onCancel: () => void;
   onSaved: (created?: SpeculaCreated) => void;
+  /** Changes when the open edit form is asked for again. */
+  focusKey?: number;
+  /** Told whether the values differ from the initial ones. */
+  onDirty?: (dirty: boolean) => void;
   ops?: SpeculaOps;
 }) {
   const queryClient = useQueryClient();
@@ -439,6 +503,13 @@ export function SpeculaForm({
   const [values, setValues] = useState(initial);
   const [errors, setErrors] = useState<SpeculaFormErrors>({});
   const [general, setGeneral] = useState<string | undefined>();
+  // The edit form opens above the table: focusing its name brings it into view.
+  const nameInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (mode === "edit") nameInput.current?.focus();
+  }, [mode, focusKey]);
+  const dirty = JSON.stringify(values) !== JSON.stringify(initial);
+  useEffect(() => onDirty?.(dirty), [dirty, onDirty]);
 
   const save = useMutation({
     mutationFn: (v: SpeculaFormValues): Promise<SpeculaCreated | undefined> =>
@@ -494,6 +565,7 @@ export function SpeculaForm({
           {(c) => (
             <Input
               {...c}
+              ref={nameInput}
               name="speculaName"
               autoComplete="off"
               maxLength={SPECULA_NAME_MAX * 2}
