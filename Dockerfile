@@ -3,7 +3,7 @@
 # Base images are pinned by multi-arch index digest; Dependabot (docker) bumps tag and digest together.
 # Multi-arch: the Go toolchain runs on the build platform and cross-compiles (no emulation).
 
-FROM --platform=$BUILDPLATFORM golang:1.26.11-bookworm@sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0 AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.4-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea AS build
 WORKDIR /src/backend
 COPY backend/go.mod backend/go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
