@@ -18,7 +18,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/statuspages/domains"
 )
 
-const lockStatusDomains int64 = 0x7072_6f72_6574_000e
+const lockStatusDomains int64 = 0x7072_6f72_6574_000f
 
 // Limits of one check_status_page_domains run. The worker role's idle_in_transaction_session_timeout
 // is 30 s and both the task's lock transaction and a batch's transaction sit idle while DNS
