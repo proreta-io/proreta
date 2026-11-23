@@ -43,11 +43,16 @@ groups:
             active, silence this alert until one is.
 
       - alert: ProretaHousekeepingStale
-        # compute_rollups runs every 5 minutes, evaluate_heartbeats every 30 seconds.
+        # compute_rollups runs every 5 minutes, evaluate_heartbeats every 30 seconds, ensure_partitions and
+        # drop_expired_partitions daily (the 2 day limit allows one missed run).
         expr: >-
           (time() - max by (task) (proreta_jobs_housekeeping_last_success_timestamp_seconds{task="compute_rollups"}) > 1800)
           or
           (time() - max by (task) (proreta_jobs_housekeeping_last_success_timestamp_seconds{task="evaluate_heartbeats"}) > 300)
+          or
+          (time() - max by (task) (proreta_jobs_housekeeping_last_success_timestamp_seconds{task="ensure_partitions"}) > 172800)
+          or
+          (time() - max by (task) (proreta_jobs_housekeeping_last_success_timestamp_seconds{task="drop_expired_partitions"}) > 172800)
         for: 5m
         labels:
           severity: warning
@@ -56,7 +61,8 @@ groups:
           description: >-
             The jobs process has not completed {{ $labels.task }} for longer than expected. For
             evaluate_heartbeats a missed heartbeat opens no incident and pings resolve none; for
-            compute_rollups uptime figures and retention fall behind. Check the jobs pod and its
+            compute_rollups uptime figures and retention fall behind; for ensure_partitions result
+            inserts fail when the next month starts, and drop_expired_partitions stops retention. Check the jobs pod and its
             logs, and the database.
 
       - alert: ProretaOutboxBacklog
