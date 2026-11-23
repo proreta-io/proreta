@@ -78,6 +78,8 @@ var (
 	// ErrSystemAdmin means the password of a platform admin cannot be reset by another admin (granted admins
 	// included), or the system admin cannot be disabled.
 	ErrSystemAdmin = errors.New("admin: the system admin changes its own password")
+	// ErrSystemAdminDelete means the system admin cannot be deleted (DeleteAccount maps ErrSystemAdmin to it).
+	ErrSystemAdminDelete = errors.New("admin: the system admin cannot be deleted")
 	// ErrSystemAdminRevoke means the system admin's platform-admin flag cannot be revoked.
 	ErrSystemAdminRevoke = errors.New("admin: the system admin cannot be revoked")
 	// ErrPlatformAdmin means a platform admin cannot be deleted; the flag is revoked first.

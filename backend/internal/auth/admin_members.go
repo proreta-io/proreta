@@ -15,6 +15,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/plans"
 	"github.com/proreta-io/proreta/backend/internal/platform/db"
 	"github.com/proreta-io/proreta/backend/internal/platform/uuidv7"
+	"github.com/proreta-io/proreta/backend/internal/platform/validation"
 )
 
 // Audit actions of the platform admin's member management. They replace the customer-facing
@@ -221,6 +222,8 @@ func (s *Service) AddFirstOwnerTx(ctx context.Context, tx pgx.Tx, a Actor, email
 	}()
 	u, err := authdb.New(tx).GetUserByEmail(ctx, email)
 	switch {
+	case err == nil && u.Status != "active":
+		return nil, nil, "", "", &validation.Error{Fields: []validation.FieldError{{Field: "ownerEmail", Message: "belongs to a disabled account; enable it first or use another address"}}}
 	case err == nil:
 		mm, act, err := setMemberTx(ctx, tx, a, u.ID, RoleOwner)
 		if err != nil {

@@ -754,7 +754,7 @@ func TestIntegrationAdminDeleteUser(t *testing.T) {
 		t.Fatalf("delete the only owner: %d %s", r.code, r.raw)
 	}
 	adminID := c.do(http.MethodGet, "/api/v1/auth/me", "", adminCookie).body["user"].(map[string]any)["id"].(string)
-	if r := c.do(http.MethodDelete, "/api/v1/admin/users/"+adminID, "", ah); r.code != http.StatusConflict || problem(r) != "urn:proreta:problem:system-admin" {
+	if r := c.do(http.MethodDelete, "/api/v1/admin/users/"+adminID, "", ah); r.code != http.StatusConflict || problem(r) != "urn:proreta:problem:system-admin" || !strings.Contains(r.raw, "cannot be deleted") {
 		t.Fatalf("delete the system admin: %d %s", r.code, r.raw)
 	}
 	if r := c.do(http.MethodDelete, "/api/v1/admin/users/01920000-0000-7000-8000-0000000000ff", "", ah); r.code != http.StatusNotFound {

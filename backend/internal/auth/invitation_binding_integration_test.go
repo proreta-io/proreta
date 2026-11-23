@@ -389,3 +389,21 @@ func TestIntegrationFirstOwnerLinkIsBound(t *testing.T) {
 		t.Fatalf("%d mails queued", n)
 	}
 }
+
+// A disabled account cannot be the first owner, and the answer names the address field.
+func TestIntegrationFirstOwnerDisabledAccount(t *testing.T) {
+	w := newInviteWorld(t, "auth_first_owner_disabled")
+	exec(t, w.admin, `UPDATE users SET status = 'disabled' WHERE email = 'viewer@example.com'`)
+	pool := w.env.Pool(t, w.env.APIURL, 2)
+	err := db.WithTx(w.ctx, pool, func(tx pgx.Tx) error {
+		if err := db.SetTenant(w.ctx, tx, w.tenant); err != nil {
+			return err
+		}
+		_, _, _, _, err := w.svc.AddFirstOwnerTx(w.ctx, tx, auth.PlatformActor(w.tenant, w.ownerID, testIP), "viewer@example.com")
+		return err
+	})
+	var verr *validation.Error
+	if !errors.As(err, &verr) || verr.Fields[0].Field != "ownerEmail" {
+		t.Fatalf("want a validation error on ownerEmail, got %v", err)
+	}
+}

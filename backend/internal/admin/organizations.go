@@ -87,7 +87,11 @@ func (s *Service) CreateTenant(ctx context.Context, actor Actor, in TenantCreate
 		if err := db.SetTenant(ctx, tx, id); err != nil {
 			return err
 		}
-		out.Member, out.Invitation, out.Token, action, err = s.auth.AddFirstOwnerTx(ctx, tx, auth.PlatformActor(id, actor.UserID, actor.IP), email)
+		if out.Member, out.Invitation, out.Token, action, err = s.auth.AddFirstOwnerTx(ctx, tx, auth.PlatformActor(id, actor.UserID, actor.IP), email); err != nil {
+			return err
+		}
+		// Read inside the transaction: a failure after the commit would lose the one-time owner link.
+		out.Tenant, err = getTenant(ctx, tx, actor, id)
 		return err
 	})
 	if err != nil {
@@ -98,9 +102,6 @@ func (s *Service) CreateTenant(ctx context.Context, actor Actor, in TenantCreate
 		return TenantCreated{}, err
 	}
 	s.recorded(ctx, action, "tenant_id", id)
-	if out.Tenant, err = s.GetTenant(ctx, actor, id); err != nil {
-		return TenantCreated{}, err
-	}
 	s.recorded(ctx, ActionCreated, "tenant_id", id, "plan_key", plan)
 	return out, nil
 }

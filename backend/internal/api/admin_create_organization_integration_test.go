@@ -145,7 +145,7 @@ func TestIntegrationAdminCreateOrganization(t *testing.T) {
 		c.register("dormant@alpha.example")
 		pgtest.MustExec(t, env.AdminConn(t), `UPDATE users SET status = 'disabled' WHERE email = 'dormant@alpha.example'`)
 		r := c.do(http.MethodPost, path, `{"name":"Dormant","slug":"dormant","ownerEmail":"dormant@alpha.example"}`, ah)
-		if r.code != http.StatusConflict || !strings.Contains(r.raw, "last-owner") {
+		if r.code != http.StatusUnprocessableEntity || !strings.Contains(r.raw, "ownerEmail") {
 			t.Fatalf("disabled owner: %d %s", r.code, r.raw)
 		}
 		if n := countRows(t, env, `SELECT count(*) FROM tenants WHERE slug = 'dormant'`); n != 0 {
