@@ -782,3 +782,39 @@ func TestIntegrationStatusPageDomainsCountsAndPageDelete(t *testing.T) {
 		t.Errorf("domain of the other page: %q (%v)", pending, err)
 	}
 }
+
+// The export of proretactl answers only the api role on a plain connection: inside a tenant
+// transaction (the HTTP path), as the owner, or as any other role it is refused.
+func TestIntegrationStatusPageDomainsExportActor(t *testing.T) {
+	f := newDomainFixture(t, "spdomainsexport")
+	ctx := context.Background()
+	f.add(tenantA, f.pageA, "live.example.org", "active")
+	f.add(tenantB, f.pageB, "waiting.example.org", "pending")
+
+	count := func(conn *pgx.Conn, all bool) (int, error) {
+		var n int
+		err := conn.QueryRow(ctx, `SELECT count(*) FROM status_page_domains_export($1)`, all).Scan(&n)
+		return n, err
+	}
+	if n, err := count(f.api, false); err != nil || n != 1 {
+		t.Errorf("api, serving only: n=%d err=%v, want 1", n, err)
+	}
+	if n, err := count(f.api, true); err != nil || n != 2 {
+		t.Errorf("api, all: n=%d err=%v, want 2", n, err)
+	}
+	err := inTenant(t, f.api, tenantA, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `SELECT * FROM status_page_domains_export(true)`)
+		return err
+	})
+	if pgCode(err) != "PRD04" {
+		t.Errorf("api inside a tenant transaction: %v, want PRD04", err)
+	}
+	if _, err := count(f.admin, true); pgCode(err) != "PRD04" {
+		t.Errorf("owner: %v, want PRD04", err)
+	}
+	for name, conn := range map[string]*pgx.Conn{"worker": f.worker, "statuspage": f.public} {
+		if _, err := count(conn, true); pgCode(err) != "42501" {
+			t.Errorf("%s: %v, want permission denied", name, err)
+		}
+	}
+}

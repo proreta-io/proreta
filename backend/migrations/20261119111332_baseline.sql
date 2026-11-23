@@ -2305,9 +2305,17 @@ GRANT EXECUTE ON FUNCTION status_page_domains_due(integer) TO proreta_worker;
 
 -- +goose StatementBegin
 CREATE FUNCTION status_page_domains_export(p_all boolean) RETURNS TABLE(host text, state text, is_primary boolean, disabled boolean, tenant_slug text, page_slug text, verified_at timestamp with time zone)
-    LANGUAGE sql STABLE SECURITY DEFINER
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
     SET search_path TO 'public', 'pg_temp'
     AS $$
+#variable_conflict use_column
+BEGIN
+    -- Only the operator path (proretactl on a plain api-role connection, no tenant) may read every
+    -- tenant's domains; a request inside a tenant transaction or any other role is refused.
+    IF session_user <> 'proreta_api' OR NULLIF(current_setting('app.tenant_id', true), '') IS NOT NULL THEN
+        RAISE EXCEPTION 'status page domain: export outside the operator path' USING ERRCODE = 'PRD04';
+    END IF;
+    RETURN QUERY
     SELECT d.host, d.state, d.is_primary, d.disabled_at IS NOT NULL, t.slug, p.slug, d.verified_at
     FROM status_page_domains AS d
     JOIN status_pages AS p ON p.tenant_id = d.tenant_id AND p.id = d.page_id
@@ -2316,7 +2324,8 @@ CREATE FUNCTION status_page_domains_export(p_all boolean) RETURNS TABLE(host tex
       AND (COALESCE(p_all, false)
            OR (d.state IN ('verified', 'active') AND d.disabled_at IS NULL
                AND p.deleted_at IS NULL AND t.status = 'active' AND t.deleted_at IS NULL))
-    ORDER BY d.host, d.id
+    ORDER BY d.host, d.id;
+END
 $$;
 -- +goose StatementEnd
 REVOKE ALL ON FUNCTION status_page_domains_export(boolean) FROM PUBLIC;
