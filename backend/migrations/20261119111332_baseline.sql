@@ -2689,6 +2689,8 @@ BEGIN
     IF v_admin THEN
         RAISE EXCEPTION 'admin: revoke platform admin before deleting the user' USING ERRCODE = 'PRA36';
     END IF;
+    -- serialise the owner check per organization: without it two calls for the two owners both see the other as active
+    PERFORM 1 FROM tenants AS tn WHERE tn.id IN (SELECT m.tenant_id FROM memberships AS m WHERE m.user_id = p_user_id AND m.role = 'owner') ORDER BY tn.id FOR UPDATE;
     -- an organization must keep an active owner (the predicate of admin_set_user_status)
     IF EXISTS (
         SELECT 1 FROM memberships AS m JOIN tenants AS tn ON tn.id = m.tenant_id
@@ -3331,6 +3333,10 @@ BEGIN
     END IF;
     IF p_status = 'disabled' AND v_system THEN
         RAISE EXCEPTION 'admin: the system admin cannot be disabled' USING ERRCODE = 'PRA07';
+    END IF;
+    IF p_status = 'disabled' THEN
+        -- serialise the owner check per organization: without it two calls for the two owners both see the other as active
+        PERFORM 1 FROM tenants AS tn WHERE tn.id IN (SELECT m.tenant_id FROM memberships AS m WHERE m.user_id = p_user_id AND m.role = 'owner') ORDER BY tn.id FOR UPDATE;
     END IF;
     -- an organization must keep an active owner (the same rule as removing or demoting the last one)
     IF p_status = 'disabled' AND EXISTS (
