@@ -1142,11 +1142,13 @@ BEGIN
     PERFORM auth_revoke_user_sessions(p_user_id);
     -- tenant tables are row-level secured: one tenant at a time, deleted organizations included
     FOR t IN SELECT m.tenant_id FROM memberships AS m WHERE m.user_id = p_user_id
-             UNION SELECT i.tenant_id FROM invitations AS i WHERE i.accepted_by = p_user_id LOOP
+             UNION SELECT i.tenant_id FROM invitations AS i WHERE i.accepted_by = p_user_id OR i.created_by = p_user_id LOOP
         PERFORM set_config('app.tenant_id', t::text, true);
         DELETE FROM project_members AS pm WHERE pm.tenant_id = t AND pm.user_id = p_user_id;
         -- the label and the address hash of an accepted invitation name a person
         UPDATE invitations AS i SET label = '', email_hash = NULL WHERE i.tenant_id = t AND i.accepted_by = p_user_id AND (i.label <> '' OR i.email_hash IS NOT NULL);
+        -- links the person handed out must not outlive the person
+        UPDATE invitations AS i SET revoked_at = now() WHERE i.tenant_id = t AND i.created_by = p_user_id AND i.accepted_at IS NULL AND i.revoked_at IS NULL;
         DELETE FROM memberships AS m WHERE m.tenant_id = t AND m.user_id = p_user_id;
         GET DIAGNOSTICS n = ROW_COUNT;
         v_members := v_members + n;
