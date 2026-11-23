@@ -53,6 +53,9 @@ jobs:
             echo "::error::tag $GITHUB_REF_NAME is not on main"
             exit 1
           fi
+      # A final tag needs the baseline pinned in released.sha256; a pre-release does not (the owner appends it last).
+      - name: Baseline frozen
+        run: bash scripts/check-baseline-pinned.sh "${GITHUB_REF_NAME#v}"
       # The previous tag is the one just below this tag in version order (a pre-release sorts before its
       # release); `none` when this is the first tag. Fails before any image is built.
       - name: Release notes

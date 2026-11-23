@@ -1,5 +1,6 @@
 # SHA-256 of every migration that belongs to a published release, one line each: `<sha256>  <file name>`
 # (the output of `shasum -a 256 <file>`). TestReleasedMigrationsUnchanged fails when such a file is edited,
 # renamed or removed, and when a migration that is not listed has an older timestamp than a listed one.
-# Add a line when you cut a release tag (the baseline first) and never change or delete one:
+# The baseline is frozen at the FINAL tag: the owner appends its hash last, before tagging vX.Y.Z (the release
+# workflow fails a final tag without it; pre-releases such as -rc.N pass without). Never change or delete a line:
 #   cd backend/migrations && shasum -a 256 20261119111332_baseline.sql >> released.sha256

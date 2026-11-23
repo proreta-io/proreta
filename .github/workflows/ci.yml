@@ -41,6 +41,8 @@ jobs:
         run: bash scripts/check-internal-refs.sh
       - name: Release notes check works
         run: bash scripts/tests/release-notes.sh
+      - name: Baseline pin check works
+        run: bash scripts/tests/baseline-pinned.sh
       - name: Actions pinned to a commit, no floating tool versions
         run: |
           set -euo pipefail
