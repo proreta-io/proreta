@@ -434,7 +434,7 @@ jobs:
           node-version-file: web/.nvmrc
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - name: Generated client is up to date
         run: |
           npm run gen:api
