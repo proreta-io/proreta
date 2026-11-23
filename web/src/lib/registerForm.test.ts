@@ -7,12 +7,15 @@ import {
 } from "./registerForm";
 
 describe("registration policy (mirrors the server)", () => {
-  it.each(["owner@example.com", "O'Brien@example.com", "  User+Tag@Example.COM ", "a_b-c.d@sub.example.co.uk", "a@b.c"])(
-    "accepts %j",
-    (email) => {
-      expect(emailError(email)).toBeUndefined();
-    },
-  );
+  it.each([
+    "owner@example.com",
+    "O'Brien@example.com",
+    "  User+Tag@Example.COM ",
+    "a_b-c.d@sub.example.co.uk",
+    "a@b.c",
+  ])("accepts %j", (email) => {
+    expect(emailError(email)).toBeUndefined();
+  });
 
   it.each([
     ["", "Enter your email address"],
