@@ -53,6 +53,15 @@ jobs:
             echo "::error::tag $GITHUB_REF_NAME is not on main"
             exit 1
           fi
+      # The previous tag is the one just below this tag in version order (a pre-release sorts before its
+      # release); `none` when this is the first tag. Fails before any image is built.
+      - name: Release notes
+        run: |
+          set -euo pipefail
+          git fetch --tags --force origin
+          prev=$(git -c versionsort.suffix=- tag --list 'v*.*.*' --sort=-v:refname \
+            | awk -v t="$GITHUB_REF_NAME" 'found { print; exit } $0 == t { found = 1 }')
+          bash scripts/check-release-notes.sh "${GITHUB_REF_NAME#v}" "${prev:-none}"
 
   ci:
     if: startsWith(github.ref, 'refs/tags/v')

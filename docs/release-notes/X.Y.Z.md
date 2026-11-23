@@ -74,6 +74,10 @@ New, all optional: `PRORETA_STATUS_PAGE_CUSTOM_DOMAINS`, `PRORETA_STATUSPAGE_CNA
 
 **If you ran an early 0.x release** (also covered by the reinstall): the role `admin` is now called `maintainer`.
 
+## Migrations
+<!-- Required by the release workflow when backend/migrations changed since the previous tag; write "No migrations." if none shipped. For the first release say that the database starts from the baseline and X.Y.Z is a new installation. -->
+This release replaces the migration chain of the 0.x releases with one baseline. A database from a 0.x release is not migrated: install X.Y.Z as a new installation (see [Breaking changes](#breaking-changes-and-what-to-do)). A pre-release `X.Y.Z-rc.N` upgrades to X.Y.Z with the migrations the migration Job applies before the workloads roll.
+
 ## Known limitations
 - **Gateway API only.** The chart creates an `HTTPRoute`; Ingress is not supported.
 - **One PostgreSQL server per installation** (the role names are fixed), external to the chart; PostgreSQL 16 (the version CI tests). No bundled database.
