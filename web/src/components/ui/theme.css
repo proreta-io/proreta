@@ -14,7 +14,7 @@
    * The brand accent: one hue, used for actions, links, selection and focus, never for a status.
    * Statuses keep their own hues: green up, amber warning, red down. Change the brand here.
    */
-  --accent-h: 265;
+  --accent-h: 300; /* ultraviolet */
 
   /* Surfaces: the page, then cards on it, then popovers. Neutrals carry a faint cool tint. */
   --background: light-dark(oklch(0.972 0.005 260), oklch(0.155 0.008 260));
@@ -29,14 +29,14 @@
   --border-faint: light-dark(oklch(0.93 0.005 260), oklch(0.255 0.011 260));
   --input: light-dark(oklch(0.74 0.012 260), oklch(0.42 0.014 260));
   --input-hover: light-dark(oklch(0.58 0.014 260), oklch(0.54 0.014 260));
-  --ring: light-dark(oklch(0.55 0.19 var(--accent-h)), oklch(0.72 0.15 var(--accent-h)));
-  --primary: light-dark(oklch(0.52 0.19 var(--accent-h)), oklch(0.7 0.15 var(--accent-h)));
-  --primary-foreground: light-dark(oklch(1 0 0), oklch(0.16 0.03 var(--accent-h)));
-  --primary-hover: light-dark(oklch(0.47 0.19 var(--accent-h)), oklch(0.75 0.14 var(--accent-h)));
-  --primary-active: light-dark(oklch(0.43 0.18 var(--accent-h)), oklch(0.66 0.15 var(--accent-h)));
+  --ring: light-dark(oklch(0.55 0.24 var(--accent-h)), oklch(0.72 0.2 var(--accent-h)));
+  --primary: light-dark(oklch(0.5 0.25 var(--accent-h)), oklch(0.68 0.22 var(--accent-h)));
+  --primary-foreground: light-dark(oklch(1 0 0), oklch(0.15 0.04 var(--accent-h)));
+  --primary-hover: light-dark(oklch(0.45 0.24 var(--accent-h)), oklch(0.73 0.2 var(--accent-h)));
+  --primary-active: light-dark(oklch(0.41 0.23 var(--accent-h)), oklch(0.63 0.22 var(--accent-h)));
   /* Links and selected text; the tint is the background of a selected or brand-marked thing. */
-  --accent-text: light-dark(oklch(0.5 0.19 var(--accent-h)), oklch(0.79 0.12 var(--accent-h)));
-  --accent-tint: light-dark(oklch(0.955 0.025 var(--accent-h)), oklch(0.27 0.05 var(--accent-h)));
+  --accent-text: light-dark(oklch(0.48 0.24 var(--accent-h)), oklch(0.8 0.14 var(--accent-h)));
+  --accent-tint: light-dark(oklch(0.95 0.04 var(--accent-h)), oklch(0.28 0.08 var(--accent-h)));
   --destructive: light-dark(oklch(0.53 0.2 27), oklch(0.72 0.16 27));
   --destructive-foreground: light-dark(oklch(1 0 0), oklch(0.16 0.02 27));
   --destructive-hover: light-dark(oklch(0.47 0.19 27), oklch(0.77 0.14 27));
