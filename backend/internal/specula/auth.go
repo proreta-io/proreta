@@ -84,7 +84,10 @@ func Hello(ctx context.Context, pool *db.Pool, id uuid.UUID, in HelloInput) (dup
 		if !ok {
 			return ErrUnauthorized
 		}
-		if in.SlotCounters == nil {
+		// Two executors on one token flip the instance id on every hello and each would add its whole
+		// cumulative value again; a hello of a duplicate is not counted, the stored baseline stays empty
+		// and the next hello of the process that keeps the id counts what it has.
+		if in.SlotCounters == nil || duplicate {
 			return nil
 		}
 		// Same transaction, so the deltas and the hello's row update commit together.

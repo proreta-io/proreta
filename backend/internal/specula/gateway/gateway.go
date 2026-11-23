@@ -224,11 +224,16 @@ func (g *Handler) hello(w http.ResponseWriter, r *http.Request) {
 			problem(w, r, http.StatusBadRequest, "bad-request", "slotCounters needs the schedule/2 capability")
 			return
 		}
-		if !sc.Valid() {
-			problem(w, r, http.StatusBadRequest, "bad-request", "slotCounters values must be between 0 and 1e15")
-			return
-		}
+		// A counter outside 0..MaxSlotCounter is left out and counted; the rest of the hello still
+		// counts, so one broken value does not make the executor lose its hello for good.
 		hello.SlotCounters = sc.Values()
+		for reason, v := range hello.SlotCounters {
+			if v < 0 || v > wire.MaxSlotCounter {
+				delete(hello.SlotCounters, reason)
+				g.metrics.slotCountersIgnored.WithLabelValues(reason).Inc()
+				g.d.Log.Warn("specula hello: slot counter out of range, ignored", "specula_id", id.SpeculaID, "reason", reason)
+			}
+		}
 	}
 	if hello.BufferDepth != nil && *hello.BufferDepth < 0 {
 		problem(w, r, http.StatusBadRequest, "bad-request", "bufferDepth must not be negative")

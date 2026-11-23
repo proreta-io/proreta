@@ -31,7 +31,10 @@ func canLinkByEmail(c linkCandidate) bool {
 
 // linkIdentityByEmail links the provider identity to the existing account with the same email, in
 // one transaction: the email counts as verified, every session the account had ends (the sign-in
-// creates its own afterwards), and the password, memberships and data stay. It returns false
+// creates its own afterwards), and memberships and data stay. The password stays only when the
+// address was verified before: otherwise whoever typed the address first set it, and the owner of
+// the address has just proved to be someone else, so it is removed together with the open reset
+// and verification links. It returns false
 // (nothing changed) when the rule says no, also when a concurrent sign-in won the account.
 func (s *Service) linkIdentityByEmail(ctx context.Context, in OAuthLoginInput, userID uuid.UUID) (bool, error) {
 	id := in.Identity
@@ -62,6 +65,21 @@ func (s *Service) linkIdentityByEmail(ctx context.Context, in OAuthLoginInput, u
 		if err := q.MarkEmailVerified(ctx, authdb.MarkEmailVerifiedParams{ID: userID, VerifiedAt: &now}); err != nil {
 			return fmt.Errorf("mark email verified: %w", err)
 		}
+		passwordRemoved := false
+		if !u.EmailVerified && u.HasPassword {
+			if err := q.ClearPassword(ctx, userID); err != nil {
+				return fmt.Errorf("clear password: %w", err)
+			}
+			passwordRemoved = true
+		}
+		if !u.EmailVerified {
+			if err := q.SupersedePasswordResets(ctx, authdb.SupersedePasswordResetsParams{UserID: userID, Now: &now}); err != nil {
+				return fmt.Errorf("supersede password resets: %w", err)
+			}
+			if err := q.SupersedeEmailVerifications(ctx, authdb.SupersedeEmailVerificationsParams{UserID: userID, Now: &now}); err != nil {
+				return fmt.Errorf("supersede email verifications: %w", err)
+			}
+		}
 		// Whoever was signed in before may not be the owner of the address.
 		revoked, err := revokeUserSessions(ctx, tx, userID)
 		if err != nil {
@@ -82,7 +100,7 @@ func (s *Service) linkIdentityByEmail(ctx context.Context, in OAuthLoginInput, u
 		return audit.Record(ctx, tx, audit.Entry{
 			TenantID: t, ActorUserID: &userID, Action: ActionIdentityLinked,
 			EntityType: "user", EntityID: userID.String(), IP: in.IP,
-			Metadata: map[string]any{"provider": id.Provider, "via": "sign_in", "sessionsRevoked": revoked},
+			Metadata: map[string]any{"provider": id.Provider, "via": "sign_in", "sessionsRevoked": revoked, "passwordRemoved": passwordRemoved},
 		})
 	})
 	if err != nil {

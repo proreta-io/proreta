@@ -38,6 +38,9 @@ func TestIntegrationAdminDeleteUser(t *testing.T) {
 		// organization it is no longer a member of (the label and the bound address's hash name the person).
 		`INSERT INTO invitations (id, tenant_id, role, token_hash, created_by, created_at, expires_at) VALUES
 		 (gen_random_uuid(), '`+tenantA+`', 'viewer', sha256('i1'::bytea), '`+userVictim+`', now() - interval '1 hour', now() + interval '1 day')`,
+		// An open link of the victim in an organization it does not belong to must stop working as well.
+		`INSERT INTO invitations (id, tenant_id, role, token_hash, created_by, created_at, expires_at) VALUES
+		 (gen_random_uuid(), '`+tenantDef+`', 'maintainer', sha256('i3'::bytea), '`+userVictim+`', now() - interval '1 hour', now() + interval '1 day')`,
 		`INSERT INTO invitations (id, tenant_id, role, token_hash, created_by, created_at, expires_at, accepted_at, accepted_by, label, email_hash)
 		 VALUES (gen_random_uuid(), '`+tenantDef+`', 'viewer', sha256('i2'::bytea), '`+userPlatform+`', now() - interval '2 hours', now() + interval '1 day', now(), '`+userVictim+`', 'Vic Tim', sha256('victim'::bytea))`,
 		`INSERT INTO org_auth_domains (id, tenant_id, domain, created_by) VALUES (gen_random_uuid(), '`+tenantA+`', 'victim.example', '`+userVictim+`')`,
@@ -122,14 +125,26 @@ func TestIntegrationAdminDeleteUser(t *testing.T) {
 		if n := count(`SELECT count(*) FROM invitations WHERE accepted_by = $1 AND label = '' AND email_hash IS NULL`, userVictim); n != 1 {
 			t.Errorf("accepted invitation with a cleared label and address hash: %d, want 1", n)
 		}
+		// The links the victim handed out are revoked, in every organization.
+		for _, tok := range []string{"i1", "i3"} {
+			if n := count(`SELECT count(*) FROM auth_invitation_lookup(sha256($1::bytea))`, tok); n != 0 {
+				t.Errorf("open invitation %s of the deleted user still resolves", tok)
+			}
+		}
+		if n := count(`SELECT count(*) FROM invitations WHERE created_by = $1 AND revoked_at IS NOT NULL`, userVictim); n != 2 {
+			t.Errorf("revoked invitations of the user = %d, want 2", n)
+		}
 		// Every reference still resolves to the tombstone.
-		for name, q := range map[string]string{
-			"invitation":  `SELECT count(*) FROM invitations i JOIN users u ON u.id = i.created_by WHERE u.id = $1`,
-			"auth domain": `SELECT count(*) FROM org_auth_domains d JOIN users u ON u.id = d.created_by WHERE u.id = $1`,
-			"specula":     `SELECT count(*) FROM specula_agents a JOIN users u ON u.id = a.created_by WHERE u.id = $1`,
+		for name, tc := range map[string]struct {
+			q    string
+			want int
+		}{
+			"invitation":  {`SELECT count(*) FROM invitations i JOIN users u ON u.id = i.created_by WHERE u.id = $1`, 2},
+			"auth domain": {`SELECT count(*) FROM org_auth_domains d JOIN users u ON u.id = d.created_by WHERE u.id = $1`, 1},
+			"specula":     {`SELECT count(*) FROM specula_agents a JOIN users u ON u.id = a.created_by WHERE u.id = $1`, 1},
 		} {
-			if n := count(q, userVictim); n != 1 {
-				t.Errorf("%s created by the deleted user resolves %d times, want 1", name, n)
+			if n := count(tc.q, userVictim); n != tc.want {
+				t.Errorf("%s created by the deleted user resolves %d times, want %d", name, n, tc.want)
 			}
 		}
 		var tenant, meta, ip string

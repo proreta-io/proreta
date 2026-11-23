@@ -125,7 +125,7 @@ Use it for abuse, non-payment or a customer's request to freeze an account.
 - A plan change and a monitor creation of the same organization are serialised by the organization row lock, so a create cannot slip past a downgrade.
 
 ## Audit
-Every change writes one `audit_log` row into the target organization with the admin's user id, the client IP and the before/after values; never a password or a hash. There is no viewer in the panel yet; read it as `proreta_owner`:
+Every change writes one `audit_log` row into the target organization with the admin's user id, the client IP and the before/after values; never a password or a hash. Audit rows are permanent today (nothing purges them); the index on `created_at` exists so that a later purge by age does not scan the table. There is no viewer in the panel yet; read it as `proreta_owner`:
 
 ```sql
 SELECT created_at, action, entity_type, entity_id, metadata, host(ip)

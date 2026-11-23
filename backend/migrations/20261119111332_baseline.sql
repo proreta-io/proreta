@@ -56,6 +56,7 @@ CREATE TABLE audit_log (
 
 ALTER TABLE ONLY audit_log FORCE ROW LEVEL SECURITY;
 CREATE INDEX audit_log_tenant_created_idx ON audit_log USING btree (tenant_id, created_at DESC);
+CREATE INDEX audit_log_created_idx ON audit_log USING btree (created_at);
 ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON audit_log USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
 REVOKE ALL ON audit_log FROM proreta_api, proreta_worker;
@@ -2689,6 +2690,8 @@ BEGIN
     IF v_admin THEN
         RAISE EXCEPTION 'admin: revoke platform admin before deleting the user' USING ERRCODE = 'PRA36';
     END IF;
+    -- serialise the owner check per organization: without it two calls for the two owners both see the other as active
+    PERFORM 1 FROM tenants AS tn WHERE tn.id IN (SELECT m.tenant_id FROM memberships AS m WHERE m.user_id = p_user_id AND m.role = 'owner') ORDER BY tn.id FOR UPDATE;
     -- an organization must keep an active owner (the predicate of admin_set_user_status)
     IF EXISTS (
         SELECT 1 FROM memberships AS m JOIN tenants AS tn ON tn.id = m.tenant_id
@@ -2703,11 +2706,13 @@ BEGIN
     PERFORM auth_revoke_user_sessions(p_user_id);
     -- tenant tables are row-level secured: one tenant at a time, deleted organizations included
     FOR t IN SELECT m.tenant_id FROM memberships AS m WHERE m.user_id = p_user_id
-             UNION SELECT i.tenant_id FROM invitations AS i WHERE i.accepted_by = p_user_id LOOP
+             UNION SELECT i.tenant_id FROM invitations AS i WHERE i.accepted_by = p_user_id OR i.created_by = p_user_id LOOP
         PERFORM set_config('app.tenant_id', t::text, true);
         DELETE FROM project_members AS pm WHERE pm.tenant_id = t AND pm.user_id = p_user_id;
         -- the label and the address hash of an accepted invitation name a person
         UPDATE invitations AS i SET label = '', email_hash = NULL WHERE i.tenant_id = t AND i.accepted_by = p_user_id AND (i.label <> '' OR i.email_hash IS NOT NULL);
+        -- links the person handed out must not outlive the person
+        UPDATE invitations AS i SET revoked_at = now() WHERE i.tenant_id = t AND i.created_by = p_user_id AND i.accepted_at IS NULL AND i.revoked_at IS NULL;
         DELETE FROM memberships AS m WHERE m.tenant_id = t AND m.user_id = p_user_id;
         GET DIAGNOSTICS n = ROW_COUNT;
         v_members := v_members + n;
@@ -3332,6 +3337,10 @@ BEGIN
     IF p_status = 'disabled' AND v_system THEN
         RAISE EXCEPTION 'admin: the system admin cannot be disabled' USING ERRCODE = 'PRA07';
     END IF;
+    IF p_status = 'disabled' THEN
+        -- serialise the owner check per organization: without it two calls for the two owners both see the other as active
+        PERFORM 1 FROM tenants AS tn WHERE tn.id IN (SELECT m.tenant_id FROM memberships AS m WHERE m.user_id = p_user_id AND m.role = 'owner') ORDER BY tn.id FOR UPDATE;
+    END IF;
     -- an organization must keep an active owner (the same rule as removing or demoting the last one)
     IF p_status = 'disabled' AND EXISTS (
         SELECT 1 FROM memberships AS m JOIN tenants AS t ON t.id = m.tenant_id
@@ -3824,23 +3833,37 @@ BEGIN
     IF NOT FOUND THEN
         RETURN;
     END IF;
+    -- Defence in depth behind the gateway: only whole numbers in 0..1e15 count; anything else is ignored
+    -- (and not stored), so a bad value never fails the hello. One hello adds at most 1e7 per reason and a
+    -- stored sum saturates at 1e15, so neither a restart loop nor a huge counter can overflow bigint.
     RETURN QUERY
-    WITH d AS (
-        SELECT m.kind, m.reason,
-               CASE WHEN o.v IS NOT NULL AND c.v >= o.v THEN c.v - o.v ELSE c.v END AS delta
-        FROM (VALUES ('missed', 'busy'), ('missed', 'late'), ('missed', 'scheduleExpired'),
+    WITH m AS (
+        SELECT * FROM (VALUES ('missed', 'busy'), ('missed', 'late'), ('missed', 'scheduleExpired'),
                      ('dropped', 'bufferSize'), ('dropped', 'bufferAge'), ('dropped', 'rejected'),
-                     ('dropped', 'superseded'), ('dropped', 'tooOld'), ('dropped', 'unreadable')) AS m(kind, reason)
-        CROSS JOIN LATERAL (SELECT coalesce((p_counters ->> m.reason)::bigint, 0) AS v) AS c
+                     ('dropped', 'superseded'), ('dropped', 'tooOld'), ('dropped', 'unreadable')) AS x(kind, reason)
+    ), good AS (
+        SELECT m.kind, m.reason, (p_counters -> m.reason)::numeric::bigint AS v
+        FROM m
+        WHERE jsonb_typeof(p_counters -> m.reason) = 'number'
+          AND CASE WHEN jsonb_typeof(p_counters -> m.reason) = 'number'
+                   THEN (p_counters -> m.reason)::numeric = trunc((p_counters -> m.reason)::numeric)
+                        AND (p_counters -> m.reason)::numeric BETWEEN 0 AND 1000000000000000
+                   ELSE false END
+    ), d AS (
+        SELECT m.kind, m.reason,
+               LEAST(CASE WHEN o.v IS NOT NULL AND c.v >= o.v THEN c.v - o.v ELSE c.v END, 10000000) AS delta
+        FROM m
+        CROSS JOIN LATERAL (SELECT coalesce((SELECT g.v FROM good AS g WHERE g.reason = m.reason), 0) AS v) AS c
         CROSS JOIN LATERAL (SELECT (a.slot_counters ->> m.reason)::bigint AS v) AS o
     ), ins AS (
         INSERT INTO specula_slot_losses AS l (tenant_id, specula_id, hour, kind, reason, count)
         SELECT a.tenant_id, a.id, date_trunc('hour', now(), 'UTC'), d.kind, d.reason, d.delta FROM d WHERE d.delta > 0
         ON CONFLICT (tenant_id, specula_id, hour, kind, reason)
-        DO UPDATE SET count = l.count + excluded.count, updated_at = now()
+        DO UPDATE SET count = LEAST(l.count + excluded.count, 1000000000000000), updated_at = now()
         RETURNING 1
     ), upd AS (
-        UPDATE specula_agents AS s SET slot_counters = p_counters WHERE s.id = a.id RETURNING 1
+        UPDATE specula_agents AS s SET slot_counters = (SELECT coalesce(jsonb_object_agg(g.reason, g.v), '{}'::jsonb) FROM good AS g)
+        WHERE s.id = a.id RETURNING 1
     )
     SELECT d.kind, d.reason, d.delta FROM d WHERE d.delta > 0;
 END

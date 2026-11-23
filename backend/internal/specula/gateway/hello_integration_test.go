@@ -204,8 +204,6 @@ func TestIntegrationHelloCapabilities(t *testing.T) {
 	}
 	for name, in := range map[string]any{
 		"counters without the capability": wire.HelloRequest{Version: "1", Capabilities: []string{"tcp", "schedule/1"}, SlotCounters: counters(1, 0)},
-		"a negative counter":              wire.HelloRequest{Version: "1", Capabilities: caps2, SlotCounters: counters(-1, 0)},
-		"a counter over the maximum":      wire.HelloRequest{Version: "1", Capabilities: caps2, SlotCounters: counters(wire.MaxSlotCounter+1, 0)},
 		"an unknown counter":              map[string]any{"version": "1", "hostname": "h", "capabilities": caps2, "slotCounters": map[string]any{"missed": map[string]any{"bogus": 1}, "dropped": map[string]any{}}},
 	} {
 		if code, _ := call(t, srv, token, "/hello", in); code != http.StatusBadRequest {
@@ -214,6 +212,15 @@ func TestIntegrationHelloCapabilities(t *testing.T) {
 	}
 	if code, _ := call(t, srv, token, "/hello", wire.HelloRequest{Version: "1", Capabilities: caps2, SlotCounters: counters(wire.MaxSlotCounter, 0)}); code != http.StatusOK {
 		t.Errorf("a counter at the maximum: %d", code)
+	}
+	// A counter outside the range is left out and counted; the hello itself is not refused.
+	for name, v := range map[string]int64{"a negative counter": -1, "a counter over the maximum": wire.MaxSlotCounter + 1} {
+		if code, _ := call(t, srv, token, "/hello", wire.HelloRequest{Version: "1", Capabilities: caps2, SlotCounters: counters(v, 0)}); code != http.StatusOK {
+			t.Errorf("%s: %d, want 200", name, code)
+		}
+	}
+	if n := metricValue(t, reg, "proreta_specula_slot_counters_ignored_total", "reason", "busy"); n != 2 {
+		t.Errorf("slot_counters_ignored_total busy = %v, want 2", n)
 	}
 
 	// Bad values answer 400 and change nothing.

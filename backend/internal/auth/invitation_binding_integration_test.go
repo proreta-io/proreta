@@ -407,3 +407,26 @@ func TestIntegrationFirstOwnerDisabledAccount(t *testing.T) {
 		t.Fatalf("want a validation error on ownerEmail, got %v", err)
 	}
 }
+
+// A bound invitation for an address with an apostrophe: the Google sign-in with that address (any
+// case) creates the account and consumes the link; another address does not.
+func TestIntegrationBoundInvitationOAuthApostrophe(t *testing.T) {
+	e := newOAuthEnv(t, "auth_oauth_bound_apos", auth.Options{})
+	admin := e.adminLogin()
+	_, token, _, err := e.svc.CreateInvitationFor(e.ctx, auth.Actor{TenantID: admin.Tenant.ID, UserID: admin.User.ID},
+		auth.InvitationInput{Role: auth.RoleMember, Email: "O'Brien@Example.com", BindToEmail: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := e.svc.CheckInvitation(e.ctx, token, oauthIP)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.login(auth.OAuthLoginInput{Identity: google("g-other", "obrien@example.com", ""), InviteHash: h}); !errors.Is(err, auth.ErrInvitationEmailMismatch) {
+		t.Fatalf("other address: %v", err)
+	}
+	res, err := e.login(auth.OAuthLoginInput{Identity: google("g-ob", "o'brien@example.com", ""), InviteHash: h})
+	if err != nil || res.Tenant.ID != admin.Tenant.ID || res.User.Login != "o'brien@example.com" {
+		t.Fatalf("sign-in with an apostrophe: %v", err)
+	}
+}

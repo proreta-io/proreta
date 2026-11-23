@@ -558,6 +558,10 @@ func TestIntegrationOAuthLinksMatchingAccount(t *testing.T) {
 			if verified {
 				pgtest.MustExec(t, e.admin, `UPDATE users SET email_verified_at = now() WHERE id = '`+uid+`'`)
 			}
+			// Open links of the account: a reset and a verification the squatter could still use.
+			pgtest.MustExec(t, e.admin,
+				`INSERT INTO password_resets (token_hash, user_id, email, expires_at) VALUES (sha256('pr'::bytea), '`+uid+`', 'ceo@corp.example', now() + interval '1 day')`,
+				`INSERT INTO email_verifications (token_hash, user_id, email, expires_at) VALUES (sha256('ev'::bytea), '`+uid+`', 'ceo@corp.example', now() + interval '1 day')`)
 			projects := e.count(`SELECT count(*) FROM projects WHERE tenant_id = $1`, first.Tenant.ID)
 
 			res, err := e.login(auth.OAuthLoginInput{Identity: google("g-ceo", "CEO@corp.example", "")})
@@ -574,12 +578,28 @@ func TestIntegrationOAuthLinksMatchingAccount(t *testing.T) {
 				}
 			}
 			e.principal(res)
-			// The password still works, memberships and data are intact.
-			if _, err := e.svc.Login(e.ctx, auth.LoginInput{Login: "ceo@corp.example", Password: pwd, IP: oauthIP}); err != nil {
-				t.Fatalf("password after the link: %v", err)
+			// Memberships and data are intact. The password stays for an address that was verified
+			// before; otherwise whoever registered it never proved it, and it is gone.
+			_, loginErr := e.svc.Login(e.ctx, auth.LoginInput{Login: "ceo@corp.example", Password: pwd, IP: oauthIP})
+			if verified && loginErr != nil {
+				t.Fatalf("password after the link: %v", loginErr)
 			}
-			if n := e.count(`SELECT count(*) FROM users WHERE id = $1 AND password_hash IS NOT NULL AND email_verified_at IS NOT NULL`, uid); n != 1 {
-				t.Fatal("password removed or email not verified")
+			if !verified && loginErr == nil {
+				t.Fatal("the password of an address nobody had verified still works after the link")
+			}
+			if n := e.count(`SELECT count(*) FROM users WHERE id = $1 AND (password_hash IS NOT NULL) = $2 AND email_verified_at IS NOT NULL`, uid, verified); n != 1 {
+				t.Fatal("password kept or removed the wrong way, or email not verified")
+			}
+			if !verified {
+				if n := e.count(`SELECT count(*) FROM password_resets WHERE user_id = $1 AND used_at IS NULL`, uid); n != 0 {
+					t.Fatalf("%d open password resets after the link", n)
+				}
+				if n := e.count(`SELECT count(*) FROM email_verifications WHERE user_id = $1 AND used_at IS NULL`, uid); n != 0 {
+					t.Fatalf("%d open email verifications after the link", n)
+				}
+			}
+			if n := e.count(`SELECT count(*) FROM audit_log WHERE action = 'auth.identity_linked' AND entity_id = $1 AND (metadata->>'passwordRemoved')::boolean = $2`, uid, !verified); n != 1 {
+				t.Fatalf("auth.identity_linked rows with passwordRemoved=%v: %d", !verified, n)
 			}
 			if n := e.count(`SELECT count(*) FROM memberships WHERE user_id = $1 AND tenant_id = $2`, uid, first.Tenant.ID); n != 1 {
 				t.Fatalf("memberships = %d, want the one kept", n)
@@ -694,8 +714,9 @@ func TestIntegrationOAuthLinkThenInvitationRefused(t *testing.T) {
 	if n := e.count(`SELECT count(*) FROM memberships WHERE user_id = $1 AND tenant_id = $2`, mine.User.ID, admin.Tenant.ID); n != 0 {
 		t.Fatal("joined the organization of a refused invitation")
 	}
-	if _, err := e.svc.Login(e.ctx, auth.LoginInput{Login: "mine@example.com", Password: pwd, IP: oauthIP}); err != nil {
-		t.Fatalf("password after the refused invitation: %v", err)
+	// Registered with an address nobody verified, so the link removed its password.
+	if _, err := e.svc.Login(e.ctx, auth.LoginInput{Login: "mine@example.com", Password: pwd, IP: oauthIP}); !errors.Is(err, auth.ErrInvalidCredentials) {
+		t.Fatalf("password after the link of an unverified address: %v", err)
 	}
 	if res, err := e.login(auth.OAuthLoginInput{Identity: github("1002", "mine@example.com")}); err != nil || res.User.ID != mine.User.ID {
 		t.Fatalf("sign-in after the link: %v", err)
@@ -772,7 +793,7 @@ func TestIntegrationMustChangeOnlyInPasswordSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	uid := reg.User.ID.String()
-	pgtest.MustExec(t, e.admin, `UPDATE users SET password_must_change = true WHERE id = '`+uid+`'`)
+	pgtest.MustExec(t, e.admin, `UPDATE users SET password_must_change = true, email_verified_at = now() WHERE id = '`+uid+`'`) // verified, so the link keeps the password
 
 	viaProvider, err := e.login(auth.OAuthLoginInput{Identity: google("g-both", "both@example.com", "")})
 	if err != nil {

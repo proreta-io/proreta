@@ -28,8 +28,8 @@ export function displayNameError(raw: string): string | undefined {
   return undefined;
 }
 
-/** The login alphabet: every registered email must be usable as a login. */
-const EMAIL_CHARS = /^[A-Za-z0-9._+@-]+$/;
+/** The server's alphabet: letters, digits, `@` and the RFC 5322 punctuation of a bare ASCII address. */
+const EMAIL_CHARS = /^[A-Za-z0-9._+@!#$%&'*/=?^{|}~-]+$/;
 
 /** Trimmed and lowercased, like the server stores it. */
 export function normalizeEmail(email: string): string {
@@ -43,11 +43,14 @@ export function emailError(raw: string): string | undefined {
   if (email.length < EMAIL_MIN || email.length > EMAIL_MAX) {
     return `Use ${EMAIL_MIN}-${EMAIL_MAX} characters`;
   }
-  if (!EMAIL_CHARS.test(email)) return "Use only letters a-z, digits and . _ + - @";
+  if (!EMAIL_CHARS.test(email)) return "Use only letters a-z, digits and ._+-!#$%&'*/=?^{|}~ @";
   const parts = email.split("@");
   if (parts.length !== 2) return "Use exactly one @";
   const [local, domain] = parts as [string, string];
   if (local === "") return "Add the name before the @";
+  if (local.startsWith(".") || local.endsWith(".") || local.includes("..")) {
+    return "Do not start or end the name with a dot or use two dots in a row";
+  }
   if (
     !domain.includes(".") ||
     domain.startsWith(".") ||

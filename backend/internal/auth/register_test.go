@@ -20,6 +20,9 @@ func TestNormalizeEmail(t *testing.T) {
 		"first.last+tag@sub.ex.io": "first.last+tag@sub.ex.io",
 		"a_b-c@x.co":               "a_b-c@x.co",
 		"a@b.c":                    "a@b.c",
+		"o'brien@example.com":      "o'brien@example.com",
+		" O'Brien@Example.COM ":    "o'brien@example.com",
+		"a!#$%&'*/=?^{|}~b@x.co":   "a!#$%&'*/=?^{|}~b@x.co",
 		strings.Repeat("a", 64) + "@" + strings.Repeat("d", 185) + ".com": strings.Repeat("a", 64) + "@" + strings.Repeat("d", 185) + ".com",
 	} {
 		got, msg := normalizeEmail(in)
@@ -32,7 +35,7 @@ func TestNormalizeEmail(t *testing.T) {
 		"owner@.example.com", "owner@example.com.", "owner@example..com",
 		"deleted-1@deleted.invalid", "x@Deleted.Invalid",
 		"o wner@example.com", "owner@exa mple.com", "owner\n@example.com", "owner@example.com\x00",
-		"üser@example.com", "owner@exämple.com", "Kelvin@example.com", "o'brien@example.com", "a!b@example.com",
+		"üser@example.com", "owner@exämple.com", "Kelvin@example.com",
 		strings.Repeat("a", 64) + "@" + strings.Repeat("d", 186) + ".com", // 255 characters
 	} {
 		if got, msg := normalizeEmail(in); msg == "" {
@@ -140,5 +143,18 @@ func TestRegisterHashQueueFullIsRateLimited(t *testing.T) {
 	}
 	if ok, _ := s.ipLimit.Reserve(limiterIPKey(ip)); !ok {
 		t.Fatal("attempt not refunded")
+	}
+}
+
+// An address with an apostrophe has one stored form and one bound-invitation hash, whatever the case
+// or the spaces around it.
+func TestEmailWithApostropheHashesLikeItsNormalForm(t *testing.T) {
+	a, msg := normalizeEmail(" O'Brien@Example.com ")
+	b, msg2 := normalizeEmail("o'BRIEN@example.COM")
+	if msg != "" || msg2 != "" || a != b || a != "o'brien@example.com" {
+		t.Fatalf("%q %q %q %q", a, b, msg, msg2)
+	}
+	if string(hashEmail(a)) != string(hashEmail("o'brien@example.com")) {
+		t.Fatal("the hash differs from the one of the lower-case address")
 	}
 }

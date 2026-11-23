@@ -448,9 +448,15 @@ func NormalizeDisplayName(raw string) (string, string) {
 	return name, ""
 }
 
+// emailLocalSpecials are the punctuation characters of a local part besides letters and digits:
+// the RFC 5322 atext set in use (Google Workspace allows an apostrophe, `o'brien@...`) and the dot.
+// Quotes, spaces, comments, brackets, backslash, comma, colon, semicolon, angle brackets and
+// non-ASCII stay refused, so the address is always a bare ASCII mailbox.
+const emailLocalSpecials = "._+-!#$%&'*/=?^{|}~"
+
 // normalizeEmail trims and lowercases an email and checks the registration policy; it returns
-// a user-facing message when the email is rejected. The alphabet is the login alphabet
-// (config.NormalizeLogin) so that every registered email can be used to log in.
+// a user-facing message when the email is rejected. Any address it accepts can be used to log in
+// (a login is only trimmed and lowercased).
 func normalizeEmail(raw string) (string, string) {
 	s := strings.TrimSpace(raw)
 	if len(s) < minEmailLen || len(s) > maxEmailLen {
@@ -458,8 +464,8 @@ func normalizeEmail(raw string) (string, string) {
 	}
 	// Checked before lowercasing: strings.ToLower maps some non-ASCII runes (the Kelvin sign) to ASCII.
 	for _, c := range s {
-		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && !strings.ContainsRune("._+-@", c) {
-			return "", "may contain only letters a-z, digits and . _ + - @"
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '@' && !strings.ContainsRune(emailLocalSpecials, c) {
+			return "", "may contain only letters a-z, digits and " + emailLocalSpecials + " @"
 		}
 	}
 	s = strings.ToLower(s)
@@ -469,6 +475,13 @@ func normalizeEmail(raw string) (string, string) {
 	}
 	if local == "" {
 		return "", "must have a name before the @"
+	}
+	if strings.HasPrefix(local, ".") || strings.HasSuffix(local, ".") || strings.Contains(local, "..") {
+		return "", "must not start or end its name with a dot or contain two dots in a row"
+	}
+	// The domain keeps the narrow alphabet of a host name.
+	if strings.Trim(domain, "abcdefghijklmnopqrstuvwxyz0123456789.-_") != "" {
+		return "", "must have a domain of letters, digits, dots and hyphens after the @"
 	}
 	if !strings.Contains(domain, ".") || strings.HasPrefix(domain, ".") || strings.HasSuffix(domain, ".") || strings.Contains(domain, "..") {
 		return "", "must have a domain such as example.com after the @"
