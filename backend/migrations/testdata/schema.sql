@@ -709,6 +709,7 @@ users users_status_check CHECK ((status = ANY (ARRAY['active'::text, 'disabled':
 users users_system_admin_is_platform_admin CHECK ((is_platform_admin OR (NOT is_system_admin)))
 
 -- indexes
+CREATE INDEX audit_log_created_idx ON public.audit_log USING btree (created_at)
 CREATE UNIQUE INDEX audit_log_pkey ON public.audit_log USING btree (id)
 CREATE INDEX audit_log_tenant_created_idx ON public.audit_log USING btree (tenant_id, created_at DESC)
 CREATE UNIQUE INDEX auth_identities_pkey ON public.auth_identities USING btree (provider, subject)

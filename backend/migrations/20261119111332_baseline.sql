@@ -56,6 +56,7 @@ CREATE TABLE audit_log (
 
 ALTER TABLE ONLY audit_log FORCE ROW LEVEL SECURITY;
 CREATE INDEX audit_log_tenant_created_idx ON audit_log USING btree (tenant_id, created_at DESC);
+CREATE INDEX audit_log_created_idx ON audit_log USING btree (created_at);
 ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON audit_log USING ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid)) WITH CHECK ((tenant_id = (NULLIF(current_setting('app.tenant_id'::text, true), ''::text))::uuid));
 REVOKE ALL ON audit_log FROM proreta_api, proreta_worker;
