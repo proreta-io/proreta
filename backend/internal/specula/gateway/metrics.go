@@ -9,14 +9,15 @@ type metrics struct {
 	results      *prometheus.CounterVec
 	tokenLimited *prometheus.CounterVec
 
-	reports            *prometheus.CounterVec
-	reportAge          prometheus.Histogram
-	lateReports        prometheus.Counter
-	scheduleRequests   *prometheus.CounterVec
-	scheduleBuild      prometheus.Histogram
-	scheduleUnreadable prometheus.Counter
-	duplicateInstance  prometheus.Counter
-	slotLosses         *prometheus.CounterVec
+	reports             *prometheus.CounterVec
+	reportAge           prometheus.Histogram
+	lateReports         prometheus.Counter
+	scheduleRequests    *prometheus.CounterVec
+	scheduleBuild       prometheus.Histogram
+	scheduleUnreadable  prometheus.Counter
+	duplicateInstance   prometheus.Counter
+	slotLosses          *prometheus.CounterVec
+	slotCountersIgnored *prometheus.CounterVec
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -62,10 +63,13 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 		slotLosses: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "proreta_specula_slot_losses_total", Help: "Slots the executors reported as never checked (kind missed) or results they gave up on (kind dropped), by reason; the growth between two hellos of the same process.",
 		}, []string{"kind", "reason"}),
+		slotCountersIgnored: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "proreta_specula_slot_counters_ignored_total", Help: "Slot loss counters of a hello that were outside 0..1e15 and left out, by reason.",
+		}, []string{"reason"}),
 	}
 	if reg != nil {
 		reg.MustRegister(m.unauthorized, m.limited, m.jobs, m.results, m.tokenLimited,
-			m.reports, m.reportAge, m.lateReports, m.scheduleRequests, m.scheduleBuild, m.scheduleUnreadable, m.duplicateInstance, m.slotLosses)
+			m.reports, m.reportAge, m.lateReports, m.scheduleRequests, m.scheduleBuild, m.scheduleUnreadable, m.duplicateInstance, m.slotLosses, m.slotCountersIgnored)
 	}
 	return m
 }

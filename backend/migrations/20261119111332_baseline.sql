@@ -3833,23 +3833,37 @@ BEGIN
     IF NOT FOUND THEN
         RETURN;
     END IF;
+    -- Defence in depth behind the gateway: only whole numbers in 0..1e15 count; anything else is ignored
+    -- (and not stored), so a bad value never fails the hello. One hello adds at most 1e7 per reason and a
+    -- stored sum saturates at 1e15, so neither a restart loop nor a huge counter can overflow bigint.
     RETURN QUERY
-    WITH d AS (
-        SELECT m.kind, m.reason,
-               CASE WHEN o.v IS NOT NULL AND c.v >= o.v THEN c.v - o.v ELSE c.v END AS delta
-        FROM (VALUES ('missed', 'busy'), ('missed', 'late'), ('missed', 'scheduleExpired'),
+    WITH m AS (
+        SELECT * FROM (VALUES ('missed', 'busy'), ('missed', 'late'), ('missed', 'scheduleExpired'),
                      ('dropped', 'bufferSize'), ('dropped', 'bufferAge'), ('dropped', 'rejected'),
-                     ('dropped', 'superseded'), ('dropped', 'tooOld'), ('dropped', 'unreadable')) AS m(kind, reason)
-        CROSS JOIN LATERAL (SELECT coalesce((p_counters ->> m.reason)::bigint, 0) AS v) AS c
+                     ('dropped', 'superseded'), ('dropped', 'tooOld'), ('dropped', 'unreadable')) AS x(kind, reason)
+    ), good AS (
+        SELECT m.kind, m.reason, (p_counters -> m.reason)::numeric::bigint AS v
+        FROM m
+        WHERE jsonb_typeof(p_counters -> m.reason) = 'number'
+          AND CASE WHEN jsonb_typeof(p_counters -> m.reason) = 'number'
+                   THEN (p_counters -> m.reason)::numeric = trunc((p_counters -> m.reason)::numeric)
+                        AND (p_counters -> m.reason)::numeric BETWEEN 0 AND 1000000000000000
+                   ELSE false END
+    ), d AS (
+        SELECT m.kind, m.reason,
+               LEAST(CASE WHEN o.v IS NOT NULL AND c.v >= o.v THEN c.v - o.v ELSE c.v END, 10000000) AS delta
+        FROM m
+        CROSS JOIN LATERAL (SELECT coalesce((SELECT g.v FROM good AS g WHERE g.reason = m.reason), 0) AS v) AS c
         CROSS JOIN LATERAL (SELECT (a.slot_counters ->> m.reason)::bigint AS v) AS o
     ), ins AS (
         INSERT INTO specula_slot_losses AS l (tenant_id, specula_id, hour, kind, reason, count)
         SELECT a.tenant_id, a.id, date_trunc('hour', now(), 'UTC'), d.kind, d.reason, d.delta FROM d WHERE d.delta > 0
         ON CONFLICT (tenant_id, specula_id, hour, kind, reason)
-        DO UPDATE SET count = l.count + excluded.count, updated_at = now()
+        DO UPDATE SET count = LEAST(l.count + excluded.count, 1000000000000000), updated_at = now()
         RETURNING 1
     ), upd AS (
-        UPDATE specula_agents AS s SET slot_counters = p_counters WHERE s.id = a.id RETURNING 1
+        UPDATE specula_agents AS s SET slot_counters = (SELECT coalesce(jsonb_object_agg(g.reason, g.v), '{}'::jsonb) FROM good AS g)
+        WHERE s.id = a.id RETURNING 1
     )
     SELECT d.kind, d.reason, d.delta FROM d WHERE d.delta > 0;
 END
