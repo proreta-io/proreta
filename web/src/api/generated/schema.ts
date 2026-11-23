@@ -87,7 +87,7 @@ export interface paths {
      *     (`emailVerificationEnabled`), a verification email for the address is queued in the same
      *     transaction; nothing depends on it being used.
      *
-     *     The email is trimmed and lowercased; it must be 3-254 characters of `a-z 0-9 . _ + - @`
+     *     The email is trimmed and lowercased; it must be 3-254 characters of `a-z 0-9 @` and `._+-!#$%&'*\/=?^{|}~`
      *     (the characters a login may contain) with one `@`, a non-empty local part and a domain
      *     with a dot. The password must be 12-128 characters (Unicode code points) and differ from
      *     the email; there are no composition rules. Policy failures are 422 with `fieldErrors`.
@@ -4212,7 +4212,7 @@ export interface components {
       /** @description An optional note for yourself, for example the person's name */
       label?: string;
       /**
-       * @description The address to email the link to (letters a-z, digits and `. _ + - @`, the
+       * @description The address to email the link to (letters a-z, digits, `@` and ``._+-!#$%&'*\/=?^{|}~``, the
        *     registration rules), and the address the link is bound to with `bindToEmail`. Mailing
        *     needs `emailEnabled`. The address itself is not stored.
        */

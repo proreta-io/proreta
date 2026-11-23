@@ -207,7 +207,7 @@ paths:
         (`emailVerificationEnabled`), a verification email for the address is queued in the same
         transaction; nothing depends on it being used.
 
-        The email is trimmed and lowercased; it must be 3-254 characters of `a-z 0-9 . _ + - @`
+        The email is trimmed and lowercased; it must be 3-254 characters of `a-z 0-9 @` and `._+-!#$%&'*/=?^{|}~`
         (the characters a login may contain) with one `@`, a non-empty local part and a domain
         with a dot. The password must be 12-128 characters (Unicode code points) and differ from
         the email; there are no composition rules. Policy failures are 422 with `fieldErrors`.
@@ -5369,7 +5369,7 @@ components:
           description: An email address or the system login (the default admin is `admin`), case-insensitive
           minLength: 1
           maxLength: 254
-          pattern: "^[A-Za-z0-9._@+-]+$"
+          pattern: "^[A-Za-z0-9._@+!#$%&'*/=?^{|}~-]+$"
           example: admin
         password:
           type: string
@@ -7546,7 +7546,7 @@ components:
           type: string
           maxLength: 254
           description: |
-            The address to email the link to (letters a-z, digits and `. _ + - @`, the
+            The address to email the link to (letters a-z, digits, `@` and ``._+-!#$%&'*/=?^{|}~``, the
             registration rules), and the address the link is bound to with `bindToEmail`. Mailing
             needs `emailEnabled`. The address itself is not stored.
         sendEmail:

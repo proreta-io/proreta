@@ -112,7 +112,7 @@ describe("register page", () => {
 
     await fill("jörg@example.com", "short");
     expect(screen.getByLabelText("Email")).toHaveAccessibleDescription(
-      "Use only letters a-z, digits and . _ + - @",
+      "Use only letters a-z, digits and ._+-!#$%&'*/=?^{|}~ @",
     );
 
     await userEvent.clear(screen.getByLabelText("Email"));

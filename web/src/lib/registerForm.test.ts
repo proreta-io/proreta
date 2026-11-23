@@ -7,7 +7,7 @@ import {
 } from "./registerForm";
 
 describe("registration policy (mirrors the server)", () => {
-  it.each(["owner@example.com", "  User+Tag@Example.COM ", "a_b-c.d@sub.example.co.uk", "a@b.c"])(
+  it.each(["owner@example.com", "O'Brien@example.com", "  User+Tag@Example.COM ", "a_b-c.d@sub.example.co.uk", "a@b.c"])(
     "accepts %j",
     (email) => {
       expect(emailError(email)).toBeUndefined();
@@ -18,11 +18,13 @@ describe("registration policy (mirrors the server)", () => {
     ["", "Enter your email address"],
     ["ab", "Use 3-254 characters"],
     [`${"a".repeat(243)}@example.com`, "Use 3-254 characters"],
-    ["jörg@example.com", "Use only letters a-z, digits and . _ + - @"],
-    ["a b@example.com", "Use only letters a-z, digits and . _ + - @"],
-    ["o'brien@example.com", "Use only letters a-z, digits and . _ + - @"],
+    ["jörg@example.com", "Use only letters a-z, digits and ._+-!#$%&'*/=?^{|}~ @"],
+    ["a b@example.com", "Use only letters a-z, digits and ._+-!#$%&'*/=?^{|}~ @"],
+    ['a"b@example.com', "Use only letters a-z, digits and ._+-!#$%&'*/=?^{|}~ @"],
     ["owner", "Use exactly one @"],
     ["a@b@example.com", "Use exactly one @"],
+    [".a@example.com", "Do not start or end the name with a dot or use two dots in a row"],
+    ["a..b@example.com", "Do not start or end the name with a dot or use two dots in a row"],
     ["@example.com", "Add the name before the @"],
     ["a@localhost", "Add a domain such as example.com after the @"],
     ["a@.example.com", "Add a domain such as example.com after the @"],
