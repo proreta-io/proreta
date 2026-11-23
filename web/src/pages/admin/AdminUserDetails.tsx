@@ -263,18 +263,20 @@ function UserInfo({ detail }: { detail: AdminUserDetail }) {
           <div className="flex flex-col items-start gap-2">
             <Button
               variant="secondary"
-              disabled={disabled}
-              aria-describedby={disabled ? "platform-admin-note" : undefined}
+              disabled={disabled || deleted}
+              aria-describedby={disabled || deleted ? "platform-admin-note" : undefined}
               onClick={() => setConfirm("grant-admin")}
             >
               Grant platform admin
             </Button>
-            {disabled && (
+            {(disabled || deleted) && (
               <p
                 id="platform-admin-note"
                 className="max-w-[420px] text-caption text-muted-foreground"
               >
-                Enable the user first: only an active user can be a platform admin.
+                {deleted
+                  ? "A deleted account cannot be a platform admin."
+                  : "Enable the user first: only an active user can be a platform admin."}
               </p>
             )}
           </div>

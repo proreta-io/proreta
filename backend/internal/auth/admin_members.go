@@ -15,6 +15,7 @@ import (
 	"github.com/proreta-io/proreta/backend/internal/plans"
 	"github.com/proreta-io/proreta/backend/internal/platform/db"
 	"github.com/proreta-io/proreta/backend/internal/platform/uuidv7"
+	"github.com/proreta-io/proreta/backend/internal/platform/validation"
 )
 
 // Audit actions of the platform admin's member management. They replace the customer-facing
@@ -221,6 +222,8 @@ func (s *Service) AddFirstOwnerTx(ctx context.Context, tx pgx.Tx, a Actor, email
 	}()
 	u, err := authdb.New(tx).GetUserByEmail(ctx, email)
 	switch {
+	case err == nil && u.Status != "active":
+		return nil, nil, "", "", &validation.Error{Fields: []validation.FieldError{{Field: "ownerEmail", Message: "belongs to a disabled account; enable it first or use another address"}}}
 	case err == nil:
 		mm, act, err := setMemberTx(ctx, tx, a, u.ID, RoleOwner)
 		if err != nil {
@@ -230,7 +233,8 @@ func (s *Service) AddFirstOwnerTx(ctx context.Context, tx pgx.Tx, a Actor, email
 	case !errors.Is(err, pgx.ErrNoRows):
 		return nil, nil, "", "", fmt.Errorf("find user: %w", err)
 	}
-	in := InvitationInput{Role: RoleOwner, Label: email, SendEmail: new(bool)}
+	// Bound to the address so a leaked link cannot be redeemed by someone else with a provider account.
+	in := InvitationInput{Role: RoleOwner, Label: email, Email: email, BindToEmail: true, SendEmail: new(bool)}
 	plan, err := s.validateInvitation(ctx, in)
 	if err != nil {
 		return nil, nil, "", "", err
@@ -239,7 +243,7 @@ func (s *Service) AddFirstOwnerTx(ctx context.Context, tx pgx.Tx, a Actor, email
 		return nil, nil, "", "", err
 	}
 	now := s.clock.Now()
-	i := Invitation{ID: uuidv7.New(), Role: in.Role, Label: plan.label, Status: InvitationOpen, CreatedAt: now, ExpiresAt: now.Add(plan.ttl)}
+	i := Invitation{ID: uuidv7.New(), Role: in.Role, Label: plan.label, Status: InvitationOpen, CreatedAt: now, ExpiresAt: now.Add(plan.ttl), EmailBound: plan.emailHash != nil}
 	if err := s.insertInvitation(ctx, tx, a, in, &i, token, plan); err != nil {
 		return nil, nil, "", "", err
 	}

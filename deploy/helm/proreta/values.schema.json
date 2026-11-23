@@ -320,13 +320,14 @@
               "type": "string",
               "title": "Secret with the CA bundle",
               "description": "name of a Secret in the release namespace; mounted in every pod and Job that connects to the database and passed as PGSSLROOTCERT. Empty: system CAs only",
-              "maxLength": 253
+              "maxLength": 253,
+              "pattern": "^$|^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
             },
             "key": {
               "type": "string",
               "title": "key in the Secret",
               "description": "key holding the PEM bundle",
-              "pattern": "^[A-Za-z0-9._-]+$",
+              "pattern": "^[A-Za-z0-9_-][A-Za-z0-9._-]*$",
               "minLength": 1
             }
           }
@@ -1739,12 +1740,18 @@
           "description": "render the PodDisruptionBudgets"
         },
         "maxUnavailable": {
-          "type": [
-            "integer",
-            "string"
-          ],
           "title": "max unavailable",
-          "description": "maxUnavailable of each PodDisruptionBudget (number or percentage)"
+          "description": "maxUnavailable of each PodDisruptionBudget: a number or a percentage, at least 1 (0 would block every node drain)",
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "string",
+              "pattern": "^([1-9][0-9]?|100)%$"
+            }
+          ]
         }
       }
     },

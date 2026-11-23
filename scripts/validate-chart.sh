@@ -201,6 +201,11 @@ expect_fail() {
   echo "rejected as expected: $label"
 }
 expect_fail "empty image tag" --set image.tag=
+expect_fail "pdb.maxUnavailable 0 blocks every drain" --set pdb.maxUnavailable=0
+expect_fail "pdb.maxUnavailable negative" --set pdb.maxUnavailable=-1
+expect_fail "pdb.maxUnavailable not a number or percentage" --set pdb.maxUnavailable=abc
+expect_fail "database CA secret name is not a DNS name" --set database.tlsCA.existingSecret=Bad_Name!
+expect_fail "database CA key is .." --set database.tlsCA.existingSecret=rds-ca --set database.tlsCA.key=..
 expect_fail "example values without an image tag from a git checkout" -f "$example" --set image.tag=
 expect_fail "missing public URL" --msg "config.publicUrl is required" --set config.publicUrl=
 expect_fail "missing public URL without a route" --msg "config.publicUrl is required" --set config.publicUrl= --set httpRoute.enabled=false

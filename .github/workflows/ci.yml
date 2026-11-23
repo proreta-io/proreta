@@ -41,6 +41,8 @@ jobs:
         run: bash scripts/check-internal-refs.sh
       - name: Release notes check works
         run: bash scripts/tests/release-notes.sh
+      - name: Baseline pin check works
+        run: bash scripts/tests/baseline-pinned.sh
       - name: Actions pinned to a commit, no floating tool versions
         run: |
           set -euo pipefail
@@ -432,7 +434,7 @@ jobs:
           node-version-file: web/.nvmrc
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - name: Generated client is up to date
         run: |
           npm run gen:api

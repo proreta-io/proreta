@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -201,7 +202,11 @@ func (s *Service) DeleteAccount(ctx context.Context, actor Actor, id uuid.UUID) 
 			actor.UserID, id, uuidv7.New(), actor.ip()).Scan(&changed, &sessions, &members, &identities)
 	})
 	if err != nil {
-		return mapError("delete user", err)
+		err = mapError("delete user", err)
+		if errors.Is(err, ErrSystemAdmin) {
+			return ErrSystemAdminDelete
+		}
+		return err
 	}
 	if changed {
 		s.recorded(ctx, ActionUserDeleted, "target_user_id", id, "sessions_revoked", sessions, "memberships_removed", members, "identities_removed", identities)

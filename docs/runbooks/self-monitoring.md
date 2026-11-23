@@ -8,7 +8,7 @@ The file is `deploy/helm/proreta/alerts/proreta-rules.yaml` (a plain `groups:` f
 |---|---|---|---|
 | `ProretaTargetDown` | a scrape target of Proreta is down for 5 minutes | critical | the pod, the admin port, the network policy, and that the job selector matches |
 | `ProretaChecksStalled` | no worker has recorded a check for 5 minutes (also when the series is gone) | critical | worker pods and logs, the database; with no active monitor at all it fires too, so silence it until you have one |
-| `ProretaHousekeepingStale` | `compute_rollups` (more than 30 minutes) or `evaluate_heartbeats` (more than 5 minutes) has not succeeded | warning | the jobs pod and logs; stale `evaluate_heartbeats` means missed heartbeats open no incident |
+| `ProretaHousekeepingStale` | `compute_rollups` (more than 30 minutes), `evaluate_heartbeats` (more than 5 minutes), `ensure_partitions` or `drop_expired_partitions` (more than 2 days) has not succeeded | warning | the jobs pod and logs; stale `evaluate_heartbeats` means missed heartbeats open no incident |
 | `ProretaOutboxBacklog` | more than 50 notifications wait for 10 minutes | warning | the jobs pod, Slack or the webhook target |
 | `ProretaDeliveriesFailing` | a notification was given up in the last hour | warning | the notification channels (revoked webhook, changed URL), jobs logs |
 | `ProretaApiErrors` | more than 5% of API requests are 5xx for 10 minutes | warning | api logs and the database |

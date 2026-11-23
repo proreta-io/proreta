@@ -213,6 +213,9 @@ func writeError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err er
 	case errors.Is(err, admin.ErrSystemAdmin):
 		p.Type, p.Title, p.Status = problemSystemAdmin, "The system administrator's password cannot be reset here", http.StatusConflict
 		p.Detail = "The platform administrator changes its own password under Profile; see docs/runbooks/admin-panel.md for a reset."
+	case errors.Is(err, admin.ErrSystemAdminDelete):
+		p.Type, p.Title, p.Status = problemSystemAdmin, "The system administrator cannot be deleted", http.StatusConflict
+		p.Detail = "The system administrator is configured by PRORETA_ADMIN_LOGIN."
 	case errors.Is(err, admin.ErrSystemAdminRevoke):
 		p.Type, p.Title, p.Status = problemSystemAdmin, "The system administrator cannot be revoked", http.StatusConflict
 		p.Detail = "The system administrator is configured by PRORETA_ADMIN_LOGIN and always keeps platform admin access."
