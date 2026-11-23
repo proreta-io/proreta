@@ -15,13 +15,26 @@ function serve() {
       const q = new URL(r.url).searchParams.get("q") ?? "";
       const items = names
         .filter((n) => n.includes(q))
-        .map((name) => ({ id: name, name, type: name.includes("cron") ? "heartbeat" : "http" }));
+        .map((name) => ({
+          id: name,
+          name,
+          projectId: name === "billing" ? "p2" : "p1",
+          type: name.includes("cron") ? "heartbeat" : "http",
+        }));
       return json({ items, summary: { up: 0, down: 0, paused: 0, unknown: 0 }, nextCursor: null });
     },
   });
 }
 
-function Harness({ onSubmit = () => {}, exclude = new Set<string>() }) {
+function Harness({
+  onSubmit = () => {},
+  exclude = new Set<string>(),
+  projectOf,
+}: {
+  onSubmit?: () => void;
+  exclude?: Set<string>;
+  projectOf?: (projectId: string) => string;
+}) {
   const [picked, setPicked] = useState<PickedMonitor | null>(null);
   return (
     <form
@@ -30,7 +43,13 @@ function Harness({ onSubmit = () => {}, exclude = new Set<string>() }) {
         onSubmit();
       }}
     >
-      <MonitorPicker label="Monitor" exclude={exclude} picked={picked} onPick={setPicked} />
+      <MonitorPicker
+        label="Monitor"
+        exclude={exclude}
+        picked={picked}
+        onPick={setPicked}
+        projectOf={projectOf}
+      />
       <output aria-label="picked">{picked?.id ?? "none"}</output>
     </form>
   );
@@ -46,6 +65,15 @@ function renderPicker(props: Parameters<typeof Harness>[0] = {}) {
 }
 
 describe("MonitorPicker", () => {
+  it("names each match's project when asked to", async () => {
+    serve();
+    renderPicker({ projectOf: (id) => (id === "p2" ? "Billing team" : "Web") });
+    await userEvent.type(screen.getByRole("combobox", { name: "Monitor" }), "bill");
+    expect(await screen.findByRole("option", { name: /billing/ })).toHaveTextContent(
+      /Billing team ·\s*HTTPS/,
+    );
+  });
+
   it("is a combobox that searches on the server and picks with the keyboard", async () => {
     const fetchMock = serve();
     const onSubmit = vi.fn();

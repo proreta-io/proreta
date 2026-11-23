@@ -443,8 +443,18 @@ function ChannelForm({
   const scope = useProjectScope();
   const can = usePermissions();
   const projects = scope.projects.data?.items;
-  // A new channel starts in the project the shell is filtered to, or the Default project.
-  const defaultProject = scope.projectId ?? projects?.find((p) => p.isDefault)?.id ?? "";
+  // A new channel starts in the project of ?project=<id> (the monitor form's link), the one the
+  // shell is filtered to, or the Default project.
+  // Only projects the select offers (those the user manages channels of).
+  const asked = new URLSearchParams(useLocation().search).get("project");
+  const manageable = projects?.filter((p) => canManageChannelOf(can, p.id)) ?? [];
+  const defaultProject =
+    [asked, scope.projectId].find((id) => manageable.some((p) => p.id === id)) ??
+    manageable.find((p) => p.isDefault)?.id ??
+    manageable[0]?.id ??
+    // The select (shown with projects) then offers only Organization-wide; without it, "" is the
+    // Default project.
+    (projects?.length && canManageChannelOf(can, null) ? ORGANIZATION_WIDE : "");
   const [values, setValues] = useState<ChannelFormValues>(
     channel ? valuesFromChannel(channel) : emptyChannelForm,
   );

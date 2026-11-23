@@ -26,5 +26,8 @@ export default defineConfig({
     setupFiles: ["./src/test-setup.ts"],
     // Times are rendered in local time; tests pin the zone so the expectations are stable.
     env: { TZ: "UTC" },
+    // Next to the Go tests on one machine the page tests starved for CPU and hit the 5 s default.
+    maxWorkers: "50%",
+    testTimeout: 15_000,
   },
 });

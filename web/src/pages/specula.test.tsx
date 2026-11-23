@@ -50,6 +50,33 @@ const projects = {
 const asRole = (role: string) => ({ "GET /api/v1/auth/me": () => json({ ...session, role }) });
 
 describe("Specula page", () => {
+  it("asks before another Specula's edit form drops unsaved changes", async () => {
+    mockApi({
+      ...signedIn,
+      "GET /api/v1/projects": () => json(projects),
+      "GET /api/v1/specula": () =>
+        json({ items: [specula(), specula({ id: "s2", name: "Lab", hostname: "lab-1" })] }),
+    });
+    renderApp("/specula");
+    await userEvent.click(await screen.findByRole("button", { name: "Prod cluster" }));
+    await userEvent.type(screen.getByLabelText("Name"), " EU");
+    await userEvent.click(screen.getByRole("button", { name: "Lab" }));
+    const dialog = screen.getByRole("dialog", { name: "Discard the changes to Prod cluster?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.getByLabelText("Name")).toHaveValue("Prod cluster EU");
+
+    await userEvent.click(screen.getByRole("button", { name: "Lab" }));
+    await userEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    expect(screen.getByLabelText("Name")).toHaveValue("Lab");
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    // The same for a new Specula with something typed.
+    await userEvent.click(screen.getByRole("button", { name: "Register a Specula" }));
+    await userEvent.type(screen.getByLabelText("Name"), "Edge");
+    await userEvent.click(screen.getByRole("button", { name: "Lab" }));
+    expect(screen.getByRole("dialog", { name: "Discard the new Specula?" })).toBeInTheDocument();
+  });
+
   it("lists the executors with status, version and who can use them", async () => {
     mockApi({
       ...signedIn,
@@ -230,8 +257,12 @@ describe("Specula page", () => {
       },
     });
     renderApp("/specula");
-    await userEvent.click(await screen.findByRole("button", { name: "Edit Prod cluster" }));
+    // The name opens the edit form, like the Edit button.
+    await userEvent.click(await screen.findByRole("button", { name: "Prod cluster" }));
+    expect(screen.getByRole("form", { name: "Edit the Specula" })).toBeInTheDocument();
     const name = screen.getByLabelText("Name");
+    // Focus brings the form above the table into view.
+    expect(name).toHaveFocus();
     await userEvent.clear(name);
     await userEvent.type(name, "Prod");
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));

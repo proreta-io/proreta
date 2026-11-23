@@ -14,3 +14,6 @@ HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) {
   this.removeAttribute("open");
 };
 /* eslint-enable @typescript-eslint/no-unnecessary-condition, @typescript-eslint/unbound-method */
+
+// Remembered choices (the project filter, the theme) must not leak from one test into the next.
+afterEach(() => localStorage.clear());

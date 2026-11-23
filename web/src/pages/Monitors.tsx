@@ -101,17 +101,31 @@ export default function Monitors() {
   // The summary counts every monitor, so a filter with no match still has the filter box.
   const hasMonitors = monitors.data !== undefined && totalMonitors(monitors.data) > 0;
 
-  // "/" jumps to the filter from anywhere on the page, unless the user is typing.
+  // "/" jumps to the filter from anywhere on the page, unless the user is typing; with nothing
+  // focused and the first row on screen, ArrowDown starts on it (further down it scrolls as usual).
   useEffect(() => {
     if (!hasMonitors) return;
     function onKey(e: globalThis.KeyboardEvent) {
-      if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
-      const typing =
-        e.target instanceof Element &&
-        e.target.closest("input, textarea, select, [contenteditable=true]");
-      if (typing) return;
-      e.preventDefault();
-      filter.current?.focus();
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+      // The "/" key types "." on a Ukrainian layout; its code stays "Slash".
+      if (e.key === "/" || (e.code === "Slash" && e.key === "." && !e.shiftKey)) {
+        const typing =
+          e.target instanceof Element &&
+          e.target.closest("input, textarea, select, [contenteditable=true]");
+        if (typing) return;
+        e.preventDefault();
+        filter.current?.focus();
+      } else if (
+        e.key === "ArrowDown" &&
+        !e.shiftKey &&
+        (document.activeElement === document.body || document.activeElement === null)
+      ) {
+        const first = document.querySelector<HTMLElement>("[data-monitor-link]");
+        const box = first?.getBoundingClientRect();
+        if (!first || !box || box.top < 0 || box.bottom > window.innerHeight) return;
+        e.preventDefault();
+        first.focus();
+      }
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -155,17 +169,6 @@ export default function Monitors() {
                     }
                   }
                 }}
-                end={
-                  // Always rendered: swapping the markup would remount the input and drop focus.
-                  <kbd
-                    className={cx(
-                      "flex size-[18px] items-center justify-center border border-border font-mono text-micro max-sm:hidden",
-                      query && "invisible",
-                    )}
-                  >
-                    /
-                  </kbd>
-                }
               />
             </div>
             <Select
@@ -199,6 +202,13 @@ export default function Monitors() {
       ) : list ? (
         <MonitorTable
           list={list}
+          projectOf={
+            // Across several projects each row says where it belongs.
+            projectId === undefined && (projects.data?.items.length ?? 0) > 1
+              ? // Empty for a project created since the list loaded, rather than a wrong name.
+                (id) => projects.data?.items.find((p) => p.id === id)?.name ?? ""
+              : undefined
+          }
           query={search}
           status={status}
           busy={monitors.isPlaceholderData}
@@ -253,6 +263,7 @@ function Summary({ list }: { list: MonitorList }) {
 
 function MonitorTable({
   list,
+  projectOf,
   query,
   status,
   busy,
@@ -264,6 +275,7 @@ function MonitorTable({
   updated,
 }: {
   list: MonitorList;
+  projectOf?: (projectId: string) => string;
   query: string;
   status: MonitorStatusFilter | "";
   busy: boolean;
@@ -364,8 +376,9 @@ function MonitorTable({
           <Table>
             <thead>
               <tr>
-                <Th className="w-[132px] max-sm:w-auto">Status</Th>
+                <Th className="w-[132px] max-sm:w-auto sm:min-w-[132px]">Status</Th>
                 <Th>Monitor</Th>
+                {projectOf && <Th className="max-lg:hidden">Project</Th>}
                 <Th numeric className="max-sm:hidden">
                   Uptime 24h
                 </Th>
@@ -384,6 +397,7 @@ function MonitorTable({
                   key={m.id}
                   monitor={m}
                   now={now}
+                  project={projectOf?.(m.projectId)}
                   onOpen={() => void navigate(`/monitors/${m.id}`)}
                 />
               ))}
@@ -405,42 +419,21 @@ function MonitorTable({
         </div>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-4 px-px py-2 font-mono text-mono text-muted-foreground">
-        <span>{updated}</span>
-        {visible.length > 0 && (
-          <span aria-hidden="true" className="flex items-center gap-3.5 max-sm:hidden">
-            <span className="flex items-center gap-1.5">
-              <Key>↑</Key>
-              <Key>↓</Key>move
-            </span>
-            <span className="flex items-center gap-1.5">
-              <Key>Enter</Key>open
-            </span>
-            <span className="flex items-center gap-1.5">
-              <Key>/</Key>filter
-            </span>
-          </span>
-        )}
-      </div>
+      <div className="px-px py-2 font-mono text-mono text-muted-foreground">{updated}</div>
     </>
-  );
-}
-
-function Key({ children }: { children: string }) {
-  return (
-    <kbd className="inline-flex h-[18px] min-w-[18px] items-center justify-center border border-border px-1 font-mono text-micro">
-      {children}
-    </kbd>
   );
 }
 
 function MonitorRow({
   monitor: m,
   now,
+  project,
   onOpen,
 }: {
   monitor: MonitorListItem;
   now: number;
+  /** The project's name, when the list shows monitors of several projects. */
+  project?: string;
   onOpen: () => void;
 }) {
   const state = monitorState(m);
@@ -454,14 +447,15 @@ function MonitorRow({
       <Td className={cx("align-top sm:align-middle", isDown && "py-3.5")}>
         <StatusIndicator status={state} label={statusText(m, now)} />
       </Td>
-      <Td className={cx("min-w-0", isDown && "py-3.5")}>
+      {/* Takes the width the figures leave, so a long URL truncates instead of pushing them out. */}
+      <Td className={cx("w-full max-w-0 min-w-40", isDown && "py-3.5")}>
         <div className="flex min-w-0 flex-col gap-1">
           <span className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-1">
             <Link
               to={`/monitors/${m.id}`}
               data-monitor-link
               className={cx(
-                "font-medium hover:underline",
+                "font-medium [overflow-wrap:anywhere] hover:underline",
                 isDown ? "text-[15px] font-semibold" : "text-[14.5px]",
                 state === "paused" && "text-muted-foreground",
               )}
@@ -480,6 +474,9 @@ function MonitorRow({
               {downReason(m)} · since {formatSince(m.statusSince, now)}
             </span>
           )}
+          {project && (
+            <span className="text-caption text-muted-foreground lg:hidden">{project}</span>
+          )}
           <span className="font-mono text-mono text-muted-foreground sm:hidden">
             {[formatPercent(m.uptime24h), formatMs(responseMs), checked]
               .filter((part) => part !== "—")
@@ -487,6 +484,13 @@ function MonitorRow({
           </span>
         </div>
       </Td>
+      {project !== undefined && (
+        <Td className="text-caption text-muted-foreground max-lg:hidden">
+          <span title={project} className="block max-w-40 truncate">
+            {project}
+          </span>
+        </Td>
+      )}
       <Td numeric className={cx(figure, "max-sm:hidden")}>
         {formatPercent(m.uptime24h)}
       </Td>
