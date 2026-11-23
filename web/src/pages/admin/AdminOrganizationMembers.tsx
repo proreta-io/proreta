@@ -254,7 +254,7 @@ function UserMatches({
   return (
     <ul
       aria-label="Matching users"
-      className="flex flex-col divide-y divide-border border border-border"
+      className="surface flex flex-col divide-y divide-border overflow-hidden"
     >
       {shown.slice(0, MATCHES_SHOWN).map((u) => (
         <li key={u.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">

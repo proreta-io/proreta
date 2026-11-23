@@ -15,7 +15,7 @@ const navClass = ({ isActive }: { isActive: boolean }) =>
   cx(
     "flex items-center whitespace-nowrap",
     isActive
-      ? "font-medium shadow-[inset_0_-2px_0_var(--foreground)]"
+      ? "font-medium shadow-[inset_0_-2px_0_var(--primary)]"
       : "text-muted-foreground hover:text-foreground",
   );
 

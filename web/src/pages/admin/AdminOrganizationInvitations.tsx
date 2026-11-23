@@ -133,7 +133,7 @@ export default function AdminOrganizationInvitations({
       {created ? (
         <section
           aria-labelledby="admin-invite-link-heading"
-          className="flex flex-col gap-4 border border-border p-5"
+          className="flex flex-col gap-4 surface p-5"
         >
           <h3 id="admin-invite-link-heading" className="text-lead font-semibold">
             Invitation link ({ROLE_LABELS[created.role].toLowerCase()})

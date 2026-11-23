@@ -530,7 +530,7 @@ function ChannelForm({
       onSubmit={onSubmit}
       noValidate
       aria-labelledby="channel-form-heading"
-      className="flex flex-col gap-5 border border-border p-4"
+      className="flex flex-col gap-5 surface p-4"
     >
       <h3 id="channel-form-heading" className="text-lead font-semibold">
         {creating ? "Add channel" : `Edit ${channel.name}`}

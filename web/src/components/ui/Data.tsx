@@ -3,10 +3,10 @@ import { Button } from "./Button";
 import { cx, DiamondShape } from "./shapes";
 import { isUnlimited } from "../../lib/limits";
 
-/** A ruled strip of figures, never a row of cards. */
+/** A card of figures side by side. */
 export function MetricStrip({ children }: { children: ReactNode }) {
   return (
-    <div className="grid grid-cols-2 gap-0 border-y border-border sm:auto-cols-fr sm:grid-flow-col sm:grid-cols-none">
+    <div className="surface grid grid-cols-2 gap-0 overflow-hidden sm:auto-cols-fr sm:grid-flow-col sm:grid-cols-none">
       {children}
     </div>
   );
@@ -38,7 +38,7 @@ export function Metric({
       </span>
       <span
         className={cx(
-          "font-mono text-headline font-medium tracking-[-0.02em]",
+          "text-headline font-semibold tracking-[-0.02em]",
           tone === "down" && "text-down",
         )}
       >
@@ -118,7 +118,7 @@ export function Table({
     // not widen the page.
     <div
       className={cx(
-        "relative overflow-x-auto border border-border",
+        "surface relative overflow-x-auto",
         cards && "max-sm:[&_table]:block max-sm:[&_tbody]:block max-sm:[&_thead]:hidden",
         className,
       )}
@@ -141,7 +141,7 @@ export function Th({
     <th
       scope="col"
       className={cx(
-        "eyebrow border-b border-border px-4 py-2 font-normal whitespace-nowrap",
+        "eyebrow border-b border-border bg-muted/60 px-4 py-2 whitespace-nowrap",
         numeric ? "text-right" : "text-left",
         className,
       )}
@@ -257,7 +257,7 @@ export function Pagination({
 
 /** A static shape, no shimmer: the refresh sweep is the only ambient motion. */
 export function Skeleton({ className }: { className?: string }) {
-  return <span aria-hidden="true" className={cx("block h-2.5 bg-muted", className)} />;
+  return <span aria-hidden="true" className={cx("block h-2.5 rounded-sm bg-muted", className)} />;
 }
 
 export function RibbonSkeleton() {

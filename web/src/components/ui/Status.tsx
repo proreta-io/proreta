@@ -11,8 +11,8 @@ const DEFAULT_LABEL: Record<StatusKind, string> = {
 };
 
 /**
- * Healthy recedes into grey; a filled red block is reserved for down, the only filled colour in
- * the product. `inline` is the unfilled down, for sentences and summaries.
+ * Up is a quiet green dot; a filled red pill is reserved for down, the only filled status colour.
+ * `inline` is the unfilled down, for sentences and summaries.
  */
 export function StatusIndicator({
   status,
@@ -32,15 +32,20 @@ export function StatusIndicator({
         {text}
       </span>
     ) : (
-      <span className="inline-flex items-center gap-1.5 bg-destructive px-1.5 py-px font-semibold whitespace-nowrap text-destructive-foreground">
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-destructive px-2 py-px font-semibold whitespace-nowrap text-destructive-foreground">
         <TriangleShape />
         {text}
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-2 whitespace-nowrap text-muted-foreground">
-      {status === "up" && <DotShape className="text-subtle-foreground" />}
+    <span
+      className={cx(
+        "inline-flex items-center gap-2 whitespace-nowrap",
+        status === "up" ? "text-foreground" : "text-muted-foreground",
+      )}
+    >
+      {status === "up" && <DotShape className="text-success" />}
       {status === "paused" && <PauseShape />}
       {status === "pending" && <HollowDotShape />}
       {text}
@@ -52,17 +57,17 @@ export type BadgeTone =
   "neutral" | "strong" | "plan" | "inverse" | "warning" | "success" | "danger" | "deleted";
 
 const BADGE_TONES: Record<BadgeTone, string> = {
-  neutral: "border-input text-muted-foreground",
-  strong: "border-input text-foreground",
-  plan: "border-border-faint bg-muted text-foreground",
+  neutral: "border-border bg-muted text-muted-foreground",
+  strong: "border-border bg-muted text-foreground",
+  plan: "border-transparent bg-accent-tint text-accent-text",
   inverse: "border-inverse bg-inverse text-inverse-foreground",
   warning: "border-warning-border bg-warning-tint text-warning",
-  success: "border-border text-success",
+  success: "border-success-border bg-success-tint text-success",
   danger: "border-down-border bg-down-tint text-down",
   deleted: "border-dashed border-input text-subtle-foreground",
 };
 
-/** Mono capitals, square. A toned badge also needs a shape or a word that carries the meaning. */
+/** A small rounded pill. A toned badge also needs a shape or a word that carries the meaning. */
 export function Badge({
   tone = "neutral",
   icon,
@@ -75,7 +80,7 @@ export function Badge({
   return (
     <span
       className={cx(
-        "inline-flex items-center gap-1.5 border px-1.5 py-px font-mono text-micro tracking-[0.08em] whitespace-nowrap uppercase",
+        "inline-flex items-center gap-1.5 rounded-full border px-2 py-px text-caption leading-[1.35] font-medium whitespace-nowrap",
         BADGE_TONES[tone],
       )}
     >

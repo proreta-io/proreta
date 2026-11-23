@@ -18,7 +18,7 @@ export default function TemporaryPasswordPanel({
   return (
     <section
       aria-labelledby="temporary-password-heading"
-      className="flex flex-col gap-4 border border-border p-5"
+      className="flex flex-col gap-4 surface p-5"
     >
       <h3 id="temporary-password-heading" className="text-lead font-semibold">
         Temporary password for {login}

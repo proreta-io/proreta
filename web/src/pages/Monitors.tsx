@@ -340,7 +340,7 @@ function MonitorTable({
       {hiddenDown > 0 && (
         <div
           role="status"
-          className="flex flex-wrap items-center gap-2.5 border border-b-0 border-down-border bg-down-tint px-4 py-2.5 text-[13px]"
+          className="mb-2 flex flex-wrap items-center gap-2.5 rounded-lg border border-down-border bg-down-tint px-4 py-2.5 text-[13px]"
         >
           <TriangleShape className="text-down" />
           <span className="min-w-40 flex-1">
@@ -355,7 +355,7 @@ function MonitorTable({
       )}
 
       {visible.length === 0 ? (
-        <div className="flex flex-col items-start gap-2.5 border border-border px-6 pt-11 pb-12">
+        <div className="flex flex-col items-start gap-2.5 surface px-6 pt-11 pb-12">
           <h2 className="text-[17px] font-semibold">
             {query
               ? `No monitors match “${query}”.`
@@ -542,7 +542,7 @@ function LoadingTable() {
 
 function EmptyMonitors({ usage }: { usage: Usage | undefined }) {
   return (
-    <div className="flex flex-col gap-7 border border-border px-5 pt-10 pb-11 sm:px-10">
+    <div className="flex flex-col gap-7 surface px-5 pt-10 pb-11 sm:px-10">
       <div aria-hidden="true" className="flex flex-col gap-1.5">
         <div className="flex h-14 items-end justify-end border-b border-dashed border-input">
           <span className="h-[22px] w-0.5 bg-foreground" />

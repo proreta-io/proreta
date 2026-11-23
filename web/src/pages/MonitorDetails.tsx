@@ -398,7 +398,7 @@ function DownBrief({
   return (
     <section
       aria-label="Ongoing incident"
-      className="grid gap-0 border border-down-border bg-down-tint sm:grid-cols-2"
+      className="grid gap-0 overflow-hidden rounded-lg border border-down-border bg-down-tint sm:grid-cols-2"
     >
       <BriefCell label="What's failing" value={heartbeat ? "No ping in time" : downReason(monitor)}>
         {failingDetail}

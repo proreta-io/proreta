@@ -3,7 +3,7 @@ import { alertmanagerSnippet, secretCommand } from "../lib/heartbeat";
 import { CopyField } from "./ui";
 
 const codeBlock =
-  "m-0 overflow-x-auto border border-border-faint bg-muted px-4 py-3.5 font-mono text-mono leading-[1.65] whitespace-pre";
+  "m-0 overflow-x-auto rounded-md border border-border-faint bg-muted px-4 py-3.5 font-mono text-mono leading-[1.65] whitespace-pre";
 
 /**
  * The one-time heartbeat URL after creating a heartbeat or regenerating its URL, with a copy
@@ -20,10 +20,7 @@ export default function HeartbeatUrlPanel({
   children?: ReactNode;
 }) {
   return (
-    <section
-      aria-labelledby="heartbeat-url-heading"
-      className="flex flex-col gap-5 border border-border p-5"
-    >
+    <section aria-labelledby="heartbeat-url-heading" className="flex flex-col gap-5 surface p-5">
       <h2 id="heartbeat-url-heading" className="text-lead font-semibold">
         Your heartbeat URL
       </h2>

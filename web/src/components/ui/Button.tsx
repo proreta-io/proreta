@@ -15,7 +15,7 @@ const VARIANTS: Record<ButtonVariant, string> = {
   primary:
     "border-primary bg-primary text-primary-foreground hover:border-primary-hover hover:bg-primary-hover active:bg-primary-active",
   secondary:
-    "border-input bg-transparent text-foreground hover:border-input-hover hover:bg-muted active:bg-border-faint",
+    "border-input bg-card text-foreground hover:border-input-hover hover:bg-muted active:bg-border-faint",
   ghost: "border-transparent bg-transparent text-foreground hover:bg-muted active:bg-border-faint",
   // A destructive action that asks for confirmation next: red words, no red block.
   "ghost-destructive":
@@ -34,7 +34,7 @@ const SIZES: Record<ButtonSize, string> = {
 };
 
 const LINK =
-  "inline cursor-pointer font-semibold underline decoration-input underline-offset-3 hover:decoration-current";
+  "inline cursor-pointer font-medium text-accent-text underline decoration-accent-text/35 underline-offset-3 hover:decoration-current";
 
 const UNAVAILABLE =
   "disabled:cursor-not-allowed disabled:border-border-faint disabled:bg-muted disabled:text-subtle-foreground aria-disabled:cursor-not-allowed aria-disabled:border-border-faint aria-disabled:bg-muted aria-disabled:text-subtle-foreground";
@@ -42,7 +42,7 @@ const UNAVAILABLE =
 function baseClass(variant: ButtonVariant, size: ButtonSize) {
   if (variant === "link") return LINK;
   return cx(
-    "box-border inline-flex cursor-pointer items-center justify-center gap-2 border font-medium whitespace-nowrap transition-colors",
+    "box-border inline-flex cursor-pointer items-center justify-center gap-2 rounded-md border font-medium whitespace-nowrap transition-colors",
     VARIANTS[variant],
     SIZES[size],
   );
