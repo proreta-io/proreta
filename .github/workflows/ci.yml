@@ -39,6 +39,8 @@ jobs:
         run: bash scripts/check-todos.sh
       - name: No internal record references
         run: bash scripts/check-internal-refs.sh
+      - name: Release notes check works
+        run: bash scripts/tests/release-notes.sh
       - name: Actions pinned to a commit, no floating tool versions
         run: |
           set -euo pipefail
