@@ -151,14 +151,14 @@ helm upgrade --install proreta oci://ghcr.io/proreta-io/charts/proreta --version
 `helm show values oci://ghcr.io/proreta-io/charts/proreta --version "$VERSION"` prints every default with its comment, as a reference. For later upgrades pass the new `--version`.
 
 ### Verifying a release
-Every release image and chart carries a signed build provenance attestation that ties it to this repository's release workflow. Check it with the [GitHub CLI](https://cli.github.com/manual/gh_attestation_verify) before you install:
+Every release image and chart carries a signed build provenance attestation that ties it to this repository's release workflow and to the release tag; the flags below make `gh` check both, not just the organization. Check it with the [GitHub CLI](https://cli.github.com/manual/gh_attestation_verify) before you install:
 ```sh
 VERSION=X.Y.Z
-gh attestation verify "oci://ghcr.io/proreta-io/proreta-backend:$VERSION" --owner proreta-io
-gh attestation verify "oci://ghcr.io/proreta-io/proreta-web:$VERSION" --owner proreta-io
-gh attestation verify "oci://ghcr.io/proreta-io/proreta-specula:$VERSION" --owner proreta-io
+gh attestation verify "oci://ghcr.io/proreta-io/proreta-backend:$VERSION" --repo proreta-io/proreta --signer-workflow proreta-io/proreta/.github/workflows/release.yml --source-ref "refs/tags/v$VERSION"
+gh attestation verify "oci://ghcr.io/proreta-io/proreta-web:$VERSION" --repo proreta-io/proreta --signer-workflow proreta-io/proreta/.github/workflows/release.yml --source-ref "refs/tags/v$VERSION"
+gh attestation verify "oci://ghcr.io/proreta-io/proreta-specula:$VERSION" --repo proreta-io/proreta --signer-workflow proreta-io/proreta/.github/workflows/release.yml --source-ref "refs/tags/v$VERSION"
 helm pull oci://ghcr.io/proreta-io/charts/proreta --version "$VERSION"
-gh attestation verify "proreta-$VERSION.tgz" --owner proreta-io
+gh attestation verify "proreta-$VERSION.tgz" --repo proreta-io/proreta --signer-workflow proreta-io/proreta/.github/workflows/release.yml --source-ref "refs/tags/v$VERSION"
 ```
 The same works for the `proreta-specula` chart (its image is `proreta-specula`, not `proreta-backend`). Tags can be moved by anyone who can write to the registry, so to install exactly what you verified, pin the images by digest: `docker buildx imagetools inspect ghcr.io/proreta-io/proreta-backend:$VERSION` prints the `Digest:`; set it as `image.digest` (and the web image's as `web.image.digest`) in `my-values.yaml`. The digest takes precedence over the tag.
 

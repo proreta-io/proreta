@@ -11,7 +11,7 @@ name: release
 #   prerelease tag vX.Y.Z-rc.1 gives the chart version X.Y.Z-rc.1).
 # After the charts, job `finalize` checks the published artifacts anonymously and creates the GitHub
 # release (marked pre-release when the version has a suffix such as -rc.1).
-# Every pushed image digest and both chart packages get a signed build provenance attestation
+# Every pushed image digest of a tag run and both chart packages get a signed build provenance attestation
 # (actions/attest-build-provenance; verify with `gh attestation verify`, docs/install.md).
 # Every image carries the labels org.opencontainers.image.revision (the commit) and
 # org.opencontainers.image.source. The workflow only publishes images; it never commits.
@@ -151,8 +151,10 @@ jobs:
             COMMIT=${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
-      # Signed provenance for the pushed digest, stored next to the image in the registry.
-      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+      # Signed provenance for the pushed digest, stored next to the image in the registry. Tags only: a manual
+      # branch build (`sha-<7 hex>`) is not a release and gets none.
+      - if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ matrix.image }}
           subject-digest: ${{ steps.build.outputs.digest }}
