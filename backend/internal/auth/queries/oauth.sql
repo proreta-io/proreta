@@ -97,7 +97,15 @@ WHERE id = @id;
 
 -- name: LockUserForLink :one
 -- Serialises the link of a provider identity by email with every other change of the account.
-SELECT status, is_platform_admin, is_system_admin, email
+-- email_verified and has_password are read under the same lock, before the link marks the address verified.
+SELECT status, is_platform_admin, is_system_admin, email,
+       (email_verified_at IS NOT NULL)::boolean AS email_verified, (password_hash IS NOT NULL)::boolean AS has_password
 FROM users
 WHERE id = @id
 FOR UPDATE;
+
+-- name: ClearPassword :exec
+-- The password of an account whose address nobody had proved: the provider sign-in proves it now.
+UPDATE users
+SET password_hash = NULL, password_must_change = false, password_changed_at = NULL, updated_at = now()
+WHERE id = @id;

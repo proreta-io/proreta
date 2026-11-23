@@ -12,6 +12,18 @@ import (
 	"github.com/google/uuid"
 )
 
+const clearPassword = `-- name: ClearPassword :exec
+UPDATE users
+SET password_hash = NULL, password_must_change = false, password_changed_at = NULL, updated_at = now()
+WHERE id = $1
+`
+
+// The password of an account whose address nobody had proved: the provider sign-in proves it now.
+func (q *Queries) ClearPassword(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, clearPassword, id)
+	return err
+}
+
 const countAuthDomains = `-- name: CountAuthDomains :one
 SELECT count(*)
 FROM org_auth_domains
@@ -354,7 +366,8 @@ func (q *Queries) LockUserForIdentities(ctx context.Context, id uuid.UUID) (Lock
 }
 
 const lockUserForLink = `-- name: LockUserForLink :one
-SELECT status, is_platform_admin, is_system_admin, email
+SELECT status, is_platform_admin, is_system_admin, email,
+       (email_verified_at IS NOT NULL)::boolean AS email_verified, (password_hash IS NOT NULL)::boolean AS has_password
 FROM users
 WHERE id = $1
 FOR UPDATE
@@ -365,9 +378,12 @@ type LockUserForLinkRow struct {
 	IsPlatformAdmin bool
 	IsSystemAdmin   bool
 	Email           string
+	EmailVerified   bool
+	HasPassword     bool
 }
 
 // Serialises the link of a provider identity by email with every other change of the account.
+// email_verified and has_password are read under the same lock, before the link marks the address verified.
 func (q *Queries) LockUserForLink(ctx context.Context, id uuid.UUID) (LockUserForLinkRow, error) {
 	row := q.db.QueryRow(ctx, lockUserForLink, id)
 	var i LockUserForLinkRow
@@ -376,6 +392,8 @@ func (q *Queries) LockUserForLink(ctx context.Context, id uuid.UUID) (LockUserFo
 		&i.IsPlatformAdmin,
 		&i.IsSystemAdmin,
 		&i.Email,
+		&i.EmailVerified,
+		&i.HasPassword,
 	)
 	return i, err
 }
