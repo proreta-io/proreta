@@ -60,7 +60,7 @@ export function Field({
 // 16 px text on phones: iOS zooms the page into any smaller input.
 // No horizontal padding here: utilities are not merged, so each use adds exactly the padding it needs.
 const CONTROL =
-  "box-border h-11 w-full min-w-0 border border-input bg-field text-[16px] text-foreground transition-colors outline-offset-1 hover:border-input-hover disabled:cursor-not-allowed disabled:border-border-faint disabled:bg-muted disabled:text-subtle-foreground aria-invalid:border-destructive sm:h-9 sm:text-body";
+  "box-border h-11 w-full min-w-0 rounded-md border border-input bg-field text-[16px] text-foreground transition-colors outline-offset-1 hover:border-input-hover disabled:cursor-not-allowed disabled:border-border-faint disabled:bg-muted disabled:text-subtle-foreground aria-invalid:border-destructive sm:h-9 sm:text-body";
 
 export function Input({
   mono = false,
@@ -112,7 +112,7 @@ function Affix({ className, children }: { className: string; children: ReactNode
   return (
     <span
       aria-hidden="true"
-      className={cx("flex items-center font-mono text-caption text-muted-foreground", className)}
+      className={cx("flex items-center font-mono text-caption text-subtle-foreground", className)}
     >
       {children}
     </span>
@@ -158,7 +158,7 @@ export function Select({
 /** A value the user can see but not change yet: a dashed box, not a disabled input. */
 export function ReadOnlyValue({ children, note }: { children: ReactNode; note?: ReactNode }) {
   return (
-    <div className="box-border flex h-11 items-center justify-between gap-3 border border-dashed border-input bg-muted px-2.5 font-mono text-caption sm:h-9">
+    <div className="box-border flex h-11 items-center justify-between gap-3 rounded-md border border-dashed border-input bg-muted px-2.5 font-mono text-caption sm:h-9">
       <span>{children}</span>
       {note && <span className="font-sans text-muted-foreground">{note}</span>}
     </div>
@@ -198,7 +198,7 @@ export function Checkbox({
               .filter(Boolean)
               .join(" ") || undefined
           }
-          className="peer absolute inset-0 m-0 cursor-pointer appearance-none border border-input bg-field checked:border-primary checked:bg-primary disabled:cursor-not-allowed disabled:border-border-faint disabled:bg-muted"
+          className="peer absolute inset-0 m-0 cursor-pointer appearance-none rounded-sm border border-input bg-field checked:border-primary checked:bg-primary disabled:cursor-not-allowed disabled:border-border-faint disabled:bg-muted"
           {...props}
         />
         <span
@@ -247,7 +247,7 @@ export function Segmented<T extends string>({
       role="radiogroup"
       aria-label={label}
       className={cx(
-        "inline-flex box-border border border-input",
+        "inline-flex box-border overflow-hidden rounded-md border border-input bg-card",
         size === "default" ? "h-11 sm:h-9" : "h-9 sm:h-7",
       )}
     >
@@ -255,7 +255,7 @@ export function Segmented<T extends string>({
         <label
           key={option.value}
           className={cx(
-            "flex cursor-pointer items-center px-3.5 font-medium transition-colors has-checked:bg-primary has-checked:text-primary-foreground not-has-checked:hover:bg-muted has-disabled:cursor-not-allowed has-disabled:text-subtle-foreground has-focus-visible:outline-2 has-focus-visible:-outline-offset-4 has-focus-visible:outline-current",
+            "flex cursor-pointer items-center px-3.5 font-medium transition-colors has-checked:bg-accent-tint has-checked:text-accent-text not-has-checked:text-muted-foreground not-has-checked:hover:bg-muted not-has-checked:hover:text-foreground has-disabled:cursor-not-allowed has-disabled:text-subtle-foreground has-focus-visible:outline-2 has-focus-visible:-outline-offset-4 has-focus-visible:outline-current",
             size === "small" && "text-caption",
             i > 0 && "border-l border-input",
           )}

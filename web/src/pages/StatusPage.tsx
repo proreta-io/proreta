@@ -292,7 +292,7 @@ function CreatePage({
       onSubmit={onSubmit}
       noValidate
       aria-label="Create the status page"
-      className="flex max-w-[560px] flex-col gap-4 border border-border p-4 sm:p-5"
+      className="flex max-w-[560px] flex-col gap-4 surface p-4 sm:p-5"
     >
       <h2 className="text-lead font-semibold">Create the status page</h2>
       {formError && <Alert>{formError}</Alert>}
@@ -425,7 +425,7 @@ function Editor({ page }: { page: Page }) {
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,440px)]">
       <div className="flex min-w-0 flex-col gap-8">
-        <div className="flex flex-col gap-3 border border-border p-4 sm:p-5">
+        <div className="flex flex-col gap-3 surface p-4 sm:p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <PublishState page={page} />
             <span className="flex flex-wrap gap-2">
@@ -768,7 +768,7 @@ function ComponentEditor({ page, initial }: { page: Page; initial: StatusPageCom
       {rows.length === 0 ? (
         <EmptyNote>No components yet. The public page says “No components.”</EmptyNote>
       ) : (
-        <ol className="flex flex-col border border-border">
+        <ol className="surface flex flex-col overflow-hidden">
           {rows.map((r, i) => (
             <li
               key={r.monitorId}
@@ -1101,13 +1101,13 @@ function Preview({
   const overall = snapshot.status;
   return (
     <div
-      className="flex flex-col gap-4 border border-border bg-background p-4"
+      className="flex flex-col gap-4 rounded-lg border border-border bg-background p-4"
       // Like the public page: the top bar only with an accent colour.
       style={accent ? { borderTop: `3px solid ${accent}` } : undefined}
     >
       <div className="flex min-w-0 items-center gap-3">
         {logoHost && (
-          <span className="flex-none border border-dashed border-input px-1.5 py-1 font-mono text-micro text-muted-foreground">
+          <span className="flex-none rounded-sm border border-dashed border-input px-1.5 py-1 font-mono text-micro text-muted-foreground">
             logo · {logoHost}
           </span>
         )}
@@ -1147,7 +1147,7 @@ function Preview({
         <p className="text-caption text-muted-foreground">No components.</p>
       ) : (
         groups.map((g, gi) => (
-          <div key={gi} className="flex flex-col border border-border">
+          <div key={gi} className="flex flex-col rounded-md border border-border">
             {g.name && (
               <div className="border-b border-border-faint bg-muted px-3 py-1.5 eyebrow">
                 {g.name}

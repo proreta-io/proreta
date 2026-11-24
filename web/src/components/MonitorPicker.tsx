@@ -121,7 +121,7 @@ export default function MonitorPicker({
             role="listbox"
             aria-label={`${label}, matches`}
             hidden={!open}
-            className="absolute z-10 mt-1 max-h-72 w-full overflow-auto border border-input bg-field shadow-md"
+            className="absolute z-10 mt-1 max-h-72 w-full overflow-auto rounded-md border border-border bg-popover shadow-overlay"
           >
             {options.map((m, i) => (
               // eslint-disable-next-line jsx-a11y/click-events-have-key-events -- the input owns the keyboard (aria-activedescendant); the options are for the mouse.

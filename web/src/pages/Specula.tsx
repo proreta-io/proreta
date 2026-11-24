@@ -85,7 +85,7 @@ const ownerOps: SpeculaOps = {
 };
 
 const codeBlock =
-  "m-0 overflow-x-auto border border-border-faint bg-muted px-4 py-3.5 font-mono text-mono leading-[1.65] whitespace-pre";
+  "m-0 overflow-x-auto rounded-md border border-border-faint bg-muted px-4 py-3.5 font-mono text-mono leading-[1.65] whitespace-pre";
 
 /** Specula executors: programs that check services inside your own network. */
 export default function SpeculaPage() {
@@ -546,7 +546,7 @@ export function SpeculaForm({
       onSubmit={onSubmit}
       noValidate
       aria-label={mode === "create" ? "Register a Specula" : "Edit the Specula"}
-      className="flex max-w-[560px] flex-col gap-5 border border-border p-5"
+      className="flex max-w-[560px] flex-col gap-5 surface p-5"
     >
       <h2 className="text-lead font-semibold">
         {mode === "create" ? "Register a Specula" : `Edit ${initial.name}`}
@@ -641,7 +641,7 @@ export function TokenPanel({ created, onDone }: { created: SpeculaCreated; onDon
   return (
     <section
       aria-labelledby="specula-token-heading"
-      className="flex max-w-[640px] flex-col gap-5 border border-border p-5"
+      className="flex max-w-[640px] flex-col gap-5 surface p-5"
     >
       <h2 id="specula-token-heading" className="text-lead font-semibold">
         {created.specula.name} is registered

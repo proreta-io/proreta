@@ -106,6 +106,17 @@ describe("StatusIndicator", () => {
     expect(screen.getByText("Pending")).toBeInTheDocument();
     expect(screen.getByText("Down 12 min")).toBeInTheDocument();
   });
+
+  it("ripples once per new check, not on the first render", () => {
+    const { container, rerender } = render(<StatusIndicator status="up" checkedAt="t1" />);
+    expect(container.querySelector(".proreta-ping")).toBeNull();
+    rerender(<StatusIndicator status="up" checkedAt="t2" />);
+    const first = container.querySelector(".proreta-ping");
+    expect(first).not.toBeNull();
+    rerender(<StatusIndicator status="up" checkedAt="t3" />);
+    // A new element, so the CSS animation plays again.
+    expect(container.querySelector(".proreta-ping")).not.toBe(first);
+  });
 });
 
 describe("Meter", () => {

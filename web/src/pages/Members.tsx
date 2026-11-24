@@ -214,10 +214,7 @@ function Invitations() {
   return (
     <>
       {created ? (
-        <section
-          aria-labelledby="invite-link-heading"
-          className="flex flex-col gap-4 border border-border p-5"
-        >
+        <section aria-labelledby="invite-link-heading" className="flex flex-col gap-4 surface p-5">
           <h3 id="invite-link-heading" className="text-lead font-semibold">
             Invitation link ({ROLE_LABELS[created.role].toLowerCase()})
           </h3>

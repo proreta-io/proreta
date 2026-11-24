@@ -139,7 +139,7 @@ export default function WebhookFields({
         ) : (
           <pre
             data-testid="template-preview"
-            className="m-0 max-h-60 overflow-auto border border-border bg-muted p-2.5 font-mono text-caption break-words whitespace-pre-wrap"
+            className="m-0 max-h-60 overflow-auto rounded-md border border-border bg-muted p-2.5 font-mono text-caption break-words whitespace-pre-wrap"
           >
             {preview.data?.body ?? "…"}
           </pre>

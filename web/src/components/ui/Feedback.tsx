@@ -65,7 +65,10 @@ export function ErrorState({
 }) {
   if (variant === "section") {
     return (
-      <div role="alert" className="flex items-start gap-2.5 border border-border-faint px-3 py-2.5">
+      <div
+        role="alert"
+        className="flex items-start gap-2.5 rounded-md border border-border bg-card px-3 py-2.5"
+      >
         <TriangleShape size="small" className="mt-1.5 text-down" />
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="text-muted-foreground">{title}</span>
@@ -81,7 +84,7 @@ export function ErrorState({
     );
   }
   return (
-    <div role="alert" className="flex flex-col gap-3 border border-border px-6 py-7">
+    <div role="alert" className="surface flex flex-col gap-3 px-6 py-7">
       <h2 className="flex items-center gap-2 text-[17px] font-semibold">
         <TriangleShape className="text-down" />
         {title}
@@ -129,7 +132,7 @@ export function Toast({
         <button
           type="button"
           aria-label="Dismiss"
-          className="size-6 cursor-pointer text-[16px] text-muted-foreground hover:bg-muted hover:text-foreground"
+          className="size-6 cursor-pointer rounded-sm text-[16px] text-muted-foreground hover:bg-muted hover:text-foreground"
           onClick={onDismiss}
         >
           ×
@@ -157,7 +160,7 @@ export function Tooltip({
       <span
         id={id}
         role="tooltip"
-        className="pointer-events-none absolute bottom-full left-0 z-10 mb-1.5 w-max max-w-64 bg-inverse px-2 py-1.5 text-caption text-inverse-foreground opacity-0 transition-opacity group-focus-within:opacity-100 group-focus-within:delay-300 group-hover:opacity-100 group-hover:delay-300"
+        className="pointer-events-none absolute bottom-full left-0 z-10 mb-1.5 w-max max-w-64 rounded-md bg-inverse px-2 py-1.5 text-caption text-inverse-foreground opacity-0 transition-opacity group-focus-within:opacity-100 group-focus-within:delay-300 group-hover:opacity-100 group-hover:delay-300"
       >
         {content}
       </span>
@@ -212,9 +215,11 @@ export function CopyField({
           value={value}
           aria-describedby={once ? `${id}-once` : undefined}
           onFocus={(e) => e.currentTarget.select()}
+          className="sm:rounded-r-none"
         />
+        {/* Joined to the field from sm up: one shape, no seam. */}
         <Button
-          className="min-w-[88px] flex-none"
+          className="min-w-[88px] flex-none sm:rounded-l-none"
           aria-label={state === "copied" ? undefined : copyAriaLabel}
           onClick={() => void copy()}
         >
@@ -230,7 +235,7 @@ export function CopyField({
       {once && (
         <span
           id={`${id}-once`}
-          className="flex items-center gap-1.5 border border-warning-border bg-warning-tint px-2.5 py-2 text-caption"
+          className="flex items-center gap-1.5 rounded-md border border-warning-border bg-warning-tint px-2.5 py-2 text-caption"
         >
           <DiamondShape className="text-warning" />
           Copy it now: it is shown only once.
@@ -256,13 +261,13 @@ export function WriteOnlyValue({
     <div className="flex flex-col gap-1.5">
       <span className="text-caption font-medium">{label}</span>
       <div className="flex items-stretch">
-        <div className="box-border flex h-11 flex-1 items-center gap-2 border border-dashed border-input bg-muted px-2.5 text-muted-foreground sm:h-9">
+        <div className="box-border flex h-11 flex-1 items-center gap-2 rounded-l-md border border-dashed border-input bg-muted px-2.5 text-muted-foreground sm:h-9">
           <span aria-hidden="true" className="font-mono tracking-[0.1em]">
             ••••
           </span>
           Configured, hidden
         </div>
-        <Button variant="secondary" className="border-l-0" onClick={onReplace}>
+        <Button variant="secondary" className="rounded-l-none border-l-0" onClick={onReplace}>
           {actionLabel}
         </Button>
       </div>
@@ -316,7 +321,7 @@ export function ConfirmDialog({
       ref={dialog}
       aria-labelledby={`${id}-title`}
       aria-describedby={`${id}-desc`}
-      className="m-auto w-[calc(100%-32px)] max-w-[420px] border border-border bg-popover text-foreground shadow-overlay backdrop:bg-overlay"
+      className="m-auto w-[calc(100%-32px)] max-w-[420px] rounded-lg border border-border bg-popover text-foreground shadow-overlay backdrop:bg-overlay"
       onKeyDown={(e) => {
         // Escape is handled here, before the browser turns it into a cancel event: the same
         // in every browser and in jsdom, which has no native dialog behaviour.
@@ -376,5 +381,9 @@ export function Loading({
 
 /** A quiet one-line empty result: "No incidents.", "No organizations match …". */
 export function EmptyNote({ children }: { children: ReactNode }) {
-  return <p className="border border-border-faint px-4 py-3 text-muted-foreground">{children}</p>;
+  return (
+    <p className="rounded-lg border border-dashed border-border bg-card px-4 py-3 text-muted-foreground">
+      {children}
+    </p>
+  );
 }

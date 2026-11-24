@@ -72,7 +72,7 @@ export default function UserMenu({ organization = true }: { organization?: boole
       {open && (
         <div
           id="account-panel"
-          className="absolute top-full right-0 z-50 mt-2 flex w-72 max-w-[calc(100vw-2rem)] flex-col border border-border bg-popover shadow-overlay"
+          className="absolute top-full right-0 z-50 mt-2 flex w-72 max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-overlay"
         >
           <div className="flex flex-col gap-0.5 border-b border-border-faint px-4 py-3">
             <span className="eyebrow">Signed in as</span>

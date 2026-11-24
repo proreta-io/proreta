@@ -123,7 +123,7 @@ export function DomainsSection({ page, canManage }: { page: Page; canManage: boo
             <EmptyNote>No custom domain.</EmptyNote>
           )}
           {items.length > 0 && (
-            <ul className="flex flex-col border border-border">
+            <ul className="surface flex flex-col overflow-hidden">
               {items.map((d) => (
                 <DomainRow
                   key={d.id}
@@ -445,7 +445,7 @@ function RecordCard({
   value: string;
 }) {
   return (
-    <div className="flex flex-col gap-3 border border-border-faint bg-muted p-3">
+    <div className="flex flex-col gap-3 rounded-md border border-border-faint bg-muted p-3">
       <div className="flex flex-wrap items-baseline gap-2">
         <span className="eyebrow">{kind} record</span>
         <span className="text-caption text-muted-foreground">{purpose}</span>

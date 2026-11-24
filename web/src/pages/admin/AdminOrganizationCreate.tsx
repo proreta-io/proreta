@@ -91,7 +91,7 @@ export default function AdminOrganizationCreate() {
       {created && (
         <section
           aria-labelledby="admin-created-heading"
-          className="flex w-full flex-col gap-4 border border-border p-5"
+          className="flex w-full flex-col gap-4 surface p-5"
         >
           <h2 id="admin-created-heading" className="text-lead font-semibold">
             Organization {created.organization.name} created

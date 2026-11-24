@@ -121,11 +121,7 @@ export default function ProjectInvitations({ project }: { project: Project }) {
         </p>
       </div>
       {created ? (
-        <div
-          role="group"
-          aria-label="Invitation link"
-          className="flex flex-col gap-4 border border-border p-5"
-        >
+        <div role="group" aria-label="Invitation link" className="flex flex-col gap-4 surface p-5">
           {created.emailedTo && (
             <Alert tone="neutral">
               An email with the link is on its way to <strong>{created.emailedTo}</strong>. You can
