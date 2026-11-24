@@ -245,6 +245,33 @@
   }
 }
 
+/* A check landed: one ring spreads from the status shape and fades. */
+@keyframes proreta-ping {
+  from {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  to {
+    transform: scale(3.2);
+    opacity: 0;
+  }
+}
+
+.proreta-ping {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: currentColor;
+  pointer-events: none;
+  animation: proreta-ping 1.1s cubic-bezier(0, 0, 0.2, 1) 1 forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .proreta-ping {
+    display: none;
+  }
+}
+
 /*
  * The auth screens: an abstract beam of light sweeping across the dark, slowly (24 s). Under
  * reduced motion it stands still. Decorative only.

@@ -439,13 +439,14 @@ function MonitorRow({
   const state = monitorState(m);
   const isDown = state === "down";
   const heartbeat = isHeartbeat(m);
-  const checked = formatAgo(m.heartbeat ? m.heartbeat.lastPingAt : m.lastCheckedAt, now);
+  const checkedAt = m.heartbeat ? m.heartbeat.lastPingAt : m.lastCheckedAt;
+  const checked = formatAgo(checkedAt, now);
   const responseMs = m.http?.lastResponseMs ?? m.tcp?.lastResponseMs;
   const figure = cx("text-mono", isDown ? "font-medium text-down" : "text-muted-foreground");
   return (
     <Tr tone={isDown ? "down" : "default"} interactive onClick={onOpen}>
       <Td className={cx("align-top sm:align-middle", isDown && "py-3.5")}>
-        <StatusIndicator status={state} label={statusText(m, now)} />
+        <StatusIndicator status={state} label={statusText(m, now)} checkedAt={checkedAt} />
       </Td>
       {/* Takes the width the figures leave, so a long URL truncates instead of pushing them out. */}
       <Td className={cx("w-full max-w-0 min-w-40", isDown && "py-3.5")}>

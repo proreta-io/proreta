@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { cx, DotShape, HollowDotShape, PauseShape, TriangleShape } from "./shapes";
 
 export type StatusKind = "up" | "down" | "paused" | "pending";
@@ -18,22 +18,34 @@ export function StatusIndicator({
   status,
   label,
   inline = false,
+  checkedAt,
 }: {
   status: StatusKind;
   /** The word with its duration, such as "Down 12 min". */
   label?: ReactNode;
   inline?: boolean;
+  /** The last check's time: each new one after the first render plays one ripple from the shape. */
+  checkedAt?: string | null;
 }) {
   const text = label ?? DEFAULT_LABEL[status];
+  const [firstCheck] = useState(checkedAt);
+  const ping = (shape: ReactNode) => (
+    <span className="relative flex">
+      {shape}
+      {checkedAt && checkedAt !== firstCheck && (
+        <span key={checkedAt} aria-hidden="true" className="proreta-ping" />
+      )}
+    </span>
+  );
   if (status === "down") {
     return inline ? (
       <span className="inline-flex items-center gap-2 font-semibold text-down">
-        <TriangleShape />
+        {ping(<TriangleShape />)}
         {text}
       </span>
     ) : (
       <span className="inline-flex items-center gap-1.5 rounded-full bg-destructive px-2 py-px font-semibold whitespace-nowrap text-destructive-foreground">
-        <TriangleShape />
+        {ping(<TriangleShape />)}
         {text}
       </span>
     );
@@ -45,7 +57,7 @@ export function StatusIndicator({
         status === "up" ? "text-foreground" : "text-muted-foreground",
       )}
     >
-      {status === "up" && <DotShape className="text-success" />}
+      {status === "up" && <span className="text-success">{ping(<DotShape />)}</span>}
       {status === "paused" && <PauseShape />}
       {status === "pending" && <HollowDotShape />}
       {text}
