@@ -83,6 +83,12 @@ type Monitor struct {
 	Method      string
 	HeaderNames []string
 	BodySet     bool
+	// SendSet, Expect, ReadTimeoutSeconds and MaxResponseBytes are the optional send and expect
+	// settings of a tcp monitor; the sent bytes are sealed and never read here.
+	SendSet            bool
+	Expect             *ExpectRule
+	ReadTimeoutSeconds *int
+	MaxResponseBytes   *int
 	// SpeculaID and SpeculaName are set when an http monitor runs at a Specula.
 	SpeculaID            *uuid.UUID
 	SpeculaName          string
@@ -111,6 +117,12 @@ type Monitor struct {
 	UpdatedAt      time.Time
 }
 
+// ExpectRule is what the reply of a tcp check must contain; Mode is "contains" or "regex".
+type ExpectRule struct {
+	Mode  string `json:"mode"`
+	Value string `json:"value"`
+}
+
 // Detail is one monitor with uptime over 24 h, 7 d and 30 d.
 type Detail struct {
 	Monitor
@@ -136,7 +148,9 @@ SELECT m.id, m.project_id, m.type, m.name, COALESCE(m.config ->> 'url', ''), COA
        lr.latency_ms, h.last_ping_at,
        CASE WHEN m.type = 'heartbeat' THEN (m.config ->> 'graceSeconds')::numeric::integer END,
        sp.id, sp.name,
-       COALESCE(m.config ->> 'host', ''), COALESCE((m.config ->> 'port')::integer, 0)
+       COALESCE(m.config ->> 'host', ''), COALESCE((m.config ->> 'port')::integer, 0),
+       COALESCE((m.config ->> 'sendSet')::boolean, false), m.config -> 'expect',
+       (m.config ->> 'readTimeoutSeconds')::integer, (m.config ->> 'maxResponseBytes')::integer
 FROM monitors AS m
 JOIN monitor_state AS s ON s.tenant_id = m.tenant_id AND s.monitor_id = m.id
 LEFT JOIN heartbeat_tokens AS h ON h.tenant_id = m.tenant_id AND h.monitor_id = m.id
@@ -171,7 +185,8 @@ func scanMonitor(row pgx.Row) (Monitor, error) {
 	var speculaName *string
 	err := row.Scan(&m.ID, &m.ProjectID, &m.Type, &m.Name, &m.URL, &m.ExpectedStatus, &m.Method, &m.HeaderNames, &m.BodySet, &interval, &timeout, &threshold, &m.NotificationsEnabled, &m.Paused,
 		&m.CreatedAt, &m.UpdatedAt, &m.Status, &m.StatusSince, &m.LastErrorKind, &m.LastCheckedAt, &m.TLSExpiresAt,
-		&incID, &incStarted, &incReason, &latency, &m.LastPingAt, &grace, &m.SpeculaID, &speculaName, &m.Host, &m.Port)
+		&incID, &incStarted, &incReason, &latency, &m.LastPingAt, &grace, &m.SpeculaID, &speculaName, &m.Host, &m.Port,
+		&m.SendSet, &m.Expect, &m.ReadTimeoutSeconds, &m.MaxResponseBytes)
 	if err != nil {
 		return Monitor{}, err
 	}

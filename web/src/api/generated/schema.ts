@@ -3086,6 +3086,28 @@ export interface components {
        */
       failureThreshold?: number;
     };
+    /**
+     * @description Bytes a TCP check writes right after it connects. At most 4096 bytes after decoding. Write-only:
+     *     stored encrypted and never returned (`sendSet` tells that one is stored). On update an empty
+     *     `value` removes it. Use `hex` or `base64` for a binary or length-prefixed protocol.
+     */
+    TcpSend: {
+      /** @enum {string} */
+      encoding: "hex" | "base64" | "text";
+      /** @example 0000001a */
+      value: string;
+    };
+    /**
+     * @description What the reply must contain. The bytes read (up to `maxResponseBytes`) are matched as text:
+     *     `contains` is a substring, `regex` a Go (RE2) regular expression found anywhere in the reply.
+     *     On update an empty `value` removes the rule.
+     */
+    TcpExpect: {
+      /** @enum {string} */
+      mode: "contains" | "regex";
+      /** @example "status":"ok" */
+      value: string;
+    };
     /** @description The settings of a TCP monitor in a create request */
     TcpSettings: {
       /**
@@ -3100,12 +3122,24 @@ export interface components {
        * @default 2
        */
       failureThreshold?: number;
+      send?: components["schemas"]["TcpSend"];
+      expect?: components["schemas"]["TcpExpect"];
+      /** @description Deadline for the reply after the connection and the send, in seconds; only with `send` or `expect` (422 otherwise). Defaults to 5 when one of them is set. */
+      readTimeoutSeconds?: number;
+      /** @description At most this many bytes of the reply are read; only with `send` or `expect` (422 otherwise). Defaults to 4096 when one of them is set. */
+      maxResponseBytes?: number;
     };
     /** @description Changes of a TCP monitor's settings; only the given fields change. A new host or port restarts the monitor. */
     TcpSettingsUpdate: {
       host?: string;
       port?: number;
       failureThreshold?: number;
+      send?: components["schemas"]["TcpSend"];
+      expect?: components["schemas"]["TcpExpect"];
+      /** @description Deadline for the reply after the connection and the send, in seconds; only with `send` or `expect` (422 otherwise) */
+      readTimeoutSeconds?: number;
+      /** @description At most this many bytes of the reply are read; only with `send` or `expect` (422 otherwise) */
+      maxResponseBytes?: number;
     };
     /** @description Changes of an HTTPS monitor's settings; only the given fields change */
     HttpSettingsUpdate: {
@@ -3180,7 +3214,9 @@ export interface components {
     };
     /**
      * @description Why a check failed or a monitor went down. Known values: `dns` (the name did not resolve),
-     *     `connect` (no TCP connection; for a tcp monitor, refused or unreachable), `tls` (handshake or certificate failure), `timeout` (no
+     *     `connect` (no TCP connection; for a tcp monitor, refused or unreachable), `no_response` (a tcp
+     *     monitor connected but got no reply in time, or the connection closed first), `unexpected_response`
+     *     (a tcp monitor got a reply that did not match `expect`), `tls` (handshake or certificate failure), `timeout` (no
      *     answer within the timeout), `blocked_address` (the target resolved to a blocked, for
      *     example private, address), `bad_port` (a connection or redirect to a port other than 443),
      *     `redirect` (too many redirects or a redirect to a non-HTTPS URL), `unexpected_status`
@@ -3278,7 +3314,7 @@ export interface components {
       /** @description Response time of the last check in milliseconds; null when no check ran or it got no response */
       lastResponseMs: number | null;
     };
-    /** @description The settings and state of a TCP monitor. A check has no status code; its response time is the time to complete the connection. */
+    /** @description The settings and state of a TCP monitor. A check has no status code; its response time is the time to complete the connection, or, when the check expects a reply, the time until the matching reply. */
     TcpMonitor: {
       host: string;
       port: number;
@@ -3290,6 +3326,13 @@ export interface components {
       failureThreshold: number;
       /** @description Time to connect of the last check in milliseconds; null when no check ran or it did not connect */
       lastResponseMs: number | null;
+      /** @description Whether the check sends bytes after it connects; the bytes are never returned */
+      sendSet?: boolean;
+      expect?: components["schemas"]["TcpExpect"];
+      /** @description Deadline for the reply, in seconds; present when the check sends or expects something */
+      readTimeoutSeconds?: number;
+      /** @description Read limit for the reply in bytes; present when the check sends or expects something */
+      maxResponseBytes?: number;
     };
     /** @description The settings and ping state of a heartbeat monitor */
     HeartbeatMonitor: {

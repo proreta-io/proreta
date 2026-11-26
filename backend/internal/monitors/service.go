@@ -170,6 +170,12 @@ type TCPSettings struct {
 	Host             *string
 	Port             *int
 	FailureThreshold *int
+	// Send, Expect, ReadTimeoutSeconds and MaxResponseBytes make the check talk to the service;
+	// see tcpcheck.go. On update a nil keeps the stored value, an empty Value removes it.
+	Send               *TCPSend
+	Expect             *TCPExpect
+	ReadTimeoutSeconds *int
+	MaxResponseBytes   *int
 }
 
 // HeartbeatSettings are the settings of a heartbeat; nil fields take their defaults on create
@@ -211,6 +217,14 @@ type httpConfig struct {
 type tcpConfig struct {
 	Host string `json:"host"`
 	Port int    `json:"port"`
+	// Send is the sealed bytes to send (monitorrequest, the bytes as base64 in Body); SendSet is
+	// kept in the clear so reads never open it. The JSON keys differ from httpConfig's because
+	// fromRow embeds both structs.
+	SendSet            bool        `json:"sendSet,omitempty"`
+	Send               string      `json:"send,omitempty"`
+	Expect             *ExpectRule `json:"expect,omitempty"`
+	ReadTimeoutSeconds int         `json:"readTimeoutSeconds,omitempty"`
+	MaxResponseBytes   int         `json:"maxResponseBytes,omitempty"`
 }
 
 // heartbeatConfig is monitors.config for type heartbeat.
@@ -278,6 +292,9 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 	if perr != nil {
 		return Monitor{}, perr
 	}
+	if p.tcpDirty && !p.tcpSec.Empty() && s.requestKeys == nil {
+		verr.Add(fieldTCPSend, msgNoSendKeys)
+	}
 	if err := verr.Err(); err != nil {
 		return Monitor{}, err
 	}
@@ -287,6 +304,13 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 			return Monitor{}, err
 		}
 		p.config = p.httpCfg
+	}
+	if p.tcpDirty {
+		cfg := p.config.(tcpConfig)
+		if err := s.sealTCP(&cfg, a.TenantID, id, p.tcpSec); err != nil {
+			return Monitor{}, err
+		}
+		p.config = cfg
 	}
 	raw, err := json.Marshal(p.config)
 	if err != nil {
@@ -318,11 +342,14 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 // createPlan is a validated CreateInput: the row to insert (without id, name, config and project),
 // the quota resource it counts against and, for an http monitor, the request still to be sealed.
 type createPlan struct {
-	row      monitorsdb.InsertMonitorParams
-	config   any
-	httpCfg  httpConfig
-	httpSec  monitorrequest.Secrets
-	isHTTP   bool
+	row     monitorsdb.InsertMonitorParams
+	config  any
+	httpCfg httpConfig
+	httpSec monitorrequest.Secrets
+	isHTTP  bool
+	// tcpSec is the send of a tcp monitor, still to be sealed when tcpDirty.
+	tcpSec   monitorrequest.Secrets
+	tcpDirty bool
 	resource plans.Resource
 }
 
@@ -401,6 +428,7 @@ func planTCP(verr *validation.Error, in CreateInput, p *createPlan) {
 	}
 	threshold := orDefault(t.FailureThreshold, DefaultFailureThreshold)
 	checkThreshold(verr, fieldTCPFailureThreshold, threshold)
+	p.tcpSec, p.tcpDirty, _ = planTCPCheck(verr, &cfg, t, false)
 	p.config = cfg
 	p.row.IntervalSeconds, p.row.FailureThreshold = IntervalSeconds, int32(threshold) //nolint:gosec // validated 1..3
 }
@@ -638,7 +666,7 @@ func (s *Service) planUpdate(ctx context.Context, tx pgx.Tx, a Actor, id uuid.UU
 	case TypeHeartbeat:
 		err = planHeartbeatUpdate(&verr, cur, in, e)
 	case TypeTCP:
-		err = planTCPUpdate(&verr, cur, in, e)
+		err = s.planTCPUpdate(&verr, a, id, cur, in, e)
 	default:
 		err = s.planHTTPUpdate(&verr, a, id, cur, in, e)
 	}
@@ -683,11 +711,12 @@ func planHeartbeatUpdate(verr *validation.Error, cur monitorsdb.LockMonitorRow, 
 	return nil
 }
 
-func planTCPUpdate(verr *validation.Error, cur monitorsdb.LockMonitorRow, in UpdateInput, e *monitorEdit) error {
+func (s *Service) planTCPUpdate(verr *validation.Error, a Actor, id uuid.UUID, cur monitorsdb.LockMonitorRow, in UpdateInput, e *monitorEdit) error {
 	var cfg tcpConfig
 	if err := json.Unmarshal(cur.Config, &cfg); err != nil {
 		return fmt.Errorf("monitor config: %w", err)
 	}
+	oldHost, oldPort := cfg.Host, cfg.Port
 	if in.Heartbeat != nil {
 		verr.Add(fieldHeartbeat, msgHeartbeatOnly)
 	}
@@ -719,6 +748,20 @@ func planTCPUpdate(verr *validation.Error, cur monitorsdb.LockMonitorRow, in Upd
 		if t.FailureThreshold != nil {
 			checkThreshold(verr, fieldTCPFailureThreshold, *t.FailureThreshold)
 			e.changed, e.threshold = appendIf(e.changed, fieldTCPFailureThreshold, *t.FailureThreshold != e.threshold), *t.FailureThreshold
+		}
+	}
+	t := in.TCP
+	if t == nil {
+		t = &TCPSettings{}
+	}
+	sec, dirty, changed := planTCPCheck(verr, &cfg, t, cfg.Host != oldHost || cfg.Port != oldPort)
+	e.changed = append(e.changed, changed...)
+	if !sec.Empty() && s.requestKeys == nil {
+		verr.Add(fieldTCPSend, msgNoSendKeys)
+	}
+	if dirty && verr.Err() == nil {
+		if err := s.sealTCP(&cfg, a.TenantID, id, sec); err != nil {
+			return err
 		}
 	}
 	e.config = cfg

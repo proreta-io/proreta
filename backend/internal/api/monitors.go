@@ -95,7 +95,8 @@ func (s *server) CreateMonitor(ctx context.Context, req gen.CreateMonitorRequest
 			Method: methodOf(h.Method), Headers: headersOf(h.Headers), Body: bodyOf(h.Body)}
 	}
 	if t := b.Tcp; t != nil {
-		in.TCP = &monitors.TCPSettings{Host: &t.Host, Port: &t.Port, FailureThreshold: t.FailureThreshold}
+		in.TCP = &monitors.TCPSettings{Host: &t.Host, Port: &t.Port, FailureThreshold: t.FailureThreshold,
+			Send: sendOf(t.Send), Expect: expectOf(t.Expect), ReadTimeoutSeconds: t.ReadTimeoutSeconds, MaxResponseBytes: t.MaxResponseBytes}
 	}
 	if hb := b.Heartbeat; hb != nil {
 		in.Heartbeat = &monitors.HeartbeatSettings{ExpectedIntervalSeconds: hb.ExpectedIntervalSeconds, GraceSeconds: hb.GraceSeconds}
@@ -143,7 +144,8 @@ func (s *server) UpdateMonitor(ctx context.Context, req gen.UpdateMonitorRequest
 			Method: methodOf(h.Method), Headers: headersOf(h.Headers), Body: bodyOf(h.Body)}
 	}
 	if t := b.Tcp; t != nil {
-		in.TCP = &monitors.TCPSettings{Host: t.Host, Port: t.Port, FailureThreshold: t.FailureThreshold}
+		in.TCP = &monitors.TCPSettings{Host: t.Host, Port: t.Port, FailureThreshold: t.FailureThreshold,
+			Send: sendOf(t.Send), Expect: expectOf(t.Expect), ReadTimeoutSeconds: t.ReadTimeoutSeconds, MaxResponseBytes: t.MaxResponseBytes}
 	}
 	if hb := b.Heartbeat; hb != nil {
 		in.Heartbeat = &monitors.HeartbeatSettings{ExpectedIntervalSeconds: hb.ExpectedIntervalSeconds, GraceSeconds: hb.GraceSeconds}
@@ -307,8 +309,13 @@ func monitorSettings(m queries.Monitor) (*gen.HttpMonitor, *gen.TcpMonitor, *gen
 	case monitors.TypeHeartbeat:
 		return nil, nil, &gen.HeartbeatMonitor{ExpectedIntervalSeconds: m.IntervalSeconds, GraceSeconds: deref(m.GraceSeconds), LastPingAt: m.LastPingAt}
 	case monitors.TypeTCP:
-		return nil, &gen.TcpMonitor{Host: m.Host, Port: m.Port, IntervalSeconds: m.IntervalSeconds, TimeoutSeconds: m.TimeoutSeconds,
-			FailureThreshold: m.FailureThreshold, LastResponseMs: m.LastResponseMs}, nil
+		tcp := &gen.TcpMonitor{Host: m.Host, Port: m.Port, IntervalSeconds: m.IntervalSeconds, TimeoutSeconds: m.TimeoutSeconds,
+			FailureThreshold: m.FailureThreshold, LastResponseMs: m.LastResponseMs, SendSet: &m.SendSet,
+			ReadTimeoutSeconds: m.ReadTimeoutSeconds, MaxResponseBytes: m.MaxResponseBytes}
+		if m.Expect != nil {
+			tcp.Expect = &gen.TcpExpect{Mode: gen.TcpExpectMode(m.Expect.Mode), Value: m.Expect.Value}
+		}
+		return nil, tcp, nil
 	}
 	names := m.HeaderNames
 	if names == nil {
@@ -384,4 +391,18 @@ func locationFrom(m queries.Monitor) *gen.MonitorLocation {
 	}
 	name := m.SpeculaName
 	return &gen.MonitorLocation{Type: gen.MonitorLocationTypeSpecula, SpeculaId: m.SpeculaID, SpeculaName: &name}
+}
+
+func sendOf(s *gen.TcpSend) *monitors.TCPSend {
+	if s == nil {
+		return nil
+	}
+	return &monitors.TCPSend{Encoding: string(s.Encoding), Value: s.Value}
+}
+
+func expectOf(e *gen.TcpExpect) *monitors.TCPExpect {
+	if e == nil {
+		return nil
+	}
+	return &monitors.TCPExpect{Mode: string(e.Mode), Value: e.Value}
 }
