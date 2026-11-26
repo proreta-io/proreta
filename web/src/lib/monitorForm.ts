@@ -39,6 +39,14 @@ export interface HeaderRow {
   stored: boolean;
 }
 
+export const SEND_ENCODINGS = ["text", "hex", "base64"] as const;
+export type SendEncoding = (typeof SEND_ENCODINGS)[number];
+export const SEND_MAX_BYTES = 4096;
+export const EXPECT_MAX = 512;
+export const READ_TIMEOUT_DEFAULT = "5";
+export const MAX_RESPONSE_DEFAULT = "4096";
+export const MAX_RESPONSE_LIMIT = 64 * 1024;
+
 export interface MonitorFormValues {
   type: MonitorKind;
   name: string;
@@ -63,6 +71,19 @@ export interface MonitorFormValues {
   /** TCP fields, as typed: the host (no scheme or port) and the port number. */
   host: string;
   port: string;
+  /** What a tcp check sends after it connects; only sent when `sendDirty`. */
+  sendEncoding: SendEncoding;
+  send: string;
+  /** The monitor stores bytes to send (hidden); they are kept unless `sendDirty`. */
+  sendStored: boolean;
+  sendDirty: boolean;
+  /** What the reply must contain, and how the limits of the read are set (as typed). */
+  expectMode: "contains" | "regex";
+  expectValue: string;
+  /** The monitor has a stored rule, so an emptied field must send the removal. */
+  expectStored: boolean;
+  readTimeoutSeconds: string;
+  maxResponseBytes: string;
   /** Heartbeat fields, as typed (seconds). */
   expectedIntervalSeconds: string;
   graceSeconds: string;
@@ -83,6 +104,10 @@ export const formFields = [
   "speculaId",
   "host",
   "port",
+  "send",
+  "expect",
+  "readTimeoutSeconds",
+  "maxResponseBytes",
   "expectedIntervalSeconds",
   "graceSeconds",
 ] as const;
@@ -101,6 +126,10 @@ const serverFields: Record<string, FormField> = {
   "tcp.host": "host",
   "tcp.port": "port",
   "tcp.failureThreshold": "failureThreshold",
+  "tcp.send": "send",
+  "tcp.expect": "expect",
+  "tcp.readTimeoutSeconds": "readTimeoutSeconds",
+  "tcp.maxResponseBytes": "maxResponseBytes",
   "heartbeat.expectedIntervalSeconds": "expectedIntervalSeconds",
   "heartbeat.graceSeconds": "graceSeconds",
 };
@@ -130,6 +159,15 @@ export const emptyMonitorForm: MonitorFormValues = {
   speculaId: "",
   host: "",
   port: "",
+  sendEncoding: "text",
+  send: "",
+  sendStored: false,
+  sendDirty: false,
+  expectMode: "contains",
+  expectValue: "",
+  expectStored: false,
+  readTimeoutSeconds: READ_TIMEOUT_DEFAULT,
+  maxResponseBytes: MAX_RESPONSE_DEFAULT,
   expectedIntervalSeconds: String(DEFAULT_INTERVAL),
   graceSeconds: String(DEFAULT_GRACE),
 };
@@ -156,6 +194,15 @@ export function valuesFromMonitor(m: MonitorDetail): MonitorFormValues {
     speculaId: m.location?.speculaId ?? "",
     host: m.tcp?.host ?? "",
     port: m.tcp ? String(m.tcp.port) : "",
+    sendEncoding: "text",
+    send: "",
+    sendStored: m.tcp?.sendSet ?? false,
+    sendDirty: false,
+    expectMode: m.tcp?.expect?.mode ?? "contains",
+    expectValue: m.tcp?.expect?.value ?? "",
+    expectStored: m.tcp?.expect !== undefined,
+    readTimeoutSeconds: String(m.tcp?.readTimeoutSeconds ?? READ_TIMEOUT_DEFAULT),
+    maxResponseBytes: String(m.tcp?.maxResponseBytes ?? MAX_RESPONSE_DEFAULT),
     expectedIntervalSeconds: String(m.heartbeat?.expectedIntervalSeconds ?? DEFAULT_INTERVAL),
     graceSeconds: String(m.heartbeat?.graceSeconds ?? DEFAULT_GRACE),
   };
@@ -224,6 +271,25 @@ export function validatePort(raw: string): string | undefined {
   return n >= 1 && n <= 65535 ? undefined : "Enter a port from 1 to 65535.";
 }
 
+/** The bytes `send` stands for in its encoding, or a message saying what is wrong with it. */
+export function decodeSend(encoding: SendEncoding, raw: string): Uint8Array | string {
+  if (encoding === "text") return new TextEncoder().encode(raw);
+  if (encoding === "hex") {
+    const hex = raw.replace(/\s+/g, "");
+    if (!/^([0-9a-fA-F]{2})+$/.test(hex)) return "Enter hex digits in pairs, such as 0000001a7b.";
+    return Uint8Array.from(hex.match(/../g)!, (b) => parseInt(b, 16));
+  }
+  try {
+    return Uint8Array.from(atob(raw.trim()), (c) => c.charCodeAt(0));
+  } catch {
+    return "Enter valid base64.";
+  }
+}
+
+/** Whether the check has a probe once saved: bytes to send (typed or stored) or a reply to expect. */
+export const hasProbe = (v: MonitorFormValues) =>
+  v.expectValue !== "" || (v.sendDirty ? v.send !== "" : v.sendStored);
+
 export function validateMonitorForm(v: MonitorFormValues): MonitorFormErrors {
   const errors: MonitorFormErrors = {};
   const name = v.name.trim();
@@ -245,6 +311,24 @@ export function validateMonitorForm(v: MonitorFormValues): MonitorFormErrors {
     if (portError) errors.port = portError;
     if (![1, 2, 3].includes(v.failureThreshold)) {
       errors.failureThreshold = "Choose 1, 2 or 3 failed checks.";
+    }
+    const sending = v.sendDirty ? v.send !== "" : v.sendStored;
+    if (v.sendDirty && v.send !== "") {
+      const bytes = decodeSend(v.sendEncoding, v.send);
+      if (typeof bytes === "string") errors.send = bytes;
+      else if (bytes.length > SEND_MAX_BYTES) errors.send = `Use ${SEND_MAX_BYTES} bytes or fewer.`;
+    }
+    if (sending && v.expectValue === "") errors.expect = "Enter what the reply must contain.";
+    else if ([...v.expectValue].length > EXPECT_MAX) {
+      errors.expect = `Use ${EXPECT_MAX} characters or fewer.`;
+    }
+    if (hasProbe(v)) {
+      if (seconds(v.readTimeoutSeconds, 1, 10) === undefined) {
+        errors.readTimeoutSeconds = "Enter whole seconds from 1 to 10.";
+      }
+      if (seconds(v.maxResponseBytes, 1, MAX_RESPONSE_LIMIT) === undefined) {
+        errors.maxResponseBytes = `Enter a number of bytes from 1 to ${MAX_RESPONSE_LIMIT}.`;
+      }
     }
     return errors;
   }
@@ -295,13 +379,24 @@ function settings(
   v: MonitorFormValues,
 ): Pick<MonitorCreate, "http"> | Pick<MonitorCreate, "tcp"> | Pick<MonitorCreate, "heartbeat"> {
   if (v.type === "tcp") {
-    return {
-      tcp: {
-        host: v.host.trim(),
-        port: Number(v.port.trim()),
-        failureThreshold: v.failureThreshold,
-      },
+    const tcp: NonNullable<MonitorCreate["tcp"]> = {
+      host: v.host.trim(),
+      port: Number(v.port.trim()),
+      failureThreshold: v.failureThreshold,
     };
+    // An empty value removes a stored rule.
+    if (v.expectValue !== "" || v.expectStored) {
+      tcp.expect = { mode: v.expectMode, value: v.expectValue };
+    }
+    // Stored bytes are kept unless replaced; an empty replacement removes them.
+    if (v.sendDirty || (!v.sendStored && v.send !== "")) {
+      tcp.send = { encoding: v.sendEncoding, value: v.send };
+    }
+    if (hasProbe(v)) {
+      tcp.readTimeoutSeconds = Number(v.readTimeoutSeconds.trim());
+      tcp.maxResponseBytes = Number(v.maxResponseBytes.trim());
+    }
+    return { tcp };
   }
   if (v.type === "heartbeat") {
     return {
@@ -445,6 +540,9 @@ export function describeSetup(v: MonitorFormValues): { text: string; blank?: boo
     return [
       { text: "Connects to " },
       host && port ? { text: `${host}:${port}` } : { text: "your host and port", blank: true },
+      ...(hasProbe(v)
+        ? [{ text: v.expectValue !== "" ? ", expects a matching reply," : ", sends bytes," }]
+        : []),
       { text: " every minute" },
       { text: slack ? " and alerts Slack after " : " and marks it down after " },
       {

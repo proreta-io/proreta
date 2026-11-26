@@ -49,7 +49,11 @@ import {
   mapServerErrors,
   MAX_HEADERS,
   METHODS,
+  EXPECT_MAX,
   HOST_MAX,
+  SEND_MAX_BYTES,
+  type SendEncoding,
+  hasProbe,
   NAME_MAX,
   toCreateRequest,
   toMonitorRequest,
@@ -397,6 +401,12 @@ function MonitorFormBody({
                 update={update}
                 errors={errors}
                 specula={speculaId !== ""}
+                needsUpgrade={
+                  speculaId !== "" &&
+                  !(speculaList.data?.items ?? []).every(
+                    (x) => x.id !== speculaId || x.capabilities.includes("tcp/probe"),
+                  )
+                }
               />
             ) : (
               <>
@@ -996,56 +1006,222 @@ function TcpFields({
   update,
   errors,
   specula,
+  needsUpgrade,
 }: {
   values: MonitorFormValues;
   update: Update;
   errors: MonitorFormErrors;
   specula: boolean;
+  /** The chosen Specula runs an executor that cannot send bytes or check a reply yet. */
+  needsUpgrade: boolean;
 }) {
   return (
-    <div className="grid gap-4 sm:grid-cols-[1fr_8rem]">
-      <Field
-        label="Host"
-        hint={
-          specula
-            ? "A name or an address in your network, such as postgres.prod.svc or 10.0.4.12."
-            : "A public host name or IP address, without http:// or a port."
-        }
-        error={errors.host}
-      >
-        {(c) => (
-          <Input
-            {...c}
-            data-field="host"
-            name="host"
-            mono
-            spellCheck={false}
-            autoCapitalize="off"
-            autoComplete="off"
-            maxLength={HOST_MAX}
-            placeholder="db.example.com"
-            value={values.host}
-            onChange={(e) => update("host", e.target.value)}
-          />
-        )}
-      </Field>
-      <Field label="Port" error={errors.port}>
-        {(c) => (
-          <Input
-            {...c}
-            data-field="port"
-            name="port"
-            mono
-            inputMode="numeric"
-            autoComplete="off"
-            maxLength={5}
-            placeholder="5432"
-            value={values.port}
-            onChange={(e) => update("port", e.target.value)}
-          />
-        )}
-      </Field>
-    </div>
+    <>
+      <div className="grid gap-4 sm:grid-cols-[1fr_8rem]">
+        <Field
+          label="Host"
+          hint={
+            specula
+              ? "A name or an address in your network, such as postgres.prod.svc or 10.0.4.12."
+              : "A public host name or IP address, without http:// or a port."
+          }
+          error={errors.host}
+        >
+          {(c) => (
+            <Input
+              {...c}
+              data-field="host"
+              name="host"
+              mono
+              spellCheck={false}
+              autoCapitalize="off"
+              autoComplete="off"
+              maxLength={HOST_MAX}
+              placeholder="db.example.com"
+              value={values.host}
+              onChange={(e) => update("host", e.target.value)}
+            />
+          )}
+        </Field>
+        <Field label="Port" error={errors.port}>
+          {(c) => (
+            <Input
+              {...c}
+              data-field="port"
+              name="port"
+              mono
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={5}
+              placeholder="5432"
+              value={values.port}
+              onChange={(e) => update("port", e.target.value)}
+            />
+          )}
+        </Field>
+      </div>
+      <ProbeFields values={values} update={update} errors={errors} needsUpgrade={needsUpgrade} />
+    </>
+  );
+}
+
+/** Optional: what a tcp check sends after it connects and what the reply must contain. */
+function ProbeFields({
+  values,
+  update,
+  errors,
+  needsUpgrade,
+}: {
+  values: MonitorFormValues;
+  update: Update;
+  errors: MonitorFormErrors;
+  needsUpgrade: boolean;
+}) {
+  const probe = hasProbe(values);
+  return (
+    <fieldset className="flex flex-col gap-4 border-t border-border pt-4">
+      <legend className="text-caption font-medium">Check the reply (optional)</legend>
+      <span className="text-caption text-muted-foreground">
+        By default the check only connects. To confirm the service is ready, send a message and
+        expect part of the answer. Leave both empty to keep the plain connection check.
+      </span>
+      {values.sendStored && !values.sendDirty ? (
+        <WriteOnlyValue
+          label="Send"
+          hint={
+            errors.send ??
+            "Stored encrypted; it cannot be shown. It is kept unless you replace it. After you change the host or port, send it again."
+          }
+          onReplace={() => update("sendDirty", true)}
+        />
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-[8rem_1fr]">
+          <Field label="Send as" className="sm:max-w-48">
+            {(c) => (
+              <Select
+                {...c}
+                name="sendEncoding"
+                value={values.sendEncoding}
+                onChange={(e) => update("sendEncoding", e.target.value as SendEncoding)}
+              >
+                <option value="text">Text</option>
+                <option value="hex">Hex</option>
+                <option value="base64">Base64</option>
+              </Select>
+            )}
+          </Field>
+          <Field
+            label="Send"
+            hint={`Up to ${SEND_MAX_BYTES} bytes written right after the connection. Use hex or base64 for a binary or length-prefixed protocol. Stored encrypted and never shown again.${
+              values.sendStored ? " Leave it empty to remove the stored bytes." : ""
+            }`}
+            error={errors.send}
+          >
+            {(c) => (
+              <Textarea
+                {...c}
+                data-field="send"
+                name="send"
+                rows={3}
+                spellCheck={false}
+                autoComplete="off"
+                className="font-mono sm:text-caption"
+                placeholder={values.sendEncoding === "text" ? "ping" : "0000001a7b22..."}
+                value={values.send}
+                onChange={(e) => {
+                  update("send", e.target.value);
+                  update("sendDirty", true);
+                }}
+              />
+            )}
+          </Field>
+        </div>
+      )}
+      <div className="grid gap-4 sm:grid-cols-[8rem_1fr]">
+        <Field label="Reply must" className="sm:max-w-48">
+          {(c) => (
+            <Select
+              {...c}
+              name="expectMode"
+              value={values.expectMode}
+              onChange={(e) => update("expectMode", e.target.value as "contains" | "regex")}
+            >
+              <option value="contains">Contain</option>
+              <option value="regex">Match regex</option>
+            </Select>
+          )}
+        </Field>
+        <Field
+          label="Expected reply"
+          hint="A substring, or a Go (RE2) regular expression found anywhere in the reply. The reply is never stored."
+          error={errors.expect}
+        >
+          {(c) => (
+            <Input
+              {...c}
+              data-field="expect"
+              name="expect"
+              mono
+              spellCheck={false}
+              autoCapitalize="off"
+              autoComplete="off"
+              maxLength={EXPECT_MAX}
+              placeholder='"status":"ok"'
+              value={values.expectValue}
+              onChange={(e) => update("expectValue", e.target.value)}
+            />
+          )}
+        </Field>
+      </div>
+      {probe && (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field
+            label="Reply timeout (seconds)"
+            hint="How long to wait for the reply after the message."
+            error={errors.readTimeoutSeconds}
+          >
+            {(c) => (
+              <Input
+                {...c}
+                data-field="readTimeoutSeconds"
+                name="readTimeoutSeconds"
+                mono
+                inputMode="numeric"
+                autoComplete="off"
+                maxLength={2}
+                value={values.readTimeoutSeconds}
+                onChange={(e) => update("readTimeoutSeconds", e.target.value)}
+              />
+            )}
+          </Field>
+          <Field
+            label="Reply size limit (bytes)"
+            hint="At most this much of the reply is read."
+            error={errors.maxResponseBytes}
+          >
+            {(c) => (
+              <Input
+                {...c}
+                data-field="maxResponseBytes"
+                name="maxResponseBytes"
+                mono
+                inputMode="numeric"
+                autoComplete="off"
+                maxLength={5}
+                value={values.maxResponseBytes}
+                onChange={(e) => update("maxResponseBytes", e.target.value)}
+              />
+            )}
+          </Field>
+        </div>
+      )}
+      {probe && needsUpgrade && (
+        <Alert tone="neutral" title="This Specula cannot check replies yet.">
+          Upgrade its executor first. Until then the monitor shows unknown instead of passing on a
+          bare connection.
+        </Alert>
+      )}
+    </fieldset>
   );
 }
 

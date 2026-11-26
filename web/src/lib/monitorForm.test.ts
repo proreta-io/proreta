@@ -10,6 +10,7 @@ import {
   valuesFromMonitor,
   validateMonitorUrl,
   describeSetup,
+  decodeSend,
   withHttps,
   withoutHttps,
   type MonitorFormValues,
@@ -420,5 +421,137 @@ describe("tcp monitors", () => {
       fieldErrors: [{ field: "tcp.host", message: "host must be a public address" }],
     });
     expect(mapServerErrors(err).fields).toEqual({ host: "Host must be a public address" });
+  });
+});
+
+describe("tcp send and expect", () => {
+  const base: MonitorFormValues = {
+    ...emptyMonitorForm,
+    type: "tcp",
+    name: "Svc",
+    host: "svc.prod.svc",
+    port: "3000",
+  };
+
+  it("decodes the bytes to send in each encoding", () => {
+    expect(decodeSend("hex", "00 00 00 1a")).toEqual(Uint8Array.from([0, 0, 0, 0x1a]));
+    expect(decodeSend("base64", "AAEC")).toEqual(Uint8Array.from([0, 1, 2]));
+    expect(decodeSend("text", "ping")).toEqual(new TextEncoder().encode("ping"));
+    expect(typeof decodeSend("hex", "abc")).toBe("string");
+    expect(typeof decodeSend("hex", "zz")).toBe("string");
+    expect(typeof decodeSend("base64", "***")).toBe("string");
+  });
+
+  it("sends nothing extra for a plain check", () => {
+    expect(toCreateRequest(base)).toMatchObject({ tcp: { host: "svc.prod.svc", port: 3000 } });
+    expect(toCreateRequest(base).tcp).not.toHaveProperty("expect");
+    expect(toCreateRequest(base).tcp).not.toHaveProperty("send");
+    expect(toCreateRequest(base).tcp).not.toHaveProperty("readTimeoutSeconds");
+  });
+
+  it("sends the bytes, the rule and the limits", () => {
+    const v = {
+      ...base,
+      sendEncoding: "hex" as const,
+      send: "0000001a",
+      sendDirty: true,
+      expectMode: "contains" as const,
+      expectValue: '"status":"ok"',
+    };
+    expect(validateMonitorForm(v)).toEqual({});
+    expect(toCreateRequest(v).tcp).toEqual({
+      host: "svc.prod.svc",
+      port: 3000,
+      failureThreshold: 2,
+      send: { encoding: "hex", value: "0000001a" },
+      expect: { mode: "contains", value: '"status":"ok"' },
+      readTimeoutSeconds: 5,
+      maxResponseBytes: 4096,
+    });
+  });
+
+  it("needs a rule when something is sent, and checks the fields", () => {
+    const sending = { ...base, send: "ping", sendDirty: true };
+    expect(validateMonitorForm(sending).expect).toBe("Enter what the reply must contain.");
+    expect(validateMonitorForm({ ...sending, sendEncoding: "hex" }).send).toMatch(/hex digits/);
+    expect(
+      validateMonitorForm({ ...base, expectValue: "ok", readTimeoutSeconds: "11" })
+        .readTimeoutSeconds,
+    ).toMatch(/1 to 10/);
+    expect(
+      validateMonitorForm({ ...base, expectValue: "ok", maxResponseBytes: "0" }).maxResponseBytes,
+    ).toMatch(/1 to 65536/);
+    // Without a probe the limits are not looked at.
+    expect(validateMonitorForm({ ...base, readTimeoutSeconds: "x" })).toEqual({});
+  });
+
+  it("keeps stored bytes unless replaced, and sends the removal of a stored rule", () => {
+    const stored = {
+      ...base,
+      sendStored: true,
+      expectStored: true,
+      expectValue: "ok",
+      readTimeoutSeconds: "5",
+      maxResponseBytes: "4096",
+    };
+    expect(validateMonitorForm(stored)).toEqual({});
+    expect(toMonitorRequest(stored).tcp).not.toHaveProperty("send");
+    expect(toMonitorRequest({ ...stored, sendDirty: true, send: "" }).tcp).toMatchObject({
+      send: { value: "" },
+    });
+    expect(toMonitorRequest({ ...stored, expectValue: "" }).tcp).toMatchObject({
+      expect: { value: "" },
+    });
+  });
+
+  it("maps the server's field errors", () => {
+    const err = new ApiError({
+      type: "x",
+      title: "Validation failed",
+      status: 422,
+      fieldErrors: [
+        {
+          field: "tcp.send",
+          message: "the host or port changed: send the value again, or remove it",
+        },
+        { field: "tcp.expect", message: "is not a valid regular expression" },
+      ],
+    });
+    expect(mapServerErrors(err).fields).toEqual({
+      send: "The host or port changed: send the value again, or remove it",
+      expect: "Is not a valid regular expression",
+    });
+  });
+
+  it("fills the form from a stored monitor", () => {
+    const v = valuesFromMonitor({
+      type: "tcp",
+      name: "Svc",
+      notificationsEnabled: true,
+      channelIds: [],
+      projectId: "p",
+      tcp: {
+        host: "h",
+        port: 1,
+        intervalSeconds: 60,
+        timeoutSeconds: 10,
+        failureThreshold: 2,
+        lastResponseMs: null,
+        sendSet: true,
+        expect: { mode: "regex", value: "ok|ready" },
+        readTimeoutSeconds: 3,
+        maxResponseBytes: 100,
+      },
+    } as never);
+    expect(v).toMatchObject({
+      sendStored: true,
+      sendDirty: false,
+      send: "",
+      expectMode: "regex",
+      expectValue: "ok|ready",
+      expectStored: true,
+      readTimeoutSeconds: "3",
+      maxResponseBytes: "100",
+    });
   });
 });
