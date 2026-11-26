@@ -71,6 +71,11 @@ func TestCreateValidationFieldsAndOrder(t *testing.T) {
 		{"tcp everything wrong", monitors.CreateInput{Type: monitors.TypeTCP, Name: "", TCP: &monitors.TCPSettings{Host: ptr("a b"), Port: ptr(0), FailureThreshold: ptr(4)}}, "name,tcp.host,tcp.port,tcp.failureThreshold"},
 		{"tcp private host from the worker", monitors.CreateInput{Type: monitors.TypeTCP, Name: "m", TCP: &monitors.TCPSettings{Host: ptr("10.0.0.1"), Port: ptr(22)}}, "tcp.host"},
 
+		{"tcp send needs the request keyring", monitors.CreateInput{Type: monitors.TypeTCP, Name: "m", TCP: &monitors.TCPSettings{Host: ptr("example.com"), Port: ptr(22),
+			Expect: &monitors.TCPExpect{Mode: "contains", Value: "ok"}}}, "tcp.send"},
+		{"tcp send is not available at a specula yet", monitors.CreateInput{Type: monitors.TypeTCP, Name: "m", SpeculaID: &spec, TCP: &monitors.TCPSettings{Host: ptr("db.svc"), Port: ptr(22),
+			Expect: &monitors.TCPExpect{Mode: "contains", Value: "ok"}}}, "tcp.send,tcp.expect"},
+
 		{"heartbeat without settings", monitors.CreateInput{Type: monitors.TypeHeartbeat, Name: "m"}, "heartbeat"},
 		{"heartbeat with everything else", monitors.CreateInput{Type: monitors.TypeHeartbeat, Name: "m", SpeculaID: &spec, HTTP: &monitors.HTTPSettings{}, TCP: &monitors.TCPSettings{}},
 			"location.speculaId,http,tcp,heartbeat"},

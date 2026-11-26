@@ -48,10 +48,23 @@ type Header struct {
 type Secrets struct {
 	Headers []Header `json:"h,omitempty"`
 	Body    string   `json:"b,omitempty"`
+	// Probe is the send and expect setting of a tcp monitor. Only the bytes to send are secret;
+	// the rest rides in the same blob so the schedule queries need no new column.
+	Probe *TCPProbe `json:"p,omitempty"`
+}
+
+// TCPProbe is what a tcp check says and expects after it connects. ExpectMode is "contains" or
+// "regex"; ExpectValue is empty when the check only sends.
+type TCPProbe struct {
+	Send               []byte `json:"s,omitempty"`
+	ExpectMode         string `json:"m,omitempty"`
+	ExpectValue        string `json:"e,omitempty"`
+	ReadTimeoutSeconds int    `json:"t,omitempty"`
+	MaxResponseBytes   int    `json:"x,omitempty"`
 }
 
 // Empty reports whether there is nothing to seal.
-func (s Secrets) Empty() bool { return len(s.Headers) == 0 && s.Body == "" }
+func (s Secrets) Empty() bool { return len(s.Headers) == 0 && s.Body == "" && s.Probe == nil }
 
 // HTTPHeader returns the headers in the form the prober takes.
 func (s Secrets) HTTPHeader() http.Header {

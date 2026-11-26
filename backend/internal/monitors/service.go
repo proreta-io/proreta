@@ -217,11 +217,12 @@ type httpConfig struct {
 type tcpConfig struct {
 	Host string `json:"host"`
 	Port int    `json:"port"`
-	// Send is the sealed bytes to send (monitorrequest, the bytes as base64 in Body); SendSet is
-	// kept in the clear so reads never open it. The JSON keys differ from httpConfig's because
-	// fromRow embeds both structs.
+	// Request is the sealed probe (monitorrequest.TCPProbe: the bytes to send, the expect rule
+	// and the limits), read by the schedule queries as for http. SendSet, Expect and the limits
+	// are kept in the clear so reads never open it. fromRow embeds this struct and httpConfig,
+	// which share the key "request"; it reads neither field.
 	SendSet            bool        `json:"sendSet,omitempty"`
-	Send               string      `json:"send,omitempty"`
+	Request            string      `json:"request,omitempty"`
 	Expect             *ExpectRule `json:"expect,omitempty"`
 	ReadTimeoutSeconds int         `json:"readTimeoutSeconds,omitempty"`
 	MaxResponseBytes   int         `json:"maxResponseBytes,omitempty"`
@@ -292,8 +293,13 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 	if perr != nil {
 		return Monitor{}, perr
 	}
-	if p.tcpDirty && !p.tcpSec.Empty() && s.requestKeys == nil {
-		verr.Add(fieldTCPSend, msgNoSendKeys)
+	if tc, ok := p.config.(tcpConfig); ok && (tc.SendSet || tc.Expect != nil) {
+		if s.requestKeys == nil {
+			verr.Add(fieldTCPSend, msgNoSendKeys)
+		}
+		if in.SpeculaID != nil {
+			verr.Add(fieldTCPExpect, msgNoSpeculaSend)
+		}
 	}
 	if err := verr.Err(); err != nil {
 		return Monitor{}, err
@@ -305,9 +311,9 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 		}
 		p.config = p.httpCfg
 	}
-	if p.tcpDirty {
+	if p.row.Type == TypeTCP {
 		cfg := p.config.(tcpConfig)
-		if err := s.sealTCP(&cfg, a.TenantID, id, p.tcpSec); err != nil {
+		if err := s.sealTCP(&cfg, a.TenantID, id, p.tcpSend, p.tcpChanged); err != nil {
 			return Monitor{}, err
 		}
 		p.config = cfg
@@ -347,10 +353,10 @@ type createPlan struct {
 	httpCfg httpConfig
 	httpSec monitorrequest.Secrets
 	isHTTP  bool
-	// tcpSec is the send of a tcp monitor, still to be sealed when tcpDirty.
-	tcpSec   monitorrequest.Secrets
-	tcpDirty bool
-	resource plans.Resource
+	// tcpSend is the new send of a tcp monitor, still to be sealed when tcpSendSet.
+	tcpSend    []byte
+	tcpChanged bool
+	resource   plans.Resource
 }
 
 // planHTTP validates the http settings of in into p. Only an unexpected error is returned;
@@ -428,7 +434,7 @@ func planTCP(verr *validation.Error, in CreateInput, p *createPlan) {
 	}
 	threshold := orDefault(t.FailureThreshold, DefaultFailureThreshold)
 	checkThreshold(verr, fieldTCPFailureThreshold, threshold)
-	p.tcpSec, p.tcpDirty, _ = planTCPCheck(verr, &cfg, t, false)
+	p.tcpSend, p.tcpChanged, _ = planTCPCheck(verr, &cfg, t, false)
 	p.config = cfg
 	p.row.IntervalSeconds, p.row.FailureThreshold = IntervalSeconds, int32(threshold) //nolint:gosec // validated 1..3
 }
@@ -754,13 +760,16 @@ func (s *Service) planTCPUpdate(verr *validation.Error, a Actor, id uuid.UUID, c
 	if t == nil {
 		t = &TCPSettings{}
 	}
-	sec, dirty, changed := planTCPCheck(verr, &cfg, t, cfg.Host != oldHost || cfg.Port != oldPort)
+	send, sendChanged, changed := planTCPCheck(verr, &cfg, t, cfg.Host != oldHost || cfg.Port != oldPort)
 	e.changed = append(e.changed, changed...)
-	if !sec.Empty() && s.requestKeys == nil {
+	if (cfg.SendSet || cfg.Expect != nil) && len(changed) > 0 && s.requestKeys == nil {
 		verr.Add(fieldTCPSend, msgNoSendKeys)
 	}
-	if dirty && verr.Err() == nil {
-		if err := s.sealTCP(&cfg, a.TenantID, id, sec); err != nil {
+	if (cfg.SendSet || cfg.Expect != nil) && e.wantSpecula != nil {
+		verr.Add(fieldTCPExpect, msgNoSpeculaSend)
+	}
+	if len(changed) > 0 && verr.Err() == nil {
+		if err := s.sealTCP(&cfg, a.TenantID, id, send, sendChanged); err != nil {
 			return err
 		}
 	}
@@ -1039,21 +1048,22 @@ func get(ctx context.Context, q *monitorsdb.Queries, tenantID, id uuid.UUID) (Mo
 }
 
 func fromRow(r monitorsdb.GetMonitorRow) (Monitor, error) {
-	var cfg struct {
-		httpConfig
-		tcpConfig
-		heartbeatConfig
+	// One struct per type: httpConfig and tcpConfig share the key "request".
+	var h httpConfig
+	var t tcpConfig
+	var hb heartbeatConfig
+	for _, dst := range []any{&h, &t, &hb} {
+		if err := json.Unmarshal(r.Config, dst); err != nil {
+			return Monitor{}, fmt.Errorf("monitor %s config: %w", r.ID, err)
+		}
 	}
-	if err := json.Unmarshal(r.Config, &cfg); err != nil {
-		return Monitor{}, fmt.Errorf("monitor %s config: %w", r.ID, err)
-	}
-	if r.Type == TypeHTTP && cfg.Method == "" {
-		cfg.Method = monitorrequest.Methods[0]
+	if r.Type == TypeHTTP && h.Method == "" {
+		h.Method = monitorrequest.Methods[0]
 	}
 	return Monitor{
-		ID: r.ID, ProjectID: r.ProjectID, Type: r.Type, Name: r.Name, URL: cfg.URL, ExpectedStatus: cfg.ExpectedStatus,
-		Method: cfg.Method, HeaderNames: cfg.HeaderNames, BodySet: cfg.BodySet, Host: cfg.Host, Port: cfg.Port,
-		IntervalSeconds: int(r.IntervalSeconds), TimeoutSeconds: int(r.TimeoutSeconds), GraceSeconds: cfg.GraceSeconds,
+		ID: r.ID, ProjectID: r.ProjectID, Type: r.Type, Name: r.Name, URL: h.URL, ExpectedStatus: h.ExpectedStatus,
+		Method: h.Method, HeaderNames: h.HeaderNames, BodySet: h.BodySet, Host: t.Host, Port: t.Port,
+		IntervalSeconds: int(r.IntervalSeconds), TimeoutSeconds: int(r.TimeoutSeconds), GraceSeconds: hb.GraceSeconds,
 		FailureThreshold: int(r.FailureThreshold), NotificationsEnabled: r.NotificationsEnabled, Paused: r.Paused,
 		Status: r.Status, StatusSince: r.StatusChangedAt, LastErrorKind: r.LastErrorKind,
 		LastCheckedAt: r.LastCheckedAt, TLSExpiresAt: r.TlsExpiresAt, CurrentIncidentID: r.CurrentIncidentID,

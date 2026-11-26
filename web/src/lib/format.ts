@@ -115,6 +115,8 @@ const errorKinds: Record<string, string> = {
   bad_port: "Port not allowed",
   redirect: "Redirect error",
   unexpected_status: "Unexpected status",
+  no_response: "No reply",
+  unexpected_response: "Unexpected reply",
   other: "Other error",
   heartbeat_missed: "Heartbeat missed",
   recovered: "Recovered",

@@ -1,7 +1,10 @@
 package checks
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"io"
 	"net"
 	"testing"
 	"time"
@@ -106,3 +109,91 @@ func TestMuxRoutesByKind(t *testing.T) {
 type proberFunc func(Request) Result
 
 func (f proberFunc) Probe(_ context.Context, r Request) Result { return f(r) }
+
+// serve accepts connections and runs handle on each.
+func serve(t *testing.T, handle func(net.Conn)) (host string, port int) {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func() { defer c.Close(); handle(c) }()
+		}
+	}()
+	a := l.Addr().(*net.TCPAddr)
+	return a.IP.String(), a.Port
+}
+
+// frame is a length-prefixed message, the shape of the NestJS TCP transport.
+func frame(s string) []byte {
+	return append([]byte(fmt.Sprintf("%d#", len(s))), s...)
+}
+
+func TestTCPProberSendAndExpect(t *testing.T) {
+	request := frame(`{"pattern":"v1/healthcheck","data":{"probe_type":"readiness"}}`)
+	healthy := func(c net.Conn) {
+		got := make([]byte, len(request))
+		if _, err := io.ReadFull(c, got); err != nil || !bytes.Equal(got, request) {
+			return // a wrong request gets no answer
+		}
+		_, _ = c.Write(frame(`{"response":{"status":"ok"},"isDisposed":true}`))
+	}
+	sick := func(c net.Conn) {
+		_, _ = io.ReadFull(c, make([]byte, len(request)))
+		_, _ = c.Write(frame(`{"response":{"status":"error"}}`))
+	}
+	silent := func(c net.Conn) { time.Sleep(2 * time.Second) }
+	closing := func(c net.Conn) {}
+	flood := func(c net.Conn) { _, _ = c.Write(bytes.Repeat([]byte("x"), 10000)) }
+	tests := []struct {
+		name   string
+		handle func(net.Conn)
+		req    Request
+		want   string
+	}{
+		{"match contains", healthy, Request{Send: request, ExpectMode: "contains", ExpectValue: `"status":"ok"`}, ""},
+		{"match regex", healthy, Request{Send: request, ExpectMode: "regex", ExpectValue: `"status":\s*"(ok|ready)"`}, ""},
+		{"banner without send", func(c net.Conn) { _, _ = c.Write([]byte("SSH-2.0-x\r\n")) }, Request{ExpectMode: "contains", ExpectValue: "SSH-2.0"}, ""},
+		{"reply does not match", sick, Request{Send: request, ExpectMode: "contains", ExpectValue: `"status":"ok"`}, KindUnexpectedResponse},
+		{"no reply in time", silent, Request{Send: request, ExpectMode: "contains", ExpectValue: "ok", ReadTimeout: 200 * time.Millisecond}, KindNoResponse},
+		{"closed without a reply", closing, Request{Send: request, ExpectMode: "contains", ExpectValue: "ok"}, KindNoResponse},
+		{"limit reached before a match", flood, Request{ExpectMode: "contains", ExpectValue: "ok", MaxResponse: 100}, KindUnexpectedResponse},
+		{"match inside the limit", flood, Request{ExpectMode: "contains", ExpectValue: "xxx", MaxResponse: 100}, ""},
+		{"wrong request gets no answer", healthy, Request{Send: frame("nope"), ExpectMode: "contains", ExpectValue: "ok", ReadTimeout: 200 * time.Millisecond}, KindNoResponse},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			host, port := serve(t, tc.handle)
+			tc.req.TCP, tc.req.Host, tc.req.Port = true, host, port
+			res := NewTCPProber(plainDial).Probe(context.Background(), tc.req)
+			if res.ErrorKind != tc.want || res.OK != (tc.want == "") {
+				t.Fatalf("result = %+v, want kind %q", res, tc.want)
+			}
+		})
+	}
+}
+
+func TestTCPProberReplyLatencyIncludesTheAnswerTime(t *testing.T) {
+	host, port := serve(t, func(c net.Conn) { time.Sleep(150 * time.Millisecond); _, _ = c.Write([]byte("ok")) })
+	res := NewTCPProber(plainDial).Probe(context.Background(), Request{TCP: true, Host: host, Port: port, ExpectMode: "contains", ExpectValue: "ok"})
+	if !res.OK || res.LatencyMs < 150 {
+		t.Fatalf("result = %+v", res)
+	}
+}
+
+func TestTCPProberCancelWhileWaitingForTheReply(t *testing.T) {
+	host, port := serve(t, func(c net.Conn) { time.Sleep(2 * time.Second) })
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, cancel)
+	res := NewTCPProber(plainDial).Probe(ctx, Request{TCP: true, Host: host, Port: port, ExpectMode: "contains", ExpectValue: "ok"})
+	if !res.Cancelled {
+		t.Fatalf("result = %+v", res)
+	}
+}

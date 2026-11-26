@@ -34,6 +34,9 @@ const (
 	fieldReadTimeout = "tcp.readTimeoutSeconds"
 	fieldMaxResponse = "tcp.maxResponseBytes"
 	msgHostMoved     = "the host or port changed: send the value again, or remove it"
+	// Refused until the Specula protocol carries the probe: an executor that ignored it would
+	// report a plain connect as a pass.
+	msgNoSpeculaSend = "send and expect are not available at a Specula yet"
 	msgNoSendKeys    = "send is not available on this installation"
 )
 
@@ -55,22 +58,22 @@ type ExpectRule struct {
 	Value string `json:"value"`
 }
 
-// planTCPCheck applies the send, expect and read limits of t to cfg. It returns the secret to
-// seal when dirty is true (the send bytes, as base64 in Body) and the changed field names; the
-// bytes never reach verr or the names. hostMoved is true when an update changed the host or
-// port: a stored send is write-only, so it must then be sent again or removed, or an editor who
-// cannot read it could aim it at their own host.
-func planTCPCheck(verr *validation.Error, cfg *tcpConfig, t *TCPSettings, hostMoved bool) (sec monitorrequest.Secrets, dirty bool, changed []string) {
+// planTCPCheck applies the send, expect and read limits of t to cfg and returns the bytes to
+// send (the new ones when sendChanged, otherwise nil) and the changed field names; the bytes
+// never reach verr or the names. hostMoved is true when an update changed the host or port: a
+// stored send is write-only, so it must then be sent again or removed, or an editor who cannot
+// read it could aim it at their own host.
+func planTCPCheck(verr *validation.Error, cfg *tcpConfig, t *TCPSettings, hostMoved bool) (send []byte, sendChanged bool, changed []string) {
 	if s := t.Send; s != nil {
 		switch b, remove, msg := decodeSend(*s); {
 		case msg != "":
 			verr.Add(fieldTCPSend, msg)
 		case remove:
 			changed = appendIf(changed, fieldTCPSend, cfg.SendSet)
-			dirty, cfg.SendSet = cfg.SendSet, false
+			sendChanged, cfg.SendSet = cfg.SendSet, false
 		default:
-			changed, dirty, cfg.SendSet = append(changed, fieldTCPSend), true, true
-			sec.Body = base64.StdEncoding.EncodeToString(b)
+			changed, sendChanged, cfg.SendSet = append(changed, fieldTCPSend), true, true
+			send = b
 		}
 	} else if hostMoved && cfg.SendSet {
 		verr.Add(fieldTCPSend, msgHostMoved)
@@ -103,7 +106,7 @@ func planTCPCheck(verr *validation.Error, cfg *tcpConfig, t *TCPSettings, hostMo
 		changed = appendIf(changed, fieldReadTimeout, cfg.ReadTimeoutSeconds != 0)
 		changed = appendIf(changed, fieldMaxResponse, cfg.MaxResponseBytes != 0)
 		cfg.ReadTimeoutSeconds, cfg.MaxResponseBytes = 0, 0
-		return sec, dirty, changed
+		return send, sendChanged, changed
 	}
 	if cfg.ReadTimeoutSeconds == 0 {
 		cfg.ReadTimeoutSeconds = DefaultReadTimeoutSeconds
@@ -127,7 +130,7 @@ func planTCPCheck(verr *validation.Error, cfg *tcpConfig, t *TCPSettings, hostMo
 			cfg.MaxResponseBytes = *v
 		}
 	}
-	return sec, dirty, changed
+	return send, sendChanged, changed
 }
 
 // decodeSend returns the bytes of s, or remove for an empty value, or a problem.
@@ -175,19 +178,32 @@ func checkExpect(e TCPExpect) (rule ExpectRule, remove bool, msg string) {
 	return ExpectRule(e), false, ""
 }
 
-// sealTCP stores sec sealed in cfg, or clears the sealed value when there is nothing to keep.
-func (s *Service) sealTCP(cfg *tcpConfig, tenantID, id uuid.UUID, sec monitorrequest.Secrets) error {
-	if sec.Empty() {
-		cfg.Send = ""
+// sealTCP rebuilds the sealed probe of a tcp monitor in cfg after planTCPCheck: the send bytes
+// (send when sendChanged, otherwise the ones already stored, which are opened to keep them),
+// the expect rule and the limits. A check with neither send nor expect stores nothing.
+func (s *Service) sealTCP(cfg *tcpConfig, tenantID, id uuid.UUID, send []byte, sendChanged bool) error {
+	if !cfg.SendSet && cfg.Expect == nil {
+		cfg.Request = ""
 		return nil
 	}
-	sealed, err := monitorrequest.Seal(s.requestKeys, tenantID, id, sec)
-	if err != nil {
-		if errors.Is(err, monitorrequest.ErrNoKeys) {
-			return err
+	if s.requestKeys == nil {
+		return monitorrequest.ErrNoKeys
+	}
+	if cfg.SendSet && !sendChanged {
+		old, err := monitorrequest.Open(s.requestKeys, tenantID, id, cfg.Request)
+		if err != nil || old.Probe == nil {
+			return fmt.Errorf("monitor send: %w", errors.Join(err, errors.New("stored send is missing")))
 		}
+		send = old.Probe.Send
+	}
+	probe := monitorrequest.TCPProbe{Send: send, ReadTimeoutSeconds: cfg.ReadTimeoutSeconds, MaxResponseBytes: cfg.MaxResponseBytes}
+	if cfg.Expect != nil {
+		probe.ExpectMode, probe.ExpectValue = cfg.Expect.Mode, cfg.Expect.Value
+	}
+	sealed, err := monitorrequest.Seal(s.requestKeys, tenantID, id, monitorrequest.Secrets{Probe: &probe})
+	if err != nil {
 		return fmt.Errorf("monitor send: %w", err)
 	}
-	cfg.Send = sealed
+	cfg.Request = sealed
 	return nil
 }

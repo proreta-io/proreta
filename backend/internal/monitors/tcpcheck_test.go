@@ -1,7 +1,7 @@
 package monitors
 
 import (
-	"encoding/base64"
+	"bytes"
 	"strings"
 	"testing"
 
@@ -20,17 +20,17 @@ func TestPlanTCPCheck(t *testing.T) {
 		moved     bool
 		wantErr   string // comma-joined fields
 		wantDirty bool
-		check     func(t *testing.T, cfg tcpConfig, body string)
+		check     func(t *testing.T, cfg tcpConfig, send []byte)
 	}{
-		{name: "nothing keeps the plain check", in: TCPSettings{}, check: func(t *testing.T, c tcpConfig, _ string) {
+		{name: "nothing keeps the plain check", in: TCPSettings{}, check: func(t *testing.T, c tcpConfig, _ []byte) {
 			if c.SendSet || c.Expect != nil || c.ReadTimeoutSeconds != 0 || c.MaxResponseBytes != 0 {
 				t.Fatalf("config changed: %+v", c)
 			}
 		}},
 		{name: "hex send with length prefix and expect", in: TCPSettings{Send: send("hex", "00 00 00 1a 7b"), Expect: exp("contains", `"status":"ok"`)},
-			wantDirty: true, check: func(t *testing.T, c tcpConfig, body string) {
-				if want := base64.StdEncoding.EncodeToString([]byte{0, 0, 0, 0x1a, 0x7b}); body != want {
-					t.Fatalf("body %q, want %q", body, want)
+			wantDirty: true, check: func(t *testing.T, c tcpConfig, send []byte) {
+				if want := []byte{0, 0, 0, 0x1a, 0x7b}; !bytes.Equal(send, want) {
+					t.Fatalf("send %x, want %x", send, want)
 				}
 				if !c.SendSet || c.ReadTimeoutSeconds != 5 || c.MaxResponseBytes != 4096 {
 					t.Fatalf("defaults: %+v", c)
@@ -46,46 +46,46 @@ func TestPlanTCPCheck(t *testing.T) {
 		{name: "bad regex", in: TCPSettings{Expect: exp("regex", "(")}, wantErr: "tcp.expect"},
 		{name: "bad mode", in: TCPSettings{Expect: exp("glob", "a")}, wantErr: "tcp.expect"},
 		{name: "expect too long", in: TCPSettings{Expect: exp("contains", strings.Repeat("a", MaxTCPExpectChars+1))}, wantErr: "tcp.expect"},
-		{name: "expect alone is a banner check", in: TCPSettings{Expect: exp("contains", "SSH-2.0")}, check: func(t *testing.T, c tcpConfig, _ string) {
+		{name: "expect alone is a banner check", in: TCPSettings{Expect: exp("contains", "SSH-2.0")}, check: func(t *testing.T, c tcpConfig, _ []byte) {
 			if c.SendSet || c.Expect == nil {
 				t.Fatalf("%+v", c)
 			}
 		}},
 		{name: "limits without a rule", in: TCPSettings{ReadTimeoutSeconds: ip(3), MaxResponseBytes: ip(10)}, wantErr: "tcp.readTimeoutSeconds,tcp.maxResponseBytes"},
 		{name: "limits out of range", in: TCPSettings{Expect: exp("contains", "x"), ReadTimeoutSeconds: ip(11), MaxResponseBytes: ip(MaxResponseBytesLimit + 1)}, wantErr: "tcp.readTimeoutSeconds,tcp.maxResponseBytes"},
-		{name: "limits applied", in: TCPSettings{Expect: exp("contains", "x"), ReadTimeoutSeconds: ip(2), MaxResponseBytes: ip(100)}, check: func(t *testing.T, c tcpConfig, _ string) {
+		{name: "limits applied", in: TCPSettings{Expect: exp("contains", "x"), ReadTimeoutSeconds: ip(2), MaxResponseBytes: ip(100)}, check: func(t *testing.T, c tcpConfig, _ []byte) {
 			if c.ReadTimeoutSeconds != 2 || c.MaxResponseBytes != 100 {
 				t.Fatalf("%+v", c)
 			}
 		}},
-		{name: "empty send removes it", cur: tcpConfig{SendSet: true, Send: "sealed", Expect: &ExpectRule{"contains", "x"}, ReadTimeoutSeconds: 5, MaxResponseBytes: 4096},
-			in: TCPSettings{Send: send("hex", "")}, wantDirty: true, wantErr: "", check: func(t *testing.T, c tcpConfig, body string) {
-				if c.SendSet || body != "" {
+		{name: "empty send removes it", cur: tcpConfig{SendSet: true, Request: "sealed", Expect: &ExpectRule{"contains", "x"}, ReadTimeoutSeconds: 5, MaxResponseBytes: 4096},
+			in: TCPSettings{Send: send("hex", "")}, wantDirty: true, wantErr: "", check: func(t *testing.T, c tcpConfig, send []byte) {
+				if c.SendSet || send != nil {
 					t.Fatalf("%+v", c)
 				}
 			}},
 		{name: "empty expect and send clear the tuning", cur: tcpConfig{SendSet: true, Expect: &ExpectRule{"contains", "x"}, ReadTimeoutSeconds: 5, MaxResponseBytes: 4096},
-			in: TCPSettings{Send: send("hex", ""), Expect: exp("contains", "")}, wantDirty: true, check: func(t *testing.T, c tcpConfig, _ string) {
+			in: TCPSettings{Send: send("hex", ""), Expect: exp("contains", "")}, wantDirty: true, check: func(t *testing.T, c tcpConfig, _ []byte) {
 				if c.Expect != nil || c.ReadTimeoutSeconds != 0 || c.MaxResponseBytes != 0 {
 					t.Fatalf("%+v", c)
 				}
 			}},
-		{name: "unchanged keeps stored send", cur: tcpConfig{SendSet: true, Send: "sealed", Expect: &ExpectRule{"contains", "x"}, ReadTimeoutSeconds: 5, MaxResponseBytes: 4096},
-			in: TCPSettings{Expect: exp("contains", "y")}, check: func(t *testing.T, c tcpConfig, _ string) {
-				if !c.SendSet || c.Send != "sealed" || c.Expect.Value != "y" {
+		{name: "unchanged keeps stored send", cur: tcpConfig{SendSet: true, Request: "sealed", Expect: &ExpectRule{"contains", "x"}, ReadTimeoutSeconds: 5, MaxResponseBytes: 4096},
+			in: TCPSettings{Expect: exp("contains", "y")}, check: func(t *testing.T, c tcpConfig, _ []byte) {
+				if !c.SendSet || c.Request != "sealed" || c.Expect.Value != "y" {
 					t.Fatalf("%+v", c)
 				}
 			}},
-		{name: "host moved needs the send again", cur: tcpConfig{SendSet: true, Send: "sealed", Expect: &ExpectRule{"contains", "x"}, ReadTimeoutSeconds: 5, MaxResponseBytes: 4096},
+		{name: "host moved needs the send again", cur: tcpConfig{SendSet: true, Request: "sealed", Expect: &ExpectRule{"contains", "x"}, ReadTimeoutSeconds: 5, MaxResponseBytes: 4096},
 			in: TCPSettings{}, moved: true, wantErr: "tcp.send"},
-		{name: "host moved with a new send", cur: tcpConfig{SendSet: true, Send: "sealed", Expect: &ExpectRule{"contains", "x"}, ReadTimeoutSeconds: 5, MaxResponseBytes: 4096},
+		{name: "host moved with a new send", cur: tcpConfig{SendSet: true, Request: "sealed", Expect: &ExpectRule{"contains", "x"}, ReadTimeoutSeconds: 5, MaxResponseBytes: 4096},
 			in: TCPSettings{Send: send("text", "a")}, moved: true, wantDirty: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var verr validation.Error
 			cfg := tc.cur
-			sec, dirty, _ := planTCPCheck(&verr, &cfg, &tc.in, tc.moved)
+			send, dirty, _ := planTCPCheck(&verr, &cfg, &tc.in, tc.moved)
 			var got []string
 			for _, f := range verr.Fields {
 				got = append(got, f.Field)
@@ -97,7 +97,7 @@ func TestPlanTCPCheck(t *testing.T) {
 				t.Fatalf("dirty %v, want %v", dirty, tc.wantDirty)
 			}
 			if tc.check != nil {
-				tc.check(t, cfg, sec.Body)
+				tc.check(t, cfg, send)
 			}
 		})
 	}
