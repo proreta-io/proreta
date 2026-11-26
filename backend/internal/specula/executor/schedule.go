@@ -360,7 +360,7 @@ func (s *scheduler) check(ctx context.Context, m wire.ScheduledMonitor, slot int
 	}
 	res := e.cfg.Prober.Probe(s.workCtx, jobRequest(wire.Job{
 		Type: m.Type, URL: m.URL, Host: m.Host, Port: m.Port, Method: m.Method, Headers: m.Headers, Body: m.Body,
-		ExpectedStatus: m.ExpectedStatus, TimeoutSeconds: m.TimeoutSeconds,
+		ExpectedStatus: m.ExpectedStatus, TimeoutSeconds: m.TimeoutSeconds, Probe: m.Probe,
 	}))
 	if res.Cancelled {
 		return // shutdown cut it short; the slot stays without a result

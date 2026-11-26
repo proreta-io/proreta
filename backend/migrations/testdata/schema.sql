@@ -2381,7 +2381,8 @@ AS $function$
                 SELECT 1 FROM specula_agents AS a
                 WHERE a.location_id = l.id AND a.tenant_id = s.tenant_id AND a.revoked_at IS NULL
                   AND NOT ('schedule/1' = ANY (a.capabilities))
-                  AND (m.type = 'http' OR 'tcp' = ANY (a.capabilities))
+                  AND (m.type = 'http' OR ('tcp' = ANY (a.capabilities)
+                       AND (NOT (m.config ? 'expect') OR 'tcp/probe' = ANY (a.capabilities))))
                   AND (a.all_projects OR EXISTS (
                         SELECT 1 FROM specula_projects AS sp
                         WHERE sp.specula_id = a.id AND sp.project_id = m.project_id))))
@@ -3573,6 +3574,9 @@ AS $function$
     JOIN monitors AS m ON m.tenant_id = e.tenant_id AND m.id = e.monitor_id
     WHERE a.tenant_id = p_tenant AND a.id = p_specula AND a.revoked_at IS NULL
       AND m.type IN ('http', 'tcp') AND NOT m.paused AND m.deleted_at IS NULL
+      -- A tcp monitor that sends or expects something goes only to an executor that can run it: an
+      -- older one would report a plain connect as a pass.
+      AND (m.type = 'http' OR NOT (m.config ? 'expect') OR 'tcp/probe' = ANY (a.capabilities))
       AND (a.all_projects OR EXISTS (
             SELECT 1 FROM specula_projects AS sp WHERE sp.specula_id = a.id AND sp.project_id = m.project_id))
     ORDER BY e.monitor_id

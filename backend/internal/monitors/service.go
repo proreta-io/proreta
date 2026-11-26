@@ -297,9 +297,6 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 		if s.requestKeys == nil {
 			verr.Add(fieldTCPSend, msgNoSendKeys)
 		}
-		if in.SpeculaID != nil {
-			verr.Add(fieldTCPExpect, msgNoSpeculaSend)
-		}
 	}
 	if err := verr.Err(); err != nil {
 		return Monitor{}, err
@@ -764,9 +761,6 @@ func (s *Service) planTCPUpdate(verr *validation.Error, a Actor, id uuid.UUID, c
 	e.changed = append(e.changed, changed...)
 	if (cfg.SendSet || cfg.Expect != nil) && len(changed) > 0 && s.requestKeys == nil {
 		verr.Add(fieldTCPSend, msgNoSendKeys)
-	}
-	if (cfg.SendSet || cfg.Expect != nil) && e.wantSpecula != nil {
-		verr.Add(fieldTCPExpect, msgNoSpeculaSend)
 	}
 	if len(changed) > 0 && verr.Err() == nil {
 		if err := s.sealTCP(&cfg, a.TenantID, id, send, sendChanged); err != nil {

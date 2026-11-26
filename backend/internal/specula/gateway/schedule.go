@@ -75,6 +75,7 @@ func (g *Handler) buildSchedule(ctx context.Context, id specula.Identity) ([]wir
 					return cmp.Or(cmp.Compare(a.Name, b.Name), cmp.Compare(a.Value, b.Value))
 				})
 				m.Body = sec.Body
+				m.Probe = probeOf(sec.Probe, typ == "tcp")
 			}
 			out = append(out, m)
 		}

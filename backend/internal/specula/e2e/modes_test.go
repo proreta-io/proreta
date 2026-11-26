@@ -141,7 +141,7 @@ func TestNewExecutorFallsBackWithoutSchedule(t *testing.T) {
 	e.until("both monitors are checked in pull mode", 5*time.Minute, time.Second, func() bool {
 		return e.link.hit(wire.PathSchedule) > 0 && e.rowsOf(api) >= 3 && e.rowsOf(db) >= 3
 	})
-	if n := e.count(`SELECT count(*) FROM specula_agents WHERE id = $1 AND capabilities = ARRAY['tcp']`, e.spec.ID); n != 1 {
+	if n := e.count(`SELECT count(*) FROM specula_agents WHERE id = $1 AND capabilities = ARRAY['tcp', 'tcp/probe']`, e.spec.ID); n != 1 {
 		t.Errorf("the last hello still announced schedule mode")
 	}
 	if e.prober.tcpSeen() == 0 {

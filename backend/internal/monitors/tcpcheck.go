@@ -34,9 +34,6 @@ const (
 	fieldReadTimeout = "tcp.readTimeoutSeconds"
 	fieldMaxResponse = "tcp.maxResponseBytes"
 	msgHostMoved     = "the host or port changed: send the value again, or remove it"
-	// Refused until the Specula protocol carries the probe: an executor that ignored it would
-	// report a plain connect as a pass.
-	msgNoSpeculaSend = "send and expect are not available at a Specula yet"
 	msgNoSendKeys    = "send is not available on this installation"
 )
 

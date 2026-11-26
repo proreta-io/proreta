@@ -322,6 +322,7 @@ func (g *Handler) claim(w http.ResponseWriter, r *http.Request) {
 				job.Headers = append(job.Headers, wire.Header{Name: h.Name, Value: h.Value})
 			}
 			job.Body = sec.Body
+			job.Probe = probeOf(sec.Probe, j.TCP())
 		}
 		out.Jobs = append(out.Jobs, job)
 	}
@@ -344,7 +345,8 @@ func (g *Handler) recordUnsent(ctx context.Context, j scheduler.Job) {
 var knownKinds = map[string]bool{
 	checks.KindDNS: true, checks.KindConnect: true, checks.KindTLS: true, checks.KindTimeout: true,
 	checks.KindBlockedAddress: true, checks.KindBadPort: true, checks.KindRedirect: true,
-	checks.KindUnexpectedStatus: true, checks.KindOther: true,
+	checks.KindUnexpectedStatus: true, checks.KindNoResponse: true, checks.KindUnexpectedResponse: true,
+	checks.KindOther: true,
 }
 
 func (g *Handler) validResult(x wire.Result, now time.Time) bool {
@@ -525,4 +527,13 @@ func clean(s string, limit int) string {
 		}
 	}
 	return s
+}
+
+// probeOf is the wire form of the sealed probe of a tcp monitor, nil for anything else.
+func probeOf(p *monitorrequest.TCPProbe, tcp bool) *wire.TCPProbe {
+	if p == nil || !tcp {
+		return nil
+	}
+	return &wire.TCPProbe{Send: p.Send, ExpectMode: p.ExpectMode, ExpectValue: p.ExpectValue,
+		ReadTimeoutSeconds: p.ReadTimeoutSeconds, MaxResponseBytes: p.MaxResponseBytes}
 }

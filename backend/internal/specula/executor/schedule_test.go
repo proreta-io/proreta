@@ -409,7 +409,7 @@ func TestAnnouncesCapabilitiesAndInstance(t *testing.T) {
 	h.gw.mu.Lock()
 	defer h.gw.mu.Unlock()
 	first := h.gw.helloReqs[0]
-	if !slices.Equal(first.Capabilities, []string{wire.CapTCP, wire.CapSchedule, wire.CapSchedule2}) || first.InstanceID == "" || first.SlotCounters != nil {
+	if !slices.Equal(first.Capabilities, []string{wire.CapTCP, wire.CapTCPProbe, wire.CapSchedule, wire.CapSchedule2}) || first.InstanceID == "" || first.SlotCounters != nil {
 		t.Fatalf("hello %+v", first)
 	}
 }
@@ -563,7 +563,7 @@ func TestFallsBackToPullModeOnAnOlderGateway(t *testing.T) {
 					gw.mu.Lock()
 					defer gw.mu.Unlock()
 					last := gw.helloReqs[len(gw.helloReqs)-1]
-					return len(last.Capabilities) == 1 && last.Capabilities[0] == wire.CapTCP
+					return slices.Equal(last.Capabilities, []string{wire.CapTCP, wire.CapTCPProbe})
 				})
 			}
 		})
