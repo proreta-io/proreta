@@ -231,11 +231,22 @@ func TestHelloAnnouncesTCPAndFallsBackOnAnOlderGateway(t *testing.T) {
 		g.mu.Lock()
 		first, last := g.helloReq[0], g.helloReq[len(g.helloReq)-1]
 		g.mu.Unlock()
-		if !slices.Equal(first.Capabilities, []string{wire.CapTCP, wire.CapSchedule, wire.CapSchedule2}) {
+		if !slices.Equal(first.Capabilities, []string{wire.CapTCP, wire.CapTCPProbe, wire.CapSchedule, wire.CapSchedule2}) {
 			t.Fatalf("old=%t: first hello %+v must announce tcp, schedule/1 and schedule/2", old, first)
 		}
 		if old && len(last.Capabilities) != 0 {
 			t.Fatalf("an older gateway must get a plain hello: %+v", last)
 		}
+	}
+}
+
+func TestJobRequestCarriesTheTCPProbe(t *testing.T) {
+	req := jobRequest(wire.Job{Type: wire.TypeTCP, Host: "svc", Port: 3000, TimeoutSeconds: 10,
+		Probe: &wire.TCPProbe{Send: []byte{1, 2}, ExpectMode: "regex", ExpectValue: "ok", ReadTimeoutSeconds: 3, MaxResponseBytes: 99}})
+	if !req.TCP || string(req.Send) != "\x01\x02" || req.ExpectMode != "regex" || req.ExpectValue != "ok" || req.ReadTimeout != 3*time.Second || req.MaxResponse != 99 {
+		t.Fatalf("request = %+v", req)
+	}
+	if got := jobRequest(wire.Job{Type: wire.TypeHTTP, URL: "https://x", Probe: &wire.TCPProbe{ExpectValue: "ok"}}); got.ExpectValue != "" {
+		t.Fatal("a probe on an http job must be ignored")
 	}
 }

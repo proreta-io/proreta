@@ -205,7 +205,7 @@ components:
           type: array
           maxItems: 16
           items: {type: string, maxLength: 32}
-          description: "What this executor can do: `tcp` (runs tcp checks), `schedule/1` (schedule mode), `schedule/2` (schedule/1 plus `slotCounters`; announce it only together with `schedule/1`). Absent means none: pull mode, http jobs only. An older server rejects a `hello` with fields it does not know (400); send them only after a plain `hello` succeeded and `schedule` answered 200."
+          description: "What this executor can do: `tcp` (runs tcp checks), `tcp/probe` (runs the send and expect of a tcp check, `probe`; announce it only together with `tcp`; a tcp monitor that has a probe is handed only to an executor that announced it), `schedule/1` (schedule mode), `schedule/2` (schedule/1 plus `slotCounters`; announce it only together with `schedule/1`). Absent means none: pull mode, http jobs only. An older server rejects a `hello` with fields it does not know (400); send them only after a plain `hello` succeeded and `schedule` answered 200."
         instanceId: {type: string, maxLength: 64, description: "Random per process; two ids from one token within minutes mean two executors share it"}
         scheduleIssuedAt: {type: string, format: date-time, description: "`issuedAt` of the schedule in use"}
         bufferDepth: {type: integer, minimum: 0, description: "Results waiting to be sent"}
@@ -261,6 +261,16 @@ components:
       properties:
         name: {type: string}
         value: {type: string, description: "A secret of the monitor; do not log it"}
+    TCPProbe:
+      type: object
+      additionalProperties: false
+      description: "The probe of a tcp check, a secret of the monitor; do not log it. After the connection the executor writes `send`, then reads at most `maxResponseBytes` until the reply matches, the peer closes or `readTimeoutSeconds` pass. A match is up; no byte is `no_response`, bytes without a match are `unexpected_response`. The latency is the time from the start of the connect to the first match."
+      properties:
+        send: {type: string, format: byte, description: "Base64 of the bytes to write; absent for a banner check"}
+        expectMode: {type: string, enum: [contains, regex], description: "`contains` is a substring, `regex` a Go (RE2) regular expression found anywhere in the reply"}
+        expectValue: {type: string}
+        readTimeoutSeconds: {type: integer, minimum: 1, maximum: 10}
+        maxResponseBytes: {type: integer, minimum: 1, maximum: 65536}
     Job:
       type: object
       required: [monitorId, leaseToken, leaseUntil, url, method, expectedStatus, timeoutSeconds]
@@ -279,6 +289,7 @@ components:
         headers: {type: array, items: {$ref: "#/components/schemas/Header"}}
         body: {type: string, description: "A secret of the monitor; do not log it"}
         expectedStatus: {type: string, description: "`2xx` or an exact status code"}
+        probe: {$ref: "#/components/schemas/TCPProbe"}
         timeoutSeconds: {type: integer}
     ClaimResponse:
       type: object
@@ -299,7 +310,7 @@ components:
         errorKind:
           type: string
           description: Empty exactly when `ok` is true
-          enum: [dns, connect, tls, timeout, blocked_address, bad_port, redirect, unexpected_status, other]
+          enum: [dns, connect, tls, timeout, blocked_address, bad_port, redirect, unexpected_status, no_response, unexpected_response, other]
         tlsNotAfter: {type: string, format: date-time}
     ResultsRequest:
       type: object
@@ -344,6 +355,7 @@ components:
         headers: {type: array, items: {$ref: "#/components/schemas/Header"}}
         body: {type: string, description: "A secret of the monitor; do not log it"}
         expectedStatus: {type: string, description: "`2xx` or an exact status code"}
+        probe: {$ref: "#/components/schemas/TCPProbe"}
     Schedule:
       type: object
       required: [version, serverTime, issuedAt, validUntil, refreshAfterSeconds, monitors]
@@ -371,7 +383,7 @@ components:
         errorKind:
           type: string
           description: Empty exactly when `ok` is true
-          enum: [dns, connect, tls, timeout, blocked_address, bad_port, redirect, unexpected_status, other]
+          enum: [dns, connect, tls, timeout, blocked_address, bad_port, redirect, unexpected_status, no_response, unexpected_response, other]
         tlsNotAfter: {type: string, format: date-time}
     ReportsRequest:
       type: object

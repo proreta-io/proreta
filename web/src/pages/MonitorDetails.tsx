@@ -71,6 +71,7 @@ import {
 import {
   checkSettings,
   tcpCheckSettings,
+  tcpProbeSummary,
   targetText,
   requestSummary,
   downReason,
@@ -312,6 +313,11 @@ function Header({
           {monitor.tcp && (
             <span className="text-caption text-muted-foreground">
               {tcpCheckSettings(monitor.tcp)}
+            </span>
+          )}
+          {monitor.tcp && tcpProbeSummary(monitor.tcp) && (
+            <span className="text-caption text-muted-foreground">
+              Check: {tcpProbeSummary(monitor.tcp)}
             </span>
           )}
           {monitor.location?.type === "specula" && (

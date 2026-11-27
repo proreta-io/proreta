@@ -326,3 +326,60 @@ func TestIntegrationScheduleCap(t *testing.T) {
 		t.Errorf("5000 monitors: %d", resp.StatusCode)
 	}
 }
+
+// The schedule carries the probe of a tcp monitor, and only to a Specula that announced tcp/probe.
+func TestIntegrationScheduleTCPProbe(t *testing.T) {
+	pg := pgtest.New(t, pgtest.DBName("speculaschedprobe"))
+	ctx := context.Background()
+	admin := pg.AdminConn(t)
+	user := uuid.New()
+	pgtest.MustExec(t, admin,
+		`INSERT INTO tenants (id, slug, name) VALUES ('`+tenantA+`', 'a', 'A')`,
+		`INSERT INTO users (id, email) VALUES ('`+user.String()+`', 'owner@example.com')`)
+	apiPool, worker := pg.Pool(t, pg.APIURL, 4), pg.Pool(t, pg.WorkerURL, 4)
+	keys, err := crypto.NewKeyring(map[string][]byte{"r1": bytes.Repeat([]byte{6}, 32)}, "r1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sched := scheduler.New()
+	inc := incidents.NewService(sched)
+	mon := monitors.NewService(apiPool, sched, inc).WithRequestKeys(keys)
+	s, token, err := specula.NewService(apiPool).Create(ctx, specula.Actor{TenantID: uuid.MustParse(tenantA), UserID: user}, specula.CreateInput{Name: "A", AllProjects: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, port := "svc.internal", 3000
+	if _, err := mon.Create(ctx, monitors.Actor{TenantID: uuid.MustParse(tenantA), UserID: user, Access: authz.Actor{UserID: user, Role: authz.Owner}},
+		monitors.CreateInput{Type: monitors.TypeTCP, Name: "Svc", SpeculaID: &s.ID, TCP: &monitors.TCPSettings{Host: &host, Port: &port,
+			Send:   &monitors.TCPSend{Encoding: "hex", Value: "0000001a"},
+			Expect: &monitors.TCPExpect{Mode: "regex", Value: `"status":\s*"ok"`}}}); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(gateway.New(gateway.Deps{
+		Limits: openLimits, Pool: worker, Scheduler: sched, Recorder: checkresult.Recorder{Scheduler: sched, Incidents: inc, Clock: clock.System{}},
+		RequestKeys: keys, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Registerer: prometheus.NewRegistry(), ScheduleTTL: time.Millisecond,
+	}))
+	defer srv.Close()
+	monitorsOf := func(caps string) []wire.ScheduledMonitor {
+		t.Helper()
+		pgtest.MustExec(t, admin, `UPDATE specula_agents SET capabilities = '`+caps+`' WHERE id = '`+s.ID.String()+`'`)
+		time.Sleep(10 * time.Millisecond)
+		a, b := getSchedule(t, srv, token, "")
+		if a.StatusCode != http.StatusOK {
+			t.Fatalf("schedule: %d %s", a.StatusCode, b)
+		}
+		var sc wire.Schedule
+		if err := json.Unmarshal(b, &sc); err != nil {
+			t.Fatal(err)
+		}
+		return sc.Monitors
+	}
+	if got := monitorsOf(`{tcp,schedule/1}`); len(got) != 0 {
+		t.Fatalf("an executor without tcp/probe was served %d monitors", len(got))
+	}
+	got := monitorsOf(`{tcp,tcp/probe,schedule/1}`)
+	if len(got) != 1 || got[0].Probe == nil || !bytes.Equal(got[0].Probe.Send, []byte{0, 0, 0, 0x1a}) ||
+		got[0].Probe.ExpectMode != "regex" || got[0].Probe.ReadTimeoutSeconds != 5 || got[0].Probe.MaxResponseBytes != 4096 {
+		t.Fatalf("schedule = %+v", got)
+	}
+}

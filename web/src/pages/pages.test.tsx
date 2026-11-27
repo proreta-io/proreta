@@ -562,6 +562,69 @@ describe("monitor form", () => {
     expect(screen.getByText("TCP")).toBeInTheDocument();
   });
 
+  it("creates a TCP monitor that sends bytes and expects a reply", async () => {
+    let body: unknown;
+    const created = detail({
+      id: "tcp2",
+      name: "Orders service",
+      type: "tcp",
+      status: "unknown",
+      http: undefined,
+      tcp: {
+        host: "orders.prod.svc",
+        port: 3000,
+        intervalSeconds: 60,
+        timeoutSeconds: 10,
+        failureThreshold: 2,
+        lastResponseMs: null,
+        sendSet: true,
+        expect: { mode: "contains", value: '"status":"ok"' },
+        readTimeoutSeconds: 5,
+        maxResponseBytes: 4096,
+      },
+    });
+    mockApi({
+      ...signedIn,
+      "POST /api/v1/monitors": async (req) => {
+        body = await req.json();
+        return json(created, 201);
+      },
+      "GET /api/v1/monitors/tcp2": () => json(created),
+    });
+    renderApp("/monitors/new");
+    await userEvent.click(await screen.findByRole("radio", { name: /TCP port/ }));
+    await userEvent.type(screen.getByLabelText("Name"), "Orders service");
+    await userEvent.type(screen.getByLabelText("Host"), "orders.prod.svc");
+    await userEvent.type(screen.getByLabelText("Port"), "3000");
+    expect(screen.queryByLabelText("Reply timeout (seconds)")).not.toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText("Send as"), "hex");
+    await userEvent.type(screen.getByLabelText("Send"), "0000001a");
+    await userEvent.click(screen.getByRole("button", { name: "Create monitor" }));
+    // Something is sent, so a reply to expect is required.
+    expect(await screen.findByText("Enter what the reply must contain.")).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText("Expected reply"), '"status":"ok"');
+    expect(screen.getByLabelText("Reply timeout (seconds)")).toHaveValue("5");
+    await userEvent.click(screen.getByRole("button", { name: "Create monitor" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Orders service", level: 1 }),
+    ).toBeInTheDocument();
+    expect(body).toMatchObject({
+      type: "tcp",
+      tcp: {
+        host: "orders.prod.svc",
+        port: 3000,
+        send: { encoding: "hex", value: "0000001a" },
+        expect: { mode: "contains", value: '"status":"ok"' },
+        readTimeoutSeconds: 5,
+        maxResponseBytes: 4096,
+      },
+    });
+    expect(
+      screen.getByText(/Check: sends bytes \(hidden\) · expects a reply containing "status":"ok"/),
+    ).toBeInTheDocument();
+  });
+
   it("validates a TCP monitor's host and port on the client", async () => {
     const fetchMock = mockApi({ ...signedIn });
     renderApp("/monitors/new");

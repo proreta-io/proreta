@@ -1,7 +1,8 @@
 // Package checks runs monitor checks. There are two kinds. HTTP: an HTTPS request through the
 // SSRF guard (internal/safehttp) that records status, latency to response headers and the leaf
 // certificate expiry, and never reads the response body. TCP: a connection to a host and a port,
-// up when the handshake completes, with the latency of the connect and nothing sent or read.
+// up when the handshake completes, with the latency of the connect; optionally it then sends
+// bytes and waits for a reply that matches a substring or a regular expression.
 package checks
 
 import (
@@ -13,6 +14,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -31,11 +33,21 @@ const (
 	KindBadPort          = "bad_port"
 	KindRedirect         = "redirect"
 	KindUnexpectedStatus = "unexpected_status"
-	KindOther            = "other"
+	// KindNoResponse: a tcp check connected but got no byte back before the read deadline or the
+	// close. KindUnexpectedResponse: it got bytes, but none matched what it expects.
+	KindNoResponse         = "no_response"
+	KindUnexpectedResponse = "unexpected_response"
+	KindOther              = "other"
 )
 
 // DefaultTimeout is the check timeout of every http monitor; it covers redirects.
 const DefaultTimeout = 10 * time.Second
+
+// Defaults of a tcp check that sends or expects something.
+const (
+	DefaultReadTimeout = 5 * time.Second
+	DefaultMaxResponse = 4096
+)
 
 // Request describes one check. A TCP check has Host and Port and none of the HTTP fields.
 type Request struct {
@@ -43,6 +55,15 @@ type Request struct {
 	TCP  bool
 	Host string
 	Port int
+	// Send is written after the connection. ExpectMode ("contains" or "regex") and ExpectValue
+	// say what the reply must contain; with neither Send nor ExpectValue the check only
+	// connects. ReadTimeout (default DefaultReadTimeout) bounds the wait for the reply and
+	// MaxResponse (default DefaultMaxResponse) the bytes read.
+	Send        []byte
+	ExpectMode  string
+	ExpectValue string
+	ReadTimeout time.Duration
+	MaxResponse int
 
 	URL string
 	// Method defaults to GET.
@@ -250,9 +271,79 @@ func (p *TCPProber) Probe(parent context.Context, req Request) Result {
 		res.ErrorKind = classify(ctx, err)
 		return res
 	}
-	_ = conn.Close()
-	res.OK, res.LatencyMs = true, int(latency.Milliseconds())
-	return res
+	defer conn.Close()
+	if len(req.Send) == 0 && req.ExpectValue == "" {
+		res.OK, res.LatencyMs = true, int(latency.Milliseconds())
+		return res
+	}
+	return p.converse(ctx, conn, req, start, res)
+}
+
+// converse writes req.Send, then reads until the reply matches, the limit is reached, the peer
+// closes or the read deadline passes. The latency is the time from the start of the connect to
+// the first read that matched. The reply is never kept or returned.
+func (p *TCPProber) converse(ctx context.Context, conn net.Conn, req Request, start time.Time, res Result) Result {
+	// Closing the connection is what interrupts a blocked read when the caller cancels.
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+	fail := func(kind string) Result {
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return Result{CheckedAt: res.CheckedAt, Cancelled: true}
+		}
+		res.ErrorKind = kind
+		return res
+	}
+	var match func([]byte) bool
+	switch {
+	case req.ExpectValue == "":
+		match = func([]byte) bool { return true }
+	case req.ExpectMode == "regex":
+		re, err := regexp.Compile(req.ExpectValue)
+		if err != nil {
+			return fail(KindOther)
+		}
+		match = re.Match
+	default:
+		want := []byte(req.ExpectValue)
+		match = func(b []byte) bool { return bytes.Contains(b, want) }
+	}
+	limit := req.MaxResponse
+	if limit <= 0 {
+		limit = DefaultMaxResponse
+	}
+	readTimeout := req.ReadTimeout
+	if readTimeout <= 0 {
+		readTimeout = DefaultReadTimeout
+	}
+	deadline, _ := ctx.Deadline()
+	if len(req.Send) > 0 {
+		_ = conn.SetWriteDeadline(deadline)
+		if _, err := conn.Write(req.Send); err != nil {
+			return fail(KindNoResponse)
+		}
+	}
+	readBy := time.Now().Add(readTimeout)
+	if !deadline.IsZero() && deadline.Before(readBy) {
+		readBy = deadline
+	}
+	_ = conn.SetReadDeadline(readBy)
+	buf := make([]byte, 0, min(limit, 4096))
+	chunk := make([]byte, 4096)
+	for len(buf) < limit {
+		n, err := conn.Read(chunk[:min(len(chunk), limit-len(buf))])
+		buf = append(buf, chunk[:n]...)
+		if n > 0 && match(buf) {
+			res.OK, res.LatencyMs = true, int(time.Since(start).Milliseconds())
+			return res
+		}
+		if err != nil {
+			break
+		}
+	}
+	if len(buf) == 0 {
+		return fail(KindNoResponse)
+	}
+	return fail(KindUnexpectedResponse)
 }
 
 // Mux sends TCP requests to TCP and everything else to HTTP.

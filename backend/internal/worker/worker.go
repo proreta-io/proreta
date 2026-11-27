@@ -300,6 +300,10 @@ func (w *Worker) check(ctx context.Context, j scheduler.Job, host string) {
 			res = checks.Result{CheckedAt: time.Now().UTC(), ErrorKind: checks.KindOther}
 		} else {
 			req.Header, req.Body = sec.HTTPHeader(), []byte(sec.Body)
+			if pr := sec.Probe; pr != nil && j.TCP() {
+				req.Send, req.ExpectMode, req.ExpectValue = pr.Send, pr.ExpectMode, pr.ExpectValue
+				req.ReadTimeout, req.MaxResponse = time.Duration(pr.ReadTimeoutSeconds)*time.Second, pr.MaxResponseBytes
+			}
 		}
 	}
 	if res.CheckedAt.IsZero() {

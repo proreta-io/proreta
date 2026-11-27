@@ -19,7 +19,7 @@ A Specula (the executor that checks services inside your own network, [runbook](
 - `PRORETA_SPECULA_CONCURRENCY` now defaults to 50 (was 20).
 
 ### TCP monitors
-A monitor can check that a host accepts connections on a port, from Proreta's cloud or from a Specula ([docs](../tcp-monitors.md)). A Specula runs TCP monitors only if its executor announces the capability.
+A monitor can check that a host accepts connections on a port, from Proreta's cloud or from a Specula ([docs](../tcp-monitors.md)). A Specula runs TCP monitors only if its executor announces the capability. A TCP monitor can also send bytes and expect a matching reply (text, hex or base64; contains or regex), for services that do not speak HTTP; such monitors need an executor of this release. Do not roll back to an earlier release once such a monitor exists: an older server drops the send and expect settings the next time the monitor is edited and then checks only the connection.
 
 ### Platform admin panel
 - Create an organization from the panel, with its owner's email.

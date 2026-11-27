@@ -173,3 +173,21 @@ export function checkSettings(
       : `alerts after ${m.failureThreshold} failed checks`;
   return `every ${m.intervalSeconds} s · ${m.timeoutSeconds} s timeout · ${expects} · ${after}`;
 }
+
+/** What a tcp check says and expects after it connects, in one line; undefined for a plain check. */
+export function tcpProbeSummary(
+  m: Pick<TcpMonitor, "sendSet" | "expect" | "readTimeoutSeconds" | "maxResponseBytes">,
+): string | undefined {
+  if (!m.sendSet && !m.expect) return undefined;
+  const parts = [
+    m.sendSet ? "sends bytes (hidden)" : "",
+    m.expect
+      ? m.expect.mode === "regex"
+        ? `expects a reply matching ${m.expect.value}`
+        : `expects a reply containing ${m.expect.value}`
+      : "",
+    m.readTimeoutSeconds ? `${m.readTimeoutSeconds} s to reply` : "",
+    m.maxResponseBytes ? `reads up to ${m.maxResponseBytes} bytes` : "",
+  ].filter(Boolean);
+  return parts.join(" · ");
+}

@@ -92,3 +92,51 @@ func TestIntegrationTCPMonitorAPI(t *testing.T) {
 		}
 	})
 }
+
+func TestIntegrationTCPSendExpectAPI(t *testing.T) {
+	env := pgtest.New(t, pgtest.DBName("apitcpsend"))
+	c := newServerKeys(t, env, auth.Options{}, requestKeyring(t))
+	cookie, csrf := c.login()
+	unsafe := withCSRF(cookie, csrf)
+
+	create := `{"type":"tcp","name":"Svc","tcp":{"host":"svc.example.com","port":3000,` +
+		`"send":{"encoding":"hex","value":"0000001a7b7d"},"expect":{"mode":"contains","value":"\"status\":\"ok\""}}}`
+	r := c.do(http.MethodPost, "/api/v1/monitors", create, unsafe)
+	if r.code != http.StatusCreated {
+		t.Fatalf("create: %d %s", r.code, r.raw)
+	}
+	if strings.Contains(r.raw, "0000001a7b7d") {
+		t.Fatalf("the bytes to send are write-only: %s", r.raw)
+	}
+	id, _ := r.body["id"].(string)
+	tcp, _ := r.body["tcp"].(map[string]any)
+	if tcp["sendSet"] != true || tcp["readTimeoutSeconds"] != 5.0 || tcp["maxResponseBytes"] != 4096.0 {
+		t.Errorf("tcp = %v", tcp)
+	}
+	if e, _ := tcp["expect"].(map[string]any); e["mode"] != "contains" || e["value"] != `"status":"ok"` {
+		t.Errorf("expect = %v", tcp["expect"])
+	}
+	if l := c.do(http.MethodGet, "/api/v1/monitors", "", cookie); !strings.Contains(l.raw, `"sendSet":true`) {
+		t.Errorf("the list carries sendSet: %s", l.raw)
+	}
+
+	for name, body := range map[string]string{
+		"send without expect": `{"tcp":{"expect":{"mode":"contains","value":""}}}`,
+		"bad regex":           `{"tcp":{"expect":{"mode":"regex","value":"("}}}`,
+		"host moved":          `{"tcp":{"host":"other.example.com"}}`,
+	} {
+		if u := c.do(http.MethodPatch, "/api/v1/monitors/"+id, body, unsafe); u.code != http.StatusUnprocessableEntity {
+			t.Errorf("%s: %d %s", name, u.code, u.raw)
+		}
+	}
+	// Moving the host with a new send, then removing both rules, leaves a plain check.
+	u := c.do(http.MethodPatch, "/api/v1/monitors/"+id, `{"tcp":{"host":"other.example.com","send":{"encoding":"text","value":"ping"}}}`, unsafe)
+	if u.code != http.StatusOK {
+		t.Fatalf("move: %d %s", u.code, u.raw)
+	}
+	u = c.do(http.MethodPatch, "/api/v1/monitors/"+id, `{"tcp":{"send":{"encoding":"text","value":""},"expect":{"mode":"contains","value":""}}}`, unsafe)
+	tcp, _ = u.body["tcp"].(map[string]any)
+	if u.code != http.StatusOK || tcp["sendSet"] != false || tcp["expect"] != nil || tcp["readTimeoutSeconds"] != nil {
+		t.Errorf("remove: %d %s", u.code, u.raw)
+	}
+}

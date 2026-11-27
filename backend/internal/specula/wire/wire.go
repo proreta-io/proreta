@@ -29,7 +29,10 @@ const (
 
 // Capabilities an executor announces in HelloRequest.Capabilities.
 const (
-	CapTCP      = "tcp"
+	CapTCP = "tcp"
+	// CapTCPProbe: runs the send and expect of a tcp job (Job.Probe, ScheduledMonitor.Probe). The
+	// server hands a monitor that has one only to an executor that announced it.
+	CapTCPProbe = "tcp/probe"
 	CapSchedule = "schedule/1"
 	// CapSchedule2 is schedule/1 plus HelloRequest.SlotCounters.
 	CapSchedule2 = "schedule/2"
@@ -150,6 +153,17 @@ const (
 	TypeTCP  = "tcp"
 )
 
+// TCPProbe is what a tcp check sends after it connects and what the reply must contain. It is
+// sent only to an executor that announced CapTCPProbe. Send is base64 in JSON; ExpectMode is
+// "contains" or "regex".
+type TCPProbe struct {
+	Send               []byte `json:"send,omitempty"`
+	ExpectMode         string `json:"expectMode,omitempty"`
+	ExpectValue        string `json:"expectValue,omitempty"`
+	ReadTimeoutSeconds int    `json:"readTimeoutSeconds,omitempty"`
+	MaxResponseBytes   int    `json:"maxResponseBytes,omitempty"`
+}
+
 // Job is one check to run before LeaseUntil. Headers and Body are the monitor's secrets, sent
 // over TLS to an executor the customer installed. A TCP job has Host and Port; its URL, Method
 // and ExpectedStatus are unused.
@@ -166,6 +180,7 @@ type Job struct {
 	Body           string    `json:"body,omitempty"`
 	ExpectedStatus string    `json:"expectedStatus"`
 	TimeoutSeconds int       `json:"timeoutSeconds"`
+	Probe          *TCPProbe `json:"probe,omitempty"`
 }
 
 // ClaimResponse lists the leased jobs, possibly none.
@@ -238,6 +253,7 @@ type ScheduledMonitor struct {
 	Headers         []Header  `json:"headers,omitempty"`
 	Body            string    `json:"body,omitempty"`
 	ExpectedStatus  string    `json:"expectedStatus"`
+	Probe           *TCPProbe `json:"probe,omitempty"`
 }
 
 // Schedule is the answer of GET /schedule. Version is also its ETag.

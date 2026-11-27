@@ -170,6 +170,12 @@ type TCPSettings struct {
 	Host             *string
 	Port             *int
 	FailureThreshold *int
+	// Send, Expect, ReadTimeoutSeconds and MaxResponseBytes make the check talk to the service;
+	// see tcpcheck.go. On update a nil keeps the stored value, an empty Value removes it.
+	Send               *TCPSend
+	Expect             *TCPExpect
+	ReadTimeoutSeconds *int
+	MaxResponseBytes   *int
 }
 
 // HeartbeatSettings are the settings of a heartbeat; nil fields take their defaults on create
@@ -211,6 +217,15 @@ type httpConfig struct {
 type tcpConfig struct {
 	Host string `json:"host"`
 	Port int    `json:"port"`
+	// Request is the sealed probe (monitorrequest.TCPProbe: the bytes to send, the expect rule
+	// and the limits), read by the schedule queries as for http. SendSet, Expect and the limits
+	// are kept in the clear so reads never open it. fromRow embeds this struct and httpConfig,
+	// which share the key "request"; it reads neither field.
+	SendSet            bool        `json:"sendSet,omitempty"`
+	Request            string      `json:"request,omitempty"`
+	Expect             *ExpectRule `json:"expect,omitempty"`
+	ReadTimeoutSeconds int         `json:"readTimeoutSeconds,omitempty"`
+	MaxResponseBytes   int         `json:"maxResponseBytes,omitempty"`
 }
 
 // heartbeatConfig is monitors.config for type heartbeat.
@@ -278,6 +293,11 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 	if perr != nil {
 		return Monitor{}, perr
 	}
+	if tc, ok := p.config.(tcpConfig); ok && (tc.SendSet || tc.Expect != nil) {
+		if s.requestKeys == nil {
+			verr.Add(fieldTCPSend, msgNoSendKeys)
+		}
+	}
 	if err := verr.Err(); err != nil {
 		return Monitor{}, err
 	}
@@ -287,6 +307,13 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 			return Monitor{}, err
 		}
 		p.config = p.httpCfg
+	}
+	if p.row.Type == TypeTCP {
+		cfg := p.config.(tcpConfig)
+		if err := s.sealTCP(&cfg, a.TenantID, id, p.tcpSend, p.tcpChanged); err != nil {
+			return Monitor{}, err
+		}
+		p.config = cfg
 	}
 	raw, err := json.Marshal(p.config)
 	if err != nil {
@@ -318,12 +345,15 @@ func (s *Service) Create(ctx context.Context, a Actor, in CreateInput) (Monitor,
 // createPlan is a validated CreateInput: the row to insert (without id, name, config and project),
 // the quota resource it counts against and, for an http monitor, the request still to be sealed.
 type createPlan struct {
-	row      monitorsdb.InsertMonitorParams
-	config   any
-	httpCfg  httpConfig
-	httpSec  monitorrequest.Secrets
-	isHTTP   bool
-	resource plans.Resource
+	row     monitorsdb.InsertMonitorParams
+	config  any
+	httpCfg httpConfig
+	httpSec monitorrequest.Secrets
+	isHTTP  bool
+	// tcpSend is the new send of a tcp monitor, still to be sealed when tcpSendSet.
+	tcpSend    []byte
+	tcpChanged bool
+	resource   plans.Resource
 }
 
 // planHTTP validates the http settings of in into p. Only an unexpected error is returned;
@@ -401,6 +431,7 @@ func planTCP(verr *validation.Error, in CreateInput, p *createPlan) {
 	}
 	threshold := orDefault(t.FailureThreshold, DefaultFailureThreshold)
 	checkThreshold(verr, fieldTCPFailureThreshold, threshold)
+	p.tcpSend, p.tcpChanged, _ = planTCPCheck(verr, &cfg, t, false)
 	p.config = cfg
 	p.row.IntervalSeconds, p.row.FailureThreshold = IntervalSeconds, int32(threshold) //nolint:gosec // validated 1..3
 }
@@ -555,10 +586,11 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 }
 
 // restartIfRetargeted restarts the monitor when the update gave it a new target (URL, host, port
-// or location): its history says nothing about the new one. Like resume, and an open incident ends
+// or location, or a new send or expect rule): its history says nothing about the new check. A
+// monitor whose executor cannot run the new rule would otherwise keep a stale "up" forever. Like resume, and an open incident ends
 // without a notification.
 func (s *Service) restartIfRetargeted(ctx context.Context, tx pgx.Tx, q *monitorsdb.Queries, a Actor, id uuid.UUID, e *monitorEdit) error {
-	if !slices.Contains(e.changed, fieldURL) && !slices.Contains(e.changed, fieldHost) && !slices.Contains(e.changed, fieldPort) && !e.locChanged {
+	if !slices.Contains(e.changed, fieldURL) && !slices.Contains(e.changed, fieldHost) && !slices.Contains(e.changed, fieldPort) && !slices.Contains(e.changed, fieldTCPSend) && !slices.Contains(e.changed, fieldTCPExpect) && !e.locChanged {
 		return nil
 	}
 	if err := s.restart(ctx, tx, q, a.TenantID, id, true); err != nil {
@@ -638,7 +670,7 @@ func (s *Service) planUpdate(ctx context.Context, tx pgx.Tx, a Actor, id uuid.UU
 	case TypeHeartbeat:
 		err = planHeartbeatUpdate(&verr, cur, in, e)
 	case TypeTCP:
-		err = planTCPUpdate(&verr, cur, in, e)
+		err = s.planTCPUpdate(&verr, a, id, cur, in, e)
 	default:
 		err = s.planHTTPUpdate(&verr, a, id, cur, in, e)
 	}
@@ -683,11 +715,12 @@ func planHeartbeatUpdate(verr *validation.Error, cur monitorsdb.LockMonitorRow, 
 	return nil
 }
 
-func planTCPUpdate(verr *validation.Error, cur monitorsdb.LockMonitorRow, in UpdateInput, e *monitorEdit) error {
+func (s *Service) planTCPUpdate(verr *validation.Error, a Actor, id uuid.UUID, cur monitorsdb.LockMonitorRow, in UpdateInput, e *monitorEdit) error {
 	var cfg tcpConfig
 	if err := json.Unmarshal(cur.Config, &cfg); err != nil {
 		return fmt.Errorf("monitor config: %w", err)
 	}
+	oldHost, oldPort := cfg.Host, cfg.Port
 	if in.Heartbeat != nil {
 		verr.Add(fieldHeartbeat, msgHeartbeatOnly)
 	}
@@ -719,6 +752,20 @@ func planTCPUpdate(verr *validation.Error, cur monitorsdb.LockMonitorRow, in Upd
 		if t.FailureThreshold != nil {
 			checkThreshold(verr, fieldTCPFailureThreshold, *t.FailureThreshold)
 			e.changed, e.threshold = appendIf(e.changed, fieldTCPFailureThreshold, *t.FailureThreshold != e.threshold), *t.FailureThreshold
+		}
+	}
+	t := in.TCP
+	if t == nil {
+		t = &TCPSettings{}
+	}
+	send, sendChanged, changed := planTCPCheck(verr, &cfg, t, cfg.Host != oldHost || cfg.Port != oldPort || e.locChanged)
+	e.changed = append(e.changed, changed...)
+	if (cfg.SendSet || cfg.Expect != nil) && len(changed) > 0 && s.requestKeys == nil {
+		verr.Add(fieldTCPSend, msgNoSendKeys)
+	}
+	if len(changed) > 0 && verr.Err() == nil {
+		if err := s.sealTCP(&cfg, a.TenantID, id, send, sendChanged); err != nil {
+			return err
 		}
 	}
 	e.config = cfg
@@ -996,21 +1043,22 @@ func get(ctx context.Context, q *monitorsdb.Queries, tenantID, id uuid.UUID) (Mo
 }
 
 func fromRow(r monitorsdb.GetMonitorRow) (Monitor, error) {
-	var cfg struct {
-		httpConfig
-		tcpConfig
-		heartbeatConfig
+	// One struct per type: httpConfig and tcpConfig share the key "request".
+	var h httpConfig
+	var t tcpConfig
+	var hb heartbeatConfig
+	for _, dst := range []any{&h, &t, &hb} {
+		if err := json.Unmarshal(r.Config, dst); err != nil {
+			return Monitor{}, fmt.Errorf("monitor %s config: %w", r.ID, err)
+		}
 	}
-	if err := json.Unmarshal(r.Config, &cfg); err != nil {
-		return Monitor{}, fmt.Errorf("monitor %s config: %w", r.ID, err)
-	}
-	if r.Type == TypeHTTP && cfg.Method == "" {
-		cfg.Method = monitorrequest.Methods[0]
+	if r.Type == TypeHTTP && h.Method == "" {
+		h.Method = monitorrequest.Methods[0]
 	}
 	return Monitor{
-		ID: r.ID, ProjectID: r.ProjectID, Type: r.Type, Name: r.Name, URL: cfg.URL, ExpectedStatus: cfg.ExpectedStatus,
-		Method: cfg.Method, HeaderNames: cfg.HeaderNames, BodySet: cfg.BodySet, Host: cfg.Host, Port: cfg.Port,
-		IntervalSeconds: int(r.IntervalSeconds), TimeoutSeconds: int(r.TimeoutSeconds), GraceSeconds: cfg.GraceSeconds,
+		ID: r.ID, ProjectID: r.ProjectID, Type: r.Type, Name: r.Name, URL: h.URL, ExpectedStatus: h.ExpectedStatus,
+		Method: h.Method, HeaderNames: h.HeaderNames, BodySet: h.BodySet, Host: t.Host, Port: t.Port,
+		IntervalSeconds: int(r.IntervalSeconds), TimeoutSeconds: int(r.TimeoutSeconds), GraceSeconds: hb.GraceSeconds,
 		FailureThreshold: int(r.FailureThreshold), NotificationsEnabled: r.NotificationsEnabled, Paused: r.Paused,
 		Status: r.Status, StatusSince: r.StatusChangedAt, LastErrorKind: r.LastErrorKind,
 		LastCheckedAt: r.LastCheckedAt, TLSExpiresAt: r.TlsExpiresAt, CurrentIncidentID: r.CurrentIncidentID,

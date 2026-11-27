@@ -353,7 +353,7 @@ func (e *Executor) hello(ctx context.Context) error {
 	var out wire.HelloResponse
 	req := wire.HelloRequest{Version: e.cfg.Version, Hostname: e.cfg.Hostname}
 	if !e.plainHello {
-		req.Capabilities = []string{wire.CapTCP}
+		req.Capabilities = []string{wire.CapTCP, wire.CapTCPProbe}
 		if !e.pullOnly.Load() {
 			req.Capabilities = append(req.Capabilities, wire.CapSchedule, wire.CapSchedule2)
 			req.InstanceID = e.instanceID
@@ -610,6 +610,10 @@ func jobRequest(j wire.Job) checks.Request {
 		TCP: j.Type == wire.TypeTCP, Host: j.Host, Port: j.Port,
 		URL: j.URL, Method: j.Method, Body: []byte(j.Body), Timeout: time.Duration(j.TimeoutSeconds) * time.Second,
 		ExpectedStatus: j.ExpectedStatus,
+	}
+	if p := j.Probe; p != nil && j.Type == wire.TypeTCP {
+		req.Send, req.ExpectMode, req.ExpectValue = p.Send, p.ExpectMode, p.ExpectValue
+		req.ReadTimeout, req.MaxResponse = time.Duration(p.ReadTimeoutSeconds)*time.Second, p.MaxResponseBytes
 	}
 	if len(j.Headers) > 0 {
 		req.Header = make(http.Header, len(j.Headers))

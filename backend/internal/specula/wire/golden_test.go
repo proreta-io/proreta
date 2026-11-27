@@ -29,6 +29,13 @@ var schedule2Added = map[string][]string{
 	"DroppedCounters": {"bufferSize", "bufferAge", "rejected", "superseded", "tooOld", "unreadable"},
 }
 
+// tcpProbeAdded is what the capability tcp/probe adds: the probe of a tcp job and its shape. It
+// is sent only to an executor that announced the capability.
+var tcpProbeAdded = map[string][]string{
+	"ScheduledMonitor": {"probe"},
+	"TCPProbe":         {"send", "expectMode", "expectValue", "readTimeoutSeconds", "maxResponseBytes"},
+}
+
 // A schedule/1 request or response never gains a field: both sides reject unknown fields (an older
 // gateway answers 400, and a 400 on /reports is retried for ever), so the new field needs a new
 // capability (schedule/2) and the gateway is upgraded first.
@@ -41,13 +48,14 @@ func TestSchedule1FieldsAreFrozen(t *testing.T) {
 		"ReportsResponse": reflect.TypeFor[ReportsResponse](),
 		"SlotCounters":    reflect.TypeFor[SlotCounters](), "MissedCounters": reflect.TypeFor[MissedCounters](),
 		"DroppedCounters": reflect.TypeFor[DroppedCounters](),
+		"TCPProbe":        reflect.TypeFor[TCPProbe](),
 	}
 	for name, typ := range types {
 		var got []string
 		for f := range typ.Fields() {
 			got = append(got, strings.Split(f.Tag.Get("json"), ",")[0])
 		}
-		want := append(slices.Clone(schedule1Fields[name]), schedule2Added[name]...)
+		want := append(append(slices.Clone(schedule1Fields[name]), schedule2Added[name]...), tcpProbeAdded[name]...)
 		if !slices.Equal(got, want) {
 			t.Errorf("%s fields are %v, recorded %v.\nA schedule/1 request or response never gains, loses or renames a field: an older peer rejects it "+
 				"(a 400 on /reports is retried for ever). A change needs a new capability (schedule/2), the gateway upgraded first; "+
@@ -58,7 +66,7 @@ func TestSchedule1FieldsAreFrozen(t *testing.T) {
 
 // The capability and mode names are part of the same contract.
 func TestScheduleNames(t *testing.T) {
-	if CapSchedule != "schedule/1" || CapSchedule2 != "schedule/2" || ModeSchedule != "schedule/1" || ModeSchedule2 != "schedule/2" {
+	if CapTCPProbe != "tcp/probe" || CapSchedule != "schedule/1" || CapSchedule2 != "schedule/2" || ModeSchedule != "schedule/1" || ModeSchedule2 != "schedule/2" {
 		t.Error("capability and mode names are frozen; a new capability is a new name")
 	}
 }
