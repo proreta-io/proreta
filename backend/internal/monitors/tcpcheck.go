@@ -127,6 +127,9 @@ func planTCPCheck(verr *validation.Error, cfg *tcpConfig, t *TCPSettings, hostMo
 			cfg.MaxResponseBytes = *v
 		}
 	}
+	if r := cfg.Expect; r != nil && r.Mode == ExpectContains && len(r.Value) > cfg.MaxResponseBytes && verr.Err() == nil {
+		verr.Add(fieldTCPExpect, "is longer than the response size limit, so it could never match")
+	}
 	return send, sendChanged, changed
 }
 
@@ -140,7 +143,11 @@ func decodeSend(s TCPSend) (b []byte, remove bool, msg string) {
 	case SendHex:
 		b, err = hex.DecodeString(strings.Join(strings.Fields(s.Value), ""))
 	case SendBase64:
-		b, err = base64.StdEncoding.DecodeString(s.Value)
+		// The browser's atob tolerates missing padding and spaces; so does the server.
+		v := strings.Join(strings.Fields(s.Value), "")
+		if b, err = base64.StdEncoding.DecodeString(v); err != nil {
+			b, err = base64.RawStdEncoding.DecodeString(strings.TrimRight(v, "="))
+		}
 	case SendText:
 		b = []byte(s.Value)
 	default:

@@ -174,6 +174,13 @@ func TestIntegrationUpdateResultsOfChanges(t *testing.T) {
 	if got.Port != 23 || got.Host != "example.com" || got.FailureThreshold != 3 || w.status(tm.ID) != "unknown" {
 		t.Fatalf("port change: %+v %s", got, w.status(tm.ID))
 	}
+	// A new expect rule changes what the check means, so it restarts too (an executor that cannot
+	// run it would otherwise leave a stale "up").
+	w.setUp(tm.ID)
+	w.must(w.svc.Update(w.ctx, w.owner, tm.ID, monitors.UpdateInput{TCP: &monitors.TCPSettings{Expect: &monitors.TCPExpect{Mode: monitors.ExpectContains, Value: "ok"}}}))
+	if w.status(tm.ID) != "unknown" {
+		t.Fatal("a new expect rule did not restart the monitor")
+	}
 	// A heartbeat's interval and grace are stored; the failure threshold stays 1.
 	hb := w.heartbeat("cron")
 	got = w.must(w.svc.Update(w.ctx, w.owner, hb.ID, monitors.UpdateInput{Heartbeat: &monitors.HeartbeatSettings{ExpectedIntervalSeconds: ptr(600), GraceSeconds: ptr(30)}}))

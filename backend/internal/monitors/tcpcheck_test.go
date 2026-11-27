@@ -37,6 +37,13 @@ func TestPlanTCPCheck(t *testing.T) {
 				}
 			}},
 		{name: "base64 and text", in: TCPSettings{Send: send("base64", "AAEC"), Expect: exp("regex", `ok|ready`)}, wantDirty: true},
+		{name: "base64 without padding and with spaces", in: TCPSettings{Send: send("base64", " AAEC AA "), Expect: exp("contains", "x")}, wantDirty: true,
+			check: func(t *testing.T, _ tcpConfig, send []byte) {
+				if want := []byte{0, 1, 2, 0}; !bytes.Equal(send, want) {
+					t.Fatalf("send %x, want %x", send, want)
+				}
+			}},
+		{name: "contains longer than the size limit", in: TCPSettings{Expect: exp("contains", "abcdef"), MaxResponseBytes: ptr(5)}, wantErr: "tcp.expect"},
 		{name: "text send", in: TCPSettings{Send: send("text", "ping\n"), Expect: exp("contains", "pong")}, wantDirty: true},
 		{name: "bad hex", in: TCPSettings{Send: send("hex", "zz"), Expect: exp("contains", "x")}, wantErr: "tcp.send"},
 		{name: "bad base64", in: TCPSettings{Send: send("base64", "***"), Expect: exp("contains", "x")}, wantErr: "tcp.send"},
@@ -102,3 +109,5 @@ func TestPlanTCPCheck(t *testing.T) {
 		})
 	}
 }
+
+func ptr(v int) *int { return &v }

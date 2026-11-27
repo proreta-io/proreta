@@ -17,7 +17,7 @@ Optionally the check writes some bytes after it connects and waits for a reply t
 | `tcp.readTimeoutSeconds` | How long to wait for the reply, 1 to 10, default 5. Separate from the connect timeout. |
 | `tcp.maxResponseBytes` | How much of the reply to read, 1 to 65536, default 4096. |
 
-`send` needs `expect` (a write that is never checked proves little). `expect` alone is allowed and checks a banner the service sends on connect. The check reads until the rule matches, the size limit is reached, the peer closes, or the reply timeout passes. The response time is measured up to the first match, so it includes the time the service takes to answer. The reply itself is never stored or shown.
+`send` needs `expect` (a write that is never checked proves little). `expect` alone is allowed and checks a banner the service sends on connect. The check reads until the rule matches, the size limit is reached, the peer closes, or the reply timeout passes. The response time is measured up to the first match, so it includes the time the service takes to answer. The reply itself is never stored or shown. A `regex` is matched against the bytes read so far each time more arrive, so an end anchor (`$`, `\z`) can match before the rest of the reply is read; prefer a pattern that does not depend on where the reply ends.
 
 If you change the host or port, send the `send` value again (or remove it): a stored value is hidden, so it is not carried over to a new target.
 
@@ -36,7 +36,11 @@ Example: a service that expects a frame made of a length, a colon and a JSON bod
 }
 ```
 
-Use `hex` or `base64` for binary framing, for example a four-byte length prefix.
+Use `hex` or `base64` for binary framing, for example a four-byte length prefix. A `text` value from the web form has `\n` line ends only; for a protocol that needs `\r\n`, use `hex`.
+
+A `contains` value longer than the size limit could never match and is refused when you save. Changing the host, the port or the **Run from** location needs the `send` value again, or removing it.
+
+Adding or changing `send` or `expect` restarts the monitor's history, because it is a different check.
 
 ## What a check records
 - **Up:** the handshake completed. The response time is the time to connect.

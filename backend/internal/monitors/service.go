@@ -586,10 +586,11 @@ func (s *Service) Update(ctx context.Context, a Actor, id uuid.UUID, in UpdateIn
 }
 
 // restartIfRetargeted restarts the monitor when the update gave it a new target (URL, host, port
-// or location): its history says nothing about the new one. Like resume, and an open incident ends
+// or location, or a new send or expect rule): its history says nothing about the new check. A
+// monitor whose executor cannot run the new rule would otherwise keep a stale "up" forever. Like resume, and an open incident ends
 // without a notification.
 func (s *Service) restartIfRetargeted(ctx context.Context, tx pgx.Tx, q *monitorsdb.Queries, a Actor, id uuid.UUID, e *monitorEdit) error {
-	if !slices.Contains(e.changed, fieldURL) && !slices.Contains(e.changed, fieldHost) && !slices.Contains(e.changed, fieldPort) && !e.locChanged {
+	if !slices.Contains(e.changed, fieldURL) && !slices.Contains(e.changed, fieldHost) && !slices.Contains(e.changed, fieldPort) && !slices.Contains(e.changed, fieldTCPSend) && !slices.Contains(e.changed, fieldTCPExpect) && !e.locChanged {
 		return nil
 	}
 	if err := s.restart(ctx, tx, q, a.TenantID, id, true); err != nil {
@@ -757,7 +758,7 @@ func (s *Service) planTCPUpdate(verr *validation.Error, a Actor, id uuid.UUID, c
 	if t == nil {
 		t = &TCPSettings{}
 	}
-	send, sendChanged, changed := planTCPCheck(verr, &cfg, t, cfg.Host != oldHost || cfg.Port != oldPort)
+	send, sendChanged, changed := planTCPCheck(verr, &cfg, t, cfg.Host != oldHost || cfg.Port != oldPort || e.locChanged)
 	e.changed = append(e.changed, changed...)
 	if (cfg.SendSet || cfg.Expect != nil) && len(changed) > 0 && s.requestKeys == nil {
 		verr.Add(fieldTCPSend, msgNoSendKeys)
